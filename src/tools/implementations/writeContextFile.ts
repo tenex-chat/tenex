@@ -34,22 +34,14 @@ export const writeContextFileTool: Tool<WriteContextFileInput, WriteContextFileO
     execute: async (input, context) => {
         logger.debug("write_context_file called", { input });
 
-        const { filename, content, title } = input.value;
+        const { filename: rawFilename, content, title } = input.value;
 
         // TODO: Implement agent role check when available in context
         // Only project-manager should use this tool
 
-        // Validate filename - no path traversal allowed
-        if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-            return {
-                ok: false,
-                error: {
-                    kind: "validation" as const,
-                    field: "filename",
-                    message: "Invalid filename. Must not contain path separators or '..'",
-                },
-            };
-        }
+        // Extract just the filename from any path
+        // If given ../../context/TEST.md or TEST.md, just use TEST.md
+        const filename = path.basename(rawFilename);
 
         // Only allow markdown files
         if (!filename.endsWith(".md")) {
