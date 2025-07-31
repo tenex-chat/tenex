@@ -1,0 +1,75 @@
+{
+    "name": "@tenex/cli",
+    "version": "0.1.0",
+    "description": "TENEX Command Line Interface",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./events": {
+            "import": "./dist/browser.js",
+            "types": "./dist/browser.d.ts"
+        }
+    },
+    "bin": {
+        "tenex": "src/tenex.ts"
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "start": "bun run ./src/tenex.ts",
+        "build": "bun scripts/build-bundled.js",
+        "prepublishOnly": "bun run build",
+        "test": "bun test",
+        "test:watch": "bun test --watch",
+        "test:coverage": "bun test --coverage",
+        "test:unit": "bun test src/**/__tests__/*.test.ts",
+        "test:integration": "bun test src/**/__tests__/*.integration.test.ts",
+        "test:e2e": "bun test tests/e2e/*.test.ts",
+        "typecheck": "tsc --noEmit",
+        "lint": "eslint src --ext .ts,.tsx",
+        "lint:fix": "eslint src --ext .ts,.tsx --fix",
+        "clean": "rm -rf dist node_modules bun.lockb coverage",
+        "llm-log": "bun run scripts/llm-log.ts"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    },
+    "dependencies": {
+        "@inquirer/search": "^3.0.15",
+        "@modelcontextprotocol/sdk": "^1.13.2",
+        "@nostr-dev-kit/ndk": "^2.14.33",
+        "@types/inquirer": "^9.0.8",
+        "chalk": "^5.4.1",
+        "commander": "^13.1.0",
+        "fs-extra": "^11.2.0",
+        "inquirer": "^12.6.3",
+        "js-base64": "^3.7.7",
+        "jwt-js-decode": "^1.9.0",
+        "multi-llm-ts": "^4.0.3",
+        "nostr-tools": "^2.15.0",
+        "repomix": "^1.1.0",
+        "zod": "^3.25.67"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.30.1",
+        "@types/uuid": "^10.0.0",
+        "esbuild": "^0.25.5",
+        "eslint": "^9.30.1",
+        "typescript": "^5.8.3",
+        "typescript-eslint": "^8.35.1"
+    },
+    "type": "module",
+    "keywords": [],
+    "author": "",
+    "license": "ISC"
+}

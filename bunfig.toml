@@ -1,0 +1,28 @@
+# Bun configuration file
+
+[test]
+# Enable coverage reporting
+coverage = true
+coverageDirectory = "./coverage"
+coverageReporter = ["text", "lcov"]
+
+# Test file patterns
+# Include all test files
+root = "./src"
+
+# Timeout for tests (in milliseconds)
+timeout = 30000
+
+# Run tests in watch mode by default in development
+# watchMode = true
+
+[install]
+# Lockfile configuration
+lockfile = { save = true }
+
+# Auto-install peer dependencies
+peer = true
+
+[run]
+# Enable source maps
+smol = true
