@@ -134,7 +134,7 @@ describe("ConversationManager", () => {
             expect(transitions[2]).toMatchObject({ from: "execute", to: "verification" });
         });
 
-        it("should not create transition when phase does not change", async () => {
+        it("should create handoff transition even when phase does not change", async () => {
             await manager.initialize();
 
             const mockEvent: NDKEvent = {
@@ -145,7 +145,7 @@ describe("ConversationManager", () => {
 
             const conversation = await manager.createConversation(mockEvent);
 
-            // Try to transition to the same phase
+            // Try to transition to the same phase (handoff)
             await manager.updatePhase(
                 conversation.id,
                 "chat",
@@ -156,7 +156,14 @@ describe("ConversationManager", () => {
 
             const updated = manager.getConversation(conversation.id);
             expect(updated?.phase).toBe("chat");
-            expect(updated?.phaseTransitions).toHaveLength(0);
+            expect(updated?.phaseTransitions).toHaveLength(1);
+            
+            // Verify handoff transition details
+            const handoff = updated?.phaseTransitions[0];
+            expect(handoff?.from).toBe("chat");
+            expect(handoff?.to).toBe("chat");
+            expect(handoff?.message).toBe("Still in chat phase");
+            expect(handoff?.agentName).toBe("PM Agent");
         });
 
         it("should preserve transition message content exactly", async () => {

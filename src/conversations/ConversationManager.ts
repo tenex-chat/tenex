@@ -721,9 +721,41 @@ export class ConversationManager {
             return context;
         }
 
-        // For ongoing conversations, create a summary
+        // For ongoing conversations, create a comprehensive context
+        let summary = "You've been brought into an ongoing conversation.\n\n";
+        
+        // First, include all phase transitions to show conversation flow
+        if (conversation.phaseTransitions.length > 0) {
+            summary += "=== CONVERSATION FLOW ===\n";
+            summary += "The conversation has evolved through the following phases:\n\n";
+            
+            for (const transition of conversation.phaseTransitions) {
+                const transitionTime = new Date(transition.timestamp).toLocaleTimeString();
+                
+                // Format phase transition
+                if (transition.from !== transition.to) {
+                    summary += `📍 Phase: ${transition.from} → ${transition.to} (${transitionTime})\n`;
+                } else {
+                    summary += `🔄 Handoff within ${transition.from} phase (${transitionTime})\n`;
+                }
+                
+                summary += `   By: ${transition.agentName}\n`;
+                
+                if (transition.reason) {
+                    summary += `   Reason: ${transition.reason}\n`;
+                }
+                
+                // Include the full transition message as it contains important context
+                summary += `   Context: ${transition.message}\n\n`;
+            }
+            
+            summary += "\n";
+        }
+        
+        // Then include recent messages for immediate context
         const recentHistory = conversation.history.slice(-10); // Last 10 messages
-        let summary = "You've been brought into an ongoing conversation. Recent context:\n\n";
+        summary += "=== RECENT CONTEXT ===\n";
+        summary += "Last 10 messages for immediate context:\n\n";
 
         for (const event of recentHistory) {
             if (event.content) {
@@ -744,6 +776,7 @@ export class ConversationManager {
             const isInRecent = recentHistory.some((e) => e.id === triggeringEvent.id);
             if (!isInRecent) {
                 const sender = isEventFromUser(triggeringEvent) ? "User" : "Agent";
+                summary += `\n=== CURRENT REQUEST ===\n`;
                 summary += `${sender}: ${triggeringEvent.content}\n\n`;
             }
         }
