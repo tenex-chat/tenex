@@ -22,6 +22,7 @@ interface StreamingState {
     finalResponse: CompletionResponse | undefined;
     fullContent: string;
     streamPublisher: StreamPublisher | undefined;
+    startedTools: Set<string>;
 }
 
 // Type guards for tool outputs
@@ -203,6 +204,7 @@ export class ReasonActLoop implements ExecutionBackend {
                     state.termination = undefined;
                     state.continueFlow = undefined;
                     state.allToolResults = [];
+                    state.startedTools.clear();
                 }
 
                 // Process the stream
@@ -322,6 +324,7 @@ export class ReasonActLoop implements ExecutionBackend {
             finalResponse: undefined,
             fullContent: "",
             streamPublisher: undefined,
+            startedTools: new Set<string>(),
         };
     }
 
@@ -360,8 +363,8 @@ export class ReasonActLoop implements ExecutionBackend {
 
     private setupStreamPublisher(
         publisher: NostrPublisher | undefined,
-        tracingLogger: TracingLogger,
-        context: ExecutionContext
+        _tracingLogger: TracingLogger,
+        _context: ExecutionContext
     ): StreamPublisher | undefined {
         if (!publisher) return undefined;
 
@@ -393,6 +396,7 @@ export class ReasonActLoop implements ExecutionBackend {
                         publisher,
                         event.tool,
                         event.args,
+                        state,
                         tracingLogger,
                         context
                     );
@@ -499,7 +503,7 @@ export class ReasonActLoop implements ExecutionBackend {
         reasoning?: string;
     } {
         const lines = content.split('\n').map(line => line.trim()).filter(Boolean);
-        const result: any = {};
+        const result: Record<string, unknown> = {};
         
         lines.forEach(line => {
             if (line.startsWith('- Current situation:')) {
@@ -529,9 +533,14 @@ export class ReasonActLoop implements ExecutionBackend {
         publisher: NostrPublisher | undefined,
         toolName: string,
         toolArgs: Record<string, unknown>,
+        state: StreamingState,
         tracingLogger: TracingLogger,
         context?: ExecutionContext
     ): Promise<void> {
+        // Create a unique ID for this tool call (based on tool name and current timestamp)
+        const toolCallId = `${toolName}_${Date.now()}`;
+        state.startedTools.add(toolCallId);
+        
         // Log tool execution start with ExecutionLogger
         if (this.executionLogger && context) {
             this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
@@ -542,37 +551,10 @@ export class ReasonActLoop implements ExecutionBackend {
 
         // Publish typing indicator with tool information
         if (publisher) {
-            // Format the tool usage message
-            let message = `@${publisher.context.agent.name} is using ${toolName}`;
-
-            // Add key parameters to the message
-            if (toolArgs && Object.keys(toolArgs).length > 0) {
-                const keyParams: string[] = [];
-
-                // Handle common file/path parameters
-                if (toolArgs.file_path || toolArgs.path) {
-                    keyParams.push(`${toolArgs.file_path || toolArgs.path}`);
-                } else if (toolArgs.filename) {
-                    keyParams.push(`${toolArgs.filename}`);
-                }
-
-                // Handle other notable parameters
-                if (toolArgs.url && typeof toolArgs.url === "string") {
-                    keyParams.push(`${toolArgs.url}`);
-                }
-
-                if (toolArgs.query && typeof toolArgs.query === "string") {
-                    keyParams.push(`"${toolArgs.query}"`);
-                }
-
-                if (toolArgs.pattern && typeof toolArgs.pattern === "string") {
-                    keyParams.push(`pattern: "${toolArgs.pattern}"`);
-                }
-
-                if (keyParams.length > 0) {
-                    message += ` with ${keyParams.join(", ")}`;
-                }
-            }
+            // Get the appropriate description function
+            const toolDescriptions = this.getToolDescriptions(toolName);
+            const descFn = toolDescriptions[toolName.toLowerCase()] || toolDescriptions.default;
+            const message = descFn(toolArgs);
 
             tracingLogger.debug("Publishing typing indicator with tool info", {
                 tool: toolName,
@@ -582,6 +564,63 @@ export class ReasonActLoop implements ExecutionBackend {
 
             await publisher.publishTypingIndicator("start", message);
         }
+    }
+
+    private getToolDescriptions(toolName: string): Record<string, (args: Record<string, unknown>) => string> {
+        return {
+                // File operations
+                read: (args) => `📖 Reading ${args.file_path || args.path || "file"}`,
+                write: (args) => `✏️ Writing to ${args.file_path || args.path || "file"}`,
+                edit: (args) => `✏️ Editing ${args.file_path || args.path || "file"}`,
+                multiedit: (args) => `✏️ Making multiple edits to ${args.file_path || args.path || "file"}`,
+                ls: (args) => `📁 Listing files in ${args.path || "directory"}`,
+                glob: (args) => `🔍 Searching for files matching "${args.pattern || "pattern"}"`,
+                grep: (args) => `🔍 Searching for "${args.pattern || "pattern"}" in files`,
+                
+                // Git operations
+                bash: (args) => {
+                    const cmd = args.command as string || "";
+                    if (cmd.startsWith("git")) {
+                        return `🔧 Running git command: ${cmd.substring(0, 50)}${cmd.length > 50 ? "..." : ""}`;
+                    }
+                    return `🖥️ Running command: ${cmd.substring(0, 50)}${cmd.length > 50 ? "..." : ""}`;
+                },
+                
+                // Web operations
+                webfetch: (args) => `🌐 Fetching content from ${args.url || "web"}`,
+                websearch: (args) => `🔎 Searching the web for "${args.query || "query"}"`,
+                
+                // Documentation
+                notebookread: (args) => `📓 Reading notebook ${args.notebook_path || "file"}`,
+                notebookedit: (args) => `📓 Editing notebook ${args.notebook_path || "file"}`,
+                
+                // Analysis
+                task: (args) => `🤖 Delegating task: ${args.description || "complex task"}`,
+                analyze: (args) => `🔬 Analyzing code with prompt: "${(args.prompt as string || "").substring(0, 50)}..."`,
+                
+                // Control flow
+                continue: (args) => {
+                    const routing = args.routing as { agents?: unknown[]; reason?: string };
+                    if (routing?.agents && Array.isArray(routing.agents)) {
+                        return `🔄 Routing to agents for ${routing.reason || "next phase"}`;
+                    }
+                    return `🔄 Continuing workflow`;
+                },
+                complete: () => `✅ Completing task and returning control`,
+                endconversation: () => `🏁 Ending conversation`,
+                
+                // MCP tools
+                default: (_args) => {
+                    // For MCP tools, try to create a descriptive message
+                    if (toolName.startsWith("mcp__")) {
+                        const parts = toolName.split("__");
+                        const provider = parts[1] || "mcp";
+                        const action = parts[2] || "action";
+                        return `🔌 Using ${provider} to ${action.replace(/_/g, " ")}`;
+                    }
+                    return `🛠️ Using ${toolName}`;
+                }
+            };
     }
 
     private async handleToolCompleteEvent(
@@ -598,6 +637,28 @@ export class ReasonActLoop implements ExecutionBackend {
             isOrchestrator: context.agent.isOrchestrator,
             phase: context.phase,
         });
+
+        // Check if this tool never sent a tool_start event
+        const toolCallPattern = `${event.tool}_`;
+        const hasStarted = Array.from(state.startedTools).some(id => id.startsWith(toolCallPattern));
+        
+        if (!hasStarted && publisher) {
+            tracingLogger.info("Tool skipped start event, publishing typing indicator", {
+                tool: event.tool,
+                agent: context.agent.name,
+            });
+            
+            // Get the tool description function
+            const toolDescriptions = this.getToolDescriptions(event.tool);
+            const descFn = toolDescriptions[event.tool.toLowerCase()] || toolDescriptions.default;
+            
+            // Note: We don't have args for tools that skip start, so pass empty object
+            const message = descFn({});
+            await publisher.publishTypingIndicator("start", message);
+            
+            // Brief delay to ensure the typing indicator is visible
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
 
         const toolResult = this.parseToolResult(event);
         state.allToolResults.push(toolResult);
@@ -798,7 +859,7 @@ export class ReasonActLoop implements ExecutionBackend {
     private handleDoneEvent(
         event: { response?: CompletionResponse },
         state: StreamingState,
-        tracingLogger: TracingLogger
+        _tracingLogger: TracingLogger
     ): void {
         state.finalResponse = event.response;
     }
@@ -824,8 +885,8 @@ export class ReasonActLoop implements ExecutionBackend {
         state: StreamingState,
         context: ExecutionContext,
         messages: Message[],
-        tracingLogger: TracingLogger,
-        publisher?: NostrPublisher
+        _tracingLogger: TracingLogger,
+        _publisher?: NostrPublisher
     ): Promise<void> {
         if (!streamPublisher || streamPublisher.isFinalized()) return;
 
@@ -835,7 +896,7 @@ export class ReasonActLoop implements ExecutionBackend {
 
         // Handle continue flow by executing target agents
         if (state.continueFlow && context.agent.isOrchestrator) {
-            tracingLogger.info("Orchestrator continue flow detected - executing target agents", {
+            _tracingLogger.info("Orchestrator continue flow detected - executing target agents", {
                 agents: state.continueFlow.routing.agents,
                 phase: state.continueFlow.routing.phase,
                 reason: state.continueFlow.routing.reason,
@@ -855,7 +916,7 @@ export class ReasonActLoop implements ExecutionBackend {
                         .find(a => a.pubkey === agentPubkey);
                     
                     if (!targetAgent) {
-                        tracingLogger.warning("Target agent not found", { pubkey: agentPubkey });
+                        _tracingLogger.warning("Target agent not found", { pubkey: agentPubkey });
                         continue;
                     }
 
@@ -877,7 +938,7 @@ export class ReasonActLoop implements ExecutionBackend {
                     try {
                         await agentExecutor.execute(targetContext);
                     } catch (error) {
-                        tracingLogger.error("Failed to execute target agent", {
+                        _tracingLogger.error("Failed to execute target agent", {
                             agent: targetAgent.name,
                             error: error instanceof Error ? error.message : String(error),
                         });

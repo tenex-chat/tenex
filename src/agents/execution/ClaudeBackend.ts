@@ -64,6 +64,21 @@ export class ClaudeBackend implements ExecutionBackend {
             throw new Error(`Claude code execution failed: ${result.error || "Unknown error"}`);
         }
 
+        // Store the Claude session ID in the agent's context
+        if (result.sessionId) {
+            const agentContext = context.conversationManager.getAgentContext(
+                context.conversationId,
+                context.agent.slug
+            );
+            
+            if (agentContext) {
+                agentContext.claudeSessionId = result.sessionId;
+                // Save the conversation to persist the session ID
+                await context.conversationManager.saveConversation(context.conversationId);
+                logger.info(`[ClaudeBackend] Stored Claude session ID for agent ${context.agent.slug}: ${result.sessionId}`);
+            }
+        }
+
         // Use Claude's final response instead of the original task content
         const claudeReport =
             result.finalResponse || result.task.content || "Task completed successfully";

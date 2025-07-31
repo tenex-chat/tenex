@@ -62,6 +62,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                             context.lastUpdate instanceof Date
                                 ? context.lastUpdate.toISOString()
                                 : context.lastUpdate,
+                        claudeSessionId: context.claudeSessionId,
                     };
                 }
             }
@@ -128,6 +129,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                         }),
                         tokenCount: contextData.tokenCount,
                         lastUpdate: new Date(contextData.lastUpdate),
+                        claudeSessionId: contextData.claudeSessionId,
                     };
                     agentContextsMap.set(agentSlug, context);
                 }

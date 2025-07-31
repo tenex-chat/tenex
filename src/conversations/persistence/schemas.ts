@@ -52,6 +52,7 @@ export const AgentContextSchema = z.object({
     messages: z.array(MessageSchema),
     tokenCount: z.number(),
     lastUpdate: z.string(), // ISO string for Date
+    claudeSessionId: z.string().optional(), // Claude Code session ID
 });
 
 export const SerializedConversationSchema = z.object({

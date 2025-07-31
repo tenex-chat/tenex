@@ -6,6 +6,7 @@ export type {
     FinalizeMetadata,
     ToolExecutionStatus,
 } from "./NostrPublisher";
+export { TypingIndicatorManager } from "./TypingIndicatorManager";
 
 export { TaskPublisher } from "./TaskPublisher";
 export { getNDK } from "./ndkClient";

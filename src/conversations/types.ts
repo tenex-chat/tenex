@@ -7,6 +7,7 @@ export interface AgentContext {
     messages: Message[]; // Agent's isolated view
     tokenCount: number;
     lastUpdate: Date;
+    claudeSessionId?: string; // Claude Code session ID for this agent
 }
 
 export interface Conversation {

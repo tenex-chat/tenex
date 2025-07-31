@@ -11,6 +11,7 @@ import type { ContinueFlow, Complete, EndConversation } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent, type NDKTag } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
+import { TypingIndicatorManager } from "./TypingIndicatorManager";
 
 // Tool execution status interface (from ToolExecutionPublisher)
 export interface ToolExecutionStatus {
@@ -40,6 +41,14 @@ export interface ResponseOptions {
     destinationPubkeys?: string[];
 }
 
+// TENEX logging types
+export interface TenexLogData {
+    event: string;
+    agent: string;
+    details: Record<string, unknown>;
+    timestamp?: number;
+}
+
 // Metadata for finalizing stream
 export interface FinalizeMetadata {
     llmMetadata?: LLMMetadata;
@@ -48,7 +57,18 @@ export interface FinalizeMetadata {
 }
 
 export class NostrPublisher {
-    constructor(public readonly context: NostrPublisherContext) {}
+    private typingIndicatorManager: TypingIndicatorManager;
+    
+    constructor(public readonly context: NostrPublisherContext) {
+        this.typingIndicatorManager = new TypingIndicatorManager(this);
+    }
+    
+    /**
+     * Clean up any resources (e.g., pending timers).
+     */
+    cleanup(): void {
+        this.typingIndicatorManager.cleanup();
+    }
 
     private getConversation(): Conversation {
         const conversation = this.context.conversationManager.getConversation(
@@ -165,7 +185,69 @@ export class NostrPublisher {
         }
     }
 
-    async publishTypingIndicator(state: "start" | "stop", message?: string): Promise<NDKEvent> {
+    async publishTenexLog(logData: TenexLogData): Promise<NDKEvent> {
+        try {
+            const event = new NDKEvent(getNDK());
+            event.kind = EVENT_KINDS.TENEX_LOG;
+            
+            // Set timestamp
+            const timestamp = logData.timestamp || Math.floor(Date.now() / 1000);
+            event.created_at = timestamp;
+            
+            // Create structured content
+            event.content = JSON.stringify({
+                event: logData.event,
+                agent: logData.agent,
+                details: logData.details,
+                timestamp,
+            });
+            
+            // Add base tags
+            this.addBaseTags(event);
+            
+            // Add conversation reference
+            event.tag(["e", this.context.conversationId]);
+            
+            // Add TENEX-specific tags
+            event.tag(["tenex-event", logData.event]);
+            event.tag(["tenex-agent", logData.agent]);
+            
+            await event.sign(this.context.agent.signer);
+            await event.publish();
+            
+            logger.debug("Published TENEX log", {
+                eventId: event.id,
+                tenexEvent: logData.event,
+                agent: logData.agent,
+            });
+            
+            return event;
+        } catch (error) {
+            logger.error("Failed to publish TENEX log", {
+                agent: this.context.agent.name,
+                tenexEvent: logData.event,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
+    }
+
+    async publishTypingIndicator(state: "start" | "stop", message?: string): Promise<NDKEvent | void> {
+        // Use the typing indicator manager for start calls
+        if (state === "start") {
+            return await this.typingIndicatorManager.start(message);
+        } else {
+            // For stop calls, use the manager's stop method which handles timing
+            await this.typingIndicatorManager.stop();
+            return;
+        }
+    }
+    
+    /**
+     * Internal method used by TypingIndicatorManager to publish raw typing events.
+     * This bypasses the timing logic and publishes immediately.
+     */
+    async publishTypingIndicatorRaw(state: "start" | "stop", message?: string): Promise<NDKEvent> {
         try {
             const { agent } = this.context;
 

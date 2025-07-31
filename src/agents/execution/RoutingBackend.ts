@@ -1,5 +1,5 @@
 import type { LLMService } from "@/llm/types";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
+import type { NostrPublisher, TenexLogData } from "@/nostr/NostrPublisher";
 import type { Tool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { createTracingLogger } from "@/tracing";
@@ -99,8 +99,20 @@ export class RoutingBackend implements ExecutionBackend {
                     break;
                 }
 
-                // Find agent by slug
-                const targetAgent = projectContext.agents.get(agentSlug);
+                // Find agent by slug (case-insensitive)
+                let targetAgent = projectContext.agents.get(agentSlug);
+                
+                // If not found, try case-insensitive search
+                if (!targetAgent) {
+                    const lowerCaseSlug = agentSlug.toLowerCase();
+                    for (const [key, agent] of projectContext.agents.entries()) {
+                        if (key.toLowerCase() === lowerCaseSlug) {
+                            targetAgent = agent;
+                            break;
+                        }
+                    }
+                }
+                
                 if (!targetAgent) {
                     tracingLogger.warning("Target agent not found", { slug: agentSlug });
                     continue;

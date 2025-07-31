@@ -8,7 +8,6 @@ import {
     type TracingContext,
     createAgentExecutionContext,
     createTracingContext,
-    createTracingLogger,
 } from "@/tracing";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -24,7 +23,7 @@ import "@/prompts/fragments/orchestrator-routing";
 import "@/prompts/fragments/expertise-boundaries";
 import "@/prompts/fragments/domain-expert-guidelines";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
+import { createExecutionLogger } from "@/logging/ExecutionLogger";
 
 export class AgentExecutor {
     constructor(
@@ -64,6 +63,27 @@ export class AgentExecutor {
         
         const executionLogger = createExecutionLogger(tracingContext, "agent");
 
+        // Retrieve the agent's stored Claude session ID if available
+        const agentContext = this.conversationManager.getAgentContext(
+            context.conversationId,
+            context.agent.slug
+        );
+        
+        // Prioritize claudeSessionId from the incoming event context (context.claudeSessionId)
+        // over the one from the agent's stored context (agentContext?.claudeSessionId).
+        // The context.claudeSessionId here comes from the event handlers (reply.ts/task.ts)
+        // which extract it from the 'claude-session' tag on the incoming Nostr event.
+        const claudeSessionId = context.claudeSessionId || agentContext?.claudeSessionId;
+        
+        if (claudeSessionId) {
+            logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {
+                conversationId: context.conversationId,
+                agentSlug: context.agent.slug,
+                sessionId: claudeSessionId,
+                source: context.claudeSessionId ? "triggering-event" : "agent-context"
+            });
+        }
+
         // Ensure context has publisher and conversationManager
         const fullContext: ExecutionContext = {
             ...context,
@@ -77,6 +97,7 @@ export class AgentExecutor {
                 }),
             conversationManager: context.conversationManager || this.conversationManager,
             agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
+            claudeSessionId, // Pass the determined session ID
         };
 
         try {
@@ -135,6 +156,9 @@ export class AgentExecutor {
 
             // Ensure typing indicator is stopped even on error
             await fullContext.publisher.publishTypingIndicator("stop");
+            
+            // Clean up the publisher resources
+            fullContext.publisher.cleanup();
 
             throw error;
         }
@@ -145,7 +169,7 @@ export class AgentExecutor {
      */
     private async buildMessages(
         context: ExecutionContext,
-        triggeringEvent: NDKEvent
+        _triggeringEvent: NDKEvent
     ): Promise<Message[]> {
         const projectCtx = getProjectContext();
         const project = projectCtx.project;
@@ -251,7 +275,7 @@ export class AgentExecutor {
     private async executeWithStreaming(
         context: ExecutionContext,
         messages: Message[],
-        tracingContext: TracingContext
+        _tracingContext: TracingContext
     ): Promise<void> {
         // Get tools for response processing - use agent's configured tools
         const tools = context.agent.tools || [];

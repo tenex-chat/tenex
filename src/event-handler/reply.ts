@@ -185,20 +185,8 @@ async function handleReplyLogic(
         executionContext.handoff = handoff;
     }
 
-    // Add the user message to the target agent's context if this is from a user
-    if (isEventFromUser(event) && event.content) {
-        logger.info("[REPLY_HANDLER] Adding user message to agent context", {
-            conversationId: conversation.id,
-            targetAgent: targetAgent.slug,
-            userMessage: `${event.content.substring(0, 100)}...`,
-        });
-
-        await conversationManager.addMessageToContext(
-            conversation.id,
-            targetAgent.slug,
-            new Message("user", event.content)
-        );
-    }
+    // Don't pre-add user messages to agent context - let the agent executor handle this
+    // to ensure proper bootstrapping for newly mentioned agents via p-tags
 
     try {
         await agentExecutor.execute(executionContext);

@@ -84,7 +84,20 @@ export const continueTool: Tool<ContinueInput> = {
         const validNames: string[] = [];
 
         for (const agent of agents) {
-            const agentDef = projectContext.agents.get(agent);
+            // Try exact match first
+            let agentDef = projectContext.agents.get(agent);
+            
+            // If not found, try case-insensitive search
+            if (!agentDef) {
+                const lowerCaseAgent = agent.toLowerCase();
+                for (const [key, value] of projectContext.agents.entries()) {
+                    if (key.toLowerCase() === lowerCaseAgent) {
+                        agentDef = value;
+                        break;
+                    }
+                }
+            }
+            
             if (!agentDef) {
                 invalidAgents.push(agent);
             } else if (agentDef.pubkey === context.agent.pubkey) {
