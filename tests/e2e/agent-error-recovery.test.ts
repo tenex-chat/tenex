@@ -242,8 +242,8 @@ describe("Agent Error Recovery E2E Tests", () => {
     let context: E2ETestContext;
 
     beforeEach(async () => {
-        // Setup E2E test environment WITHOUT scenarios (we'll set them per test)
-        context = await setupE2ETest([]);
+        // Setup E2E test environment with routing decisions always included
+        context = await setupE2ETest(["routing-decisions"]);
     });
 
     afterEach(async () => {
@@ -251,12 +251,10 @@ describe("Agent Error Recovery E2E Tests", () => {
     });
 
     it("should recover from tool execution errors", async () => {
-        // Update context with error recovery scenarios
-        context.mockLLM = createMockLLMService([{
-            name: "error-recovery",
-            description: "Test error recovery",
-            responses: errorRecoveryResponses
-        }], { debug: true });
+        // Add error recovery scenarios to existing mock
+        for (const response of errorRecoveryResponses) {
+            context.mockLLM.addResponse(response);
+        }
 
         // Create conversation
         const conversationId = await createConversation(
@@ -308,12 +306,10 @@ describe("Agent Error Recovery E2E Tests", () => {
     });
 
     it("should detect and handle infinite loops", async () => {
-        // Update context with infinite loop scenarios
-        context.mockLLM = createMockLLMService([{
-            name: "infinite-loop",
-            description: "Test infinite loop detection",
-            responses: infiniteLoopResponses
-        }]);
+        // Add infinite loop scenarios to existing mock
+        for (const response of infiniteLoopResponses) {
+            context.mockLLM.addResponse(response);
+        }
 
         // Create conversation
         const conversationId = await createConversation(
@@ -342,12 +338,10 @@ describe("Agent Error Recovery E2E Tests", () => {
     });
 
     it("should handle agent timeouts gracefully", async () => {
-        // Update context with timeout scenarios
-        context.mockLLM = createMockLLMService([{
-            name: "timeout-test",
-            description: "Test timeout handling",
-            responses: timeoutResponses
-        }]);
+        // Add timeout scenarios to existing mock
+        for (const response of timeoutResponses) {
+            context.mockLLM.addResponse(response);
+        }
 
         // Create conversation
         const conversationId = await createConversation(
@@ -415,12 +409,10 @@ describe("Agent Error Recovery E2E Tests", () => {
             }
         ];
 
-        // Update context with complex error scenarios
-        context.mockLLM = createMockLLMService([{
-            name: "complex-errors",
-            description: "Test multiple error types",
-            responses: complexResponses
-        }]);
+        // Add complex error scenarios to existing mock
+        for (const response of complexResponses) {
+            context.mockLLM.addResponse(response);
+        }
 
         // Create conversation
         const conversationId = await createConversation(
@@ -447,12 +439,10 @@ describe("Agent Error Recovery E2E Tests", () => {
     });
 
     it("should handle errors in different agent types", async () => {
-        // Update context with multi-agent error scenarios
-        context.mockLLM = createMockLLMService([{
-            name: "multi-agent-errors",
-            description: "Test errors across agent types",
-            responses: multiAgentErrorResponses
-        }]);
+        // Add multi-agent error scenarios to existing mock
+        for (const response of multiAgentErrorResponses) {
+            context.mockLLM.addResponse(response);
+        }
 
         // Create conversation
         const conversationId = await createConversation(

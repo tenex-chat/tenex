@@ -1,10 +1,12 @@
 export * from "./orchestrator-workflow";
 export * from "./error-handling";
 export * from "./state-persistence";
+export * from "./routing-decisions";
 
 import { orchestratorWorkflowScenario } from "./orchestrator-workflow";
 import { errorHandlingScenario } from "./error-handling";
 import { statePersistenceScenario } from "./state-persistence";
+import { routingDecisions } from "./routing-decisions";
 import type { MockLLMScenario } from "../types";
 
 /**
@@ -13,7 +15,8 @@ import type { MockLLMScenario } from "../types";
 export const allScenarios: MockLLMScenario[] = [
     orchestratorWorkflowScenario,
     errorHandlingScenario,
-    statePersistenceScenario
+    statePersistenceScenario,
+    routingDecisions
 ];
 
 /**

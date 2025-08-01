@@ -113,6 +113,8 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
             logComplete() {}
             logError() {}
             logEvent() {}
+            routingDecision() {}
+            agentThinking() {}
         },
         createExecutionLogger: () => ({
             logToolCall: () => {},
@@ -120,7 +122,9 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
             logStream: () => {},
             logComplete: () => {},
             logError: () => {},
-            logEvent: () => {}
+            logEvent: () => {},
+            routingDecision: () => {},
+            agentThinking: () => {}
         })
     }));
     

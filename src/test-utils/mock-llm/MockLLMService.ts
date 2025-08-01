@@ -1,10 +1,10 @@
 import type { 
     LLMService, 
-    LLMMessage, 
-    LLMStreamHandler,
-    ModelInfo,
-    ToolCall,
-    LLMResponse
+    Message,
+    CompletionRequest,
+    CompletionResponse,
+    StreamEvent,
+    ToolCall
 } from "@/llm/types";
 import type { MockLLMConfig, MockLLMResponse } from "./types";
 import { logger } from "@/utils/logger";
@@ -13,8 +13,8 @@ export class MockLLMService implements LLMService {
     private config: MockLLMConfig;
     private responses: MockLLMResponse[] = [];
     private requestHistory: Array<{
-        messages: LLMMessage[];
-        model: string;
+        messages: Message[];
+        model?: string;
         response: MockLLMResponse['response'];
         timestamp: Date;
     }> = [];
@@ -33,11 +33,10 @@ export class MockLLMService implements LLMService {
         this.responses.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
 
-    async chat(
-        messages: LLMMessage[], 
-        model: string, 
-        _tools?: any[]
-    ): Promise<LLMResponse> {
+    async complete(request: CompletionRequest): Promise<CompletionResponse> {
+        const messages = request.messages;
+        const model = request.options?.configName || 'mock-model';
+        
         const response = this.findMatchingResponse(messages, model);
         
         this.recordRequest(messages, model, response);
@@ -51,36 +50,39 @@ export class MockLLMService implements LLMService {
             await new Promise(resolve => setTimeout(resolve, response.streamDelay));
         }
         
+        // Convert to CompletionResponse format that matches multi-llm-ts v4
         return {
+            type: 'text',
             content: response.content || "",
-            toolCalls: response.toolCalls || []
-        };
+            toolCalls: response.toolCalls || [],
+            usage: {
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                total_tokens: 150
+            }
+        } as any;
     }
 
-    async stream(
-        messages: LLMMessage[], 
-        model: string, 
-        handler: LLMStreamHandler,
-        tools?: any[]
-    ): Promise<void> {
+    async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
+        const messages = request.messages;
+        const model = request.options?.configName || 'mock-model';
+        
         const response = this.findMatchingResponse(messages, model);
         
         this.recordRequest(messages, model, response);
         
         if (response.error) {
-            handler.onError?.(response.error);
+            yield { type: 'error', error: response.error.message };
             return;
         }
         
-        handler.onStart?.();
-        
-        // Simulate streaming
+        // Simulate streaming content
         if (response.content) {
             const words = response.content.split(' ');
             for (const word of words) {
-                handler.onContent?.(word + ' ');
+                yield { type: 'content', content: word + ' ' };
                 if (response.streamDelay) {
-                    await new Promise(resolve => setTimeout(resolve, response.streamDelay / words.length));
+                    await new Promise(resolve => setTimeout(resolve, response.streamDelay! / words.length));
                 }
             }
         }
@@ -88,14 +90,31 @@ export class MockLLMService implements LLMService {
         // Send tool calls
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
-                handler.onToolCall?.(toolCall);
+                yield { 
+                    type: 'tool_start', 
+                    tool: toolCall.function.name,
+                    args: JSON.parse(toolCall.function.arguments || '{}')
+                };
             }
         }
         
-        handler.onComplete?.();
+        // Send completion event
+        yield { 
+            type: 'done', 
+            response: {
+                type: 'text',
+                content: response.content || "",
+                toolCalls: response.toolCalls || [],
+                usage: {
+                    prompt_tokens: 100,
+                    completion_tokens: 50,
+                    total_tokens: 150
+                }
+            } as any
+        };
     }
 
-    private findMatchingResponse(messages: LLMMessage[], model: string): MockLLMResponse['response'] {
+    private findMatchingResponse(messages: Message[], model: string): MockLLMResponse['response'] {
         const systemMessage = messages.find(m => m.role === 'system');
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
         const toolCalls = messages
@@ -122,15 +141,15 @@ export class MockLLMService implements LLMService {
             // Check all trigger conditions
             if (trigger.systemPrompt && systemMessage) {
                 const matches = trigger.systemPrompt instanceof RegExp
-                    ? trigger.systemPrompt.test(systemMessage.content)
-                    : systemMessage.content.includes(trigger.systemPrompt);
+                    ? trigger.systemPrompt.test(systemMessage.content!)
+                    : systemMessage.content!.includes(trigger.systemPrompt);
                 if (!matches) continue;
             }
             
             if (trigger.userMessage && lastUserMessage) {
                 const matches = trigger.userMessage instanceof RegExp
-                    ? trigger.userMessage.test(lastUserMessage.content)
-                    : lastUserMessage.content.includes(trigger.userMessage);
+                    ? trigger.userMessage.test(lastUserMessage.content!)
+                    : lastUserMessage.content!.includes(trigger.userMessage);
                 if (!matches) continue;
             }
             
@@ -141,7 +160,7 @@ export class MockLLMService implements LLMService {
                 if (!hasAllTools) continue;
             }
             
-            if (trigger.agentName && trigger.agentName !== agentName) {
+            if (trigger.agentName && trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
                 continue;
             }
             
@@ -174,7 +193,7 @@ export class MockLLMService implements LLMService {
     }
     
     private recordRequest(
-        messages: LLMMessage[], 
+        messages: Message[], 
         model: string, 
         response: MockLLMResponse['response']
     ): void {
@@ -201,19 +220,4 @@ export class MockLLMService implements LLMService {
         this.requestHistory = [];
     }
     
-    // Required interface methods
-    
-    getModelInfo(_model: string): ModelInfo {
-        return {
-            contextWindow: 128000,
-            maxOutputTokens: 4096,
-            supportsStreaming: true,
-            supportsTools: true,
-            provider: 'mock'
-        };
-    }
-    
-    validateModel(_model: string): boolean {
-        return true;
-    }
 }
