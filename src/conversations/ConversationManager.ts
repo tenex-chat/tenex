@@ -606,84 +606,218 @@ export class ConversationManager {
         agentSlug: string,
         triggeringEvent?: NDKEvent
     ): Promise<void> {
+        const syncContext = this.validateAndGetSyncContext(conversationId, agentSlug);
+        
+        // Get all events that need processing
+        const { historicalEvents, shouldProcessTrigger } = this.categorizeEvents(
+            syncContext,
+            triggeringEvent
+        );
+        
+        // Add historical context if needed
+        if (historicalEvents.length > 0) {
+            await this.addHistoricalContext(syncContext, historicalEvents);
+        }
+        
+        // Add current triggering event if needed
+        if (triggeringEvent?.content && shouldProcessTrigger) {
+            await this.addTriggeringEvent(
+                syncContext,
+                triggeringEvent,
+                historicalEvents.length > 0
+            );
+        }
+        
+        // Update tracking and save
+        await this.finalizeSynchronization(syncContext);
+    }
+    
+    /**
+     * Validate inputs and get synchronization context
+     */
+    private validateAndGetSyncContext(
+        conversationId: string,
+        agentSlug: string
+    ): { conversation: Conversation; context: AgentContext; agentSlug: string; lastUpdateTime: number } {
         const conversation = this.conversations.get(conversationId);
         if (!conversation) {
             throw new Error(`Conversation ${conversationId} not found`);
         }
-
+        
         const context = conversation.agentContexts.get(agentSlug);
         if (!context) {
             throw new Error(`Agent context for ${agentSlug} not found`);
         }
-
-        // Find the timestamp of when this agent was last updated
-        const lastUpdateTime = context.lastUpdate.getTime();
-
-        // Find all events that occurred after the agent's last update
+        
+        return {
+            conversation,
+            context,
+            agentSlug,
+            lastUpdateTime: context.lastUpdate.getTime()
+        };
+    }
+    
+    /**
+     * Categorize events into historical and triggering
+     */
+    private categorizeEvents(
+        syncContext: { conversation: Conversation; lastUpdateTime: number },
+        triggeringEvent?: NDKEvent
+    ): { historicalEvents: NDKEvent[], shouldProcessTrigger: boolean } {
+        const { conversation, lastUpdateTime } = syncContext;
         const missedEvents: NDKEvent[] = [];
-
+        
+        // Find all events after last update
         for (const event of conversation.history) {
-            // Check if event has a timestamp (created_at is in seconds, we need milliseconds)
             const eventTime = (event.created_at || 0) * 1000;
-
             if (eventTime > lastUpdateTime) {
                 missedEvents.push(event);
             }
         }
-
-        // If there's a triggering event that's not in history yet, include it
-        if (triggeringEvent && !missedEvents.find((e) => e.id === triggeringEvent.id)) {
+        
+        // Include triggering event if not in history
+        if (triggeringEvent && !missedEvents.find(e => e.id === triggeringEvent.id)) {
             const triggeringTime = (triggeringEvent.created_at || 0) * 1000;
             if (triggeringTime > lastUpdateTime) {
                 missedEvents.push(triggeringEvent);
             }
         }
-
-        // Convert missed events to messages and add to context
-        for (const event of missedEvents) {
+        
+        // Separate historical from triggering
+        const historicalEvents = missedEvents.filter(e => e.id !== triggeringEvent?.id);
+        const shouldProcessTrigger = triggeringEvent ? 
+            this.shouldProcessTriggeringEvent(syncContext, triggeringEvent) : false;
+        
+        return { historicalEvents, shouldProcessTrigger };
+    }
+    
+    /**
+     * Check if triggering event should be processed as new action
+     */
+    private shouldProcessTriggeringEvent(
+        syncContext: { conversation: Conversation; lastUpdateTime: number },
+        triggeringEvent: NDKEvent
+    ): boolean {
+        const { conversation, lastUpdateTime } = syncContext;
+        
+        // Is it new (not in history)?
+        const isNew = !conversation.history.find(e => e.id === triggeringEvent.id);
+        
+        // Or is it newer than last update?
+        const isNewer = (triggeringEvent.created_at || 0) * 1000 > lastUpdateTime;
+        
+        return isNew || isNewer;
+    }
+    
+    /**
+     * Add historical context block
+     */
+    private async addHistoricalContext(
+        syncContext: { context: AgentContext; agentSlug: string },
+        historicalEvents: NDKEvent[]
+    ): Promise<void> {
+        const { context, agentSlug } = syncContext;
+        
+        let contextBlock = "<conversation-history>\n";
+        contextBlock += "This is what happened while you were not active. ";
+        contextBlock += "This is provided for context only - do not act on these messages:\n\n";
+        
+        for (const event of historicalEvents) {
             if (!event.content) continue;
-
-            // Determine the sender
-            const eventAgentSlug = getAgentSlugFromEvent(event);
-
-            // Skip if this is the agent's own message
-            if (eventAgentSlug === agentSlug) {
-                logger.debug(`[AGENT_CONTEXT] Skipping agent's own message`, {
-                    agentSlug,
-                    eventId: event.id,
-                });
-                continue;
-            }
-
-            // Add messages with proper attribution
-            if (isEventFromUser(event)) {
-                // Direct user message
-                context.messages.push(new Message("user", event.content));
-            } else if (eventAgentSlug) {
-                // Message from another agent - add attribution
+            
+            const sender = this.getEventSender(event, agentSlug);
+            if (!sender) continue; // Skip agent's own messages
+            
+            contextBlock += `[${sender}]: ${event.content}\n\n`;
+        }
+        
+        contextBlock += "\nREMINDER: The above messages are historical context only. ";
+        contextBlock += "Do NOT act on them.\n";
+        contextBlock += "</conversation-history>\n\n";
+        
+        context.messages.push(new Message("system", contextBlock));
+        
+        logger.info("[AGENT_CONTEXT] Added historical context block", {
+            agentSlug,
+            historicalEventCount: historicalEvents.length,
+            contextLength: contextBlock.length,
+        });
+    }
+    
+    /**
+     * Get sender name for an event, returns null if it's the agent's own message
+     */
+    private getEventSender(event: NDKEvent, agentSlug: string): string | null {
+        const eventAgentSlug = getAgentSlugFromEvent(event);
+        
+        // Skip if this is the agent's own message
+        if (eventAgentSlug === agentSlug) {
+            logger.debug(`[AGENT_CONTEXT] Skipping agent's own message`, {
+                agentSlug,
+                eventId: event.id,
+            });
+            return null;
+        }
+        
+        if (isEventFromUser(event)) {
+            return "User";
+        } else if (eventAgentSlug) {
+            const projectCtx = getProjectContext();
+            const sendingAgent = projectCtx.agents.get(eventAgentSlug);
+            return sendingAgent ? sendingAgent.name : "Another agent";
+        } else {
+            return "Unknown";
+        }
+    }
+    
+    /**
+     * Add triggering event as an action message
+     */
+    private async addTriggeringEvent(
+        syncContext: { context: AgentContext; agentSlug: string },
+        triggeringEvent: NDKEvent,
+        hasHistoricalContext: boolean
+    ): Promise<void> {
+        const { context, agentSlug } = syncContext;
+        
+        // Add separator if we had historical context
+        if (hasHistoricalContext) {
+            context.messages.push(new Message("system", "=== NEW INTERACTION ==="));
+        }
+        
+        // Add the actual message that needs action
+        if (isEventFromUser(triggeringEvent)) {
+            context.messages.push(new Message("user", triggeringEvent.content));
+        } else {
+            const eventAgentSlug = getAgentSlugFromEvent(triggeringEvent);
+            if (eventAgentSlug && eventAgentSlug !== agentSlug) {
                 const projectCtx = getProjectContext();
                 const sendingAgent = projectCtx.agents.get(eventAgentSlug);
-                const senderName = sendingAgent ? sendingAgent.name : "another agent";
-
-                // Add a system message for attribution, then the actual content
-                context.messages.push(new Message("system", `Message from ${senderName}:`));
-                context.messages.push(new Message("user", event.content));
-            } else {
-                // Unknown sender (shouldn't happen, but handle gracefully)
-                context.messages.push(new Message("user", event.content));
+                const senderName = sendingAgent ? sendingAgent.name : "Another agent";
+                // Use consistent format
+                context.messages.push(
+                    new Message("system", `[${senderName}]: ${triggeringEvent.content}`)
+                );
             }
-
-            logger.info("[AGENT_CONTEXT] Added missed message to context", {
-                agentSlug,
-                fromUser: isEventFromUser(event),
-                fromAgent: eventAgentSlug,
-                messagePreview: `${event.content.substring(0, 100)}...`,
-            });
         }
-
+        
+        logger.info("[AGENT_CONTEXT] Added current message for action", {
+            agentSlug,
+            messagePreview: `${triggeringEvent.content.substring(0, 100)}...`,
+        });
+    }
+    
+    /**
+     * Finalize synchronization: update timestamp and save
+     */
+    private async finalizeSynchronization(
+        syncContext: { context: AgentContext; conversation: Conversation }
+    ): Promise<void> {
+        const { context, conversation } = syncContext;
+        
         // Update the last update time
         context.lastUpdate = new Date();
-
+        
         // Save the updated conversation
         await this.persistence.save(conversation);
     }
