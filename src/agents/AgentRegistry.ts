@@ -184,20 +184,30 @@ export class AgentRegistry {
                 const content = await readFile(definitionPath, "utf-8");
                 try {
                     agentDefinition = JSON.parse(content);
-                    this.validateAgentDefinition(agentDefinition);
-
-                    // For built-in agents, use the hardcoded instructions if not present in the file
+                    
+                    // For built-in agents, merge missing fields from TypeScript definition before validation
                     const builtInAgents = getBuiltInAgents();
                     const builtInAgent = builtInAgents.find((agent) => agent.slug === name);
                     if (builtInAgent) {
+                        // Fill in missing required fields from built-in definition
+                        if (!agentDefinition.role) {
+                            agentDefinition.role = builtInAgent.role;
+                        }
+                        if (!agentDefinition.useCriteria) {
+                            agentDefinition.useCriteria = builtInAgent.useCriteria;
+                        }
                         if (!agentDefinition.instructions) {
                             agentDefinition.instructions = builtInAgent.instructions || "";
                         }
-                        // Also use the built-in backend if not specified in the file
                         if (!agentDefinition.backend && builtInAgent.backend) {
                             agentDefinition.backend = builtInAgent.backend;
                         }
+                        if (!agentDefinition.name) {
+                            agentDefinition.name = builtInAgent.name;
+                        }
                     }
+                    
+                    this.validateAgentDefinition(agentDefinition);
                 } catch (error) {
                     logger.error("Failed to parse or validate agent definition", {
                         file: registryEntry.file,
@@ -522,6 +532,29 @@ export class AgentRegistry {
         let agentDefinition: StoredAgentData;
         try {
             agentDefinition = JSON.parse(content);
+            
+            // For built-in agents, merge missing fields from TypeScript definition before validation
+            const builtInAgents = getBuiltInAgents();
+            const builtInAgent = builtInAgents.find((agent) => agent.slug === slug);
+            if (builtInAgent) {
+                // Fill in missing required fields from built-in definition
+                if (!agentDefinition.role) {
+                    agentDefinition.role = builtInAgent.role;
+                }
+                if (!agentDefinition.useCriteria) {
+                    agentDefinition.useCriteria = builtInAgent.useCriteria;
+                }
+                if (!agentDefinition.instructions) {
+                    agentDefinition.instructions = builtInAgent.instructions || "";
+                }
+                if (!agentDefinition.backend && builtInAgent.backend) {
+                    agentDefinition.backend = builtInAgent.backend;
+                }
+                if (!agentDefinition.name) {
+                    agentDefinition.name = builtInAgent.name;
+                }
+            }
+            
             this.validateAgentDefinition(agentDefinition);
         } catch (error) {
             logger.error("Failed to parse or validate agent definition", {
@@ -531,23 +564,18 @@ export class AgentRegistry {
             throw new Error(`Invalid agent definition in ${definitionPath}: ${error}`);
         }
 
-        // For built-in agents, use the hardcoded instructions if not present in the file
-        const builtInAgents = getBuiltInAgents();
-        const builtInAgent = builtInAgents.find((agent) => agent.slug === slug);
-        if (builtInAgent && !agentDefinition.instructions) {
-            agentDefinition.instructions = builtInAgent.instructions || "";
-        }
-
         // Create AgentConfig from definition
         const config: AgentConfig = {
             name: agentDefinition.name,
             role: agentDefinition.role,
             instructions: agentDefinition.instructions || "",
+            useCriteria: agentDefinition.useCriteria,
             nsec: registryEntry.nsec,
             eventId: registryEntry.eventId,
             tools: agentDefinition.tools, // Preserve explicit tools configuration
             mcp: agentDefinition.mcp, // Preserve MCP configuration
             llmConfig: agentDefinition.llmConfig,
+            backend: agentDefinition.backend,
         };
 
         return this.ensureAgent(slug, config);
@@ -575,6 +603,18 @@ export class AgentRegistry {
         // Note: instructions is optional for built-in agents
         if (def.instructions !== undefined && typeof def.instructions !== "string") {
             throw new Error("Agent instructions must be a string");
+        }
+
+        if (def.useCriteria !== undefined && typeof def.useCriteria !== "string") {
+            throw new Error("Agent useCriteria must be a string");
+        }
+
+        if (def.description !== undefined && typeof def.description !== "string") {
+            throw new Error("Agent description must be a string");
+        }
+
+        if (def.backend !== undefined && typeof def.backend !== "string") {
+            throw new Error("Agent backend must be a string");
         }
 
         if (def.tools !== undefined && !Array.isArray(def.tools)) {

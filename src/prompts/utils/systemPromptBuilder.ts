@@ -46,6 +46,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
             projectTitle,
             projectRepository,
         })
+        .add("conversation-history-instructions", {
+            isOrchestrator: agent.isOrchestrator || false,
+        })
         .add("available-agents", {
             agents: availableAgents,
             currentAgent: agent,

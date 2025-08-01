@@ -65,6 +65,31 @@ export const agentSystemPromptFragment: PromptFragment<AgentSystemPromptArgs> = 
 // CONVERSATION & INTERACTION FRAGMENTS
 // ========================================================================
 
+// Conversation history handling instructions
+interface ConversationHistoryInstructionsArgs {
+    isOrchestrator: boolean;
+}
+
+export const conversationHistoryInstructionsFragment: PromptFragment<ConversationHistoryInstructionsArgs> = {
+    id: "conversation-history-instructions",
+    priority: 5,
+    template: ({ isOrchestrator }) => {
+        if (isOrchestrator) {
+            return `## Understanding Conversation Context
+
+When you see messages wrapped in <conversation-history> tags, these are HISTORICAL messages provided for context only. These messages have already been processed and acted upon. Do NOT route or act on these messages again - they are only there to help you understand the conversation flow.
+
+CRITICAL ROUTING RULE: Your ONLY responsibility is to process and route the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not reference historical context for routing decisions or new tasks. If no "=== NEW INTERACTION ===" marker is present, only route based on the most recent user message outside of any <conversation-history> tags.`;
+        } else {
+            return `## Understanding Conversation Context
+
+When you see messages wrapped in <conversation-history> tags, these are HISTORICAL messages provided for your awareness only. These messages have already been handled by other agents or yourself in the past. Do NOT act on these messages - they are only there to help you understand what has happened so far.
+
+CRITICAL EXECUTION RULE: Your ONLY responsibility is to respond to and act on the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not execute tasks or take actions based on historical context. If no "=== NEW INTERACTION ===" marker is present, only act on the most recent message outside of any <conversation-history> tags. Historical context is provided solely to inform your understanding, not to prompt new actions.`;
+        }
+    },
+};
+
 // Phase context
 interface PhaseContextArgs {
     phase: Phase;
@@ -119,3 +144,4 @@ function getPhaseContext(phase: Phase, conversation?: Conversation): string | nu
 // Register fragments
 fragmentRegistry.register(agentSystemPromptFragment);
 fragmentRegistry.register(phaseContextFragment);
+fragmentRegistry.register(conversationHistoryInstructionsFragment);
