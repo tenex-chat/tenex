@@ -95,8 +95,51 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
             logStream() {}
             logComplete() {}
             logError() {}
-        }
+            logEvent() {}
+        },
+        createExecutionLogger: () => ({
+            logToolCall: () => {},
+            logToolResult: () => {},
+            logStream: () => {},
+            logComplete: () => {},
+            logError: () => {},
+            logEvent: () => {}
+        })
     }));
+    
+    // Mock tracing
+    mock.module("@/tracing", () => ({
+        TracingContext: class {
+            constructor() {}
+            getRequest() { return { id: "mock-request-id" }; }
+            getConversation() { return { id: "mock-conv-id" }; }
+            getAgent() { return null; }
+            addConversation() {}
+            addAgent() {}
+            removeAgent() {}
+        },
+        createTracingLogger: () => ({
+            info: () => {},
+            warn: () => {},
+            error: () => {},
+            debug: () => {}
+        })
+    }));
+    
+    // Create test agent
+    const testAgent = {
+        name: "test-agent",
+        slug: "test-agent",
+        pubkey: "test-agent-pubkey",
+        description: "Test agent for E2E tests",
+        role: "Test Agent",
+        instructions: "You are a test agent for E2E testing",
+        systemPrompt: "You are a test agent for E2E testing",
+        allowedTools: ["writeContextFile", "complete", "analyze"],
+        tools: [],
+        isBuiltIn: false,
+        llmConfig: { model: "claude-3-sonnet-20240229", provider: "anthropic" }
+    };
     
     // Mock project context to avoid complex initialization
     mock.module("@/services/ProjectContext", () => ({
@@ -105,11 +148,12 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
             signer: { privateKey: () => "test-key" },
             pubkey: "test-pubkey",
             orchestrator: null,
-            agents: new Map(),
+            agents: new Map([["test-agent", testAgent]]),
             agentLessons: new Map(),
             initialize: () => {}
         }),
-        setProjectContext: () => {}
+        setProjectContext: () => {},
+        isProjectContextInitialized: () => true
     }));
     
     // Initialize services
@@ -117,7 +161,7 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
     await conversationManager.initialize();
     
     const agentRegistry = new AgentRegistry(projectPath);
-    await agentRegistry.initialize();
+    await agentRegistry.loadFromProject();
     
     // Ensure built-in agents are loaded
     const agents = agentRegistry.getAllAgents();

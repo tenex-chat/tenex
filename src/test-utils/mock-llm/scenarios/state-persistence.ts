@@ -11,7 +11,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Initial orchestrator response - transition to PLAN phase
     {
         trigger: {
-            agentName: "Orchestrator",
+            agentName: "orchestrator",
             phase: "CHAT",
             userMessage: /create.*authentication/i,
         },
@@ -36,7 +36,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Plan phase response - transition to BUILD
     {
         trigger: {
-            agentName: "Orchestrator",
+            agentName: "orchestrator",
             phase: "PLAN",
             userMessage: /continue.*implementation/i,
         },
@@ -51,7 +51,7 @@ export const statePersistenceScenario: MockLLMScenario = {
                         arguments: JSON.stringify({
                             summary: "Starting authentication implementation",
                             suggestedPhase: "BUILD",
-                            suggestedAgent: "test-agent",
+                            suggestedAgent: "executor",
                         }),
                     },
                 },
@@ -62,7 +62,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Test agent BUILD phase response
     {
         trigger: {
-            agentName: "Test Agent",
+            agentName: "executor",
             phase: "BUILD",
         },
         response: {
@@ -86,7 +86,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Analyze project structure scenario
     {
         trigger: {
-            agentName: "Orchestrator",
+            agentName: "orchestrator",
             phase: "CHAT",
             userMessage: /analyze.*project.*structure/i,
         },
@@ -101,7 +101,7 @@ export const statePersistenceScenario: MockLLMScenario = {
                         arguments: JSON.stringify({
                             summary: "Analyzing project structure",
                             suggestedPhase: "BUILD",
-                            suggestedAgent: "test-agent",
+                            suggestedAgent: "executor",
                         }),
                     },
                 },
@@ -112,7 +112,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Recovery scenario - continue analysis
     {
         trigger: {
-            agentName: "Test Agent",
+            agentName: "executor",
             phase: "BUILD",
             userMessage: /continue.*analysis/i,
         },
@@ -136,7 +136,7 @@ export const statePersistenceScenario: MockLLMScenario = {
     // Concurrent task scenarios
     {
         trigger: {
-            agentName: "Orchestrator",
+            agentName: "orchestrator",
             phase: "CHAT",
             userMessage: /Task.*Create feature/i,
         },

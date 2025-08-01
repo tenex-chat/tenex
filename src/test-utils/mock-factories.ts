@@ -8,17 +8,49 @@ import { EVENT_KINDS } from "@/llm/types";
  * Factory functions for creating mock objects in tests
  */
 
+/**
+ * MockNostrEvent class that implements the serialize method required by FileSystemAdapter
+ */
+export class MockNostrEvent implements NDKEvent {
+    id: string;
+    pubkey: string;
+    created_at: number;
+    kind: number;
+    tags: string[][];
+    content: string;
+    sig?: string;
+    
+    constructor(overrides?: Partial<NDKEvent>) {
+        this.id = overrides?.id || "mock-event-" + Math.random().toString(36).substr(2, 9);
+        this.pubkey = overrides?.pubkey || "mock-pubkey";
+        this.created_at = overrides?.created_at || Math.floor(Date.now() / 1000);
+        this.kind = overrides?.kind || EVENT_KINDS.GENERIC_REPLY;
+        this.tags = overrides?.tags || [];
+        this.content = overrides?.content || "Mock event content";
+        this.sig = overrides?.sig || "mock-signature";
+    }
+    
+    serialize(includeSignature?: boolean, includeId?: boolean): string {
+        const obj = {
+            id: includeId ? this.id : undefined,
+            pubkey: this.pubkey,
+            created_at: this.created_at,
+            kind: this.kind,
+            tags: this.tags,
+            content: this.content,
+            sig: includeSignature ? this.sig : undefined
+        };
+        return JSON.stringify(obj);
+    }
+    
+    static deserialize(ndk: any, serialized: string): MockNostrEvent {
+        const data = JSON.parse(serialized);
+        return new MockNostrEvent(data);
+    }
+}
+
 export function createMockNDKEvent(overrides?: Partial<NDKEvent>): NDKEvent {
-    return {
-        id: "mock-event-" + Math.random().toString(36).substr(2, 9),
-        pubkey: "mock-pubkey",
-        created_at: Math.floor(Date.now() / 1000),
-        kind: EVENT_KINDS.GENERIC_REPLY,
-        tags: [],
-        content: "Mock event content",
-        sig: "mock-signature",
-        ...overrides
-    } as NDKEvent;
+    return new MockNostrEvent(overrides) as NDKEvent;
 }
 
 export function createMockAgent(overrides?: Partial<Agent>): Agent {
