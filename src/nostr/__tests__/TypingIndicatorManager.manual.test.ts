@@ -3,7 +3,7 @@
  * Run with: npm test -- src/nostr/__tests__/TypingIndicatorManager.manual.test.ts
  */
 
-import { describe, it } from "vitest";
+import { describe, it } from "bun:test";
 import { TypingIndicatorManager } from "../TypingIndicatorManager";
 import type { NostrPublisher } from "../NostrPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { createTracingLogger } from "@/tracing";
 import { ReasonActLoop } from "../ReasonActLoop";
@@ -7,8 +7,8 @@ import { serializeToolResult } from "@/llm/ToolResult";
 describe("ReasonActLoop - Tool Error Publishing", () => {
     it("should publish error when tool returns success: false", async () => {
         const mockPublisher = {
-            publishError: vi.fn().mockResolvedValue({}),
-            publishTypingIndicator: vi.fn().mockResolvedValue({}),
+            publishError: mock(() => Promise.resolve({})),
+            publishTypingIndicator: mock(() => Promise.resolve({})),
         } as any as NostrPublisher;
 
         const tracingLogger = createTracingLogger(
@@ -71,8 +71,8 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
 
     it("should not publish error when tool returns success: true", async () => {
         const mockPublisher = {
-            publishError: vi.fn().mockResolvedValue({}),
-            publishTypingIndicator: vi.fn().mockResolvedValue({}),
+            publishError: mock(() => Promise.resolve({})),
+            publishTypingIndicator: mock(() => Promise.resolve({})),
         } as any as NostrPublisher;
 
         const tracingLogger = createTracingLogger(

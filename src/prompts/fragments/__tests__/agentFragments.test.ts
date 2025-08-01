@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { phaseContextFragment } from "../agentFragments";
 import type { Conversation, PhaseTransition } from "@/conversations/types";
 import type { Phase } from "@/conversations/phases";

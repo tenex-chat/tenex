@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { TypingIndicatorManager } from "../TypingIndicatorManager";
 import type { NostrPublisher } from "../NostrPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -8,20 +8,22 @@ describe("TypingIndicatorManager Integration Test", () => {
         const mockEvent = {} as NDKEvent;
         const publishCalls: Array<{ state: string; message?: string; timestamp: number }> = [];
         
+        const publishTypingIndicatorRawMock = mock(async (state: string, message?: string) => {
+            publishCalls.push({
+                state,
+                message,
+                timestamp: Date.now(),
+            });
+            return mockEvent;
+        });
+        
         const mockPublisher = {
             context: {
                 agent: {
                     name: "test-agent",
                 },
             },
-            publishTypingIndicatorRaw: vi.fn().mockImplementation(async (state: string, message?: string) => {
-                publishCalls.push({
-                    state,
-                    message,
-                    timestamp: Date.now(),
-                });
-                return mockEvent;
-            }),
+            publishTypingIndicatorRaw: publishTypingIndicatorRawMock,
         } as any;
         
         const manager = new TypingIndicatorManager(mockPublisher);

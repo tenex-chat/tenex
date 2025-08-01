@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { TypingIndicatorManager } from "../TypingIndicatorManager";
 import type { NostrPublisher } from "../NostrPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -9,11 +9,12 @@ describe("TypingIndicatorManager", () => {
     };
     let manager: TypingIndicatorManager;
     let mockEvent: NDKEvent;
+    let publishTypingIndicatorRawMock: any;
 
     beforeEach(() => {
-        vi.useFakeTimers();
-        
         mockEvent = {} as NDKEvent;
+        
+        publishTypingIndicatorRawMock = mock(() => Promise.resolve(mockEvent));
         
         mockPublisher = {
             context: {
@@ -21,21 +22,20 @@ describe("TypingIndicatorManager", () => {
                     name: "test-agent",
                 },
             },
-            publishTypingIndicatorRaw: vi.fn().mockResolvedValue(mockEvent),
+            publishTypingIndicatorRaw: publishTypingIndicatorRawMock,
         } as any;
         
         manager = new TypingIndicatorManager(mockPublisher);
     });
 
     afterEach(() => {
-        vi.useRealTimers();
         manager.cleanup();
     });
 
     it("should publish start typing indicator immediately", async () => {
         await manager.start("Agent is thinking...");
         
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledWith(
+        expect(publishTypingIndicatorRawMock).toHaveBeenCalledWith(
             "start",
             "Agent is thinking..."
         );
@@ -48,18 +48,19 @@ describe("TypingIndicatorManager", () => {
         await manager.stop();
         
         // Stop should not be published immediately
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledTimes(1);
-        expect(mockPublisher.publishTypingIndicatorRaw).not.toHaveBeenCalledWith("stop");
+        expect(publishTypingIndicatorRawMock).toHaveBeenCalledTimes(1);
         
-        // Advance time less than minimum duration
-        vi.advanceTimersByTime(3000); // 3 seconds
-        expect(mockPublisher.publishTypingIndicatorRaw).not.toHaveBeenCalledWith("stop");
+        const calls = publishTypingIndicatorRawMock.mock.calls;
+        const stopCalls = calls.filter((call: any) => call[0] === "stop");
+        expect(stopCalls.length).toBe(0);
         
-        // Advance time to reach minimum duration
-        vi.advanceTimersByTime(2000); // Total 5 seconds
-        await vi.runOnlyPendingTimersAsync();
+        // Wait for minimum duration (5 seconds)
+        await new Promise(resolve => setTimeout(resolve, 5100));
         
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledWith("stop");
+        // Now stop should have been called
+        const updatedCalls = publishTypingIndicatorRawMock.mock.calls;
+        const updatedStopCalls = updatedCalls.filter((call: any) => call[0] === "stop");
+        expect(updatedStopCalls.length).toBe(1);
     });
 
     it("should not flicker when multiple start/stop calls happen rapidly", async () => {
@@ -70,37 +71,38 @@ describe("TypingIndicatorManager", () => {
         await manager.stop();
         
         // Only two start calls should have been made
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledTimes(2);
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenNthCalledWith(1, "start", "1");
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenNthCalledWith(2, "start", "2");
+        expect(publishTypingIndicatorRawMock).toHaveBeenCalledTimes(2);
+        expect(publishTypingIndicatorRawMock.mock.calls[0]).toEqual(["start", "1"]);
+        expect(publishTypingIndicatorRawMock.mock.calls[1]).toEqual(["start", "2"]);
         
         // No stop call should have been made yet
-        expect(mockPublisher.publishTypingIndicatorRaw).not.toHaveBeenCalledWith("stop");
+        const stopCalls = publishTypingIndicatorRawMock.mock.calls
+            .filter((call: any) => call[0] === "stop");
+        expect(stopCalls.length).toBe(0);
         
         // After 5 seconds, stop should be called once
-        vi.advanceTimersByTime(5000);
-        await vi.runOnlyPendingTimersAsync();
+        await new Promise(resolve => setTimeout(resolve, 5100));
         
-        const stopCalls = (mockPublisher.publishTypingIndicatorRaw as any).mock.calls
+        const updatedStopCalls = publishTypingIndicatorRawMock.mock.calls
             .filter((call: any) => call[0] === "stop");
-        expect(stopCalls).toHaveLength(1);
+        expect(updatedStopCalls.length).toBe(1);
     });
 
     it("should update message when already typing", async () => {
         await manager.start("First message");
         await manager.start("Second message");
         
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledTimes(2);
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenNthCalledWith(1, "start", "First message");
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenNthCalledWith(2, "start", "Second message");
+        expect(publishTypingIndicatorRawMock).toHaveBeenCalledTimes(2);
+        expect(publishTypingIndicatorRawMock.mock.calls[0]).toEqual(["start", "First message"]);
+        expect(publishTypingIndicatorRawMock.mock.calls[1]).toEqual(["start", "Second message"]);
     });
 
     it("should force stop immediately when forceStop is called", async () => {
         await manager.start("Agent is thinking...");
         await manager.forceStop();
         
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledWith("stop");
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledTimes(2);
+        expect(publishTypingIndicatorRawMock.mock.calls).toContainEqual(["stop"]);
+        expect(publishTypingIndicatorRawMock).toHaveBeenCalledTimes(2);
     });
 
     it("should handle multiple stop requests gracefully", async () => {
@@ -111,21 +113,20 @@ describe("TypingIndicatorManager", () => {
         await manager.stop();
         await manager.stop();
         
-        // Advance time to trigger stop
-        vi.advanceTimersByTime(5000);
-        await vi.runOnlyPendingTimersAsync();
+        // Wait for stop to trigger
+        await new Promise(resolve => setTimeout(resolve, 5100));
         
         // Should only publish stop once
-        const stopCalls = (mockPublisher.publishTypingIndicatorRaw as any).mock.calls
+        const stopCalls = publishTypingIndicatorRawMock.mock.calls
             .filter((call: any) => call[0] === "stop");
-        expect(stopCalls).toHaveLength(1);
+        expect(stopCalls.length).toBe(1);
     });
 
     it("should respect minimum duration from first typing start", async () => {
         await manager.start("1");
         
         // Wait 2 seconds
-        vi.advanceTimersByTime(2000);
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Start typing again (updates message but doesn't reset timer)
         await manager.start("2");
@@ -134,11 +135,22 @@ describe("TypingIndicatorManager", () => {
         await manager.stop();
         
         // Should stop after 3 more seconds (5 total from first start)
-        vi.advanceTimersByTime(2999);
-        expect(mockPublisher.publishTypingIndicatorRaw).not.toHaveBeenCalledWith("stop");
+        await new Promise(resolve => setTimeout(resolve, 2900));
         
-        vi.advanceTimersByTime(1);
-        await vi.runOnlyPendingTimersAsync();
-        expect(mockPublisher.publishTypingIndicatorRaw).toHaveBeenCalledWith("stop");
+        let stopCalls = publishTypingIndicatorRawMock.mock.calls
+            .filter((call: any) => call[0] === "stop");
+        expect(stopCalls.length).toBe(0);
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        stopCalls = publishTypingIndicatorRawMock.mock.calls
+            .filter((call: any) => call[0] === "stop");
+        expect(stopCalls.length).toBe(1);
+    });
+
+    it.skip("should delay stop typing indicator for minimum duration (using fake timers)", async () => {
+        // Note: Bun doesn't have built-in fake timers like Vitest
+        // This test is kept for reference but skipped
+        // The actual timing tests above use real timeouts
     });
 });

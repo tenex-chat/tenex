@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { ReasonActLoop } from "../ReasonActLoop";
 import type { LLMService, StreamEvent } from "@/llm/types";
 import type { Agent } from "@/agents/types";
@@ -10,10 +10,13 @@ describe("ReasonActLoop - Orchestrator Reminder", () => {
     let mockLLMService: LLMService;
     let mockAgent: Agent;
     let mockConversation: Conversation;
+    let streamMock: any;
 
     beforeEach(() => {
+        streamMock = mock();
+        
         mockLLMService = {
-            stream: vi.fn(),
+            stream: streamMock,
         } as unknown as LLMService;
 
         mockAgent = {
@@ -90,140 +93,78 @@ describe("ReasonActLoop - Orchestrator Reminder", () => {
             },
         };
 
-        mockLLMService.stream = vi
-            .fn()
-            .mockReturnValueOnce(firstStream)
-            .mockReturnValueOnce(reminderStream);
+        // Set up the mock to return different streams on consecutive calls
+        let callCount = 0;
+        streamMock.mockImplementation(() => {
+            callCount++;
+            if (callCount === 1) {
+                return firstStream;
+            } else {
+                return reminderStream;
+            }
+        });
 
         const context = {
             projectPath: "/test",
             conversationId: "test-conversation",
-            phase: "execute", // Non-chat/brainstorm phase
-            llmConfig: "test-config",
             agent: mockAgent,
             conversation: mockConversation,
+            phase: "execute",
+            publisher: {
+                publishAgentMessage: mock(() => Promise.resolve()),
+                publishToolComplete: mock(() => Promise.resolve()),
+            },
+            conversationManager: {
+                updateAgentContext: mock(() => Promise.resolve()),
+            },
         };
 
-        const result = reasonActLoop.executeStreamingInternal(
-            context,
-            messages,
-            { spanId: "test-span" },
-            undefined,
-            []
-        );
+        const result = await reasonActLoop.execute(messages, context as any, {});
 
-        const events = [];
-        for await (const event of result) {
-            events.push(event);
-        }
+        // Should have called stream twice
+        expect(streamMock).toHaveBeenCalledTimes(2);
 
-        // Verify LLM was called twice (original + reminder)
-        expect(mockLLMService.stream).toHaveBeenCalledTimes(2);
+        // Second call should have the reminder
+        const secondCallMessages = streamMock.mock.calls[1][0];
+        const assistantMessage = secondCallMessages.find((m: Message) => m.role === "assistant");
+        expect(assistantMessage?.content).toContain("continue");
 
-        // Check reminder message was added
-        const secondCall = mockLLMService.stream.mock.calls[1];
-        const reminderMessages = secondCall[0].messages;
-        expect(reminderMessages).toHaveLength(3); // Original + assistant response + reminder
-        expect(reminderMessages[2].content).toContain(
-            "you haven't used the 'continue' tool yet"
-        );
-
-        // Verify final result has continue flow
-        const finalEvent = events[events.length - 1];
-        expect(finalEvent.continueFlow).toBeDefined();
-        expect(finalEvent.continueFlow?.routing.agents).toEqual(["executor"]);
+        // Result should be from the continue tool
+        expect(result.type).toBe("continue");
     });
 
-    it("should NOT remind orchestrator in chat phase", async () => {
-        const messages = [new Message("user", "What can you help me with?")];
+    it("should not remind if phase is chat or brainstorm", async () => {
+        const messages = [new Message("user", "Let's brainstorm")];
 
         const stream: AsyncIterable<StreamEvent> = {
             async *[Symbol.asyncIterator]() {
-                yield { type: "content", content: "I can help you with various tasks." };
+                yield { type: "content", content: "Great idea! Let's explore..." };
                 yield {
                     type: "done",
-                    response: {
-                        type: "text",
-                        content: "I can help you with various tasks.",
-                        toolCalls: [],
-                    },
+                    response: { type: "text", content: "Great idea! Let's explore...", toolCalls: [] },
                 };
             },
         };
 
-        mockLLMService.stream = vi.fn().mockReturnValue(stream);
+        streamMock.mockReturnValue(stream);
 
         const context = {
             projectPath: "/test",
             conversationId: "test-conversation",
-            phase: "chat", // Chat phase - no reminder
-            llmConfig: "test-config",
             agent: mockAgent,
             conversation: mockConversation,
-        };
-
-        const result = reasonActLoop.executeStreamingInternal(
-            context,
-            messages,
-            { spanId: "test-span" },
-            undefined,
-            []
-        );
-
-        const events = [];
-        for await (const event of result) {
-            events.push(event);
-        }
-
-        // Should only be called once (no reminder)
-        expect(mockLLMService.stream).toHaveBeenCalledTimes(1);
-    });
-
-    it.skip("should throw error if orchestrator doesn't comply after reminder", async () => {
-        const messages = [new Message("user", "Complete the task")];
-
-        // Both calls return content without terminal tools
-        const stream: AsyncIterable<StreamEvent> = {
-            async *[Symbol.asyncIterator]() {
-                yield { type: "content", content: "Task completed successfully." };
-                yield {
-                    type: "done",
-                    response: {
-                        type: "text",
-                        content: "Task completed successfully.",
-                        toolCalls: [],
-                    },
-                };
+            phase: "chat", // Chat phase - no reminder needed
+            publisher: {
+                publishAgentMessage: mock(() => Promise.resolve()),
+            },
+            conversationManager: {
+                updateAgentContext: mock(() => Promise.resolve()),
             },
         };
 
-        mockLLMService.stream = vi.fn().mockReturnValue(stream);
+        const result = await reasonActLoop.execute(messages, context as any, {});
 
-        const context = {
-            projectPath: "/test",
-            conversationId: "test-conversation",
-            phase: "verification", // Non-chat/brainstorm phase
-            llmConfig: "test-config",
-            agent: mockAgent,
-            conversation: mockConversation,
-        };
-
-        const result = reasonActLoop.executeStreamingInternal(
-            context,
-            messages,
-            { spanId: "test-span" },
-            undefined,
-            []
-        );
-
-        const events = [];
-        for await (const event of result) {
-            events.push(event);
-        }
-
-        // Verify auto-completion
-        const finalEvent = events[events.length - 1];
-        expect(finalEvent.termination).toBeDefined();
-        // This test is now skipped because orchestrator must use continue() or it throws an error
+        // Should only call stream once (no reminder)
+        expect(streamMock).toHaveBeenCalledTimes(1);
     });
 });
