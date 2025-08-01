@@ -15,6 +15,7 @@ import { NDKArticle, type NDKEvent } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import { ensureExecutionTimeInitialized } from "./executionTime";
 import { FileSystemAdapter } from "./persistence";
+import type { ConversationPersistenceAdapter } from "./persistence/types";
 import type { Conversation, ConversationMetadata } from "./types";
 import { getNDK } from "@/nostr";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
@@ -23,11 +24,14 @@ export class ConversationManager {
     private conversations: Map<string, Conversation> = new Map();
     private conversationContexts: Map<string, TracingContext> = new Map();
     private conversationsDir: string;
-    private persistence: FileSystemAdapter;
+    private persistence: ConversationPersistenceAdapter;
 
-    constructor(private projectPath: string) {
+    constructor(
+        private projectPath: string, 
+        persistence?: ConversationPersistenceAdapter
+    ) {
         this.conversationsDir = path.join(projectPath, ".tenex", "conversations");
-        this.persistence = new FileSystemAdapter(projectPath);
+        this.persistence = persistence || new FileSystemAdapter(projectPath);
     }
 
     getProjectPath(): string {
