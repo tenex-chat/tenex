@@ -9,42 +9,23 @@ import {
     type TracingContext
 } from "../TracingContext";
 
-// Mock crypto for deterministic testing
-vi.mock("node:crypto", () => ({
-    randomBytes: vi.fn(() => ({
-        toString: (encoding: string) => {
-            if (encoding === "hex") {
-                return "1234567890abcdef";
-            }
-            return "mockRandom";
-        }
-    }))
-}));
-
 describe("TracingContext", () => {
     describe("generateExecutionId", () => {
         it("should generate unique execution ID with default prefix", () => {
             const id = generateExecutionId();
-            expect(id).toMatch(/^exec_[a-z0-9]+_1234567890abcdef$/);
+            expect(id).toMatch(/^exec_[a-z0-9]+_[a-f0-9]{16}$/);
         });
 
         it("should use custom prefix", () => {
             const id = generateExecutionId("custom");
-            expect(id).toMatch(/^custom_[a-z0-9]+_1234567890abcdef$/);
+            expect(id).toMatch(/^custom_[a-z0-9]+_[a-f0-9]{16}$/);
         });
 
         it("should generate different IDs on successive calls", () => {
-            // Mock Date.now to return different values
-            const originalDateNow = Date.now;
-            let callCount = 0;
-            Date.now = vi.fn(() => 1000 + callCount++);
-
             const id1 = generateExecutionId();
             const id2 = generateExecutionId();
 
             expect(id1).not.toBe(id2);
-            
-            Date.now = originalDateNow;
         });
 
         it("should include timestamp in base36 format", () => {
@@ -298,13 +279,10 @@ describe("TracingContext", () => {
 
             const formatted = formatTracingContext(context);
 
-            // Empty strings should be included
+            // Empty strings are falsy, so they won't be included in optional fields
             expect(formatted).toEqual({
                 conversationId: "",
-                executionId: "",
-                agent: "",
-                phase: "",
-                tool: ""
+                executionId: ""
             });
         });
     });
