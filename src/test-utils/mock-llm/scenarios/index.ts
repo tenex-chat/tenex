@@ -4,6 +4,7 @@ export * from "./state-persistence";
 export * from "./routing-decisions";
 export * from "./performance-testing";
 export * from "./concurrency-workflow";
+export * from "./inventory-generation";
 
 import { orchestratorWorkflowScenario } from "./orchestrator-workflow";
 import { errorHandlingScenario } from "./error-handling";
@@ -11,6 +12,7 @@ import { statePersistenceScenario } from "./state-persistence";
 import { routingDecisions } from "./routing-decisions";
 import { performanceTestingScenario } from "./performance-testing";
 import { concurrencyWorkflowScenarios } from "./concurrency-workflow";
+import { inventoryGenerationScenario } from "./inventory-generation";
 import type { MockLLMScenario, MockScenario } from "../types";
 
 /**
@@ -21,7 +23,8 @@ export const allScenarios: MockLLMScenario[] = [
     errorHandlingScenario,
     statePersistenceScenario,
     routingDecisions,
-    performanceTestingScenario
+    performanceTestingScenario,
+    inventoryGenerationScenario
 ];
 
 /**
