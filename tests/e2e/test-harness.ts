@@ -24,6 +24,11 @@ export interface E2ETestContext {
     conversationManager: ConversationManager;
     agentRegistry: AgentRegistry;
     configService: typeof ConfigService;
+    services: {
+        configService: typeof ConfigService;
+        projectContext: any;
+    };
+    projectConfig: any;
 }
 
 /**
@@ -208,7 +213,16 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
         mockLLM,
         conversationManager,
         agentRegistry,
-        configService: ConfigService
+        configService: ConfigService,
+        services: {
+            configService: ConfigService,
+            projectContext: null
+        },
+        projectConfig: {
+            title: "Test Project",
+            hashtags: ["test"],
+            identifier: "test-project"
+        }
     };
 }
 
