@@ -167,17 +167,24 @@ describe("TypingIndicatorManager", () => {
         });
 
         it("should handle errors during stop and reset state", async () => {
-            // Make publishTypingIndicatorRaw throw for stop
-            publishTypingIndicatorRawMock = mock((state: string) => {
-                if (state === "stop") {
-                    return Promise.reject(new Error("Network error during stop"));
-                }
-                return Promise.resolve(mockEvent);
-            });
-            mockPublisher.publishTypingIndicatorRaw = publishTypingIndicatorRawMock;
+            // Create a new manager instance for this test
+            const errorPublisher = {
+                context: {
+                    agent: {
+                        name: "test-agent",
+                    },
+                },
+                publishTypingIndicatorRaw: mock((state: string) => {
+                    if (state === "stop") {
+                        return Promise.reject(new Error("Network error during stop"));
+                    }
+                    return Promise.resolve(mockEvent);
+                }),
+            } as any;
+            const errorManager = new TypingIndicatorManager(errorPublisher);
 
-            await manager.start("Test message");
-            await manager.stop();
+            await errorManager.start("Test message");
+            await errorManager.stop();
 
             // Wait for stop to execute
             await new Promise(resolve => setTimeout(resolve, 5100));
@@ -192,7 +199,7 @@ describe("TypingIndicatorManager", () => {
             );
 
             // Manager should reset state despite error
-            expect(manager.isCurrentlyTyping()).toBe(false);
+            expect(errorManager.isCurrentlyTyping()).toBe(false);
         });
 
         it("should handle errors during forceStop and reset state", async () => {
@@ -311,6 +318,64 @@ describe("TypingIndicatorManager", () => {
             // Should use the first message for the second call
             expect(publishTypingIndicatorRawMock).toHaveBeenCalledTimes(2);
             expect(publishTypingIndicatorRawMock.mock.calls[1]).toEqual(["start", "First"]);
+        });
+    });
+
+    describe("retry functionality", () => {
+        it("should retry start on failure with exponential backoff", async () => {
+            let callCount = 0;
+            const retryPublisher = {
+                context: {
+                    agent: {
+                        name: "test-agent",
+                    },
+                },
+                publishTypingIndicatorRaw: mock(() => {
+                    callCount++;
+                    if (callCount < 3) {
+                        return Promise.reject(new Error("Network error"));
+                    }
+                    return Promise.resolve(mockEvent);
+                }),
+            } as any;
+            const retryManager = new TypingIndicatorManager(retryPublisher);
+
+            const startTime = Date.now();
+            const result = await retryManager.start("Test message");
+            const totalTime = Date.now() - startTime;
+
+            // Should have called 3 times (initial + 2 retries)
+            expect(callCount).toBe(3);
+            expect(result).toBe(mockEvent);
+            
+            // Should have taken at least 3 seconds (1s + 2s delays)
+            expect(totalTime).toBeGreaterThanOrEqual(3000);
+            expect(retryManager.isCurrentlyTyping()).toBe(true);
+        });
+
+        it("should fail after max retries and reset state", async () => {
+            const failingPublisher = {
+                context: {
+                    agent: {
+                        name: "test-agent",
+                    },
+                },
+                publishTypingIndicatorRaw: mock(() => 
+                    Promise.reject(new Error("Persistent network error"))
+                ),
+            } as any;
+            const failingManager = new TypingIndicatorManager(failingPublisher);
+
+            try {
+                await failingManager.start("Test message");
+                expect(true).toBe(false); // Should not reach here
+            } catch (error) {
+                expect(error).toBeInstanceOf(Error);
+                expect((error as Error).message).toBe("Persistent network error");
+            }
+
+            // State should be reset after failure
+            expect(failingManager.isCurrentlyTyping()).toBe(false);
         });
     });
 

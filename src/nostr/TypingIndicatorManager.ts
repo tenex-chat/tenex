@@ -13,12 +13,15 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 export class TypingIndicatorManager {
     private static readonly MINIMUM_DURATION_MS = 5000; // 5 seconds
     private static readonly DEBOUNCE_DELAY_MS = 200; // 200ms debounce for rapid messages
+    private static readonly MAX_RETRY_ATTEMPTS = 3;
+    private static readonly RETRY_DELAY_MS = 1000; // 1 second between retries
     
     private typingStartTime: number | null = null;
     private stopTimer: NodeJS.Timeout | null = null;
     private isTyping = false;
     private lastMessage: string | undefined;
     private publisher: NostrPublisher;
+    private retryCount = 0;
     
     constructor(publisher: NostrPublisher) {
         this.publisher = publisher;
@@ -57,7 +60,39 @@ export class TypingIndicatorManager {
         const publisher = this.publisher as NostrPublisher & {
             publishTypingIndicatorRaw(state: "start" | "stop", message?: string): Promise<NDKEvent>;
         };
-        return await publisher.publishTypingIndicatorRaw("start", this.lastMessage);
+        
+        try {
+            const event = await publisher.publishTypingIndicatorRaw("start", this.lastMessage);
+            this.retryCount = 0; // Reset retry count on success
+            return event;
+        } catch (error) {
+            logger.error("Failed to start typing indicator", {
+                agent: this.publisher.context.agent.name,
+                error: error instanceof Error ? error.message : String(error),
+                retryCount: this.retryCount,
+            });
+            
+            // Attempt retry with exponential backoff
+            if (this.retryCount < TypingIndicatorManager.MAX_RETRY_ATTEMPTS) {
+                this.retryCount++;
+                const delay = TypingIndicatorManager.RETRY_DELAY_MS * Math.pow(2, this.retryCount - 1);
+                
+                logger.debug("Retrying typing indicator start", {
+                    agent: this.publisher.context.agent.name,
+                    retryCount: this.retryCount,
+                    delayMs: delay,
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return this.start(message); // Recursive retry
+            }
+            
+            // After max retries, reset state and throw
+            this.isTyping = false;
+            this.typingStartTime = null;
+            this.retryCount = 0;
+            throw error;
+        }
     }
     
     /**
@@ -106,6 +141,15 @@ export class TypingIndicatorManager {
                     agent: this.publisher.context.agent.name,
                     error: error instanceof Error ? error.message : String(error),
                 });
+                
+                // Always reset state on error to prevent stuck indicators
+                this.isTyping = false;
+                this.typingStartTime = null;
+                this.lastMessage = undefined;
+                this.stopTimer = null;
+            } finally {
+                // Ensure timer is cleared
+                this.stopTimer = null;
             }
         }, remainingTime);
     }
@@ -139,6 +183,16 @@ export class TypingIndicatorManager {
                     agent: this.publisher.context.agent.name,
                     error: error instanceof Error ? error.message : String(error),
                 });
+                
+                // Always reset state on error
+                this.isTyping = false;
+                this.typingStartTime = null;
+                this.lastMessage = undefined;
+            } finally {
+                // Always reset state when force stopping
+                this.isTyping = false;
+                this.typingStartTime = null;
+                this.lastMessage = undefined;
             }
         }
     }
