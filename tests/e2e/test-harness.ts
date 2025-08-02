@@ -12,7 +12,7 @@ import { ConversationManager } from "@/conversations/ConversationManager";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { RoutingBackend } from "@/agents/execution/RoutingBackend";
-import type { ExecutionContext } from "@/agents/types";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { ConfigService } from "@/services/ConfigService";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
@@ -147,8 +147,10 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
         createTracingLogger: () => ({
             info: () => {},
             warn: () => {},
+            warning: () => {},
             error: () => {},
-            debug: () => {}
+            debug: () => {},
+            trace: () => {}
         })
     }));
     
@@ -264,7 +266,47 @@ export async function executeAgent(
         throw new Error(`Conversation not found: ${conversationId}`);
     }
     
+    // Create a mock NDK event for the triggering event
+    const triggeringEvent = createMockNDKEvent({
+        kind: EVENT_KINDS.TASK,
+        content: userMessage,
+        created_at: Math.floor(Date.now() / 1000)
+    });
+    
+    // Create mock publisher
+    const mockPublisher = {
+        publishResponse: async () => {},
+        publishError: async () => {},
+        publishTypingIndicator: async () => {},
+        stopTypingIndicator: async () => {}
+    };
+    
+    // Create AgentExecutor first for use in ExecutionContext
+    let agentExecutor: AgentExecutor | undefined;
+    
     const executionContext: ExecutionContext = {
+        agent,
+        conversationId,
+        phase: conversation.phase,
+        projectPath: context.projectPath,
+        triggeringEvent,
+        publisher: mockPublisher as any,
+        conversationManager: context.conversationManager,
+        previousPhase: conversation.previousPhase,
+        handoff: conversation.phaseTransitions[conversation.phaseTransitions.length - 1],
+        claudeSessionId: undefined,
+        agentExecutor: undefined, // Will be set below
+        tracingContext: {
+            requestId: "test-request-" + Math.random().toString(36).substr(2, 9),
+            conversationId,
+            getRequest: () => ({ id: "test-request" }),
+            getConversation: () => ({ id: conversationId }),
+            getAgent: () => agent
+        } as any
+    };
+    
+    // Create AgentExecutor with the context
+    agentExecutor = new AgentExecutor({
         agent,
         conversation,
         conversationId,
@@ -286,21 +328,17 @@ export async function executeAgent(
         onError: options.onError || ((error) => {
             logger.error("Agent execution error:", error);
         })
-    };
+    });
+    
+    // Set the agentExecutor in the context
+    executionContext.agentExecutor = agentExecutor;
     
     // Use appropriate backend based on agent
     if (agentName.toLowerCase() === "orchestrator") {
         const backend = new RoutingBackend(context.mockLLM, context.conversationManager);
-        const mockPublisher = {
-            publishResponse: async () => {},
-            publishError: async () => {},
-            publishTypingIndicator: async () => {},
-            stopTypingIndicator: async () => {}
-        };
         await backend.execute([], [], executionContext, mockPublisher as any);
     } else {
-        const executor = new AgentExecutor(executionContext);
-        await executor.execute();
+        await agentExecutor.execute();
     }
 }
 

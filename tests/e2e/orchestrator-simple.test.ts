@@ -1,220 +1,89 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
-
-// Mock tracing before imports
-mock.module("@/tracing", () => ({
-    createTracingLogger: () => ({
-        trace: () => {},
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {}
-    })
-}));
-
-import { createMockLLMService, createMockAgent, createMockConversation } from "@/test-utils";
-import { AgentExecutor } from "@/agents/execution/AgentExecutor";
-import { RoutingBackend } from "@/agents/execution/RoutingBackend";
-import type { ExecutionContext } from "@/agents/types";
-
-// Mock tools
-mock.module("@/tools/registry", () => ({
-    ToolRegistry: {
-        getInstance: () => ({
-            getAllTools: () => [],
-            getTool: () => null
-        })
-    }
-}));
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { setupE2ETest, cleanupE2ETest, executeAgent, createConversation, getConversationState, type E2ETestContext } from "./test-harness";
 
 describe("E2E: Orchestrator Simple Test", () => {
-    beforeEach(() => {
-        // Mock dependencies
-        mock.module("@/nostr", () => ({
-            NostrPublisher: class {
-                async publishResponse() { }
-                async publishError() { }
-                async publishTypingIndicator() { }
-                async stopTypingIndicator() { }
-            }
-        }));
-        
-        mock.module("@/logging/ExecutionLogger", () => ({
-            ExecutionLogger: class {
-                logToolCall() {}
-                logToolResult() {}
-                logStream() {}
-                logComplete() {}
-                logError() {}
-            }
-        }));
-        
-        mock.module("@/services/ProjectContext", () => ({
-            getProjectContext: () => ({
-                project: { id: "test", pubkey: "test" },
-                orchestrator: createMockAgent({ name: "Orchestrator" }),
-                agents: new Map([
-                    ["orchestrator", createMockAgent({ name: "Orchestrator" })],
-                    ["executor", createMockAgent({ name: "Executor" })],
-                    ["planner", createMockAgent({ name: "Planner" })]
-                ])
-            })
-        }));
-        
-        // Mock conversation manager
-        mock.module("@/conversations/ConversationManager", () => ({
-            ConversationManager: class {
-                async updatePhase(id: string, phase: string) {
-                    console.log(`Phase updated to: ${phase}`);
-                }
-                async updateAgentContext() {}
-                async getConversation() {
-                    return createMockConversation({ phase: "CHAT" });
-                }
-            }
-        }));
-        
+    let context: E2ETestContext;
+    
+    beforeEach(async () => {
+        context = await setupE2ETest(["routing-decisions"]);
+    });
+    
+    afterEach(async () => {
+        await cleanupE2ETest(context);
     });
     
     it("should route orchestrator decisions correctly", async () => {
-        const mockLLM = createMockLLMService(['orchestrator-workflow']);
+        // Create conversation
+        const conversationId = await createConversation(
+            context,
+            "Test Error Recovery",
+            "I need help with error recovery mechanisms"
+        );
         
-        // Mock LLM router
-        mock.module("@/llm/router", () => ({
-            getLLMService: () => mockLLM,
-            LLMRouter: class {
-                getService() { return mockLLM; }
-            }
-        }));
-        
-        // Create execution context
-        const orchestrator = createMockAgent({
-            name: "Orchestrator",
-            systemPrompt: "You are the Orchestrator agent"
-        });
-        
-        const conversation = createMockConversation({
-            phase: "CHAT"
-        });
-        
+        // Execute orchestrator
         const toolCalls: any[] = [];
-        const context: ExecutionContext = {
-            agent: orchestrator,
-            conversation,
-            conversationId: conversation.id,
-            projectPath: "/test",
-            userMessage: "I need to create a user authentication system with JWT and OAuth support",
-            systemPrompt: orchestrator.systemPrompt || "",
-            availableTools: ["continue", "endConversation"],
-            onStreamContent: () => {},
+        await executeAgent(context, "Orchestrator", conversationId, "I need help with error recovery mechanisms", {
             onStreamToolCall: (toolCall) => {
                 toolCalls.push(toolCall);
-            },
-            onComplete: () => {},
-            onError: (error) => {
-                console.error("Error:", error);
-            },
-            tracingContext: {
-                conversationId: conversation.id,
-                traceId: "test-trace",
-                spanId: "test-span"
             }
-        };
+        });
         
-        // Execute routing backend
-        const routingBackend = new RoutingBackend();
-        await routingBackend.execute(context);
+        // Get conversation state
+        const state = await getConversationState(context, conversationId);
         
-        // Verify tool calls
-        expect(toolCalls).toHaveLength(1);
-        expect(toolCalls[0].function.name).toBe("continue");
+        // Verify routing happened
+        expect(state.phase).toBe("PLAN");
         
-        // Parse arguments
-        const args = JSON.parse(toolCalls[0].function.arguments);
-        expect(args.suggestedPhase).toBe("CHAT");
-        expect(args.confidence).toBeGreaterThan(80);
-        expect(args.reasoning).toContain("requirements");
-        
-        // Check LLM history
-        const history = (mockLLM as any).getRequestHistory();
+        // Check mock LLM history
+        const history = context.mockLLM.getRequestHistory();
         expect(history).toHaveLength(1);
-        expect(history[0].messages[0].role).toBe("system");
-        expect(history[0].messages[0].content).toContain("Orchestrator");
+        
+        // Verify the routing decision was made correctly
+        const response = history[0].response;
+        expect(response.content).toContain("planner");
+        
+        // Parse the routing decision
+        const routingDecision = JSON.parse(response.content);
+        expect(routingDecision.agents).toContain("planner");
+        expect(routingDecision.phase).toBe("PLAN");
+        expect(routingDecision.reason).toBeTruthy();
     });
     
-    it("should handle phase transitions", async () => {
-        const mockLLM = createMockLLMService();
+    it("should handle multiple routing scenarios", async () => {
+        // Test infinite loop scenario
+        const conversationId1 = await createConversation(
+            context,
+            "Test Infinite Loop",
+            "Test infinite loop detection"
+        );
         
-        // Add custom response for phase transition
-        mockLLM.addResponse({
-            trigger: {
-                agentName: "Orchestrator",
-                phase: "CHAT",
-                previousToolCalls: ["complete"]
-            },
-            response: {
-                toolCalls: [{
-                    id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Moving to planning phase",
-                            suggestedPhase: "PLAN",
-                            confidence: 95,
-                            reasoning: "Requirements gathered"
-                        })
-                    }
-                }]
-            },
-            priority: 10
-        });
+        await executeAgent(context, "Orchestrator", conversationId1, "Test infinite loop detection");
         
-        // Mock LLM router
-        mock.module("@/llm/router", () => ({
-            getLLMService: () => mockLLM,
-            LLMRouter: class {
-                getService() { return mockLLM; }
-            }
-        }));
+        const state1 = await getConversationState(context, conversationId1);
+        expect(state1.phase).toBe("PLAN");
         
-        // Create context with previous tool call
-        const conversation = createMockConversation({
-            phase: "CHAT"
-        });
+        // Test timeout scenario
+        const conversationId2 = await createConversation(
+            context,
+            "Test Timeout",
+            "Test timeout handling"
+        );
         
-        const context: ExecutionContext = {
-            agent: createMockAgent({ name: "Orchestrator" }),
-            conversation,
-            conversationId: conversation.id,
-            projectPath: "/test",
-            userMessage: "Continue with the next phase",
-            systemPrompt: "You are the Orchestrator agent. Current Phase: CHAT",
-            availableTools: ["continue", "endConversation"],
-            onStreamContent: () => {},
-            onStreamToolCall: () => {},
-            onComplete: () => {},
-            onError: () => {}
-        };
+        await executeAgent(context, "Orchestrator", conversationId2, "Test timeout handling");
         
-        // Add mock tool call history
-        const messages = [
-            { role: "system", content: context.systemPrompt },
-            { role: "user", content: "Previous message" },
-            { role: "assistant", content: "Response", tool_calls: [{
-                id: "prev1",
-                type: "function",
-                function: { name: "complete", arguments: "{}" }
-            }] },
-            { role: "user", content: context.userMessage }
-        ];
+        const state2 = await getConversationState(context, conversationId2);
+        expect(state2.phase).toBe("PLAN");
         
-        // Manually call the LLM to test trigger matching
-        const response = await mockLLM.chat(messages as any, "test");
+        // Verify both routing decisions were made
+        const history = context.mockLLM.getRequestHistory();
+        expect(history.length).toBeGreaterThanOrEqual(2);
         
-        expect(response.toolCalls).toHaveLength(1);
-        expect(response.toolCalls[0].function.name).toBe("continue");
-        
-        const args = JSON.parse(response.toolCalls[0].function.arguments);
-        expect(args.suggestedPhase).toBe("PLAN");
+        // Verify routing decisions
+        for (const request of history) {
+            const routingDecision = JSON.parse(request.response.content);
+            expect(routingDecision.agents).toBeDefined();
+            expect(routingDecision.agents).toHaveLength(1);
+            expect(routingDecision.reason).toBeTruthy();
+        }
     });
 });
