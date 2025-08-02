@@ -3,13 +3,15 @@ export * from "./error-handling";
 export * from "./state-persistence";
 export * from "./routing-decisions";
 export * from "./performance-testing";
+export * from "./concurrency-workflow";
 
 import { orchestratorWorkflowScenario } from "./orchestrator-workflow";
 import { errorHandlingScenario } from "./error-handling";
 import { statePersistenceScenario } from "./state-persistence";
 import { routingDecisions } from "./routing-decisions";
 import { performanceTestingScenario } from "./performance-testing";
-import type { MockLLMScenario } from "../types";
+import { concurrencyWorkflowScenarios } from "./concurrency-workflow";
+import type { MockLLMScenario, MockScenario } from "../types";
 
 /**
  * All available mock scenarios for testing
@@ -21,6 +23,18 @@ export const allScenarios: MockLLMScenario[] = [
     routingDecisions,
     performanceTestingScenario
 ];
+
+/**
+ * Concurrency testing scenario
+ */
+export const concurrencyScenario: MockLLMScenario = {
+    name: "concurrency-workflow",
+    description: "Test multiple simultaneous conversations",
+    responses: concurrencyWorkflowScenarios
+};
+
+// Add concurrency scenario to all scenarios
+allScenarios.push(concurrencyScenario);
 
 /**
  * Get a specific scenario by name
