@@ -21,9 +21,6 @@ describe("E2E: Complete Tool Integration", () => {
     let mockFiles: Map<string, string>;
 
     beforeEach(async () => {
-        // Reset singletons
-        ConfigService.instance = undefined;
-        
         testDir = await createTempDir();
         projectPath = path.join(testDir, "test-project");
         
@@ -115,11 +112,6 @@ describe("E2E: Complete Tool Integration", () => {
         mockLLM = createMockLLMService([], { customResponses: completeToolScenario });
         conversationManager = new ConversationManager(projectPath);
         agentRegistry = new AgentRegistry(projectPath);
-        
-        // Initialize config service
-        const configService = ConfigService.getInstance();
-        configService.setProjectConfig("projectPath", projectPath);
-        configService.setLLMService(mockLLM as any);
     });
 
     afterEach(async () => {
