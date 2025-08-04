@@ -1,5 +1,4 @@
 import { describe, expect, test, beforeEach, mock, Mock } from "bun:test";
-import { ClaudeBackend } from "../ClaudeBackend";
 import type { ExecutionContext } from "../types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { ConversationManager } from "@/conversations/ConversationManager";
@@ -51,6 +50,9 @@ mock.module("@/utils/logger", () => ({
         warn: mock(() => {}),
     },
 }));
+
+// Import ClaudeBackend after mocks are set up
+import { ClaudeBackend } from "../ClaudeBackend";
 
 describe("ClaudeBackend", () => {
     let backend: ClaudeBackend;
