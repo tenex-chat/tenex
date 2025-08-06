@@ -328,7 +328,7 @@ export class NostrPublisher {
             event.content = contentParts.join("\n");
 
             await event.sign(this.context.agent.signer);
-            // await event.publish();
+            await event.publish();
 
             logger.debug("Published tool execution status", {
                 tool: status.tool,

@@ -1,4 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type NDK from "@nostr-dev-kit/ndk";
 import type { Agent } from "@/agents/types";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { Conversation } from "@/conversations/types";
@@ -50,7 +51,7 @@ export class MockNostrEvent implements Partial<NDKEvent> {
         return tag?.[1];
     }
     
-    static deserialize(ndk: any, serialized: string): MockNostrEvent {
+    static deserialize(ndk: NDK, serialized: string): MockNostrEvent {
         const data = JSON.parse(serialized);
         return new MockNostrEvent(data);
     }

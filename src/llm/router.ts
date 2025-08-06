@@ -277,7 +277,7 @@ export class LLMRouter implements LLMService {
 
             let fullContent = "";
             let lastResponse: CompletionResponse | undefined;
-            const chunkMetadata: any[] = [];
+            const chunkMetadata: Array<{ type: string; chunkKeys: string[]; fullChunk: string }> = [];
 
             for await (const chunk of stream) {
                 // Log chunk metadata

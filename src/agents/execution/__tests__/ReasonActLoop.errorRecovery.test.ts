@@ -3,6 +3,7 @@ import { ReasonActLoop } from "../ReasonActLoop";
 import type { LLMService, StreamEvent } from "@/llm/types";
 import { serializeToolResult } from "@/llm/ToolResult";
 import type { ToolError } from "@/tools/core";
+import { formatToolError } from "@/utils/error-formatter";
 
 describe("ReasonActLoop - Error Recovery", () => {
     let mockLLMService: LLMService;
@@ -358,7 +359,7 @@ describe("ReasonActLoop - Error Recovery", () => {
     });
 
     it("should format various error types correctly", () => {
-        const formatToolError = (reasonActLoop as any).formatToolError.bind(reasonActLoop);
+        // Using the shared formatToolError utility directly
 
         // Test string error
         expect(formatToolError("Simple error message")).toBe("Simple error message");

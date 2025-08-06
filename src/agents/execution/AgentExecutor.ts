@@ -84,7 +84,8 @@ export class AgentExecutor {
             });
         }
 
-        // Ensure context has publisher and conversationManager
+        // Build full context with additional properties
+        // Keep fallbacks for backward compatibility with tests
         const fullContext: ExecutionContext = {
             ...context,
             publisher:
