@@ -41,6 +41,14 @@ export class LLMRouter implements LLMService {
             // If the default key doesn't exist or point to a valid config, continue to other logic
         }
 
+        // Check if configName is a default key (e.g., "agents", "analyze", "orchestrator")
+        if (context?.configName && this.config.defaults[context.configName]) {
+            const configKey = this.config.defaults[context.configName];
+            if (configKey && this.config.configs[configKey]) {
+                return configKey;
+            }
+        }
+
         // Direct config name takes precedence
         if (context?.configName && this.config.configs[context.configName]) {
             return context.configName;
