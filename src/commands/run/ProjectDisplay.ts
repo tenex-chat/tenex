@@ -67,6 +67,7 @@ export class ProjectDisplay {
         logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
         logInfo(chalk.gray("Slug:        ") + chalk.white(slug));
         logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
+        logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
         logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
         if (agent.isOrchestrator) {
             logInfo(chalk.gray("Type:        ") + chalk.cyan("Orchestrator"));
@@ -97,6 +98,7 @@ export class ProjectDisplay {
         // Display agent information with instance pubkey
         logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
         logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
+        logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
         logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
         logInfo(chalk.gray("Cached:      ") + chalk.green(`✓ ${eventId}.json`));
     }
