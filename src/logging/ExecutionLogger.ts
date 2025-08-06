@@ -1,6 +1,7 @@
 import { type LogModule, logger as baseLogger } from "@/utils/logger";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger } from "@/tracing";
+import { formatDuration } from "@/utils/formatting";
 import chalk from "chalk";
 import type { Phase } from "@/conversations/phases";
 import type { Agent } from "@/agents/types";
@@ -435,7 +436,7 @@ export class ExecutionLogger {
         console.log();
         console.log(statusColor(`${statusIcon} CONVERSATION COMPLETE [${this.shortId(event.conversationId)}]`));
         console.log(chalk.white(`    ├─ Final phase: ${chalk.bold(event.finalPhase)}`));
-        console.log(chalk.white(`    ├─ Duration: ${this.formatDuration(event.totalDuration)}`));
+        console.log(chalk.white(`    ├─ Duration: ${formatDuration(event.totalDuration)}`));
         console.log(statusColor(`    └─ Success: ${event.success}`));
         console.log();
 
@@ -477,13 +478,6 @@ export class ExecutionLogger {
         return String(value);
     }
 
-    private formatDuration(ms: number): string {
-        const seconds = ms / 1000;
-        if (seconds < 60) return `${seconds.toFixed(1)}s`;
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = seconds % 60;
-        return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
-    }
 
     // Quick logging methods
     agentThinking(agent: string, reasoning: string, context?: AgentThinkingEvent["context"]): void {

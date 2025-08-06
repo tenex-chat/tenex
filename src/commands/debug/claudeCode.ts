@@ -1,5 +1,6 @@
-import { ClaudeCodeExecutor } from "@/claude/executor";
+import { ClaudeCodeExecutor, type ClaudeCodeResult } from "@/claude/executor";
 import type { SDKMessage } from "@anthropic-ai/claude-code";
+import type { TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
 import { formatError } from "@/utils/errors";
 import { logError, logInfo, logDebug } from "@/utils/logger";
 import chalk from "chalk";
@@ -41,7 +42,7 @@ export async function runDebugClaudeCode(
 
         // Create the generator
         const generator = executor.execute();
-        let finalResult: any;
+        let finalResult: ClaudeCodeResult;
 
         // Process messages using the same pattern as ClaudeTaskOrchestrator
         while (true) {
@@ -66,7 +67,7 @@ export async function runDebugClaudeCode(
             if (message.type === "assistant" && message.message?.content) {
                 lastAssistantMessage = message.message.content
                     .filter((c) => c.type === "text")
-                    .map((c) => (c as any).text)
+                    .map((c) => (c as TextBlock).text)
                     .join("");
             }
         }

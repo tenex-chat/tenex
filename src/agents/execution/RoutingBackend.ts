@@ -2,7 +2,7 @@ import type { LLMService } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Tool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
-import { createTracingLogger } from "@/tracing";
+import { createTracingLogger, type TracingLogger } from "@/tracing";
 import { Message } from "multi-llm-ts";
 import { z } from "zod";
 import type { ConversationManager } from "@/conversations/ConversationManager";
@@ -157,7 +157,7 @@ export class RoutingBackend implements ExecutionBackend {
     private async getRoutingDecision(
         messages: Message[], 
         context: ExecutionContext,
-        tracingLogger: any,
+        tracingLogger: TracingLogger,
         executionLogger?: ExecutionLogger
     ): Promise<RoutingDecision> {
         // Add instruction to return JSON only
