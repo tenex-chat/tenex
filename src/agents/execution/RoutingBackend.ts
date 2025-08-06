@@ -5,6 +5,7 @@ import { getProjectContext } from "@/services/ProjectContext";
 import { createTracingLogger } from "@/tracing";
 import { Message } from "multi-llm-ts";
 import { z } from "zod";
+import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
@@ -21,7 +22,7 @@ type RoutingDecision = z.infer<typeof RoutingDecisionSchema>;
 export class RoutingBackend implements ExecutionBackend {
     constructor(
         private llmService: LLMService,
-        private conversationManager: import("@/conversations/ConversationManager").ConversationManager
+        private conversationManager: ConversationManager
     ) {}
 
     async execute(
@@ -144,11 +145,6 @@ export class RoutingBackend implements ExecutionBackend {
                     // Continue with other agents even if one fails
                 }
             }
-
-            tracingLogger.info("🏁 Routing complete", {
-                agentsExecuted: routingDecision.agents.length
-            });
-
         } catch (error) {
             tracingLogger.error("Routing backend error", {
                 error: error instanceof Error ? error.message : String(error)

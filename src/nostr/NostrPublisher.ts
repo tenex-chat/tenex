@@ -127,15 +127,9 @@ export class NostrPublisher {
                 }
             }
 
-            // Update conversation context with the assistant's response BEFORE publishing
-            // This ensures transactional integrity - if the update fails, we don't publish
-            await this.context.conversationManager.addMessageToContext(
-                this.context.conversationId,
-                this.context.agent.slug,
-                new Message("assistant", options.content)
-            );
-
-            // Save conversation state BEFORE publishing
+            // With the new simplified system, we don't need to manually add messages to context
+            // The conversation history (NDKEvents) is the source of truth
+            // Just save the conversation state BEFORE publishing
             await this.context.conversationManager.saveConversation(this.context.conversationId);
 
             // Sign and publish only after local state is successfully updated
@@ -395,6 +389,11 @@ export class NostrPublisher {
         // Always add execution time tag using the fresh conversation object
         const totalSeconds = getTotalExecutionTimeSeconds(conversation);
         event.tag([EXECUTION_TAGS.NET_TIME, totalSeconds.toString()]);
+
+        // Add voice mode tag if the triggering event has it
+        if (this.context.triggeringEvent.tagValue("mode") === "voice") {
+            event.tag(["mode", "voice"]);
+        }
     }
 
     private cleanPTags(event: NDKEvent): void {
@@ -551,9 +550,6 @@ export class StreamPublisher {
         try {
             // Cancel any pending flush timeout
             if (this.flushTimeout) {
-                logger.info("[StreamPublisher] Cancelling pending flush in finalize", {
-                    agent: this.publisher.context.agent.name,
-                });
                 this.cancelScheduledFlush();
             }
 
@@ -648,6 +644,11 @@ export class StreamPublisher {
             this.sequence++;
             streamingEvent.tag(["streaming", "true"]);
             streamingEvent.tag(["sequence", this.sequence.toString()]);
+
+            // Add voice mode tag if the triggering event has it
+            if (this.publisher.context.triggeringEvent.tagValue("mode") === "voice") {
+                streamingEvent.tag(["mode", "voice"]);
+            }
 
             await streamingEvent.sign(this.publisher.context.agent.signer);
             await streamingEvent.publish();

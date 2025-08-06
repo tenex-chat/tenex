@@ -99,7 +99,7 @@ export class TaskPublisher {
         try {
             await progressUpdate.publish();
         } catch (e) {
-            logger.debug("Error publishing update: " + e.message, {
+            logger.debug("Error publishing update: " + (e instanceof Error ? e.message : String(e)), {
                 taskId: task.id,
                 contentLength: content.length,
                 sessionId,

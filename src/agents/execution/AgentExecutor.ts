@@ -12,6 +12,7 @@ import {
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Agent } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
 import { ClaudeBackend } from "./ClaudeBackend";
@@ -24,6 +25,7 @@ import "@/prompts/fragments/expertise-boundaries";
 import "@/prompts/fragments/domain-expert-guidelines";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
+import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 export class AgentExecutor {
     constructor(
@@ -35,7 +37,7 @@ export class AgentExecutor {
     /**
      * Get the appropriate execution backend based on agent configuration
      */
-    private getBackend(agent: import("@/agents/types").Agent): ExecutionBackend {
+    private getBackend(agent: Agent): ExecutionBackend {
         const backendType = agent.backend || "reason-act-loop";
 
         switch (backendType) {
@@ -63,16 +65,14 @@ export class AgentExecutor {
         
         const executionLogger = createExecutionLogger(tracingContext, "agent");
 
-        // Retrieve the agent's stored Claude session ID if available
+        // Build messages first to get the Claude session ID
+        const messages = await this.buildMessages(context, context.triggeringEvent);
+        
+        // Get the Claude session ID from the conversation state
         const agentContext = this.conversationManager.getAgentContext(
             context.conversationId,
             context.agent.slug
         );
-        
-        // Prioritize claudeSessionId from the incoming event context (context.claudeSessionId)
-        // over the one from the agent's stored context (agentContext?.claudeSessionId).
-        // The context.claudeSessionId here comes from the event handlers (reply.ts/task.ts)
-        // which extract it from the 'claude-session' tag on the incoming Nostr event.
         const claudeSessionId = context.claudeSessionId || agentContext?.claudeSessionId;
         
         if (claudeSessionId) {
@@ -119,10 +119,7 @@ export class AgentExecutor {
                 narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`
             });
 
-            // 1. Build the agent's messages
-            const messages = await this.buildMessages(fullContext, fullContext.triggeringEvent);
-
-            // 2. Publish typing indicator start
+            // Publish typing indicator start
             await fullContext.publisher.publishTypingIndicator("start");
 
             await this.executeWithStreaming(fullContext, messages, tracingContext);
@@ -134,6 +131,12 @@ export class AgentExecutor {
                 narrative: `Agent ${context.agent.name} completed execution successfully`,
                 success: true
             });
+
+            // Stop typing indicator after successful execution
+            await fullContext.publisher.publishTypingIndicator("stop");
+            
+            // Clean up the publisher resources
+            fullContext.publisher.cleanup();
 
             // Conversation updates are now handled by NostrPublisher
         } catch (error) {
@@ -188,9 +191,6 @@ export class AgentExecutor {
             }
         }
 
-        // No need to load inventory or context files here anymore
-        // The fragment handles this internally
-
         // Get all available agents for handoffs
         const availableAgents = Array.from(projectCtx.agents.values());
 
@@ -203,7 +203,7 @@ export class AgentExecutor {
         // Only pass the current agent's lessons
         const agentLessonsMap = new Map<
             string,
-            import("@/events/NDKAgentLesson").NDKAgentLesson[]
+            NDKAgentLesson[]
         >();
         const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
         if (currentAgentLessons.length > 0) {
@@ -219,52 +219,21 @@ export class AgentExecutor {
             conversation,
             agentLessons: agentLessonsMap,
             mcpTools,
+            triggeringEvent: context.triggeringEvent,
         });
 
         messages.push(new Message("system", systemPrompt));
 
-        // Use agent's isolated context instead of full history
-        let agentContext = context.conversationManager.getAgentContext(
+        // Use the new unified buildAgentMessages method
+        const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
             context.conversationId,
-            context.agent.slug
+            context.agent,
+            context.triggeringEvent,
+            context.handoff
         );
 
-        // If no context exists, this agent is being invoked for the first time
-        if (!agentContext) {
-            // Check if this is a handoff from another agent
-            const handoff = context.handoff;
-
-            if (handoff) {
-                logger.info("[AGENT_EXECUTOR] Creating context from handoff", {
-                    fromAgent: handoff.agentName,
-                    toAgent: context.agent.slug,
-                    handoffMessage: `${handoff.message.substring(0, 100)}...`,
-                });
-
-                // Create context with handoff information
-                agentContext = context.conversationManager.createAgentContext(
-                    context.conversationId,
-                    context.agent.slug,
-                    handoff
-                );
-            } else {
-                // Bootstrap context for direct invocation (e.g., p-tag mention)
-                agentContext = await context.conversationManager.bootstrapAgentContext(
-                    context.conversationId,
-                    context.agent.slug,
-                    context.triggeringEvent
-                );
-            }
-        } else {
-            await context.conversationManager.synchronizeAgentContext(
-                context.conversationId,
-                context.agent.slug,
-                context.triggeringEvent
-            );
-        }
-
-        // Add the agent's isolated messages
-        messages.push(...agentContext.messages);
+        // Add the agent's messages
+        messages.push(...agentMessages);
 
         return messages;
     }

@@ -7,6 +7,7 @@ import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { logger } from "@/utils/logger";
+import type { Message } from "multi-llm-ts";
 
 /**
  * ClaudeBackend executes tasks by directly calling Claude Code
@@ -15,7 +16,7 @@ import { logger } from "@/utils/logger";
  */
 export class ClaudeBackend implements ExecutionBackend {
     async execute(
-        messages: Array<import("multi-llm-ts").Message>,
+        messages: Array<Message>,
         tools: Tool[],
         context: ExecutionContext,
         publisher: NostrPublisher
@@ -64,19 +65,14 @@ export class ClaudeBackend implements ExecutionBackend {
             throw new Error(`Claude code execution failed: ${result.error || "Unknown error"}`);
         }
 
-        // Store the Claude session ID in the agent's context
+        // Store the Claude session ID using the new updateAgentState method
         if (result.sessionId) {
-            const agentContext = context.conversationManager.getAgentContext(
+            await context.conversationManager.updateAgentState(
                 context.conversationId,
-                context.agent.slug
+                context.agent.slug,
+                { claudeSessionId: result.sessionId }
             );
-            
-            if (agentContext) {
-                agentContext.claudeSessionId = result.sessionId;
-                // Save the conversation to persist the session ID
-                await context.conversationManager.saveConversation(context.conversationId);
-                logger.info(`[ClaudeBackend] Stored Claude session ID for agent ${context.agent.slug}: ${result.sessionId}`);
-            }
+            logger.info(`[ClaudeBackend] Stored Claude session ID for agent ${context.agent.slug}: ${result.sessionId}`);
         }
 
         // Use Claude's final response instead of the original task content

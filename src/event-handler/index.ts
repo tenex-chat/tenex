@@ -6,6 +6,7 @@ import { getEventKindName } from "../commands/run/constants";
 import { ConversationManager } from "../conversations/ConversationManager";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
+import { getProjectContext } from "../services";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
@@ -43,15 +44,6 @@ export class EventHandler {
     async handleEvent(event: NDKEvent): Promise<void> {
         // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
         if (IGNORED_EVENT_KIDNS.includes(event.kind)) return;
-
-        logInfo(chalk.gray("\n📥 Event received:", event.id));
-
-        const timestamp = new Date().toLocaleTimeString();
-        const eventKindName = getEventKindName(event.kind);
-
-        logInfo(chalk.gray(`\n[${timestamp}] `) + chalk.cyan(`${eventKindName} received`));
-        logInfo(chalk.gray("From:    ") + chalk.white(event.author.npub));
-        logInfo(chalk.gray("Event:   ") + chalk.gray(event.encode()));
 
         switch (event.kind) {
             case EVENT_KINDS.GENERIC_REPLY:
@@ -91,8 +83,79 @@ export class EventHandler {
                 }
                 break;
 
+            case EVENT_KINDS.LLM_CONFIG_CHANGE:
+                await this.handleLLMConfigChange(event);
+                break;
+
             default:
                 this.handleDefaultEvent(event);
+        }
+    }
+
+    private async handleLLMConfigChange(event: NDKEvent): Promise<void> {
+        try {
+            // Extract the agent pubkey and new model from the event tags
+            const agentPubkey = event.tagValue("p");
+            const newModel = event.tagValue("model");
+
+            if (!agentPubkey || !newModel) {
+                logger.warn("LLM_CONFIG_CHANGE event missing required tags", {
+                    eventId: event.id,
+                    hasAgentPubkey: !!agentPubkey,
+                    hasModel: !!newModel,
+                });
+                return;
+            }
+
+            logger.info(`Received LLM config change request`, {
+                agentPubkey,
+                newModel,
+                eventId: event.id,
+                from: event.pubkey,
+            });
+
+            // Get the agent from the project context
+            const projectContext = getProjectContext();
+            const agent = Array.from(projectContext.agents.values()).find(
+                (a) => a.pubkey === agentPubkey
+            );
+
+            if (!agent) {
+                logger.warn("Agent not found for LLM config change", {
+                    agentPubkey,
+                    availableAgents: Array.from(projectContext.agents.keys()),
+                });
+                return;
+            }
+
+            // Update the agent's LLM configuration persistently
+            const { AgentRegistry } = await import("@/agents/AgentRegistry");
+            const agentRegistry = new AgentRegistry(this.projectPath, false);
+            await agentRegistry.loadFromProject();
+            const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
+            
+            if (updated) {
+                // Also update in memory for immediate effect
+                agent.llmConfig = newModel;
+                logger.info(`Updated and persisted LLM configuration for agent`, {
+                    agentName: agent.name,
+                    agentPubkey: agent.pubkey,
+                    newModel,
+                });
+            } else {
+                // Fallback: at least update in memory for this session
+                agent.llmConfig = newModel;
+                logger.warn(`Updated LLM configuration in memory only (persistence failed)`, {
+                    agentName: agent.name,
+                    agentPubkey: agent.pubkey,
+                    newModel,
+                });
+            }
+        } catch (error) {
+            logger.error("Failed to handle LLM config change", {
+                eventId: event.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 

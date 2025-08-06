@@ -18,9 +18,12 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 // Core Result Type
 // ============================================================================
 
-// Result type for fallible operations
+// Import metadata type from executor
+import type { ToolExecutionMetadata } from "./executor";
+
+// Result type for fallible operations with optional metadata
 export type Result<E, A> =
-    | { readonly ok: true; readonly value: A }
+    | { readonly ok: true; readonly value: A; readonly metadata?: ToolExecutionMetadata }
     | { readonly ok: false; readonly error: E };
 
 // ============================================================================
@@ -161,9 +164,10 @@ export const isNonEmptyArray = <T>(array: ReadonlyArray<T>): array is NonEmptyAr
 // Result Constructors
 // ============================================================================
 
-export const success = <A>(value: A): Result<never, A> => ({
+export const success = <A>(value: A, metadata?: ToolExecutionMetadata): Result<never, A> => ({
     ok: true,
     value,
+    ...(metadata && { metadata }),
 });
 
 export const failure = <E>(error: E): Result<E, never> => ({

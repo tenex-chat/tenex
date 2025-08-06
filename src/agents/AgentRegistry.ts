@@ -10,6 +10,7 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
 import { isToollessBackend } from "./utils";
@@ -38,7 +39,7 @@ export class AgentRegistry {
         }
     }
 
-    async loadFromProject(ndkProject?: import("@nostr-dev-kit/ndk").NDKProject): Promise<void> {
+    async loadFromProject(ndkProject?: NDKProject): Promise<void> {
         // Ensure .tenex directory exists
         const tenexDir = this.basePath.endsWith(".tenex")
             ? this.basePath
@@ -105,7 +106,7 @@ export class AgentRegistry {
     async ensureAgent(
         name: string,
         config: AgentConfigOptionalNsec,
-        ndkProject?: import("@nostr-dev-kit/ndk").NDKProject
+        ndkProject?: NDKProject
     ): Promise<Agent> {
         // Check if agent already exists
         const existingAgent = this.agents.get(name);
@@ -445,6 +446,74 @@ export class AgentRegistry {
     }
 
     /**
+     * Update an agent's LLM configuration persistently
+     */
+    async updateAgentLLMConfig(agentPubkey: string, newLLMConfig: string): Promise<boolean> {
+        // Find the agent by pubkey
+        const agent = this.agentsByPubkey.get(agentPubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${agentPubkey} not found for LLM config update`);
+            return false;
+        }
+
+        // Update the agent in memory
+        agent.llmConfig = newLLMConfig;
+
+        // Find the registry entry by slug
+        const registryEntry = this.registry[agent.slug];
+        if (!registryEntry) {
+            logger.warn(`Registry entry not found for agent ${agent.slug}`);
+            return false;
+        }
+
+        // Update the agent definition file
+        try {
+            const definitionPath = path.join(this.agentsDir, registryEntry.file);
+            
+            // Read existing definition
+            let agentDefinition: StoredAgentData;
+            try {
+                const content = await fs.readFile(definitionPath, "utf-8");
+                agentDefinition = JSON.parse(content);
+            } catch (error) {
+                logger.warn("Failed to read agent definition, creating from current state", {
+                    file: registryEntry.file,
+                    error,
+                });
+                // Create definition from current agent state
+                agentDefinition = {
+                    name: agent.name,
+                    role: agent.role,
+                    description: agent.description,
+                    instructions: agent.instructions || "",
+                    useCriteria: agent.useCriteria,
+                    llmConfig: newLLMConfig,
+                    backend: agent.backend,
+                };
+            }
+
+            // Update the llmConfig
+            agentDefinition.llmConfig = newLLMConfig;
+
+            // Save the updated definition
+            await writeJsonFile(definitionPath, agentDefinition);
+            
+            logger.info(`Updated LLM config for agent ${agent.name} (${agent.slug})`, {
+                newLLMConfig,
+                file: registryEntry.file,
+            });
+
+            return true;
+        } catch (error) {
+            logger.error("Failed to update agent LLM config", {
+                agentSlug: agent.slug,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return false;
+        }
+    }
+
+    /**
      * Get the orchestrator agent if one exists
      */
     getOrchestratorAgent(): Agent | undefined {
@@ -465,7 +534,7 @@ export class AgentRegistry {
         signer: NDKPrivateKeySigner,
         config: Omit<AgentConfig, "nsec">,
         ndkAgentEventId?: string,
-        ndkProject?: import("@nostr-dev-kit/ndk").NDKProject
+        ndkProject?: NDKProject
     ): Promise<void> {
         try {
             let projectName: string;
@@ -634,7 +703,7 @@ export class AgentRegistry {
      * Ensure built-in agents are loaded
      */
     private async ensureBuiltInAgents(
-        ndkProject?: import("@nostr-dev-kit/ndk").NDKProject
+        ndkProject?: NDKProject
     ): Promise<void> {
         const builtInAgents = getBuiltInAgents();
         logger.debug(`Loading ${builtInAgents.length} built-in agents`, {
@@ -686,7 +755,7 @@ export class AgentRegistry {
      * Republish kind:0 events for all agents
      * This is called when the project boots to ensure agents are discoverable
      */
-    async republishAllAgentProfiles(ndkProject?: import("@nostr-dev-kit/ndk").NDKProject): Promise<void> {
+    async republishAllAgentProfiles(ndkProject?: NDKProject): Promise<void> {
         logger.info("Republishing kind:0 events for all agents", {
             agentCount: this.agents.size,
         });

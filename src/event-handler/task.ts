@@ -65,7 +65,7 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
         }
 
         if (!targetAgent) {
-            logInfo(chalk.green("✅ Not routing to any agent", { mentionedPubkeys }));
+            logInfo(chalk.green("✅ Not routing to any agent", JSON.stringify(mentionedPubkeys)));
             return;
         }
 

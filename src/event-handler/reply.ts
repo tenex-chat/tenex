@@ -32,15 +32,6 @@ export const handleChatMessage = async (
         .map((tag) => tag[1])
         .filter((pubkey): pubkey is string => !!pubkey);
 
-    if (mentionedPubkeys.length > 0) {
-        logInfo(
-            chalk.gray("P-tags:  ") +
-                chalk.cyan(
-                    `${mentionedPubkeys.length} pubkeys mentioned: ${mentionedPubkeys.join(", ")}`
-                )
-        );
-    }
-
     // Check if this message is directed to the system (project or agents)
     if (pTags.length > 0) {
         const projectCtx = getProjectContext();
@@ -51,14 +42,7 @@ export const handleChatMessage = async (
 
         const isDirectedToSystem = mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
 
-        if (!isDirectedToSystem) {
-            logInfo(
-                chalk.gray(
-                    "Message is not directed to system (p-tags point to external users), skipping routing"
-                )
-            );
-            return;
-        }
+        if (!isDirectedToSystem) return;
     }
 
     // This is a reply within an existing conversation

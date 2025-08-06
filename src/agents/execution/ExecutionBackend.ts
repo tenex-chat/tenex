@@ -1,6 +1,7 @@
 import type { ExecutionContext } from "./types";
 import type { Tool } from "@/tools/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
+import type { Message } from "multi-llm-ts";
 
 /**
  * Interface for agent execution backends.
@@ -16,7 +17,7 @@ export interface ExecutionBackend {
      * @param publisher - The NostrPublisher for publishing events
      */
     execute(
-        messages: Array<import("multi-llm-ts").Message>,
+        messages: Array<Message>,
         tools: Tool[],
         context: ExecutionContext,
         publisher: NostrPublisher

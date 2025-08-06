@@ -7,6 +7,9 @@ import type { Tool } from "@/tools/types";
 import "@/prompts/fragments/phase-definitions";
 import "@/prompts/fragments/referenced-article";
 import "@/prompts/fragments/domain-expert-guidelines";
+import "@/prompts/fragments/voice-mode";
+import { isVoiceMode } from "@/prompts/fragments/voice-mode";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface BuildSystemPromptOptions {
     // Required data
@@ -20,6 +23,7 @@ export interface BuildSystemPromptOptions {
     conversation?: Conversation;
     agentLessons?: Map<string, NDKAgentLesson[]>;
     mcpTools?: Tool[];
+    triggeringEvent?: NDKEvent;
 }
 
 /**
@@ -36,6 +40,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         conversation,
         agentLessons,
         mcpTools = [],
+        triggeringEvent,
     } = options;
 
     // Build system prompt with all agent and phase context
@@ -53,6 +58,14 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
             agents: availableAgents,
             currentAgent: agent,
         });
+    
+    // Add voice mode instructions if this is a voice mode event
+    // But skip for orchestrator since it doesn't speak to users
+    if (!agent.isOrchestrator && isVoiceMode(triggeringEvent)) {
+        systemPromptBuilder.add("voice-mode", {
+            isVoiceMode: true,
+        });
+    }
 
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {

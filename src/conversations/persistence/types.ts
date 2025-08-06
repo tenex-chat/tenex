@@ -21,6 +21,7 @@ export interface ConversationSearchCriteria {
 }
 
 export interface ConversationPersistenceAdapter {
+    initialize(): Promise<void>;
     save(conversation: Conversation): Promise<void>;
     load(conversationId: string): Promise<Conversation | null>;
     delete(conversationId: string): Promise<void>;

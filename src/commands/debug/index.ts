@@ -9,6 +9,7 @@ import { logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
 import { formatMarkdown, colorizeJSON } from "@/utils/formatting";
+import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 // Format content with enhancements
 function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {
@@ -101,7 +102,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions) {
             // Only pass the current agent's lessons
             const agentLessonsMap = new Map<
                 string,
-                import("@/events/NDKAgentLesson").NDKAgentLesson[]
+                NDKAgentLesson[]
             >();
             const currentAgentLessons = projectCtx.getLessonsForAgent(agent.pubkey);
             if (currentAgentLessons.length > 0) {

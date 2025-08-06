@@ -6,9 +6,9 @@ import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
-import type { AgentContext, ConversationMetadata as ConvMetadata, Conversation } from "../types";
+import type { AgentState, ConversationMetadata as ConvMetadata, Conversation } from "../types";
 import {
-    type AgentContextSchema,
+    type AgentStateSchema,
     MetadataFileSchema,
     SerializedConversationSchema,
 } from "./schemas";
@@ -45,24 +45,13 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
         try {
             const filePath = this.getConversationPath(conversation.id);
 
-            // Convert agentContexts Map to a plain object for serialization
-            const agentContextsObj: Record<string, z.infer<typeof AgentContextSchema>> = {};
-            if (conversation.agentContexts) {
-                for (const [key, context] of conversation.agentContexts.entries()) {
-                    agentContextsObj[key] = {
-                        agentSlug: context.agentSlug,
-                        messages: context.messages.map((msg) => ({
-                            role: msg.role,
-                            content: msg.content,
-                            reasoning: msg.reasoning,
-                            attachments: msg.attachments,
-                        })),
-                        tokenCount: context.tokenCount,
-                        lastUpdate:
-                            context.lastUpdate instanceof Date
-                                ? context.lastUpdate.toISOString()
-                                : context.lastUpdate,
-                        claudeSessionId: context.claudeSessionId,
+            // Convert agentStates Map to a plain object for serialization
+            const agentStatesObj: Record<string, z.infer<typeof AgentStateSchema>> = {};
+            if (conversation.agentStates) {
+                for (const [key, state] of conversation.agentStates.entries()) {
+                    agentStatesObj[key] = {
+                        lastProcessedMessageIndex: state.lastProcessedMessageIndex,
+                        claudeSessionId: state.claudeSessionId,
                     };
                 }
             }
@@ -71,7 +60,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
             const serialized = {
                 ...conversation,
                 history: conversation.history.map((event) => event.serialize(true, true)),
-                agentContexts: agentContextsObj,
+                agentStates: agentStatesObj,
             };
 
             await writeJsonFile(filePath, serialized);
@@ -113,25 +102,15 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
             // Reconstruct conversation with validated data
             const ndk = getNDK();
 
-            // Reconstruct agentContexts Map
-            const agentContextsMap = new Map<string, AgentContext>();
-            if (data.agentContexts) {
-                for (const [agentSlug, contextData] of Object.entries(data.agentContexts)) {
-                    const context: AgentContext = {
-                        agentSlug: contextData.agentSlug,
-                        messages: contextData.messages.map((msg) => {
-                            const message = new Message(msg.role, msg.content || null);
-                            if (msg.reasoning) message.reasoning = msg.reasoning;
-                            if (msg.attachments) {
-                                msg.attachments.forEach((att) => message.attach(att));
-                            }
-                            return message;
-                        }),
-                        tokenCount: contextData.tokenCount,
-                        lastUpdate: new Date(contextData.lastUpdate),
-                        claudeSessionId: contextData.claudeSessionId,
+            // Reconstruct agentStates Map
+            const agentStatesMap = new Map<string, AgentState>();
+            if (data.agentStates) {
+                for (const [agentSlug, stateData] of Object.entries(data.agentStates)) {
+                    const state: AgentState = {
+                        lastProcessedMessageIndex: stateData.lastProcessedMessageIndex,
+                        claudeSessionId: stateData.claudeSessionId,
                     };
-                    agentContextsMap.set(agentSlug, context);
+                    agentStatesMap.set(agentSlug, state);
                 }
             }
 
@@ -149,7 +128,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                         }
                     })
                     .filter((event): event is NDKEvent => event !== null),
-                agentContexts: agentContextsMap,
+                agentStates: agentStatesMap,
                 phaseStartedAt: data.phaseStartedAt,
                 metadata: data.metadata,
                 phaseTransitions: data.phaseTransitions,

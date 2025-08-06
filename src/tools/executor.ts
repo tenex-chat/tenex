@@ -7,6 +7,18 @@ import type { ExecutionContext } from "./types";
 import { logger } from "@/utils/logger";
 
 /**
+ * Metadata that tools can provide for better UI/logging
+ */
+export interface ToolExecutionMetadata {
+    /** Human-readable message describing what the tool is doing */
+    displayMessage?: string;
+    /** The actual arguments that were executed (for tools that skip tool_start) */
+    executedArgs?: Record<string, unknown>;
+    /** Any other metadata the tool wants to provide */
+    [key: string]: unknown;
+}
+
+/**
  * Simple, unified tool execution result
  */
 export interface ToolExecutionResult<T = unknown> {
@@ -14,6 +26,8 @@ export interface ToolExecutionResult<T = unknown> {
     output?: T;
     error?: ToolError;
     duration: number;
+    /** Optional metadata for UI/logging purposes */
+    metadata?: ToolExecutionMetadata;
 }
 
 /**
@@ -60,6 +74,7 @@ export class ToolExecutor {
                     success: true,
                     output: result.value,
                     duration: Date.now() - startTime,
+                    metadata: result.metadata, // Pass through metadata if present
                 };
             } else {
                 return {

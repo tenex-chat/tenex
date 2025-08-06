@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Phase } from "@/conversations/phases";
-import type { AgentContext, PhaseTransition } from "@/conversations/types";
+import type { AgentState, PhaseTransition } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
 import { getProjectContext } from "@/services";
@@ -18,7 +18,8 @@ import { FileSystemAdapter } from "./persistence";
 import type { ConversationPersistenceAdapter } from "./persistence/types";
 import type { Conversation, ConversationMetadata } from "./types";
 import { getNDK } from "@/nostr";
-import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
+import { createExecutionLogger } from "@/logging/ExecutionLogger";
+import type { Agent } from "@/agents/types";
 
 export class ConversationManager {
     private conversations: Map<string, Conversation> = new Map();
@@ -57,7 +58,6 @@ export class ConversationManager {
         const tracingContext = createTracingContext(id);
         this.conversationContexts.set(id, tracingContext);
 
-        const tracingLogger = createTracingLogger(tracingContext, "conversation");
         const executionLogger = createExecutionLogger(tracingContext, "conversation");
         
         // Log conversation start
@@ -76,7 +76,7 @@ export class ConversationManager {
         if (articleTag && articleTag[1]) {
             try {
                 // Parse the article reference (format: 30023:pubkey:dtag)
-                const [kind, pubkey, dTag] = articleTag[1].split(":");
+                const [_kind, pubkey, dTag] = articleTag[1].split(":");
 
                 if (pubkey && dTag) {
                     const ndk = getNDK();
@@ -86,18 +86,13 @@ export class ConversationManager {
                         "#d": [dTag],
                     };
 
-                    const startTime = Date.now();
                     const articles = await ndk.fetchEvents(filter);
-                    const duration = Date.now() - startTime;
-
-                    tracingLogger.info(`Fetched NDKArticle in ${duration}ms`, {
-                        duration,
-                        articleCount: articles.size,
-                        dTag,
-                    });
 
                     if (articles.size > 0) {
                         const articleEvent = Array.from(articles)[0];
+                        if (!articleEvent) {
+                            throw new Error("Article event not found");
+                        }
                         const article = NDKArticle.from(articleEvent);
 
                         referencedArticle = {
@@ -105,12 +100,6 @@ export class ConversationManager {
                             content: article.content || "",
                             dTag: dTag,
                         };
-
-                        tracingLogger.info("Referenced NDKArticle content loaded", {
-                            dTag,
-                            title: referencedArticle.title,
-                            contentLength: referencedArticle.content.length,
-                        });
                     }
                 }
             } catch (error) {
@@ -123,7 +112,7 @@ export class ConversationManager {
             title,
             phase: "chat", // All conversations start in chat phase
             history: [event],
-            agentContexts: new Map<string, AgentContext>(), // Initialize empty agent contexts
+            agentStates: new Map<string, AgentState>(), // Initialize empty agent states
             phaseStartedAt: Date.now(),
             metadata: {
                 summary: event.content,
@@ -172,12 +161,11 @@ export class ConversationManager {
 
         // Create phase execution context
         const phaseContext = createPhaseExecutionContext(tracingContext, phase);
-        const tracingLogger = createTracingLogger(phaseContext, "conversation");
         const executionLogger = createExecutionLogger(phaseContext, "conversation");
 
         const previousPhase = conversation.phase;
         
-        // Log phase transition trigger
+        // Log phase transition
         executionLogger.logEvent({
             type: "phase_transition_trigger",
             conversationId: id,
@@ -186,20 +174,8 @@ export class ConversationManager {
             triggerAgent: agentName,
             signal: `${previousPhase} → ${phase}`
         });
-        
-        // Log phase transition decision
-        executionLogger.logEvent({
-            type: "phase_transition_decision",
-            conversationId: id,
-            from: previousPhase,
-            to: phase,
-            decisionBy: agentName,
-            reason: reason || "Phase transition requested",
-            confidence: 0.9
-        });
 
         // Create transition record even for same-phase handoffs
-        // This ensures handoff information is always persisted
         const transition: PhaseTransition = {
             from: previousPhase,
             to: phase,
@@ -217,26 +193,9 @@ export class ConversationManager {
             conversation.phaseStartedAt = Date.now();
 
             // Clear readFiles when transitioning from REFLECTION back to CHAT
-            // This starts a new conversation cycle with fresh file tracking
             if (previousPhase === "reflection" && phase === "chat") {
-                const previousCount = conversation.metadata.readFiles?.length || 0;
                 conversation.metadata.readFiles = undefined;
-                logger.info(
-                    "[CONVERSATION] Cleared readFiles metadata on REFLECTION->CHAT transition",
-                    {
-                        conversationId: id,
-                        previousReadFiles: previousCount,
-                    }
-                );
             }
-        } else {
-            // Log handoff within same phase
-            tracingLogger.info(`[CONVERSATION] Handoff within phase "${phase}"`, {
-                phase,
-                conversationTitle: conversation.title,
-                fromAgent: agentName,
-                message: `${message.substring(0, 100)}...`,
-            });
         }
 
         // Always push the transition (handoff) record
@@ -244,29 +203,6 @@ export class ConversationManager {
 
         // Save after phase update
         await this.persistence.save(conversation);
-        
-        // Log phase transition executed
-        const duration = Date.now() - transition.timestamp;
-        executionLogger.logEvent({
-            type: "phase_transition_executed",
-            conversationId: id,
-            from: previousPhase,
-            to: phase,
-            handoffTo: agentName,
-            handoffMessage: message,
-            duration
-        });
-        
-        // Log agent handoff if within same phase
-        if (previousPhase === phase) {
-            executionLogger.logEvent({
-                type: "agent_handoff",
-                from: agentName,
-                to: agentName, // This could be improved to track actual handoff target
-                task: message,
-                phase: phase
-            });
-        }
     }
 
     async incrementContinueCallCount(conversationId: string, phase: Phase): Promise<void> {
@@ -292,13 +228,6 @@ export class ConversationManager {
         const currentCount = conversation.metadata.continueCallCounts[phase] || 0;
         conversation.metadata.continueCallCounts[phase] = currentCount + 1;
 
-        logger.info("[CONTINUE_TRACKING] Incremented continue call count", {
-            conversationId,
-            phase,
-            newCount: currentCount + 1,
-            allCounts: conversation.metadata.continueCallCounts,
-        });
-
         // Save after updating count
         await this.persistence.save(conversation);
     }
@@ -318,35 +247,15 @@ export class ConversationManager {
             throw new Error(`Conversation ${conversationId} not found`);
         }
 
-        // Get or create tracing context
-        let tracingContext = this.conversationContexts.get(conversationId);
-        if (!tracingContext) {
-            tracingContext = createTracingContext(conversationId);
-            this.conversationContexts.set(conversationId, tracingContext);
-        }
-
-        const tracingLogger = createTracingLogger(tracingContext, "conversation");
-
         conversation.history.push(event);
 
         // Update the conversation summary to include the latest message
-        // This ensures other parts of the system have access to updated context
         if (event.content) {
             const isUser = isEventFromUser(event);
             if (isUser) {
-                // For user messages, update the summary to be more descriptive
                 conversation.metadata.summary = event.content;
                 conversation.metadata.last_user_message = event.content;
             }
-
-            tracingLogger.logEventReceived(
-                event.id || "unknown",
-                isUser ? "user_message" : "agent_response",
-                {
-                    phase: conversation.phase,
-                    historyLength: conversation.history.length,
-                }
-            );
         }
 
         // Save after adding event
@@ -376,7 +285,6 @@ export class ConversationManager {
 
         // Return events from current phase only
         // For now, return all events - phase filtering can be added later
-        // when we implement phase transition events
         return conversation.history;
     }
 
@@ -394,11 +302,158 @@ export class ConversationManager {
         return undefined;
     }
 
+    /**
+     * Build messages for an agent using simplified conversation context.
+     * This is the SINGLE method for building agent context.
+     */
+    async buildAgentMessages(
+        conversationId: string,
+        targetAgent: Agent,
+        triggeringEvent?: NDKEvent,
+        handoff?: PhaseTransition
+    ): Promise<{ messages: Message[]; claudeSessionId?: string }> {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            throw new Error(`Conversation ${conversationId} not found`);
+        }
+
+        // Get or initialize the agent's state
+        let agentState = conversation.agentStates.get(targetAgent.slug);
+        if (!agentState) {
+            agentState = { lastProcessedMessageIndex: 0 };
+            conversation.agentStates.set(targetAgent.slug, agentState);
+            logger.info(`[CONV_MGR] Initialized new agent state for ${targetAgent.slug}`);
+        }
+
+        const messagesForLLM: Message[] = [];
+        const currentHistoryLength = conversation.history.length;
+
+        // === 1. Add historical context (messages the agent has not yet seen) ===
+        const missedEvents = conversation.history.slice(agentState.lastProcessedMessageIndex);
+        
+        if (missedEvents.length > 0) {
+            let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
+            
+            // Add handoff summary if provided
+            if (handoff?.summary) {
+                contextBlock += `**Previous context**: ${handoff.summary}\n\n`;
+            }
+
+            for (const event of missedEvents) {
+                if (!event.content) continue;
+                const sender = this.getEventSender(event, targetAgent.slug);
+                if (sender) { // Don't include the agent's own previous messages
+                    if (sender === "User") {
+                        contextBlock += `🟢 USER:\n${event.content}\n\n`;
+                    } else {
+                        contextBlock += `💬 ${sender}:\n${event.content}\n\n`;
+                    }
+                }
+            }
+            
+            contextBlock += "=== END OF HISTORY ===\n";
+            contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
+            
+            messagesForLLM.push(new Message("system", contextBlock));
+            logger.debug(`[CONV_MGR] Added historical context for ${targetAgent.slug}`, { 
+                missedEventsCount: missedEvents.length 
+            });
+        }
+
+        // === 2. Add "NEW INTERACTION" marker (if applicable) ===
+        // Always for orchestrator, or for any agent if there was historical context
+        const shouldAddMarker = targetAgent.isOrchestrator || missedEvents.length > 0;
+        if (shouldAddMarker) {
+            messagesForLLM.push(new Message("system", "=== NEW INTERACTION ==="));
+        }
+
+        // === 3. Add the current triggering event as the primary message ===
+        if (triggeringEvent?.content) {
+            if (isEventFromUser(triggeringEvent)) {
+                messagesForLLM.push(new Message("user", triggeringEvent.content));
+            } else {
+                // If from another agent, attribute it as a system message
+                const eventAgentSlug = getAgentSlugFromEvent(triggeringEvent);
+                const projectCtx = getProjectContext();
+                const sendingAgentName = eventAgentSlug ? 
+                    (projectCtx.agents.get(eventAgentSlug)?.name || "Another agent") : 
+                    "Another agent";
+                messagesForLLM.push(new Message("system", `[${sendingAgentName}]: ${triggeringEvent.content}`));
+            }
+        } else if (handoff?.message) {
+            // If no explicit triggering event content, but a handoff message exists
+            messagesForLLM.push(new Message("user", handoff.message));
+        }
+
+        // === 4. Update agent's state for next turn ===
+        agentState.lastProcessedMessageIndex = currentHistoryLength;
+        
+        // Update Claude session ID from the triggering event if available
+        const claudeSessionFromTrigger = triggeringEvent?.tagValue?.('claude-session');
+        if (claudeSessionFromTrigger) {
+            agentState.claudeSessionId = claudeSessionFromTrigger;
+        }
+
+        // Save the updated conversation state
+        await this.persistence.save(conversation);
+        
+        return { 
+            messages: messagesForLLM, 
+            claudeSessionId: agentState.claudeSessionId 
+        };
+    }
+
+    /**
+     * Update an agent's state (e.g., to store Claude session ID)
+     */
+    async updateAgentState(
+        conversationId: string, 
+        agentSlug: string, 
+        updates: Partial<AgentState>
+    ): Promise<void> {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            throw new Error(`Conversation ${conversationId} not found`);
+        }
+        
+        let agentState = conversation.agentStates.get(agentSlug);
+        if (!agentState) {
+            logger.warn(`[CONV_MGR] Agent state not found for ${agentSlug}, creating new one for update.`);
+            agentState = { lastProcessedMessageIndex: 0 };
+            conversation.agentStates.set(agentSlug, agentState);
+        }
+        
+        Object.assign(agentState, updates);
+        await this.persistence.save(conversation);
+        logger.debug(`[CONV_MGR] Updated agent state for ${agentSlug}`, { updates });
+    }
+
+    /**
+     * Helper to determine who sent an event
+     */
+    private getEventSender(event: NDKEvent, agentSlug: string): string | null {
+        const eventAgentSlug = getAgentSlugFromEvent(event);
+        
+        // Skip the agent's own previous messages
+        if (eventAgentSlug === agentSlug) {
+            return null;
+        }
+        
+        if (isEventFromUser(event)) {
+            return "User";
+        } else if (eventAgentSlug) {
+            const projectCtx = getProjectContext();
+            const sendingAgent = projectCtx.agents.get(eventAgentSlug);
+            return sendingAgent ? sendingAgent.name : "Another agent";
+        } else {
+            return "Unknown";
+        }
+    }
+
     // Persistence methods
     private async loadConversations(): Promise<void> {
         try {
             const metadata = await this.persistence.list();
-            let _loadedCount = 0;
 
             for (const meta of metadata) {
                 if (!meta.archived) {
@@ -407,38 +462,24 @@ export class ConversationManager {
                         // Ensure execution time is initialized for loaded conversations
                         ensureExecutionTimeInitialized(conversation);
 
-                        // Initialize agentContexts as a Map if not present
-                        if (!conversation.agentContexts) {
-                            conversation.agentContexts = new Map<string, AgentContext>();
-                        } else if (!(conversation.agentContexts instanceof Map)) {
+                        // Initialize agentStates as a Map if not present
+                        if (!conversation.agentStates) {
+                            conversation.agentStates = new Map<string, AgentState>();
+                        } else if (!(conversation.agentStates instanceof Map)) {
                             // Convert from plain object to Map after deserialization
-                            const contextsObj = conversation.agentContexts as Record<
-                                string,
-                                AgentContext
-                            >;
-                            conversation.agentContexts = new Map<string, AgentContext>(
-                                Object.entries(contextsObj)
+                            const statesObj = conversation.agentStates as Record<string, AgentState>;
+                            conversation.agentStates = new Map<string, AgentState>(
+                                Object.entries(statesObj)
                             );
                         }
 
                         this.conversations.set(meta.id, conversation);
-                        _loadedCount++;
                     }
                 }
             }
         } catch (error) {
             logger.error("Failed to load conversations", { error });
         }
-    }
-
-    private async saveAllConversations(): Promise<void> {
-        const promises: Promise<void>[] = [];
-
-        for (const conversation of this.conversations.values()) {
-            promises.push(this.persistence.save(conversation));
-        }
-
-        await Promise.all(promises);
     }
 
     async saveConversation(conversationId: string): Promise<void> {
@@ -469,7 +510,11 @@ export class ConversationManager {
 
     async cleanup(): Promise<void> {
         // Save all conversations before cleanup
-        await this.saveAllConversations();
+        const promises: Promise<void>[] = [];
+        for (const conversation of this.conversations.values()) {
+            promises.push(this.persistence.save(conversation));
+        }
+        await Promise.all(promises);
     }
 
     /**
@@ -479,490 +524,8 @@ export class ConversationManager {
         return this.conversationContexts.get(conversationId);
     }
 
-    // Agent Context Management Methods
-
-    /**
-     * Create a new context for an agent in a conversation
-     */
-    createAgentContext(
-        conversationId: string,
-        agentSlug: string,
-        handoff?: PhaseTransition
-    ): AgentContext {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        const messages: Message[] = [];
-
-        // If there's a handoff, create system message for context and user message for the request
-        if (handoff) {
-            // First, add a system message with the context
-            if (handoff.summary) {
-                let contextContent = "";
-
-                if (handoff.summary) {
-                    contextContent += `**Current State:**\n${handoff.summary}\n\n`;
-                }
-
-                messages.push(new Message("system", contextContent.trim()));
-            }
-
-            // Then add the user message with the actual request
-            messages.push(new Message("user", handoff.message));
-        }
-
-        const context: AgentContext = {
-            agentSlug,
-            messages,
-            tokenCount: 0, // Will be updated when messages are added
-            lastUpdate: new Date(),
-        };
-
-        conversation.agentContexts.set(agentSlug, context);
-
-        logger.info(`[AGENT_CONTEXT] Context created for agent: ${agentSlug}`, {
-            conversationId,
-            agentSlug,
-            messageCount: context.messages.length,
-            messages: context.messages.map((m) => ({
-                role: m.role,
-                content: `${m.content.substring(0, 100)}...`,
-            })),
-        });
-
-        return context;
-    }
-
-    /**
-     * Add a message to an agent's context
-     */
-    async addMessageToContext(
-        conversationId: string,
-        agentSlug: string,
-        message: Message
-    ): Promise<void> {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        // logger.info(`[AGENT_CONTEXT] Adding message to agent context`, {
-        //   conversationId,
-        //   agentSlug,
-        //   messageRole: message.role,
-        //   messageContent: message.content.substring(0, 100) + "...",
-        //   currentPhase: conversation.phase
-        // });
-
-        let context = conversation.agentContexts.get(agentSlug);
-        if (!context) {
-            logger.warn(
-                `[AGENT_CONTEXT] Context not found for agent ${agentSlug}, creating new context`
-            );
-            // Create context if it doesn't exist
-            context = this.createAgentContext(conversationId, agentSlug);
-        }
-
-        context.messages.push(message);
-        context.lastUpdate = new Date();
-
-        // logger.info(`[AGENT_CONTEXT] Message added to agent context`, {
-        //   conversationId,
-        //   agentSlug,
-        //   totalMessages: context.messages.length,
-        //   contextState: context.messages.map(m => ({
-        //     role: m.role,
-        //     preview: m.content.substring(0, 50) + "..."
-        //   }))
-        // });
-
-        // TODO: Update token count based on message content
-        // This would require tokenization logic specific to the model being used
-
-        // Save after updating context
-        await this.persistence.save(conversation);
-    }
-
-    /**
-     * Get an agent's context from a conversation
-     */
-    getAgentContext(conversationId: string, agentSlug: string): AgentContext | undefined {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            logger.warn(
-                `[AGENT_CONTEXT] Conversation ${conversationId} not found when getting agent context`
-            );
-            return undefined;
-        }
-
-        const context = conversation.agentContexts.get(agentSlug);
-
-        return context;
-    }
-
-    /**
-     * Synchronize an agent's context with messages they missed since last active
-     */
-    async synchronizeAgentContext(
-        conversationId: string,
-        agentSlug: string,
-        triggeringEvent?: NDKEvent
-    ): Promise<void> {
-        const syncContext = this.validateAndGetSyncContext(conversationId, agentSlug);
-        
-        // Get all events that need processing
-        const { historicalEvents, shouldProcessTrigger } = this.categorizeEvents(
-            syncContext,
-            triggeringEvent
-        );
-        
-        // Add historical context if needed
-        if (historicalEvents.length > 0) {
-            await this.addHistoricalContext(syncContext, historicalEvents);
-        }
-        
-        // Add current triggering event if needed
-        if (triggeringEvent?.content && shouldProcessTrigger) {
-            await this.addTriggeringEvent(
-                syncContext,
-                triggeringEvent,
-                historicalEvents.length > 0
-            );
-        }
-        
-        // Update tracking and save
-        await this.finalizeSynchronization(syncContext);
-    }
-    
-    /**
-     * Validate inputs and get synchronization context
-     */
-    private validateAndGetSyncContext(
-        conversationId: string,
-        agentSlug: string
-    ): { conversation: Conversation; context: AgentContext; agentSlug: string; lastUpdateTime: number } {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-        
-        const context = conversation.agentContexts.get(agentSlug);
-        if (!context) {
-            throw new Error(`Agent context for ${agentSlug} not found`);
-        }
-        
-        return {
-            conversation,
-            context,
-            agentSlug,
-            lastUpdateTime: context.lastUpdate.getTime()
-        };
-    }
-    
-    /**
-     * Categorize events into historical and triggering
-     */
-    private categorizeEvents(
-        syncContext: { conversation: Conversation; lastUpdateTime: number },
-        triggeringEvent?: NDKEvent
-    ): { historicalEvents: NDKEvent[], shouldProcessTrigger: boolean } {
-        const { conversation, lastUpdateTime } = syncContext;
-        const missedEvents: NDKEvent[] = [];
-        
-        // Find all events after last update
-        for (const event of conversation.history) {
-            const eventTime = (event.created_at || 0) * 1000;
-            if (eventTime > lastUpdateTime) {
-                missedEvents.push(event);
-            }
-        }
-        
-        // Include triggering event if not in history
-        if (triggeringEvent && !missedEvents.find(e => e.id === triggeringEvent.id)) {
-            const triggeringTime = (triggeringEvent.created_at || 0) * 1000;
-            if (triggeringTime > lastUpdateTime) {
-                missedEvents.push(triggeringEvent);
-            }
-        }
-        
-        // Separate historical from triggering
-        const historicalEvents = missedEvents.filter(e => e.id !== triggeringEvent?.id);
-        const shouldProcessTrigger = triggeringEvent ? 
-            this.shouldProcessTriggeringEvent(syncContext, triggeringEvent) : false;
-        
-        return { historicalEvents, shouldProcessTrigger };
-    }
-    
-    /**
-     * Check if triggering event should be processed as new action
-     */
-    private shouldProcessTriggeringEvent(
-        syncContext: { conversation: Conversation; lastUpdateTime: number },
-        triggeringEvent: NDKEvent
-    ): boolean {
-        const { conversation, lastUpdateTime } = syncContext;
-        
-        // Is it new (not in history)?
-        const isNew = !conversation.history.find(e => e.id === triggeringEvent.id);
-        
-        // Or is it newer than last update?
-        const isNewer = (triggeringEvent.created_at || 0) * 1000 > lastUpdateTime;
-        
-        return isNew || isNewer;
-    }
-    
-    /**
-     * Add historical context block
-     */
-    private async addHistoricalContext(
-        syncContext: { context: AgentContext; agentSlug: string },
-        historicalEvents: NDKEvent[]
-    ): Promise<void> {
-        const { context, agentSlug } = syncContext;
-        
-        let contextBlock = "<conversation-history>\n";
-        contextBlock += "This is what happened while you were not active. ";
-        contextBlock += "This is provided for context only - do not act on these messages:\n\n";
-        
-        for (const event of historicalEvents) {
-            if (!event.content) continue;
-            
-            const sender = this.getEventSender(event, agentSlug);
-            if (!sender) continue; // Skip agent's own messages
-            
-            contextBlock += `[${sender}]: ${event.content}\n\n`;
-        }
-        
-        contextBlock += "\nREMINDER: The above messages are historical context only. ";
-        contextBlock += "Do NOT act on them.\n";
-        contextBlock += "</conversation-history>\n\n";
-        
-        context.messages.push(new Message("system", contextBlock));
-        
-        logger.info("[AGENT_CONTEXT] Added historical context block", {
-            agentSlug,
-            historicalEventCount: historicalEvents.length,
-            contextLength: contextBlock.length,
-        });
-    }
-    
-    /**
-     * Get sender name for an event, returns null if it's the agent's own message
-     */
-    private getEventSender(event: NDKEvent, agentSlug: string): string | null {
-        const eventAgentSlug = getAgentSlugFromEvent(event);
-        
-        // Skip if this is the agent's own message
-        if (eventAgentSlug === agentSlug) {
-            logger.debug(`[AGENT_CONTEXT] Skipping agent's own message`, {
-                agentSlug,
-                eventId: event.id,
-            });
-            return null;
-        }
-        
-        if (isEventFromUser(event)) {
-            return "User";
-        } else if (eventAgentSlug) {
-            const projectCtx = getProjectContext();
-            const sendingAgent = projectCtx.agents.get(eventAgentSlug);
-            return sendingAgent ? sendingAgent.name : "Another agent";
-        } else {
-            return "Unknown";
-        }
-    }
-    
-    /**
-     * Add triggering event as an action message
-     */
-    private async addTriggeringEvent(
-        syncContext: { context: AgentContext; agentSlug: string },
-        triggeringEvent: NDKEvent,
-        hasHistoricalContext: boolean
-    ): Promise<void> {
-        const { context, agentSlug } = syncContext;
-        
-        // Add separator if we had historical context
-        if (hasHistoricalContext) {
-            context.messages.push(new Message("system", "=== NEW INTERACTION ==="));
-        }
-        
-        // Add the actual message that needs action
-        if (isEventFromUser(triggeringEvent)) {
-            context.messages.push(new Message("user", triggeringEvent.content));
-        } else {
-            const eventAgentSlug = getAgentSlugFromEvent(triggeringEvent);
-            if (eventAgentSlug && eventAgentSlug !== agentSlug) {
-                const projectCtx = getProjectContext();
-                const sendingAgent = projectCtx.agents.get(eventAgentSlug);
-                const senderName = sendingAgent ? sendingAgent.name : "Another agent";
-                // Use consistent format
-                context.messages.push(
-                    new Message("system", `[${senderName}]: ${triggeringEvent.content}`)
-                );
-            }
-        }
-        
-        logger.info("[AGENT_CONTEXT] Added current message for action", {
-            agentSlug,
-            messagePreview: `${triggeringEvent.content.substring(0, 100)}...`,
-        });
-    }
-    
-    /**
-     * Finalize synchronization: update timestamp and save
-     */
-    private async finalizeSynchronization(
-        syncContext: { context: AgentContext; conversation: Conversation }
-    ): Promise<void> {
-        const { context, conversation } = syncContext;
-        
-        // Update the last update time
-        context.lastUpdate = new Date();
-        
-        // Save the updated conversation
-        await this.persistence.save(conversation);
-    }
-
-    /**
-     * Bootstrap context for an agent that joins without a handoff
-     * (e.g., directly mentioned via p-tag)
-     */
-    async bootstrapAgentContext(
-        conversationId: string,
-        agentSlug: string,
-        triggeringEvent?: NDKEvent
-    ): Promise<AgentContext> {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        // Check if this is a new conversation (only has the initial event)
-        const isNewConversation = conversation.history.length === 1;
-
-        // For new conversations, just pass the user message directly
-        if (isNewConversation && triggeringEvent?.content) {
-            const messages: Message[] = [new Message("user", triggeringEvent.content)];
-
-            const context: AgentContext = {
-                agentSlug,
-                messages,
-                tokenCount: 0,
-                lastUpdate: new Date(),
-            };
-
-            conversation.agentContexts.set(agentSlug, context);
-
-            return context;
-        }
-
-        // For ongoing conversations, create a comprehensive context
-        let summary = "You've been brought into an ongoing conversation.\n\n";
-        
-        // First, include all phase transitions to show conversation flow
-        if (conversation.phaseTransitions.length > 0) {
-            summary += "=== CONVERSATION FLOW ===\n";
-            summary += "The conversation has evolved through the following phases:\n\n";
-            
-            for (const transition of conversation.phaseTransitions) {
-                const transitionTime = new Date(transition.timestamp).toLocaleTimeString();
-                
-                // Format phase transition
-                if (transition.from !== transition.to) {
-                    summary += `📍 Phase: ${transition.from} → ${transition.to} (${transitionTime})\n`;
-                } else {
-                    summary += `🔄 Handoff within ${transition.from} phase (${transitionTime})\n`;
-                }
-                
-                summary += `   By: ${transition.agentName}\n`;
-                
-                if (transition.reason) {
-                    summary += `   Reason: ${transition.reason}\n`;
-                }
-                
-                // Include the full transition message as it contains important context
-                summary += `   Context: ${transition.message}\n\n`;
-            }
-            
-            summary += "\n";
-        }
-        
-        // Then include recent messages for immediate context
-        const recentHistory = conversation.history.slice(-10); // Last 10 messages
-        summary += "=== RECENT CONTEXT ===\n";
-        summary += "Last 10 messages for immediate context:\n\n";
-
-        for (const event of recentHistory) {
-            if (event.content) {
-                let sender: string;
-                if (isEventFromUser(event)) {
-                    sender = "User";
-                } else {
-                    // Try to get the actual agent slug from the event
-                    const eventAgentSlug = getAgentSlugFromEvent(event);
-                    sender = eventAgentSlug || "Agent";
-                }
-                summary += `${sender}: ${event.content.substring(0, 200)}...\n\n`;
-            }
-        }
-
-        // If we have a triggering event and it's not already in the summary, add it
-        if (triggeringEvent?.content) {
-            const isInRecent = recentHistory.some((e) => e.id === triggeringEvent.id);
-            if (!isInRecent) {
-                const sender = isEventFromUser(triggeringEvent) ? "User" : "Agent";
-                summary += `\n=== CURRENT REQUEST ===\n`;
-                summary += `${sender}: ${triggeringEvent.content}\n\n`;
-            }
-        }
-
-        const handoff: PhaseTransition = {
-            from: conversation.phase,
-            to: conversation.phase,
-            message: triggeringEvent?.content || "Direct mention - bootstrapping context",
-            timestamp: Date.now(),
-            agentPubkey: "", // Will be filled by orchestrator
-            agentName: "system",
-            summary: summary,
-        };
-
-        const context = this.createAgentContext(conversationId, agentSlug, handoff);
-
-        logger.info("[AGENT_CONTEXT] Bootstrap completed for ongoing conversation", {
-            conversationId,
-            agentSlug,
-            summaryLength: summary.length,
-            handoffMessage: handoff.message,
-        });
-
-        return context;
-    }
-
-    /**
-     * Remove old contexts to manage memory
-     */
-    pruneOldContexts(conversationId: string): void {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            return;
-        }
-
-        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-
-        // Remove contexts that haven't been updated in over an hour
-        for (const [agentSlug, context] of conversation.agentContexts.entries()) {
-            if (context.lastUpdate < oneHourAgo) {
-                conversation.agentContexts.delete(agentSlug);
-            }
-        }
-    }
-
     /**
      * Clean up conversation metadata that's no longer needed
-     * This includes readFiles and other temporary metadata
      */
     cleanupConversationMetadata(conversationId: string): void {
         const conversation = this.conversations.get(conversationId);
@@ -978,8 +541,6 @@ export class ConversationManager {
             });
             conversation.metadata.readFiles = undefined;
         }
-
-        // Could add cleanup for other temporary metadata here in the future
     }
 
     /**
@@ -1006,5 +567,23 @@ export class ConversationManager {
 
         // Save final state
         await this.persistence.save(conversation);
+    }
+
+    // DEPRECATED: Temporary method for backward compatibility during migration
+    getAgentContext(conversationId: string, agentSlug: string): { claudeSessionId?: string } | undefined {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            return undefined;
+        }
+        
+        const agentState = conversation.agentStates.get(agentSlug);
+        if (!agentState) {
+            return undefined;
+        }
+        
+        // Return a minimal object that satisfies the claudeSessionId check
+        return {
+            claudeSessionId: agentState.claudeSessionId
+        };
     }
 }

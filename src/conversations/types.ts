@@ -2,20 +2,18 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Message } from "multi-llm-ts";
 import type { Phase } from "./phases";
 
-export interface AgentContext {
-    agentSlug: string;
-    messages: Message[]; // Agent's isolated view
-    tokenCount: number;
-    lastUpdate: Date;
-    claudeSessionId?: string; // Claude Code session ID for this agent
+// Simplified agent state to track what an agent has seen
+export interface AgentState {
+    lastProcessedMessageIndex: number; // Index into Conversation.history
+    claudeSessionId?: string; // Claude Code session ID (if per-agent per-conversation)
 }
 
 export interface Conversation {
     id: string;
     title: string;
     phase: Phase;
-    history: NDKEvent[]; // Master audit trail
-    agentContexts: Map<string, AgentContext>; // Per-agent contexts
+    history: NDKEvent[]; // The SINGLE source of truth for all events/messages
+    agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
     phaseStartedAt?: number;
     metadata: ConversationMetadata;
     phaseTransitions: PhaseTransition[]; // First-class phase transition history

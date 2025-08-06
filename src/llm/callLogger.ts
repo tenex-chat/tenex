@@ -37,10 +37,6 @@ export interface LLMCallLogEntry {
         options?: Record<string, unknown>;
         messageCount: number;
         totalRequestLength: number;
-        systemPrompt?: {
-            content: string;
-            length: number;
-        };
     };
 
     // Complete response data (if successful)
@@ -140,15 +136,6 @@ export class LLMCallLogger {
             const durationMs = performance.endTime - performance.startTime;
             const timestamp = new Date().toISOString();
 
-            // Extract system prompt
-            const systemMessage = request.messages.find((m) => m.role === "system");
-            const systemPrompt = systemMessage
-                ? {
-                      content: systemMessage.content,
-                      length: systemMessage.content.length,
-                  }
-                : undefined;
-
             // Calculate total request length
             const totalRequestLength = request.messages.reduce(
                 (sum, msg) => sum + msg.content.length,
@@ -188,7 +175,6 @@ export class LLMCallLogger {
                     options: request.options as Record<string, unknown> | undefined,
                     messageCount: request.messages.length,
                     totalRequestLength,
-                    systemPrompt,
                 },
 
                 status: result.error ? "error" : "success",

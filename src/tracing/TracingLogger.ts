@@ -142,22 +142,6 @@ export class TracingLogger {
     }
 
     /**
-     * Log an event receipt
-     */
-    logEventReceived(
-        eventId: string,
-        eventType: string,
-        additionalContext?: Record<string, unknown>
-    ): void {
-        this.info(`Received ${eventType} event`, {
-            event: "event_received",
-            eventId,
-            eventType,
-            ...additionalContext,
-        });
-    }
-
-    /**
      * Log LLM interaction
      */
     logLLMRequest(model: string, additionalContext?: Record<string, unknown>): void {

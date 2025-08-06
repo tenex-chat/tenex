@@ -39,6 +39,10 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
                 return {
                     ok: true,
                     value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
+                    metadata: {
+                        displayMessage: `📁 Listing directory ${path}`,
+                        executedArgs: { path },
+                    },
                 };
             }
 
@@ -60,7 +64,14 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
                 }
             }
 
-            return { ok: true, value: content };
+            return { 
+                ok: true, 
+                value: content,
+                metadata: {
+                    displayMessage: `📖 Reading ${path}`,
+                    executedArgs: { path },
+                },
+            };
         } catch (error: unknown) {
             // If it's an EISDIR error that we somehow missed, provide helpful guidance
             if (error instanceof Error && "code" in error && error.code === "EISDIR") {
@@ -72,6 +83,10 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
                     return {
                         ok: true,
                         value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
+                        metadata: {
+                            displayMessage: `📁 Listing directory ${path}`,
+                            executedArgs: { path },
+                        },
                     };
                 } catch {
                     // If we can't read the directory, fall back to the original error

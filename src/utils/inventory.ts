@@ -9,6 +9,7 @@ import type { NDKTask } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import { generateRepomixOutput } from "./repomix.js";
 import "@/prompts"; // This ensures all fragments are registered
+import type { Agent } from "@/agents/types";
 
 const DEFAULT_INVENTORY_PATH = "context/INVENTORY.md";
 
@@ -30,7 +31,7 @@ interface InventoryResult {
 
 interface InventoryGenerationOptions {
     conversationRootEventId?: string;
-    agent?: import("@/agents/types").Agent;
+    agent?: Agent;
     focusFiles?: Array<{ path: string; status: string }>;
 }
 

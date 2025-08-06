@@ -29,6 +29,20 @@ export const writeContextFileTool: Tool<WriteContextFileInput, WriteContextFileO
     description:
         "Write or update a specification file in the context/ directory. You must have read this file recently before writing to it.",
 
+    promptFragment: `
+**IMPORTANT: Before using write_context_file:**
+1. You MUST first use the read_path tool to read the file from the context/ directory
+2. The system tracks which files you've read - if you haven't read the file recently, the write will be rejected
+3. This ensures you understand the current content before making changes
+4. If the file doesn't exist yet, you can create it without reading first
+
+Example workflow:
+- To update context/PROJECT.md:
+  1. First: Use read_path with path "context/PROJECT.md"
+  2. Then: Use write_context_file with your updated content
+- Creating a new file doesn't require reading first
+`,
+
     parameters: createZodSchema(WriteContextFileArgsSchema),
 
     execute: async (input, context) => {

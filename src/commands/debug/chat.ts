@@ -86,7 +86,7 @@ export async function runDebugChat(
             title: "Debug Chat Session",
             phase: "chat" as Phase,
             history: [],
-            agentContexts: new Map(),
+            agentStates: new Map(),
             phaseStartedAt: Date.now(),
             metadata: {
                 projectPath,

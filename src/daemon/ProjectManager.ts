@@ -281,7 +281,7 @@ export class ProjectManager implements IProjectManager {
         projectPath: string,
         project: ProjectData,
         ndk: NDK,
-        ndkProject?: import("@nostr-dev-kit/ndk").NDKProject
+        ndkProject?: NDKProject
     ): Promise<void> {
         const agentsDir = path.join(projectPath, ".tenex", "agents");
         await fs.mkdir(agentsDir, { recursive: true });

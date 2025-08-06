@@ -39,20 +39,10 @@ const ExecutionTimeSchema = z.object({
     lastUpdated: z.number(),
 });
 
-// Message schema for agent contexts
-const MessageSchema = z.object({
-    role: z.enum(["user", "assistant", "system", "developer", "tool"]),
-    content: z.string(),
-    reasoning: z.string().nullable().optional(),
-    attachments: z.array(z.any()).optional(),
-});
-
-export const AgentContextSchema = z.object({
-    agentSlug: z.string(),
-    messages: z.array(MessageSchema),
-    tokenCount: z.number(),
-    lastUpdate: z.string(), // ISO string for Date
-    claudeSessionId: z.string().optional(), // Claude Code session ID
+// Simplified agent state schema
+export const AgentStateSchema = z.object({
+    lastProcessedMessageIndex: z.number().int().min(0),
+    claudeSessionId: z.string().optional(),
 });
 
 export const SerializedConversationSchema = z.object({
@@ -60,7 +50,7 @@ export const SerializedConversationSchema = z.object({
     title: z.string(),
     phase: PhaseSchema,
     history: z.array(z.string()),
-    agentContexts: z.record(z.string(), AgentContextSchema).optional(), // Map serialized as object
+    agentStates: z.record(z.string(), AgentStateSchema).optional(), // Map serialized as object
     phaseStartedAt: z.number().optional(),
     metadata: ConversationMetadataSchema,
     phaseTransitions: z.array(PhaseTransitionSchema).default([]),

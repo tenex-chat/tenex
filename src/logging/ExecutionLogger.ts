@@ -279,11 +279,6 @@ export class ExecutionLogger {
                             event.confidence > 0.5 ? chalk.yellow : chalk.red;
             console.log(confColor(`    └─ Confidence: ${(event.confidence * 100).toFixed(0)}%`));
         }
-
-        this.tracingLogger.info("Agent decision made", {
-            event: "agent_decision",
-            ...event
-        });
     }
 
     private logAgentHandoff(event: AgentHandoffEvent): void {
@@ -310,11 +305,6 @@ export class ExecutionLogger {
         console.log(chalk.white(`    ├─ Trigger: ${event.trigger}`));
         console.log(chalk.white(`    ├─ Triggered by: ${chalk.bold(event.triggerAgent)}`));
         console.log(chalk.yellow(`    └─ Signal: ${event.signal}`));
-
-        this.tracingLogger.info("Phase transition triggered", {
-            event: "phase_transition_trigger",
-            ...event
-        });
     }
 
     private logPhaseTransitionDecision(event: PhaseTransitionDecisionEvent): void {
@@ -329,11 +319,6 @@ export class ExecutionLogger {
                             event.confidence > 0.5 ? chalk.yellow : chalk.red;
             console.log(confColor(`    └─ Confidence: ${(event.confidence * 100).toFixed(0)}%`));
         }
-
-        this.tracingLogger.info("Phase transition decision", {
-            event: "phase_transition_decision",
-            ...event
-        });
     }
 
     private logPhaseTransitionExecuted(event: PhaseTransitionExecutedEvent): void {
@@ -352,11 +337,6 @@ export class ExecutionLogger {
         if (event.duration) {
             console.log(chalk.dim(`    └─ Duration: ${(event.duration / 1000).toFixed(1)}s`));
         }
-
-        this.tracingLogger.success("Phase transition completed", {
-            event: "phase_transition_executed",
-            ...event
-        });
     }
 
     // Routing Events
@@ -473,11 +453,6 @@ export class ExecutionLogger {
         console.log(statusColor.white(` ${statusIcon} EXECUTION FLOW COMPLETE `));
         console.log(chalk.white(`[${this.shortId(event.conversationId)}] ${event.narrative}`));
         console.log();
-
-        this.tracingLogger.info("Execution flow completed", {
-            event: "execution_flow_complete",
-            ...event
-        });
     }
 
     // Helper methods
