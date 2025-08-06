@@ -24,7 +24,7 @@ export class TestPersistenceAdapter implements ConversationPersistenceAdapter {
             ...conversation,
             // Deep clone to prevent mutations
             history: [...conversation.history],
-            agentContexts: new Map(conversation.agentContexts),
+            agentStates: new Map(conversation.agentStates),
             phaseTransitions: [...conversation.phaseTransitions]
         });
     }
@@ -37,7 +37,7 @@ export class TestPersistenceAdapter implements ConversationPersistenceAdapter {
         return {
             ...stored,
             history: [...stored.history],
-            agentContexts: new Map(stored.agentContexts),
+            agentStates: new Map(stored.agentStates),
             phaseTransitions: [...stored.phaseTransitions]
         };
     }
@@ -104,11 +104,11 @@ export class TestPersistenceAdapter implements ConversationPersistenceAdapter {
         return {
             id: conv.id,
             title: conv.title,
-            createdAt: conv.createdAt || Date.now(),
-            updatedAt: conv.updatedAt || Date.now(),
+            createdAt: conv.executionTime?.lastUpdated || Date.now(),
+            updatedAt: conv.executionTime?.lastUpdated || Date.now(),
             phase: conv.phase,
             eventCount: conv.history.length,
-            agentCount: conv.agentContexts.size,
+            agentCount: conv.agentStates.size,
             archived: this.archived.has(conv.id)
         };
     }

@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { AgentRegistry } from "../AgentRegistry";
 import type { AgentConfig } from "@/agents/types";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as fs from "@/lib/fs";
-import path from "node:path";
 import { configService } from "@/services";
 import { nip19 } from "nostr-tools";
 

@@ -5,6 +5,7 @@
 import type { Tool, ToolError } from "./core";
 import type { ExecutionContext } from "./types";
 import { logger } from "@/utils/logger";
+import { formatError } from "@/utils/errors";
 
 /**
  * Metadata that tools can provide for better UI/logging
@@ -44,10 +45,10 @@ export class ToolExecutor {
 
         try {
             // Skip validation for generate_inventory tool
-            let validatedInput: I;
+            let validatedInput: Validated<I>;
             if (tool.name === "generate_inventory") {
                 // Pass through any input for generate_inventory
-                validatedInput = input as I;
+                validatedInput = input as Validated<I>;
             } else {
                 // Validate input for other tools
                 const validationResult = tool.parameters.validate(input);
@@ -86,7 +87,7 @@ export class ToolExecutor {
         } catch (error) {
             logger.error("Tool execution failed", {
                 tool: tool.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatError(error),
             });
 
             return {

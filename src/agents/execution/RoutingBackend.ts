@@ -2,7 +2,7 @@ import type { LLMService } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Tool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
-import { createTracingLogger, type TracingLogger } from "@/tracing";
+import { createTracingLogger, type TracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
 import { z } from "zod";
 import type { ConversationManager } from "@/conversations/ConversationManager";
@@ -33,8 +33,9 @@ export class RoutingBackend implements ExecutionBackend {
         context: ExecutionContext,
         _publisher: NostrPublisher
     ): Promise<void> {
-        const tracingLogger = createTracingLogger(context.tracingContext || { conversationId: context.conversationId }, "routing");
-        const executionLogger = createExecutionLogger(context.tracingContext || { conversationId: context.conversationId }, "routing");
+        const tracingContext = context.tracingContext || createTracingContext(context.conversationId);
+        const tracingLogger = createTracingLogger(tracingContext, "routing");
+        const executionLogger = createExecutionLogger(tracingContext, "routing");
 
         try {
             // Log routing analysis start
@@ -93,7 +94,7 @@ export class RoutingBackend implements ExecutionBackend {
                     });
                     // Log the end of conversation
                     executionLogger.logEvent({
-                        type: "conversation_end",
+                        type: "execution_flow_complete" as const,
                         agent: context.agent.name,
                         reason: routingDecision.reason,
                         phase: context.phase
@@ -129,10 +130,10 @@ export class RoutingBackend implements ExecutionBackend {
                     conversationManager: this.conversationManager,
                 });
 
-                const targetContext = {
+                const targetContext: ExecutionContext = {
                     ...context,
                     agent: targetAgent,
-                    phase: routingDecision.phase || context.phase,
+                    phase: (routingDecision.phase || context.phase) as Phase,
                     publisher: targetPublisher,
                 };
 
@@ -189,7 +190,7 @@ No other text, only valid JSON.`)
         }
         
         // Extract and log reasoning if present in the response
-        if (executionLogger) {
+        if (executionLogger && response.content) {
             const thinkingMatch = response.content.match(/<thinking>([\s\S]*?)<\/thinking>/);
             if (thinkingMatch) {
                 const thinking = thinkingMatch[1].trim();
@@ -206,7 +207,7 @@ No other text, only valid JSON.`)
 
         try {
             // Parse the JSON response
-            const content = response.content.trim();
+            const content = (response.content || "").trim();
             // Extract JSON if it's wrapped in markdown code blocks
             const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || 
                              content.match(/(\{[\s\S]*\})/);
@@ -215,7 +216,7 @@ No other text, only valid JSON.`)
                 throw new Error("No JSON found in response");
             }
 
-            const parsed = JSON.parse(jsonMatch[1]);
+            const parsed = JSON.parse(jsonMatch[1] || "{}");
             
             // Validate with Zod schema
             const result = RoutingDecisionSchema.safeParse(parsed);

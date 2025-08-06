@@ -22,7 +22,7 @@ export async function installMCPServerFromEvent(
 
     // Build server config
     const serverConfig: MCPServerConfig = {
-        command: cmd,
+        command: cmd!,
         args,
         description: mcpTool.description,
     };

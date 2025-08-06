@@ -53,7 +53,7 @@ function zodToSchemaShape(schema: z.ZodType<unknown>, isOptional = false): Schem
     if (schema instanceof z.ZodUnion) {
         // If it's a union of undefined/null/void, treat it as no parameters
         const unionDef = schema._def as z.ZodUnionDef;
-        const options = unionDef.options as z.ZodType<unknown>[];
+        const options = Array.from(unionDef.options) as z.ZodType<unknown>[];
         const allVoid = options.every(
             (opt) =>
                 opt instanceof z.ZodUndefined ||
@@ -69,7 +69,7 @@ function zodToSchemaShape(schema: z.ZodType<unknown>, isOptional = false): Schem
             };
         }
         // Otherwise, use the first option
-        return zodToSchemaShape(options[0], isOptional);
+        return zodToSchemaShape(options[0]!, isOptional);
     }
 
     if (schema instanceof z.ZodString) {

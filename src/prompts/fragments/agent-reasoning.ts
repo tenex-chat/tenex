@@ -8,7 +8,6 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 export const agentReasoningFragment: PromptFragment<Record<string, never>> = {
     id: "agent-reasoning",
     priority: 90, // High priority to ensure it's included early
-    applicablePhases: ["chat", "plan", "execute", "verification"],
     template: () => `
 ## Reasoning Output Format
 
@@ -55,8 +54,6 @@ Always include your thinking BEFORE using any tools or generating responses. Be 
 export const orchestratorReasoningFragment: PromptFragment<Record<string, never>> = {
     id: "orchestrator-reasoning",
     priority: 85,
-    applicablePhases: ["chat", "plan", "execute", "verification"],
-    applicableAgents: ["isOrchestrator"],
     template: () => `
 ## Orchestrator Routing Reasoning
 
@@ -90,7 +87,6 @@ Example:
 export const expertReasoningFragment: PromptFragment<Record<string, never>> = {
     id: "expert-reasoning",
     priority: 85,
-    applicablePhases: ["plan", "execute", "verification"],
     template: () => `
 ## Expert Domain Reasoning
 

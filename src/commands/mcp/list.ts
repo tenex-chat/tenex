@@ -57,7 +57,7 @@ export const listCommand = new Command("list")
                 logger.info(chalk.yellow("\nGlobal servers:"));
                 for (const [name, server] of Object.entries(globalMCP.servers)) {
                     const isOverridden = hasProjectServers && projectMCP.servers[name];
-                    displayServer(name, server, isOverridden);
+                    displayServer(name, server, !!isOverridden);
                 }
             }
 

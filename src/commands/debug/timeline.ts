@@ -327,7 +327,7 @@ function extractReasoning(content?: string): string | undefined {
             return decisionMatch[1].trim();
         }
         // Otherwise return first line of thinking
-        return thinking.split('\n')[0].substring(0, 100);
+        return thinking.split('\n')[0]?.substring(0, 100) || '';
     }
     
     return undefined;

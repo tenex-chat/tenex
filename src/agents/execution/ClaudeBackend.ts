@@ -7,7 +7,6 @@ import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { logger } from "@/utils/logger";
-import type { Message } from "multi-llm-ts";
 
 /**
  * ClaudeBackend executes tasks by directly calling Claude Code

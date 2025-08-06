@@ -66,8 +66,8 @@ export async function runDebugClaudeCode(
             // Track last assistant message for summary
             if (message.type === "assistant" && message.message?.content) {
                 lastAssistantMessage = message.message.content
-                    .filter((c) => c.type === "text")
-                    .map((c) => (c as TextBlock).text)
+                    .filter((c: any) => c.type === "text")
+                    .map((c: any) => (c as TextBlock).text)
                     .join("");
             }
         }
@@ -118,22 +118,22 @@ function displaySDKMessage(message: SDKMessage): void {
     const timestamp = new Date().toISOString();
 
     switch (message.type) {
-        case "start":
+        case "start" as any:
             console.log(chalk.blue(`[${timestamp}] START`));
-            console.log(chalk.gray("Session ID:"), message.session_id);
+            console.log(chalk.gray("Session ID:"), (message as any).session_id);
             break;
 
-        case "human":
+        case "human" as any:
             console.log(chalk.green(`[${timestamp}] HUMAN`));
-            if (message.message?.content) {
-                console.log(chalk.gray("Content:"), message.message.content);
+            if ((message as any).message?.content) {
+                console.log(chalk.gray("Content:"), (message as any).message.content);
             }
             break;
 
         case "assistant":
             console.log(chalk.magenta(`[${timestamp}] ASSISTANT`));
             if (message.message?.content) {
-                message.message.content.forEach((block) => {
+                message.message.content.forEach((block: any) => {
                     if (block.type === "text") {
                         console.log(chalk.gray("Text:"), (block as any).text);
                     } else if (block.type === "tool_use") {
@@ -147,16 +147,16 @@ function displaySDKMessage(message: SDKMessage): void {
             }
             break;
 
-        case "tool":
+        case "tool" as any:
             console.log(chalk.yellow(`[${timestamp}] TOOL`));
             if ("tool_name" in message) {
-                console.log(chalk.gray("Tool:"), message.tool_name);
+                console.log(chalk.gray("Tool:"), (message as any).tool_name);
             }
-            if ("tool_result" in message && message.tool_result) {
+            if ("tool_result" in message && (message as any).tool_result) {
                 const result =
-                    typeof message.tool_result === "string"
-                        ? message.tool_result
-                        : JSON.stringify(message.tool_result, null, 2);
+                    typeof (message as any).tool_result === "string"
+                        ? (message as any).tool_result
+                        : JSON.stringify((message as any).tool_result, null, 2);
 
                 // Truncate very long results
                 const maxLength = 500;
@@ -178,17 +178,17 @@ function displaySDKMessage(message: SDKMessage): void {
             }
             break;
 
-        case "error":
+        case "error" as any:
             console.log(chalk.red(`[${timestamp}] ERROR`));
-            if ("error" in message && message.error) {
-                console.log(chalk.red("Error:"), message.error);
+            if ("error" in message && (message as any).error) {
+                console.log(chalk.red("Error:"), (message as any).error);
             }
             break;
 
         default:
             // Log unknown message types for debugging
             console.log(chalk.gray(`[${timestamp}] ${message.type.toUpperCase()}`));
-            logDebug(`Unknown message type: ${message.type}`, "debug", "claude-code", message);
+            logDebug(`Unknown message type: ${message.type}`, "claude-code", message);
     }
 
     console.log(); // Empty line for readability
