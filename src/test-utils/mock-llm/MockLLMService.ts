@@ -71,6 +71,16 @@ export class MockLLMService implements LLMService {
         } as CompletionResponse;
     }
 
+    /**
+     * Backward compatibility method for tests using the old chat interface
+     */
+    async chat(messages: Message[], model?: string): Promise<CompletionResponse> {
+        return this.complete({
+            messages,
+            options: { configName: model || 'mock-model' }
+        });
+    }
+    
     async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
         const messages = request.messages;
         const model = request.options?.configName || 'mock-model';
@@ -145,7 +155,7 @@ export class MockLLMService implements LLMService {
         const agentIteration = context.agentIterations.get(agentName)!;
         
         if (this.config.debug) {
-            logger.debug('MockLLM: Finding response for', {
+            console.log('MockLLM: Finding response for', {
                 agentName,
                 phase,
                 lastUserMessage: lastUserMessage?.content?.substring(0, 100),
@@ -168,10 +178,13 @@ export class MockLLMService implements LLMService {
                 if (!matches) continue;
             }
             
-            if (trigger.userMessage && lastUserMessage) {
+            if (trigger.userMessage) {
+                if (!lastUserMessage || !lastUserMessage.content) {
+                    continue; // No user message, but trigger expects one
+                }
                 const matches = trigger.userMessage instanceof RegExp
-                    ? trigger.userMessage.test(lastUserMessage.content!)
-                    : lastUserMessage.content!.includes(trigger.userMessage);
+                    ? trigger.userMessage.test(lastUserMessage.content)
+                    : lastUserMessage.content.includes(trigger.userMessage);
                 if (!matches) continue;
             }
             
@@ -182,8 +195,16 @@ export class MockLLMService implements LLMService {
                 if (!hasAllTools) continue;
             }
             
-            if (trigger.agentName && trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
-                continue;
+            if (trigger.agentName) {
+                if (typeof trigger.agentName === 'string') {
+                    if (trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
+                        continue;
+                    }
+                } else if (trigger.agentName instanceof RegExp) {
+                    if (!trigger.agentName.test(agentName)) {
+                        continue;
+                    }
+                }
             }
             
             if (trigger.phase && trigger.phase !== phase) {
@@ -212,14 +233,14 @@ export class MockLLMService implements LLMService {
             
             // All conditions matched
             if (this.config.debug) {
-                logger.debug('MockLLM: Matched response', mockResponse);
+                console.log('MockLLM: Matched response', mockResponse);
             }
             return mockResponse.response;
         }
         
         // Return default response
         if (this.config.debug) {
-            logger.debug('MockLLM: Using default response');
+            console.log('MockLLM: Using default response');
         }
         return this.config.defaultResponse || { content: "Default mock response" };
     }
@@ -227,24 +248,31 @@ export class MockLLMService implements LLMService {
     private extractAgentName(systemPrompt: string): string {
         // Try multiple patterns to extract agent name
         const patterns = [
-            /You are the (\w+) agent/i,
-            /You are (\w+)/i,
-            /Agent: (\w+)/i,
-            /\[Agent: (\w+)\]/i
+            /You are the ([\w-]+) agent/i,
+            /You are ([\w-]+)[\s.]/i,
+            /Agent: ([\w-]+)/i,
+            /\[Agent: ([\w-]+)\]/i
         ];
         
         for (const pattern of patterns) {
             const match = systemPrompt.match(pattern);
             if (match) {
-                return match[1].toLowerCase();
+                const name = match[1].toLowerCase();
+                // Handle special cases
+                if (name === 'the') continue; // Skip if we accidentally matched "the"
+                return name;
             }
         }
         
         // Check for specific agent keywords
+        if (systemPrompt.includes('orchestrator')) return 'orchestrator';
         if (systemPrompt.includes('message router')) return 'orchestrator';
         if (systemPrompt.includes('execution specialist')) return 'executor';
+        if (systemPrompt.includes('executor')) return 'executor';
+        if (systemPrompt.includes('project-manager')) return 'project-manager';
         if (systemPrompt.includes('project manager')) return 'project-manager';
         if (systemPrompt.includes('planning specialist')) return 'planner';
+        if (systemPrompt.includes('planner')) return 'planner';
         
         return 'unknown';
     }

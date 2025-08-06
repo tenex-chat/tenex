@@ -6,6 +6,7 @@ import { getProjectContext } from "../services";
 import { formatError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { Agent } from "@/agents";
+import { createNostrPublisher } from "../nostr/factory";
 
 const logInfo = logger.info.bind(logger);
 
@@ -76,7 +77,7 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
             phase: conversation.phase,
             projectPath: process.cwd(),
             triggeringEvent: event,
-            publisher: new (await import("@/nostr/NostrPublisher")).NostrPublisher({
+            publisher: await createNostrPublisher({
                 conversationId: conversation.id,
                 agent: targetAgent,
                 triggeringEvent: event,

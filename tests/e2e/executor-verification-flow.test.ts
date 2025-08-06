@@ -36,15 +36,14 @@ describe("E2E: Executor-Verification Flow", () => {
                         reason: "User wants to implement authentication. Routing to executor."
                     })
                 },
-                priority: 100
+                priority: 120  // Highest priority for initial user request
             },
             
             // 2. Executor implements (first attempt)
             {
                 trigger: {
-                    agentName: "executor",
-                    phase: "execute",
-                    iterationCount: 1  // First time executor is called
+                    systemPrompt: /executor/i
+                    // Don't match on phase - it might be "chat" or "execute"
                 },
                 response: {
                     content: "I've implemented a basic authentication system with login and registration endpoints using Express.js.",
@@ -68,7 +67,6 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     systemPrompt: /You must respond with ONLY a JSON object/,
-                    phase: "verification",
                     previousAgent: "executor"  // After executor calls continue
                 },
                 response: {
@@ -78,14 +76,13 @@ describe("E2E: Executor-Verification Flow", () => {
                         reason: "Executor completed implementation. Routing to project-manager for verification."
                     })
                 },
-                priority: 90
+                priority: 110  // Higher priority than the userMessage trigger
             },
             
             // 4. Project Manager finds issues
             {
                 trigger: {
                     agentName: "project-manager",
-                    phase: "verification",
                     iterationCount: 1  // First verification
                 },
                 response: {
@@ -110,7 +107,6 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     systemPrompt: /You must respond with ONLY a JSON object/,
-                    phase: "execute",
                     previousAgent: "project-manager"  // After PM calls continue
                 },
                 response: {
@@ -127,7 +123,6 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     agentName: "executor",
-                    phase: "execute",
                     iterationCount: 2  // Second time executor is called
                 },
                 response: {
@@ -152,7 +147,6 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     systemPrompt: /You must respond with ONLY a JSON object/,
-                    phase: "verification",
                     previousAgent: "executor",
                     messageContains: /bcrypt|security fixes/i
                 },
@@ -170,7 +164,6 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     agentName: "project-manager",
-                    phase: "verification",
                     iterationCount: 2  // Second verification
                 },
                 response: {

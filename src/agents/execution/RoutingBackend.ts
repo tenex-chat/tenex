@@ -9,6 +9,7 @@ import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
+import { createNostrPublisher } from "@/nostr/factory";
 
 // Schema for routing decisions
 const RoutingDecisionSchema = z.object({
@@ -120,8 +121,7 @@ export class RoutingBackend implements ExecutionBackend {
                 }
 
                 // Create a new publisher for the target agent
-                const { NostrPublisher } = await import("@/nostr/NostrPublisher");
-                const targetPublisher = new NostrPublisher({
+                const targetPublisher = await createNostrPublisher({
                     conversationId: context.conversationId,
                     agent: targetAgent,
                     triggeringEvent: context.triggeringEvent,

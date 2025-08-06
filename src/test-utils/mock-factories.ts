@@ -43,6 +43,11 @@ export class MockNostrEvent implements NDKEvent {
         return JSON.stringify(obj);
     }
     
+    tagValue(tagName: string): string | undefined {
+        const tag = this.tags.find(t => t[0] === tagName);
+        return tag?.[1];
+    }
+    
     static deserialize(ndk: any, serialized: string): MockNostrEvent {
         const data = JSON.parse(serialized);
         return new MockNostrEvent(data);
@@ -54,16 +59,29 @@ export function createMockNDKEvent(overrides?: Partial<NDKEvent>): NDKEvent {
 }
 
 export function createMockAgent(overrides?: Partial<Agent>): Agent {
+    const mockSigner = {
+        privateKey: "mock-private-key",
+        sign: async () => "mock-signature"
+    } as any;
+    
     return {
-        id: "mock-agent-" + Math.random().toString(36).substr(2, 9),
         name: "MockAgent",
+        pubkey: "mock-pubkey",
+        signer: mockSigner,
+        role: "Mock Role",
         description: "A mock agent for testing",
-        publicKey: "mock-pubkey",
+        instructions: "You are a mock agent for testing",
+        useCriteria: "Mock use criteria",
+        llmConfig: "default",
+        tools: [],
+        mcp: false,
+        eventId: "mock-event-id",
+        slug: "mock-agent",
+        isOrchestrator: false,
         isBuiltIn: false,
-        allowedTools: ["analyze", "complete", "continue"],
-        systemPrompt: "You are a mock agent for testing",
+        backend: "reason-act-loop",
         ...overrides
-    };
+    } as Agent;
 }
 
 export function createMockConversation(overrides?: Partial<Conversation>): Conversation {
@@ -93,22 +111,31 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
 
 export function createMockExecutionContext(overrides?: Partial<ExecutionContext>): ExecutionContext {
     const agent = overrides?.agent || createMockAgent();
-    const conversation = overrides?.conversation || createMockConversation();
+    const mockEvent = createMockNDKEvent();
+    
+    // Create mock publisher and conversation manager
+    const mockPublisher = {
+        publishReply: async () => mockEvent,
+        publishToolCall: async () => mockEvent,
+        publishAgentThinking: async () => mockEvent
+    } as any;
+    
+    const mockConversationManager = {
+        getConversation: async () => createMockConversation(),
+        updateConversation: async () => {},
+        transitionPhase: async () => {}
+    } as any;
     
     return {
         agent,
-        conversation,
-        conversationId: conversation.id,
+        conversationId: overrides?.conversationId || "mock-conv-" + Math.random().toString(36).substr(2, 9),
+        phase: "CHAT",
         projectPath: "/mock/project",
-        userMessage: "Mock user message",
-        systemPrompt: agent.systemPrompt || "Mock system prompt",
-        availableTools: ["analyze", "complete", "continue"],
-        onStreamContent: overrides?.onStreamContent || (() => {}),
-        onStreamToolCall: overrides?.onStreamToolCall || (() => {}),
-        onComplete: overrides?.onComplete || (() => {}),
-        onError: overrides?.onError || (() => {}),
+        triggeringEvent: mockEvent,
+        publisher: mockPublisher,
+        conversationManager: mockConversationManager,
         ...overrides
-    };
+    } as ExecutionContext;
 }
 
 export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
