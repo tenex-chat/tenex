@@ -1,6 +1,17 @@
 import chalk from "chalk";
 
 /**
+ * Format duration in human-readable format
+ */
+export function formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = ((ms % 60000) / 1000).toFixed(0);
+    return `${minutes}m ${seconds}s`;
+}
+
+/**
  * Format markdown text with chalk styling
  */
 export function formatMarkdown(text: string): string {

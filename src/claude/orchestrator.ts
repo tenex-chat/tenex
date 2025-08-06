@@ -81,7 +81,7 @@ export class ClaudeTaskOrchestrator {
                 }
             );
 
-            abortSubscription.on("event", async (event: NDKEvent) => {
+            abortSubscription.on("event", async (_event: NDKEvent) => {
                 logger.info("Received abort request for task", { taskId: task.id });
 
                 // Abort the executor

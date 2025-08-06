@@ -1,5 +1,4 @@
 import { getProjectContext } from "@/services/ProjectContext";
-import { logger } from "@/utils/logger";
 import type { Complete } from "@/tools/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Agent } from "@/agents/types";
@@ -24,7 +23,7 @@ export interface CompletionOptions {
  * This is the core logic extracted from the complete() tool
  */
 export async function handleAgentCompletion(options: CompletionOptions): Promise<Complete> {
-    const { response, summary, agent, conversationId, publisher } = options;
+    const { response, summary, publisher } = options;
 
     const projectContext = getProjectContext();
     const orchestratorAgent = projectContext.getProjectAgent();

@@ -1,4 +1,4 @@
-import type { CompletionResponse, LLMService, Tool } from "@/llm/types";
+import type { LLMService, Tool } from "@/llm/types";
 import type { StreamEvent } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { StreamPublisher } from "@/nostr/NostrPublisher";
@@ -9,7 +9,6 @@ import { Message } from "multi-llm-ts";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
-import { logger } from "@/utils/logger";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolStreamHandler } from "./ToolStreamHandler";

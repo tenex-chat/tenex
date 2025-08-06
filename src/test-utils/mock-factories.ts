@@ -1,6 +1,8 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Agent, ExecutionContext } from "@/agents/types";
-import type { Conversation, Phase } from "@/conversations/types";
+import type { Agent } from "@/agents/types";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { Conversation } from "@/conversations/types";
+import type { Phase } from "@/conversations/phases";
 import type { ToolCall } from "@/llm/types";
 import { EVENT_KINDS } from "@/llm/types";
 
@@ -11,7 +13,7 @@ import { EVENT_KINDS } from "@/llm/types";
 /**
  * MockNostrEvent class that implements the serialize method required by FileSystemAdapter
  */
-export class MockNostrEvent implements NDKEvent {
+export class MockNostrEvent implements Partial<NDKEvent> {
     id: string;
     pubkey: string;
     created_at: number;
@@ -89,9 +91,9 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
     return {
         id,
         title: "Mock Conversation",
-        phase: "CHAT",
+        phase: "chat",
         history: [],
-        agentContexts: new Map(),
+        agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {
             summary: "Mock conversation summary",
@@ -129,7 +131,7 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
     return {
         agent,
         conversationId: overrides?.conversationId || "mock-conv-" + Math.random().toString(36).substr(2, 9),
-        phase: "CHAT",
+        phase: "chat",
         projectPath: "/mock/project",
         triggeringEvent: mockEvent,
         publisher: mockPublisher,

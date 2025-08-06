@@ -6,6 +6,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import type { TracingContext } from "@/tracing";
 
 export interface ExecutionContext {
     agent: Agent;
@@ -19,6 +20,7 @@ export interface ExecutionContext {
     handoff?: PhaseTransition;
     claudeSessionId?: string;
     agentExecutor?: AgentExecutor;
+    tracingContext?: TracingContext;
 }
 
 export interface AgentExecutionResult {

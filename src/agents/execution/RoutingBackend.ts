@@ -1,5 +1,5 @@
 import type { LLMService } from "@/llm/types";
-import type { NostrPublisher, TenexLogData } from "@/nostr/NostrPublisher";
+import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Tool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { createTracingLogger } from "@/tracing";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
+import type { Phase } from "@/conversations/phases";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { createNostrPublisher } from "@/nostr/factory";
 
@@ -30,7 +31,7 @@ export class RoutingBackend implements ExecutionBackend {
         messages: Message[],
         tools: Tool[], // Ignored - routing backend doesn't use tools
         context: ExecutionContext,
-        publisher: NostrPublisher
+        _publisher: NostrPublisher
     ): Promise<void> {
         const tracingLogger = createTracingLogger(context.tracingContext || { conversationId: context.conversationId }, "routing");
         const executionLogger = createExecutionLogger(context.tracingContext || { conversationId: context.conversationId }, "routing");
@@ -59,7 +60,7 @@ export class RoutingBackend implements ExecutionBackend {
                 routingDecision.agents,
                 routingDecision.reason,
                 {
-                    targetPhase: routingDecision.phase as any,
+                    targetPhase: routingDecision.phase as Phase,
                     confidence: 0.9
                 }
             );
@@ -68,7 +69,7 @@ export class RoutingBackend implements ExecutionBackend {
             if (routingDecision.phase && routingDecision.phase !== context.phase) {
                 await this.conversationManager.updatePhase(
                     context.conversationId,
-                    routingDecision.phase as any, // TODO: proper phase type
+                    routingDecision.phase as Phase,
                     `Phase transition: ${routingDecision.reason}`,
                     context.agent.pubkey,
                     context.agent.name,

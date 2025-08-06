@@ -7,6 +7,7 @@ import type { LLMCallLogEntry } from "@/llm/callLogger";
 import type { ToolCallLogEntry } from "@/tools/toolLogger";
 import { getProjectContext } from "@/services/ProjectContext";
 import { selectConversation } from "./conversationSelector";
+import { formatDuration } from "@/utils/formatting";
 
 interface TimelineEvent {
     timestamp: number;
@@ -312,13 +313,6 @@ async function findLogFiles(logDir: string, conversationId: string): Promise<str
 }
 
 // Helper function to format duration
-function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    const minutes = Math.floor(ms / 60000);
-    const seconds = ((ms % 60000) / 1000).toFixed(0);
-    return `${minutes}m ${seconds}s`;
-}
 
 // Helper function to extract reasoning from LLM response
 function extractReasoning(content?: string): string | undefined {

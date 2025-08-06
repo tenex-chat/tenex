@@ -1,10 +1,9 @@
 import type { TracingLogger } from "@/tracing";
 import type { ExecutionContext } from "./types";
-import type { Message } from "multi-llm-ts";
+import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
 import { getProjectContext } from "@/services/ProjectContext";
-import { logger } from "@/utils/logger";
 
 /**
  * Handles termination logic for agent execution.
@@ -85,7 +84,6 @@ export class TerminationHandler {
         context: ExecutionContext,
         tracingLogger: TracingLogger
     ): Message[] {
-        const { Message } = require("multi-llm-ts");
         const reminderMessage = this.getReminderMessage(context);
         
         tracingLogger.info("📝 Preparing retry with reminder message", {

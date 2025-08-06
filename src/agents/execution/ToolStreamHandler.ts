@@ -8,7 +8,6 @@ import { ExecutionConfig } from "./constants";
 import { formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import { isContinueFlow, isComplete, isEndConversation } from "./control-flow-types";
-import { logger } from "@/utils/logger";
 
 /**
  * Handles tool-related events in the LLM stream.
@@ -106,7 +105,7 @@ export class ToolStreamHandler {
         toolResult: ToolExecutionResult,
         publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
-        context: ExecutionContext
+        _context: ExecutionContext
     ): Promise<void> {
         const toolCallPattern = `${toolName}_`;
         const hasStarted = this.stateManager.hasToolStarted(toolCallPattern);

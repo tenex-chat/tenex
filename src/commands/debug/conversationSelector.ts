@@ -2,6 +2,7 @@ import inquirer from "inquirer";
 import chalk from "chalk";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { Conversation } from "@/conversations/types";
+import { formatDuration } from "@/utils/formatting";
 
 interface ConversationChoice {
     name: string;
@@ -88,10 +89,3 @@ export async function selectConversation(conversationManager: ConversationManage
     }
 }
 
-function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    const minutes = Math.floor(ms / 60000);
-    const seconds = ((ms % 60000) / 1000).toFixed(0);
-    return `${minutes}m ${seconds}s`;
-}

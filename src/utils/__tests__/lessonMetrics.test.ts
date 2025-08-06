@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import {
     calculateLessonMetrics,
-    logLessonMetrics,
     logLessonUsage,
     logLessonCreationPattern,
 } from "../lessonMetrics";
