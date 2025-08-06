@@ -13,6 +13,14 @@ export interface MockLLMResponse {
         agentName?: string;
         /** Match conversation phase */
         phase?: string;
+        /** Match if message contains text */
+        messageContains?: string | RegExp;
+        /** Which iteration for this agent (1st, 2nd, etc) */
+        iterationCount?: number;
+        /** Who called continue last */
+        previousAgent?: string;
+        /** Respond differently after specific agent */
+        afterAgent?: string;
     };
     /** The response to return when triggered */
     response: {

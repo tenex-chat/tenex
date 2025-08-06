@@ -18,6 +18,14 @@ export class MockLLMService implements LLMService {
         response: MockLLMResponse['response'];
         timestamp: Date;
     }> = [];
+    
+    // Context tracking for enhanced triggers
+    private conversationContext: Map<string, {
+        lastContinueCaller?: string;
+        iteration: number;
+        agentIterations: Map<string, number>;
+        lastAgentExecuted?: string;
+    }> = new Map();
 
     constructor(config: MockLLMConfig = {}) {
         this.config = config;
@@ -60,7 +68,7 @@ export class MockLLMService implements LLMService {
                 completion_tokens: 50,
                 total_tokens: 150
             }
-        } as any;
+        } as CompletionResponse;
     }
 
     async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
@@ -110,7 +118,7 @@ export class MockLLMService implements LLMService {
                     completion_tokens: 50,
                     total_tokens: 150
                 }
-            } as any
+            } as CompletionResponse
         };
     }
 
@@ -125,12 +133,26 @@ export class MockLLMService implements LLMService {
         const agentName = this.extractAgentName(systemMessage?.content || '');
         const phase = this.extractPhase(systemMessage?.content || '');
         
+        // Get conversation context
+        const conversationId = this.extractConversationId(messages);
+        const context = this.getOrCreateContext(conversationId);
+        
+        // Update agent iteration count
+        if (!context.agentIterations.has(agentName)) {
+            context.agentIterations.set(agentName, 0);
+        }
+        context.agentIterations.set(agentName, context.agentIterations.get(agentName)! + 1);
+        const agentIteration = context.agentIterations.get(agentName)!;
+        
         if (this.config.debug) {
             logger.debug('MockLLM: Finding response for', {
                 agentName,
                 phase,
                 lastUserMessage: lastUserMessage?.content?.substring(0, 100),
-                toolCalls
+                toolCalls,
+                iteration: context.iteration,
+                agentIteration,
+                lastContinueCaller: context.lastContinueCaller
             });
         }
         
@@ -168,6 +190,26 @@ export class MockLLMService implements LLMService {
                 continue;
             }
             
+            if (trigger.messageContains) {
+                const allContent = messages.map(m => m.content || '').join(' ');
+                const matches = trigger.messageContains instanceof RegExp
+                    ? trigger.messageContains.test(allContent)
+                    : allContent.includes(trigger.messageContains);
+                if (!matches) continue;
+            }
+            
+            if (trigger.iterationCount !== undefined) {
+                if (agentIteration !== trigger.iterationCount) continue;
+            }
+            
+            if (trigger.previousAgent) {
+                if (context.lastContinueCaller !== trigger.previousAgent) continue;
+            }
+            
+            if (trigger.afterAgent) {
+                if (context.lastAgentExecuted !== trigger.afterAgent) continue;
+            }
+            
             // All conditions matched
             if (this.config.debug) {
                 logger.debug('MockLLM: Matched response', mockResponse);
@@ -183,13 +225,47 @@ export class MockLLMService implements LLMService {
     }
     
     private extractAgentName(systemPrompt: string): string {
-        const match = systemPrompt.match(/You are the (\w+) agent/i);
-        return match ? match[1] : 'unknown';
+        // Try multiple patterns to extract agent name
+        const patterns = [
+            /You are the (\w+) agent/i,
+            /You are (\w+)/i,
+            /Agent: (\w+)/i,
+            /\[Agent: (\w+)\]/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = systemPrompt.match(pattern);
+            if (match) {
+                return match[1].toLowerCase();
+            }
+        }
+        
+        // Check for specific agent keywords
+        if (systemPrompt.includes('message router')) return 'orchestrator';
+        if (systemPrompt.includes('execution specialist')) return 'executor';
+        if (systemPrompt.includes('project manager')) return 'project-manager';
+        if (systemPrompt.includes('planning specialist')) return 'planner';
+        
+        return 'unknown';
     }
     
     private extractPhase(systemPrompt: string): string {
-        const match = systemPrompt.match(/Current Phase: (\w+)/i);
-        return match ? match[1] : 'unknown';
+        // Try multiple patterns to extract phase
+        const patterns = [
+            /Current Phase: (\w+)/i,
+            /Phase: (\w+)/i,
+            /\[Phase: (\w+)\]/i,
+            /in (\w+) phase/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = systemPrompt.match(pattern);
+            if (match) {
+                return match[1].toLowerCase();
+            }
+        }
+        
+        return 'unknown';
     }
     
     private recordRequest(
@@ -220,4 +296,40 @@ export class MockLLMService implements LLMService {
         this.requestHistory = [];
     }
     
+    // Method to update context (called by test harness)
+    updateContext(updates: {
+        conversationId?: string;
+        lastContinueCaller?: string;
+        iteration?: number;
+        lastAgentExecuted?: string;
+    }): void {
+        const conversationId = updates.conversationId || 'default';
+        const context = this.getOrCreateContext(conversationId);
+        
+        if (updates.lastContinueCaller !== undefined) {
+            context.lastContinueCaller = updates.lastContinueCaller;
+        }
+        if (updates.iteration !== undefined) {
+            context.iteration = updates.iteration;
+        }
+        if (updates.lastAgentExecuted !== undefined) {
+            context.lastAgentExecuted = updates.lastAgentExecuted;
+        }
+    }
+    
+    private getOrCreateContext(conversationId: string) {
+        if (!this.conversationContext.has(conversationId)) {
+            this.conversationContext.set(conversationId, {
+                iteration: 0,
+                agentIterations: new Map()
+            });
+        }
+        return this.conversationContext.get(conversationId)!;
+    }
+    
+    private extractConversationId(messages: Message[]): string {
+        // Try to extract conversation ID from messages
+        // For now, use a default ID
+        return 'default';
+    }
 }

@@ -1,4 +1,4 @@
-import { mock } from "bun:test";
+import { mock, expect } from "bun:test";
 import path from "node:path";
 import { 
     createTempDir, 
@@ -13,6 +13,8 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { RoutingBackend } from "@/agents/execution/RoutingBackend";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolCall } from "@/llm/types";
+import { Message } from "multi-llm-ts";
 import { ConfigService } from "@/services/ConfigService";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
@@ -29,6 +31,46 @@ export interface E2ETestContext {
         projectContext: any;
     };
     projectConfig: any;
+}
+
+// Execution trace for tracking conversation flow
+export interface ExecutionTrace {
+    conversationId: string;
+    executions: AgentExecutionRecord[];
+    phaseTransitions: PhaseTransitionRecord[];
+    toolCalls: ToolCallRecord[];
+    routingDecisions: RoutingDecisionRecord[];
+}
+
+export interface AgentExecutionRecord {
+    agent: string;
+    phase: string;
+    timestamp: Date;
+    message?: string;
+    toolCalls?: any[];
+}
+
+export interface PhaseTransitionRecord {
+    from: string;
+    to: string;
+    agent: string;
+    reason: string;
+    timestamp: Date;
+}
+
+export interface ToolCallRecord {
+    agent: string;
+    tool: string;
+    arguments: any;
+    timestamp: Date;
+}
+
+export interface RoutingDecisionRecord {
+    fromAgent: string;
+    toAgents: string[];
+    phase: string;
+    reason: string;
+    timestamp: Date;
 }
 
 /**
@@ -108,6 +150,67 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
             async publishAgentCreation() { return Promise.resolve(); }
         }
     }));
+    
+    // Mock ClaudeBackend to prevent launching actual Claude Code process
+    mock.module("@/agents/execution/ClaudeBackend", () => ({
+        ClaudeBackend: class {
+            async execute(messages: any[], tools: any[], context: any, publisher: any) {
+                // Use the mock LLM instead of launching Claude Code
+                const response = await mockLLM.complete({
+                    messages,
+                    options: {
+                        configName: context.agent.llmConfig || context.agent.name,
+                        agentName: context.agent.name
+                    }
+                });
+                
+                // Simulate Claude Code execution
+                // 1. Publish the response content
+                if (response.content) {
+                    await publisher.publishResponse(response.content, null, false);
+                }
+                
+                // 2. Handle tool calls if present
+                if (response.toolCalls && response.toolCalls.length > 0) {
+                    for (const toolCall of response.toolCalls) {
+                        const toolName = toolCall.function.name;
+                        const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                        
+                        if (toolName === 'continue') {
+                            // For continue tool, import and use the actual continue tool
+                            const { continueTool } = await import('@/tools/implementations/continue');
+                            const result = await continueTool.execute(
+                                { value: toolArgs },
+                                context
+                            );
+                            
+                            if (result.success && result.value.type === 'continue') {
+                                // The continue tool returns control flow info
+                                // In real Claude backend, this would trigger orchestrator
+                                // For tests, we just need to ensure the tool was called
+                                await publisher.publishResponse(
+                                    `Routing to ${toolArgs.agents.join(', ')}: ${toolArgs.reason}`,
+                                    null,
+                                    false
+                                );
+                            }
+                        } else if (toolName === 'complete') {
+                            // For complete tool, call the completion handler
+                            const { handleAgentCompletion } = await import('@/agents/execution/completionHandler');
+                            await handleAgentCompletion(
+                                toolArgs.summary || 'Task completed',
+                                context,
+                                publisher
+                            );
+                        }
+                        // Add other tools as needed
+                    }
+                }
+                
+                return Promise.resolve();
+            }
+        }
+    }))
     
     // Mock logging
     mock.module("@/logging/ExecutionLogger", () => ({
@@ -209,6 +312,9 @@ export async function setupE2ETest(scenarios: string[] = []): Promise<E2ETestCon
         console.error("Available agents:", agents.map(a => a.name));
     }
     
+    // Store mockLLM in global context for ClaudeBackend mock
+    // Removed unnecessary global storage - mockLLM is already accessible via context
+    
     return {
         projectPath,
         tempDir,
@@ -236,6 +342,18 @@ export async function cleanupE2ETest(context: E2ETestContext | undefined): Promi
         await cleanupTempDir(context.tempDir);
     }
     mock.restore();
+}
+
+/**
+ * Create a mock publisher for testing
+ */
+function createMockPublisher() {
+    return {
+        publishResponse: async () => {},
+        publishError: async () => {},
+        publishTypingIndicator: async () => {},
+        stopTypingIndicator: async () => {}
+    };
 }
 
 /**
@@ -274,12 +392,7 @@ export async function executeAgent(
     });
     
     // Create mock publisher
-    const mockPublisher = {
-        publishResponse: async () => {},
-        publishError: async () => {},
-        publishTypingIndicator: async () => {},
-        stopTypingIndicator: async () => {}
-    };
+    const mockPublisher = createMockPublisher();
     
     // Create AgentExecutor first for use in ExecutionContext
     let agentExecutor: AgentExecutor | undefined;
@@ -290,7 +403,7 @@ export async function executeAgent(
         phase: conversation.phase,
         projectPath: context.projectPath,
         triggeringEvent,
-        publisher: mockPublisher as any,
+        publisher: mockPublisher,
         conversationManager: context.conversationManager,
         previousPhase: conversation.previousPhase,
         handoff: conversation.phaseTransitions[conversation.phaseTransitions.length - 1],
@@ -305,40 +418,58 @@ export async function executeAgent(
         } as any
     };
     
-    // Create AgentExecutor with the context
-    agentExecutor = new AgentExecutor({
-        agent,
-        conversation,
-        conversationId,
-        projectPath: context.projectPath,
-        userMessage,
-        systemPrompt: agent.systemPrompt || "",
-        availableTools: agent.allowedTools || [],
-        llmService: context.mockLLM,
-        tracingContext: {
-            requestId: "test-request-" + Math.random().toString(36).substr(2, 9),
-            conversationId,
-            getRequest: () => ({ id: "test-request" }),
-            getConversation: () => ({ id: conversationId }),
-            getAgent: () => agent
-        },
-        onStreamContent: options.onStreamContent || (() => {}),
-        onStreamToolCall: options.onStreamToolCall || (() => {}),
-        onComplete: options.onComplete || (() => {}),
-        onError: options.onError || ((error) => {
-            logger.error("Agent execution error:", error);
-        })
-    });
+    // Import getNDK for AgentExecutor
+    const { getNDK } = await import('@/nostr');
+    
+    // Create AgentExecutor with the correct constructor signature
+    agentExecutor = new AgentExecutor(
+        context.mockLLM as any,  // LLMService
+        getNDK(),  // NDK
+        context.conversationManager  // ConversationManager
+    );
     
     // Set the agentExecutor in the context
     executionContext.agentExecutor = agentExecutor;
     
     // Use appropriate backend based on agent
     if (agentName.toLowerCase() === "orchestrator") {
-        const backend = new RoutingBackend(context.mockLLM, context.conversationManager);
-        await backend.execute([], [], executionContext, mockPublisher as any);
+        // For orchestrator, we need to get the routing decision without executing agents
+        // Create a custom mock publisher that captures the response
+        let capturedResponse = "";
+        const customPublisher = {
+            ...mockPublisher,
+            publishResponse: async (content: string) => {
+                capturedResponse = content;
+                if (options.onStreamContent) {
+                    options.onStreamContent(content);
+                }
+            }
+        };
+        
+        // Use the mock LLM directly to get routing decision
+        const response = await context.mockLLM.complete({
+            messages: [...messages, new Message("system", `
+You must respond with ONLY a JSON object in this exact format:
+{
+    "agents": ["agent-slug"],
+    "phase": "phase-name",
+    "reason": "Your reasoning here"
+}
+
+No other text, only valid JSON.`)],
+            options: {
+                configName: agent.llmConfig || "orchestrator",
+                agentName: agent.name
+            }
+        });
+        
+        // Stream the response
+        if (options.onStreamContent && response.content) {
+            options.onStreamContent(response.content);
+        }
     } else {
-        await agentExecutor.execute();
+        // Execute the agent using the AgentExecutor
+        await agentExecutor.execute(executionContext);
     }
 }
 
@@ -463,3 +594,245 @@ export const e2eAssertions = {
         );
     }
 };
+
+/**
+ * Execute a complete conversation flow, automatically following orchestrator routing
+ */
+export async function executeConversationFlow(
+    context: E2ETestContext,
+    conversationId: string,
+    initialMessage: string,
+    options?: {
+        maxIterations?: number;
+        onAgentExecution?: (agent: string, phase: string) => void;
+        onPhaseTransition?: (from: string, to: string) => void;
+    }
+): Promise<ExecutionTrace> {
+    const maxIterations = options?.maxIterations || 20;
+    let iteration = 0;
+    
+    const trace: ExecutionTrace = {
+        conversationId,
+        executions: [],
+        phaseTransitions: [],
+        toolCalls: [],
+        routingDecisions: []
+    };
+    
+    // Track conversation state
+    let currentMessage = initialMessage;
+    let lastAgentExecuted: string | null = null;
+    
+    while (iteration < maxIterations) {
+        iteration++;
+        
+        // Get current conversation state
+        const state = await getConversationState(context, conversationId);
+        const currentPhase = state.phase;
+        
+        // Always execute orchestrator for routing
+        const orchestratorResult = await executeAgentWithResult(
+            context,
+            "orchestrator",
+            conversationId,
+            iteration === 1 ? currentMessage : ""
+        );
+        
+        // Record orchestrator execution
+        trace.executions.push({
+            agent: "orchestrator",
+            phase: currentPhase,
+            timestamp: new Date(),
+            message: orchestratorResult.message
+        });
+        
+        // Extract routing decision from orchestrator response
+        const routingDecision = extractRoutingDecision(orchestratorResult);
+        if (!routingDecision) {
+            // No routing decision means conversation is complete
+            console.log("No routing decision found. Orchestrator result:", orchestratorResult.message);
+            break;
+        }
+        
+        // Record routing decision
+        trace.routingDecisions.push({
+            fromAgent: "orchestrator",
+            toAgents: routingDecision.agents,
+            phase: routingDecision.phase || currentPhase,
+            reason: routingDecision.reason,
+            timestamp: new Date()
+        });
+        
+        // Execute each target agent
+        for (const targetAgent of routingDecision.agents) {
+            if (targetAgent === "END") {
+                // Conversation complete
+                return trace;
+            }
+            
+            // Notify callback
+            if (options?.onAgentExecution) {
+                options.onAgentExecution(targetAgent, routingDecision.phase || currentPhase);
+            }
+            
+            // Execute target agent
+            const agentResult = await executeAgentWithResult(
+                context,
+                targetAgent,
+                conversationId,
+                "" // No message, agent gets context from conversation
+            );
+            
+            // Record agent execution
+            trace.executions.push({
+                agent: targetAgent,
+                phase: routingDecision.phase || currentPhase,
+                timestamp: new Date(),
+                message: agentResult.message,
+                toolCalls: agentResult.toolCalls
+            });
+            
+            // Record tool calls
+            if (agentResult.toolCalls) {
+                for (const toolCall of agentResult.toolCalls) {
+                    trace.toolCalls.push({
+                        agent: targetAgent,
+                        tool: toolCall.function.name,
+                        arguments: JSON.parse(toolCall.function.arguments || '{}'),
+                        timestamp: new Date()
+                    });
+                    
+                    // Check for continue tool - means we need to go back to orchestrator
+                    if (toolCall.function.name === 'continue') {
+                        lastAgentExecuted = targetAgent;
+                        // Update mock LLM context for next iteration
+                        if ((context.mockLLM as any).updateContext) {
+                            (context.mockLLM as any).updateContext({
+                                lastContinueCaller: targetAgent,
+                                iteration: iteration
+                            });
+                        }
+                    } else if (toolCall.function.name === 'complete') {
+                        // Conversation complete
+                        return trace;
+                    }
+                }
+            }
+            
+            // Check for phase transitions
+            const newState = await getConversationState(context, conversationId);
+            if (newState.phase !== currentPhase) {
+                trace.phaseTransitions.push({
+                    from: currentPhase,
+                    to: newState.phase,
+                    agent: targetAgent,
+                    reason: routingDecision.reason,
+                    timestamp: new Date()
+                });
+                
+                if (options?.onPhaseTransition) {
+                    options.onPhaseTransition(currentPhase, newState.phase);
+                }
+            }
+        }
+    }
+    
+    return trace;
+}
+
+interface AgentExecutionResult {
+    message: string;
+    toolCalls: ToolCall[];
+}
+
+/**
+ * Execute agent and return result (internal helper)
+ */
+async function executeAgentWithResult(
+    context: E2ETestContext,
+    agentName: string,
+    conversationId: string,
+    userMessage: string
+): Promise<AgentExecutionResult> {
+    const result: AgentExecutionResult = {
+        message: "",
+        toolCalls: []
+    };
+    
+    await executeAgent(context, agentName, conversationId, userMessage, {
+        onStreamContent: (content) => {
+            result.message += content;
+        },
+        onStreamToolCall: (toolCall) => {
+            result.toolCalls.push(toolCall);
+        }
+    });
+    
+    if (context.mockLLM.config?.debug) {
+        console.log(`Agent ${agentName} result:`, result);
+    }
+    
+    return result;
+}
+
+interface RoutingDecision {
+    agents: string[];
+    phase?: string;
+    reason: string;
+}
+
+/**
+ * Extract routing decision from orchestrator response
+ */
+function extractRoutingDecision(orchestratorResult: AgentExecutionResult): RoutingDecision | null {
+    try {
+        // Orchestrator with routing backend returns JSON
+        const content = orchestratorResult.message;
+        if (!content) return null;
+        
+        // Try to parse as JSON
+        const parsed = JSON.parse(content);
+        if (parsed.agents && Array.isArray(parsed.agents)) {
+            return parsed;
+        }
+    } catch (e) {
+        // Not a routing decision
+    }
+    return null;
+}
+
+// Assertion helpers for traces
+export function assertAgentSequence(trace: ExecutionTrace, ...expectedAgents: string[]) {
+    const executedAgents = trace.executions.map(e => e.agent);
+    expect(executedAgents).toEqual(expectedAgents);
+}
+
+export function assertPhaseTransitions(trace: ExecutionTrace, ...expectedPhases: string[]) {
+    const phases = trace.phaseTransitions.map(t => t.to);
+    expect(phases).toEqual(expectedPhases);
+}
+
+export function assertToolCalls(trace: ExecutionTrace, agent: string, ...expectedTools: string[]) {
+    const agentTools = trace.toolCalls
+        .filter(tc => tc.agent === agent)
+        .map(tc => tc.tool);
+    expect(agentTools).toEqual(expectedTools);
+}
+
+export function assertFeedbackPropagated(trace: ExecutionTrace, fromAgent: string, toAgent: string, keyword: string): boolean {
+    // Find message from fromAgent
+    const fromExecution = trace.executions.find(e => 
+        e.agent === fromAgent && e.message?.includes(keyword)
+    );
+    if (!fromExecution) return false;
+    
+    // Find subsequent execution of toAgent
+    const fromIndex = trace.executions.indexOf(fromExecution);
+    const toExecution = trace.executions
+        .slice(fromIndex + 1)
+        .find(e => e.agent === toAgent);
+    
+    return toExecution !== undefined;
+}
+
+export { createMockNDKEvent };
