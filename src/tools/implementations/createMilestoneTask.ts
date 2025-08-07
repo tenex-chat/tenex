@@ -1,5 +1,6 @@
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKTask } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
@@ -159,7 +160,7 @@ export const createMilestoneTaskTool: Tool<CreateMilestoneTaskInput, CreateMiles
             };
         } catch (error) {
             logger.error("❌ Create milestone task tool failed", {
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
                 agent: context.agent.name,
                 agentPubkey: context.agent.pubkey,
                 title,
@@ -172,7 +173,7 @@ export const createMilestoneTaskTool: Tool<CreateMilestoneTaskInput, CreateMiles
                 error: {
                     kind: "execution" as const,
                     tool: "create_milestone_task",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                 },
             };
         }

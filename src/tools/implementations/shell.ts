@@ -21,7 +21,6 @@ const shellSchema = z.object({
 /**
  * Shell tool - allows agents to execute shell commands
  * Restricted to project-manager agent for safety
- * Only available to the project-manager agent
  */
 export const shellTool: Tool<
     {

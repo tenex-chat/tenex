@@ -1,6 +1,7 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
@@ -152,7 +153,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
             };
         } catch (error) {
             logger.error("❌ Learn tool failed", {
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
                 agent: context.agent.name,
                 agentPubkey: context.agent.pubkey,
                 title,
@@ -165,7 +166,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
                 error: {
                     kind: "execution" as const,
                     tool: "learn",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                 },
             };
         }

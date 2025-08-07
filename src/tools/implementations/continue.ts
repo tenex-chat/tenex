@@ -1,3 +1,4 @@
+import { findAgentByName } from "@/agents/utils";
 import { ALL_PHASES, type Phase } from "@/conversations/phases";
 import { type ProjectContext, getProjectContext } from "@/services/ProjectContext";
 import type { Tool, NonEmptyArray } from "../types";
@@ -84,19 +85,7 @@ export const continueTool: Tool<ContinueInput> = {
         const validNames: string[] = [];
 
         for (const agent of agents) {
-            // Try exact match first
-            let agentDef = projectContext.agents.get(agent);
-            
-            // If not found, try case-insensitive search
-            if (!agentDef) {
-                const lowerCaseAgent = agent.toLowerCase();
-                for (const [key, value] of projectContext.agents.entries()) {
-                    if (key.toLowerCase() === lowerCaseAgent) {
-                        agentDef = value;
-                        break;
-                    }
-                }
-            }
+            const agentDef = findAgentByName(projectContext.agents, agent);
             
             if (!agentDef) {
                 invalidAgents.push(agent);

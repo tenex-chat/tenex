@@ -5,7 +5,7 @@ import type { ExecutionLogger } from "@/logging/ExecutionLogger";
 import type { ToolExecutionResult } from "@/tools/executor";
 import { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
-import { formatToolError } from "@/utils/error-formatter";
+import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import { isContinueFlow, isComplete, isEndConversation } from "./control-flow-types";
 
@@ -222,7 +222,7 @@ export class ToolStreamHandler {
                 tracingLogger.error("Failed to publish tool error", {
                     tool: toolName,
                     originalError: toolResult.error,
-                    publishError: error instanceof Error ? error.message : String(error),
+                    publishError: formatAnyError(error),
                 });
             }
         }

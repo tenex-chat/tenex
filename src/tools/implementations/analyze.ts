@@ -1,4 +1,5 @@
 import { loadLLMRouter } from "@/llm";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { generateRepomixOutput } from "@/utils/repomix";
 import { Message } from "multi-llm-ts";
@@ -46,7 +47,7 @@ export const analyze = createToolDefinition<z.infer<typeof analyzeSchema>, Analy
                 error: {
                     kind: "execution" as const,
                     tool: "analyze",
-                    message: `Failed to generate repomix output: ${error instanceof Error ? error.message : String(error)}`,
+                    message: `Failed to generate repomix output: ${formatAnyError(error)}`,
                     cause: error,
                 },
             };
@@ -109,7 +110,7 @@ Provide a clear, structured response focused on the specific question asked.`;
                 error: {
                     kind: "execution" as const,
                     tool: "analyze",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                     cause: error,
                 },
             };

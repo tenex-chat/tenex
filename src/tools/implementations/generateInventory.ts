@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { generateInventory, inventoryExists } from "@/utils/inventory";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
@@ -95,7 +96,7 @@ The inventory provides comprehensive information about the codebase structure, s
                 error: {
                     kind: "execution" as const,
                     tool: "generate_inventory",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                     cause: error,
                 },
             };

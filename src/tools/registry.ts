@@ -11,17 +11,18 @@ import { shellTool } from "./implementations/shell";
 import type { Tool } from "./types";
 
 // Registry of all available tools
-const toolsMap = new Map<string, Tool<unknown, unknown>>();
-toolsMap.set("read_path", readPathTool as Tool<unknown, unknown>);
-toolsMap.set("write_context_file", writeContextFileTool as Tool<unknown, unknown>);
-toolsMap.set("continue", continueTool as Tool<unknown, unknown>);
-toolsMap.set("complete", completeTool as Tool<unknown, unknown>);
-toolsMap.set("end_conversation", endConversationTool as Tool<unknown, unknown>);
-toolsMap.set("analyze", analyze as Tool<unknown, unknown>);
-toolsMap.set("generate_inventory", generateInventoryTool as Tool<unknown, unknown>);
-toolsMap.set("learn", learnTool as Tool<unknown, unknown>);
-toolsMap.set("create_milestone_task", createMilestoneTaskTool as Tool<unknown, unknown>);
-toolsMap.set("shell", shellTool as Tool<unknown, unknown>);
+const toolsMap = new Map<string, Tool>([
+    ["read_path", readPathTool],
+    ["write_context_file", writeContextFileTool],
+    ["continue", continueTool],
+    ["complete", completeTool],
+    ["end_conversation", endConversationTool],
+    ["analyze", analyze],
+    ["generate_inventory", generateInventoryTool],
+    ["learn", learnTool],
+    ["create_milestone_task", createMilestoneTaskTool],
+    ["shell", shellTool],
+]);
 
 export function getTool(name: string): Tool | undefined {
     return toolsMap.get(name);
