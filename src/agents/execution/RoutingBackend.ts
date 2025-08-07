@@ -12,6 +12,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import type { Phase } from "@/conversations/phases";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { createNostrPublisher } from "@/nostr/factory";
+import { findAgentByName } from "@/agents/utils";
 
 // Schema for routing decisions
 const RoutingDecisionSchema = z.object({
@@ -49,12 +50,6 @@ export class RoutingBackend implements ExecutionBackend {
 
             // Get routing decision from LLM
             const routingDecision = await this.getRoutingDecision(messages, context, tracingLogger, executionLogger);
-            
-            tracingLogger.info("📍 Routing decision made", {
-                targetAgents: routingDecision.agents,
-                targetPhase: routingDecision.phase,
-                reason: routingDecision.reason
-            });
             
             // Log routing decision with ExecutionLogger
             executionLogger.routingDecision(
@@ -104,22 +99,23 @@ export class RoutingBackend implements ExecutionBackend {
                     break;
                 }
 
-                // Find agent by slug (case-insensitive)
-                let targetAgent = projectContext.agents.get(agentSlug);
-                
-                // If not found, try case-insensitive search
-                if (!targetAgent) {
-                    const lowerCaseSlug = agentSlug.toLowerCase();
-                    for (const [key, agent] of projectContext.agents.entries()) {
-                        if (key.toLowerCase() === lowerCaseSlug) {
-                            targetAgent = agent;
-                            break;
-                        }
-                    }
-                }
+                // Find agent using normalized name matching
+                const targetAgent = findAgentByName(projectContext.agents, agentSlug);
                 
                 if (!targetAgent) {
                     tracingLogger.warning("Target agent not found", { slug: agentSlug });
+                    
+                    // Provide feedback to orchestrator about invalid agent name
+                    const availableAgents = Array.from(projectContext.agents.keys());
+                    
+                    // Send feedback message back through the orchestrator
+                    await this.sendRoutingFeedback(
+                        context,
+                        agentSlug,
+                        availableAgents,
+                        routingDecision.reason
+                    );
+                    
                     continue;
                 }
 
@@ -153,6 +149,106 @@ export class RoutingBackend implements ExecutionBackend {
                 error: formatAnyError(error)
             });
             throw error;
+        }
+    }
+
+    private async sendRoutingFeedback(
+        context: ExecutionContext,
+        invalidAgentSlug: string,
+        availableAgents: string[],
+        originalReason: string
+    ): Promise<void> {
+        const tracingLogger = createTracingLogger(context.tracingContext || createTracingContext(context.conversationId), "agent");
+        
+        // Create a feedback message that will help the orchestrator learn
+        const feedbackMessage = new Message("system", `
+ROUTING ERROR: The agent "${invalidAgentSlug}" does not exist.
+
+Available agent slugs (use these exact values):
+${availableAgents.map(slug => `- ${slug}`).join('\n')}
+
+Common mistakes:
+- "Project Manager" should be "project-manager"
+- "Human Replica" should be "human-replica"
+- Agent names are case-sensitive and use kebab-case
+
+Original routing reason: ${originalReason}
+
+Please re-route using the correct agent slug from the list above.`);
+
+        // Store this as a lesson for future reference
+        const lesson = {
+            scenario: `Routing to agent "${invalidAgentSlug}"`,
+            mistake: `Used incorrect agent slug "${invalidAgentSlug}"`,
+            correction: `Should use one of: ${availableAgents.join(', ')}`,
+            timestamp: new Date().toISOString()
+        };
+        
+        tracingLogger.info("📚 Routing lesson learned", lesson);
+        
+        // Log the feedback
+        const executionLogger = createExecutionLogger(context.tracingContext || createTracingContext(context.conversationId), "agent");
+        executionLogger.logEvent({
+            type: "routing_analysis",
+            agent: context.agent.name,
+            messageAnalysis: `Routing error: Invalid agent "${invalidAgentSlug}"`,
+            candidateAgents: availableAgents,
+            phaseConsiderations: `Need to re-route to valid agent`
+        });
+        
+        // Build messages with the feedback
+        const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
+            context.conversationId,
+            context.agent,
+            context.triggeringEvent
+        );
+        
+        // Add feedback message after the agent messages
+        const messagesWithFeedback = [...agentMessages, feedbackMessage];
+        
+        // Re-attempt routing with the feedback
+        try {
+            const correctedDecision = await this.getRoutingDecision(
+                messagesWithFeedback,
+                context,
+                tracingLogger,
+                executionLogger
+            );
+            
+            tracingLogger.info("📍 Corrected routing decision", {
+                originalTarget: invalidAgentSlug,
+                correctedTargets: correctedDecision.agents,
+                reason: correctedDecision.reason
+            });
+            
+            // Execute the corrected routing
+            const projectContext = getProjectContext();
+            for (const agentSlug of correctedDecision.agents) {
+                // Use the same normalized finding logic
+                const targetAgent = findAgentByName(projectContext.agents, agentSlug);
+                    
+                if (targetAgent) {
+                    const targetPublisher = await createNostrPublisher({
+                        conversationId: context.conversationId,
+                        agent: targetAgent,
+                        triggeringEvent: context.triggeringEvent,
+                        conversationManager: this.conversationManager,
+                    });
+
+                    const targetContext: ExecutionContext = {
+                        ...context,
+                        agent: targetAgent,
+                        phase: (correctedDecision.phase || context.phase) as Phase,
+                        publisher: targetPublisher,
+                    };
+
+                    await context.agentExecutor?.execute(targetContext);
+                }
+            }
+        } catch (error) {
+            tracingLogger.error("Failed to correct routing after feedback", {
+                error: formatAnyError(error)
+            });
         }
     }
 
