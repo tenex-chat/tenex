@@ -218,3 +218,16 @@ export class MockBuilder<T> {
 //     .with('name', 'TestAgent')
 //     .with('allowedTools', ['test-tool'])
 //     .build(createMockAgent());
+
+/**
+ * MockFactory namespace for backwards compatibility
+ */
+export const MockFactory = {
+    createMockNostrEvent: createMockNDKEvent,
+    createMockAgent,
+    createMockConversation,
+    createMockExecutionContext,
+    createMockToolCall,
+    createMockPhaseTransition,
+    createMockFileSystem
+};

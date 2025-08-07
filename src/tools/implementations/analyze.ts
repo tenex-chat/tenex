@@ -3,8 +3,7 @@ import { logger } from "@/utils/logger";
 import { generateRepomixOutput } from "@/utils/repomix";
 import { Message } from "multi-llm-ts";
 import { z } from "zod";
-import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createToolDefinition } from "../types";
 
 const analyzeSchema = z.object({
     prompt: z.string().min(1).describe("The analysis prompt or question about the codebase"),
@@ -16,23 +15,16 @@ const analyzeSchema = z.object({
         ),
 });
 
-interface AnalyzeInput {
-    prompt: string;
-    targetDirectory?: string;
-}
-
 interface AnalyzeOutput {
     analysis: string;
     repoSize: number;
 }
 
-export const analyze: Tool<AnalyzeInput, AnalyzeOutput> = {
+export const analyze = createToolDefinition<z.infer<typeof analyzeSchema>, AnalyzeOutput>({
     name: "analyze",
     description:
         "Deeply analyze a topic or question, GREAT for reasoning and performing detailed reviews of work that was done or to validate a plan with a full view of everything involved. Can analyze the entire project or focus on a specific directory for more targeted analysis in monorepos.",
-
-    parameters: createZodSchema(analyzeSchema),
-
+    schema: analyzeSchema,
     execute: async (input, context) => {
         const { prompt, targetDirectory } = input.value;
 
@@ -125,4 +117,4 @@ Provide a clear, structured response focused on the specific question asked.`;
             repomixResult.cleanup();
         }
     },
-};
+});

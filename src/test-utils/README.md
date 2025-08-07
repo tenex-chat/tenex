@@ -43,8 +43,10 @@ The `mock-factories.ts` file provides factory functions for creating mock object
 - `createMockConversation()` - Creates a mock conversation
 - `createMockExecutionContext()` - Creates a mock execution context
 - `createMockToolCall()` - Creates a mock tool call
+- `createMockPhaseTransition()` - Creates a mock phase transition
 - `createMockFileSystem()` - Creates a mock file system structure
 - `MockBuilder` - A builder class for complex mock objects
+- `MockFactory` - Namespace providing all factory functions for backwards compatibility
 
 ## Mock LLM Service
 

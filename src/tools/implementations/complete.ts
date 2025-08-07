@@ -1,5 +1,5 @@
-import type { Tool, Termination } from "../types";
-import { success, createZodSchema } from "../types";
+import type { Termination } from "../types";
+import { success, createToolDefinition } from "../types";
 import { z } from "zod";
 import { handleAgentCompletion } from "@/agents/execution/completionHandler";
 
@@ -29,13 +29,7 @@ const completeSchema = z.object({
  * DO NOT use this for conversational responses - just respond normally for those.
  * YOUR JOB IS NOT DONE UNTIL YOU EXPLICITLY USE THIS TOOL
  */
-export const completeTool: Tool<
-    {
-        response: string;
-        summary?: string;
-    },
-    Termination
-> = {
+export const completeTool = createToolDefinition<z.infer<typeof completeSchema>, Termination>({
     name: "complete",
     description:
         "Signal task completion and return control to the orchestrator for next steps",
@@ -46,9 +40,7 @@ export const completeTool: Tool<
 - DO NOT use this for conversational exchanges - just respond normally
 - Example in CHAT: complete("User wants to add authentication with OAuth providers")
 - Example in EXECUTE: complete("Implemented OAuth with Google and GitHub providers")`,
-
-    parameters: createZodSchema(completeSchema),
-
+    schema: completeSchema,
     execute: async (input, context) => {
         const { response, summary } = input.value;
 
@@ -65,4 +57,4 @@ export const completeTool: Tool<
         // Return success with the completion
         return success(completion);
     },
-};
+});
