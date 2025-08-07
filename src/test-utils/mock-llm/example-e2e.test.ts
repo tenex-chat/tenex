@@ -32,9 +32,9 @@ describe("Example E2E Test with Mock LLM", () => {
         ], "mock-model");
         
         // Verify orchestrator response
-        expect(response.content).toContain("help you create");
+        expect(response.content).toContain("I'll help you create a user authentication system");
         expect(response.toolCalls).toHaveLength(1);
-        expect(response.toolCalls[0].function.name).toBe("continue");
+        expect(response.toolCalls[0].name).toBe("continue");
         
         // Get request history for debugging
         const history = (mockLLM as any).getRequestHistory();
@@ -50,8 +50,9 @@ describe("Example E2E Test with Mock LLM", () => {
             { role: "user", content: "simulate an error" }
         ], "mock-model");
         
-        expect(response.toolCalls[0].function.name).toBe("shell");
-        expect(response.toolCalls[0].function.arguments).toContain("exit 1");
+        expect(response.toolCalls).toBeDefined();
+        expect(response.toolCalls[0].name).toBe("shell");
+        expect(JSON.stringify(response.toolCalls[0].params)).toContain("exit 1");
     });
     
     it("should detect infinite loops", async () => {
@@ -64,15 +65,13 @@ describe("Example E2E Test with Mock LLM", () => {
                 response: {
                     toolCalls: [{
                         id: "1",
-                        type: "function",
-                        function: {
-                            name: "continue",
-                            arguments: JSON.stringify({
-                                summary: "Continuing...",
-                                suggestedPhase: "CHAT",
-                                confidence: 50
-                            })
-                        }
+                        message: null,
+                        function: "continue",
+                        args: JSON.stringify({
+                            summary: "Continuing...",
+                            suggestedPhase: "CHAT",
+                            confidence: 50
+                        })
                     }]
                 }
             }]

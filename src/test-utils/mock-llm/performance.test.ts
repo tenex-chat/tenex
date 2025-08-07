@@ -17,21 +17,21 @@ describe("MockLLMService Performance Testing", () => {
             responses: [
                 {
                     trigger: {
-                        userMessage: /slow test/i,
-                    },
-                    response: {
-                        streamDelay: 1000, // 1 second delay
-                        content: "This is a slow response"
-                    },
-                    priority: 10
-                },
-                {
-                    trigger: {
                         userMessage: /very slow test/i,
                     },
                     response: {
                         streamDelay: 3000, // 3 second delay
                         content: "This is a very slow response"
+                    },
+                    priority: 10
+                },
+                {
+                    trigger: {
+                        userMessage: /slow test/i,
+                    },
+                    response: {
+                        streamDelay: 1000, // 1 second delay
+                        content: "This is a slow response"
                     },
                     priority: 10
                 },

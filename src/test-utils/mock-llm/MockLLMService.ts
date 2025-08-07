@@ -59,25 +59,45 @@ export class MockLLMService implements LLMService {
         }
         
         // Convert to CompletionResponse format that matches multi-llm-ts v4
-        const toolCalls = response.toolCalls ? response.toolCalls.map(tc => {
-            // Handle both old and new formats
-            if (typeof tc === 'object' && 'function' in tc && typeof tc.function === 'object') {
-                // Old format with function object
-                return {
-                    id: tc.id,
-                    message: null,
-                    function: (tc.function as any).name,
-                    args: (tc.function as any).arguments || '{}'
-                };
+        // LlmResponse expects toolCalls with LlmToolCallInfo[] structure (name, params, result)
+        const toolCallsInfo = response.toolCalls ? response.toolCalls.map(tc => {
+            // Convert our mock format to LlmToolCallInfo format
+            let functionName: string;
+            let args: any = {};
+            
+            if (typeof tc === 'object' && 'function' in tc) {
+                if (typeof tc.function === 'object') {
+                    // Old format with function object
+                    functionName = (tc.function as any).name;
+                    try {
+                        args = JSON.parse((tc.function as any).arguments || '{}');
+                    } catch {
+                        args = {};
+                    }
+                } else {
+                    // New format with function as string
+                    functionName = tc.function;
+                    try {
+                        args = JSON.parse(tc.args || '{}');
+                    } catch {
+                        args = {};
+                    }
+                }
+            } else {
+                functionName = 'unknown';
             }
-            // Already in correct format
-            return tc;
+            
+            return {
+                name: functionName,
+                params: args,
+                result: null
+            };
         }) : [];
         
         return {
             type: 'text',
             content: response.content || "",
-            toolCalls: [],
+            toolCalls: toolCallsInfo.length > 0 ? toolCallsInfo : undefined,
             usage: {
                 prompt_tokens: 100,
                 completion_tokens: 50,
@@ -226,7 +246,7 @@ export class MockLLMService implements LLMService {
                 }
             }
             
-            if (trigger.phase && trigger.phase !== phase) {
+            if (trigger.phase && trigger.phase.toLowerCase() !== phase.toLowerCase()) {
                 continue;
             }
             

@@ -7,7 +7,7 @@ import { logger } from "@/utils/logger";
 import search from "@inquirer/search";
 import chalk from "chalk";
 import inquirer from "inquirer";
-import { igniteEngine } from "multi-llm-ts";
+import { igniteEngine, Message } from "multi-llm-ts";
 import { LLM_DEFAULTS } from "./constants";
 import { getModelsForProvider } from "./models";
 
