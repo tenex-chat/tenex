@@ -1,7 +1,15 @@
 import { logger } from "@/utils/logger";
 
+/**
+ * Handler function called during graceful shutdown
+ */
 export type ShutdownHandler = (signal: string) => Promise<void>;
 
+/**
+ * Sets up graceful shutdown handlers for various termination signals
+ * @param shutdownHandler - Async function to handle cleanup during shutdown
+ * @description Handles SIGTERM, SIGINT, SIGHUP signals and uncaught exceptions/rejections
+ */
 export function setupGracefulShutdown(shutdownHandler: ShutdownHandler): void {
     let isShuttingDown = false;
 

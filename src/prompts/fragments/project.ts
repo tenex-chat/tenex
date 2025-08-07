@@ -57,7 +57,7 @@ function getProjectFiles(): { files: string[]; isEmpty: boolean; tree: string } 
     }
 
     // Helper function to build tree structure recursively
-    function buildTree(dir: string, prefix = "", isLast = true, showFiles = true): string[] {
+    function buildTree(dir: string, prefix = "", _isLast = true, showFiles = true): string[] {
         const treeLines: string[] = [];
 
         try {

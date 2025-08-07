@@ -69,7 +69,7 @@ export const mcpToolsFragment: PromptFragment<MCPToolsArgs> = {
                 "To use an MCP tool, call it with the full namespaced name (e.g., 'server-name/tool-name').\n";
 
             return content;
-        } catch (error) {
+        } catch {
             // Silent failure - don't break prompt generation
             return "";
         }

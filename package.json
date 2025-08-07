@@ -48,7 +48,6 @@
         "@inquirer/search": "^3.0.15",
         "@modelcontextprotocol/sdk": "^1.13.2",
         "@nostr-dev-kit/ndk": "^2.14.33",
-        "@types/inquirer": "^9.0.8",
         "chalk": "^5.4.1",
         "commander": "^13.1.0",
         "inquirer": "^12.6.3",

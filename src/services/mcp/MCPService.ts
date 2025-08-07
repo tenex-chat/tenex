@@ -180,7 +180,7 @@ export class MCPService {
             logger.error(`MCP server '${name}' failed health check:`, error);
             try {
                 await client.close();
-            } catch (_closeError) {
+            } catch {
                 // Ignore close errors
             }
             return;
@@ -333,7 +333,7 @@ export class MCPService {
                 if (mcpClient.process) {
                     mcpClient.process.kill("SIGKILL");
                 }
-            } catch (error) {
+            } catch {
                 // Process already terminated, ignore error
             }
         }

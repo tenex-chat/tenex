@@ -52,6 +52,7 @@ export function resetAllMocks(): void {
     
     for (const module of modules) {
         try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const mod = require(module);
             if (mod.instance) {
                 mod.instance = undefined;

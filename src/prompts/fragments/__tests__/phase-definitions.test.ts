@@ -16,9 +16,9 @@ describe("phaseDefinitionsFragment", () => {
         expect(result).toContain("**REFLECTION**:");
 
         // Should contain the enhanced descriptions for key phases
-        expect(result).toContain("Implementation + technical review by domain experts");
-        expect(result).toContain("User acceptance testing - agents act as end users");
-        expect(result).toContain("Learning extraction and process improvement");
+        expect(result).toContain("Moment of truth: the phase where all of the work is to be implemented AND reviewed");
+        expect(result).toContain("Functional verification of the implemented work from an end-user perspective");
+        expect(result).toContain("Provide an opportunity to all agents that were part of this conversation to reflect");
 
         // Should contain goals
         expect(result).toContain("Goal:");
