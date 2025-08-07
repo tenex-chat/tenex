@@ -78,7 +78,6 @@ export class ReasonActLoop implements ExecutionBackend {
             // Main termination loop
             while (attempt < ExecutionConfig.MAX_TERMINATION_ATTEMPTS) {
                 attempt++;
-                terminationHandler.logTerminationAttempt(attempt, context, tracingLogger);
 
                 // Reset state for retry (but keep stream publisher)
                 if (attempt > 1) {

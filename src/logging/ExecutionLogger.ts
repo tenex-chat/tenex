@@ -226,9 +226,6 @@ export class ExecutionLogger {
             case "conversation_complete":
                 this.logConversationComplete(event);
                 break;
-            case "execution_flow_complete":
-                this.logExecutionFlowComplete(event);
-                break;
         }
     }
 
@@ -256,11 +253,6 @@ export class ExecutionLogger {
                             event.context.confidence > 0.5 ? chalk.yellow : chalk.red;
             console.log(confColor(`    └─ Confidence: ${(event.context.confidence * 100).toFixed(0)}%`));
         }
-
-        this.tracingLogger.info("Agent thinking", {
-            event: "agent_thinking",
-            ...event
-        });
     }
 
     private logAgentDecision(event: AgentDecisionEvent): void {
@@ -290,11 +282,6 @@ export class ExecutionLogger {
             console.log(chalk.gray(`    ├─ Context: ${event.context}`));
         }
         console.log(chalk.dim(`    └─ Phase: ${event.phase}`));
-
-        this.tracingLogger.info("Agent handoff", {
-            event: "agent_handoff",
-            ...event
-        });
     }
 
     // Phase Transition Events
@@ -349,11 +336,6 @@ export class ExecutionLogger {
         if (event.phaseConsiderations) {
             console.log(chalk.gray(`    └─ Phase considerations: ${event.phaseConsiderations}`));
         }
-
-        this.tracingLogger.info("Routing analysis", {
-            event: "routing_analysis",
-            ...event
-        });
     }
 
     private logRoutingDecision(event: RoutingDecisionEvent): void {
@@ -386,11 +368,6 @@ export class ExecutionLogger {
         if (event.parameters && Object.keys(event.parameters).length > 0) {
             console.log(chalk.gray(`    └─ Parameters: ${this.formatParams(event.parameters)}`));
         }
-
-        this.tracingLogger.info("Tool execution started", {
-            event: "tool_execution_start",
-            ...event
-        });
     }
 
     private logToolExecutionComplete(event: ToolExecutionCompleteEvent): void {
@@ -409,11 +386,6 @@ export class ExecutionLogger {
         if (event.error) {
             console.log(chalk.red(`    └─ Error: ${event.error}`));
         }
-
-        this.tracingLogger.info("Tool execution completed", {
-            event: "tool_execution_complete",
-            ...event
-        });
     }
 
     // Conversation Events
@@ -437,21 +409,6 @@ export class ExecutionLogger {
         console.log(chalk.white(`    ├─ Final phase: ${chalk.bold(event.finalPhase)}`));
         console.log(chalk.white(`    ├─ Duration: ${formatDuration(event.totalDuration)}`));
         console.log(statusColor(`    └─ Success: ${event.success}`));
-        console.log();
-
-        this.tracingLogger.info("Conversation completed", {
-            event: "conversation_complete",
-            ...event
-        });
-    }
-
-    private logExecutionFlowComplete(event: ExecutionFlowCompleteEvent): void {
-        const statusColor = event.success ? chalk.bgGreen : chalk.bgRed;
-        const statusIcon = event.success ? "✅" : "❌";
-
-        console.log();
-        console.log(statusColor.white(` ${statusIcon} EXECUTION FLOW COMPLETE `));
-        console.log(chalk.white(`[${this.shortId(event.conversationId)}] ${event.narrative}`));
         console.log();
     }
 

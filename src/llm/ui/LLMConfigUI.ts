@@ -196,20 +196,7 @@ export class LLMConfigUI {
         provider: LLMProvider,
         model: string
     ): Promise<ConfigurationPrompts> {
-        const cachingPrompts = [];
-        if (
-            (provider === "anthropic" && model.includes("claude")) ||
-            (provider === "openrouter" && supportsCaching)
-        ) {
-            cachingPrompts.push({
-                type: "confirm",
-                name: "enableCaching",
-                message: "Enable prompt caching? (reduces costs for repeated context)",
-                default: true,
-            });
-        }
-
-        const prompts: Array<Record<string, unknown>> = [
+        const basePrompts = [
             {
                 type: "input",
                 name: "configName",
@@ -222,7 +209,6 @@ export class LLMConfigUI {
                     return true;
                 },
             },
-            ...cachingPrompts,
             {
                 type: "confirm",
                 name: "setAsDefault",
@@ -231,9 +217,20 @@ export class LLMConfigUI {
             },
         ];
 
-        const responses = await inquirer.prompt(
-            prompts as unknown as Parameters<typeof inquirer.prompt>[0]
-        );
+        // Add caching prompt conditionally
+        if (
+            (provider === "anthropic" && model.includes("claude")) ||
+            (provider === "openrouter" && supportsCaching)
+        ) {
+            basePrompts.splice(1, 0, {
+                type: "confirm",
+                name: "enableCaching",
+                message: "Enable prompt caching? (reduces costs for repeated context)",
+                default: true,
+            });
+        }
+
+        const responses = await inquirer.prompt(basePrompts as any);
 
         return {
             configName: responses.configName as string,

@@ -6,13 +6,13 @@ import { getLLMLogger, initializeLLMLogger } from "./callLogger";
 import type {
     CompletionRequest,
     CompletionResponse,
-    LLMConfig,
+    ResolvedLLMConfig,
     LLMService,
     StreamEvent,
 } from "./types";
 
 export interface LLMRouterConfig {
-    configs: Record<string, LLMConfig>;
+    configs: Record<string, ResolvedLLMConfig>;
     defaults: {
         agents?: string;
         analyze?: string;
@@ -264,11 +264,6 @@ export class LLMRouter implements LLMService {
                 throw new Error(`Model ${config.model} not found for provider ${config.provider}`);
             }
 
-            console.log(
-                "CALLING LLM",
-                request.messages[request.messages.length - 1]?.content.substring(0, 100)
-            );
-
             // Use generate() for streaming
             const stream = llm.generate(model, request.messages, {
                 usage: true,
@@ -373,10 +368,10 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter> {
         // Use configService to load merged global and project-specific configuration
         const { llms: tenexLLMs } = await configService.loadConfig(projectPath);
 
-        // Transform TenexLLMs structure to LLMRouterConfig
-        const configs: Record<string, LLMConfig> = {};
+        // Transform TenexLLMs structure to LLMRouterConfig with resolved configs
+        const configs: Record<string, ResolvedLLMConfig> = {};
 
-        // For each configuration, merge in the credentials
+        // For each configuration, merge in the credentials to create resolved configs
         for (const [name, config] of Object.entries(tenexLLMs.configurations)) {
             const provider = config.provider;
             const credentials = tenexLLMs.credentials?.[provider] || {};
@@ -385,7 +380,8 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter> {
                 ...config,
                 apiKey: credentials.apiKey,
                 baseUrl: credentials.baseUrl,
-            } as LLMConfig;
+                headers: credentials.headers,
+            };
         }
 
         const routerConfig: LLMRouterConfig = {

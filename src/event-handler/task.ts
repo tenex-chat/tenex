@@ -57,7 +57,6 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
                 );
                 if (agent) {
                     targetAgent = agent;
-                    logInfo(chalk.cyan(`Routing to p-tagged agent: ${agent.name}`));
                     break;
                 }
             }

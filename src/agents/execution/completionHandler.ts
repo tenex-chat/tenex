@@ -35,6 +35,9 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
     await publisher.publishResponse({
         content: response,
         destinationPubkeys: [respondToPubkey],
+        additionalTags: [
+            [ "tool", "complete" ]
+        ],
         completeMetadata: {
             type: "complete",
             completion: {

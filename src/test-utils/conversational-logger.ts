@@ -8,6 +8,7 @@ export class ConversationalLogger {
     private static instance: ConversationalLogger;
     private conversationStartTime: Date = new Date();
     private lastPhase: string = "CHAT";
+    private currentAgent: string | null = null;
 
     static getInstance(): ConversationalLogger {
         if (!ConversationalLogger.instance) {
@@ -34,12 +35,23 @@ export class ConversationalLogger {
             .replace(/-/g, ' '); // Replace hyphens with spaces
     }
 
+    private getAgentSlug(agentName: string): string {
+        // Convert to lowercase slug format
+        return agentName.toLowerCase().replace(/\s+/g, '-');
+    }
+
+    private formatLogLine(agentName: string | null, emoji: string, timeStamp: string, message: string): string {
+        const agentPrefix = agentName ? `[${this.getAgentSlug(agentName)}] ` : '';
+        return `${emoji} [${timeStamp}] ${agentPrefix}${message}`;
+    }
+
     logAgentThinking(agentName: string, context: {
         phase?: string;
         userMessage?: string;
         iteration?: number;
         agentIteration?: number;
     }): void {
+        this.currentAgent = agentName;
         const formattedAgent = this.formatAgentName(agentName);
         const timeStamp = this.formatTime();
         
@@ -50,10 +62,12 @@ export class ConversationalLogger {
         }
 
         if (context.userMessage) {
-            console.log(`\n🎯 [${timeStamp}] ${formattedAgent} received: "${context.userMessage.substring(0, 60)}${context.userMessage.length > 60 ? '...' : ''}"`);
+            const message = `${formattedAgent} received: "${context.userMessage.substring(0, 60)}${context.userMessage.length > 60 ? '...' : ''}"`;  
+            console.log(`\n${this.formatLogLine(agentName, '🎯', timeStamp, message)}`);
         }
         
-        console.log(`🤔 [${timeStamp}] ${formattedAgent} is thinking...`);
+        const message = `${formattedAgent} is thinking...`;
+        console.log(this.formatLogLine(agentName, '🤔', timeStamp, message));
     }
 
     logAgentResponse(agentName: string, response: {
@@ -71,7 +85,8 @@ export class ConversationalLogger {
                 try {
                     const routing = JSON.parse(response.content);
                     if (routing.agents && routing.phase && routing.reason) {
-                        console.log(`🎯 [${timeStamp}] ${formattedAgent}: "I'll route this to ${routing.agents.join(', ')} in ${routing.phase} phase - ${routing.reason}"`);
+                        const message = `${formattedAgent}: "I'll route this to ${routing.agents.join(', ')} in ${routing.phase} phase - ${routing.reason}"`;
+                        console.log(this.formatLogLine(agentName, '🎯', timeStamp, message));
                         return;
                     }
                 } catch (e) {
@@ -82,7 +97,8 @@ export class ConversationalLogger {
             const truncatedContent = response.content.length > 80 
                 ? response.content.substring(0, 80) + '...' 
                 : response.content;
-            console.log(`💬 [${timeStamp}] ${formattedAgent}: "${truncatedContent}"`);
+            const message = `${formattedAgent}: "${truncatedContent}"`;
+            console.log(this.formatLogLine(agentName, '💬', timeStamp, message));
         }
 
         if (response.toolCalls && response.toolCalls.length > 0) {
@@ -108,12 +124,15 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     
                     if (args.agents) {
-                        console.log(`🔄 [${timeStamp}] ${formattedAgent}: "Passing control to ${args.agents.join(', ')} - ${args.reason || 'continuing workflow'}"`);
+                        const message = `${formattedAgent}: "Passing control to ${args.agents.join(', ')} - ${args.reason || 'continuing workflow'}"`;
+                        console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                     } else {
-                        console.log(`🔄 [${timeStamp}] ${formattedAgent}: "Continuing with next phase - ${args.summary || args.reason || 'proceeding'}"`);
+                        const message = `${formattedAgent}: "Continuing with next phase - ${args.summary || args.reason || 'proceeding'}"`;
+                        console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                     }
                 } catch (e) {
-                    console.log(`🔄 [${timeStamp}] ${formattedAgent}: "Continuing workflow..."`);
+                    const message = `${formattedAgent}: "Continuing workflow..."`;
+                    console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                 }
                 break;
             
@@ -122,9 +141,11 @@ export class ConversationalLogger {
                     const args = typeof toolCall.function === 'string' 
                         ? JSON.parse(toolCall.args || '{}')
                         : JSON.parse(toolCall.function?.arguments || '{}');
-                    console.log(`✅ [${timeStamp}] ${formattedAgent}: "Task completed - ${args.finalResponse || args.summary || 'done'}"`);
+                    const message = `${formattedAgent}: "Task completed - ${args.finalResponse || args.summary || 'done'}"`;
+                    console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
                 } catch (e) {
-                    console.log(`✅ [${timeStamp}] ${formattedAgent}: "Task completed successfully"`);
+                    const message = `${formattedAgent}: "Task completed successfully"`;
+                    console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
                 }
                 break;
             
@@ -133,9 +154,11 @@ export class ConversationalLogger {
                     const args = typeof toolCall.function === 'string' 
                         ? JSON.parse(toolCall.args || '{}')
                         : JSON.parse(toolCall.function?.arguments || '{}');
-                    console.log(`⚡ [${timeStamp}] ${formattedAgent}: "Executing: ${args.command}"`);
+                    const message = `${formattedAgent}: "Executing: ${args.command}"`;
+                    console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
                 } catch (e) {
-                    console.log(`⚡ [${timeStamp}] ${formattedAgent}: "Executing shell command..."`);
+                    const message = `${formattedAgent}: "Executing shell command..."`;
+                    console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
                 }
                 break;
             
@@ -144,9 +167,11 @@ export class ConversationalLogger {
                     const args = typeof toolCall.function === 'string' 
                         ? JSON.parse(toolCall.args || '{}')
                         : JSON.parse(toolCall.function?.arguments || '{}');
-                    console.log(`📋 [${timeStamp}] ${formattedAgent}: "Analyzing project structure in ${args.paths?.join(', ') || 'current directory'}"`);
+                    const message = `${formattedAgent}: "Analyzing project structure in ${args.paths?.join(', ') || 'current directory'}"`;
+                    console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
                 } catch (e) {
-                    console.log(`📋 [${timeStamp}] ${formattedAgent}: "Generating project inventory..."`);
+                    const message = `${formattedAgent}: "Generating project inventory..."`;
+                    console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
                 }
                 break;
             
@@ -156,14 +181,17 @@ export class ConversationalLogger {
                     const args = typeof toolCall.function === 'string' 
                         ? JSON.parse(toolCall.args || '{}')
                         : JSON.parse(toolCall.function?.arguments || '{}');
-                    console.log(`📝 [${timeStamp}] ${formattedAgent}: "Writing to ${args.path || args.filename || 'file'}"`);
+                    const message = `${formattedAgent}: "Writing to ${args.path || args.filename || 'file'}"`;
+                    console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
                 } catch (e) {
-                    console.log(`📝 [${timeStamp}] ${formattedAgent}: "Writing file..."`);
+                    const message = `${formattedAgent}: "Writing file..."`;
+                    console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
                 }
                 break;
             
             default:
-                console.log(`🔧 [${timeStamp}] ${formattedAgent}: "Using ${toolName} tool"`);
+                const message = `${formattedAgent}: "Using ${toolName} tool"`;
+                console.log(this.formatLogLine(agentName, '🔧', timeStamp, message));
         }
     }
 
@@ -175,7 +203,8 @@ export class ConversationalLogger {
     logError(agentName: string, error: string): void {
         const formattedAgent = this.formatAgentName(agentName);
         const timeStamp = this.formatTime();
-        console.log(`❌ [${timeStamp}] ${formattedAgent}: "Error occurred - ${error}"`);
+        const message = `${formattedAgent}: "Error occurred - ${error}"`;
+        console.log(this.formatLogLine(agentName, '❌', timeStamp, message));
     }
 
     logTestStart(testName: string): void {
@@ -196,6 +225,7 @@ export class ConversationalLogger {
     logMatchedResponse(mockResponse: any): void {
         const timeStamp = this.formatTime();
         const trigger = mockResponse.trigger;
+        const agentName = trigger.agentName || this.currentAgent;
         
         let triggerDescription = '';
         if (trigger.agentName) {
@@ -209,17 +239,28 @@ export class ConversationalLogger {
             triggerDescription += `, Message: "${msgPreview}..."`;
         }
         
-        console.log(`🎯 [${timeStamp}] Mock matched (${triggerDescription})`);
+        const message = `Mock matched (${triggerDescription})`;
+        console.log(this.formatLogLine(agentName, '🎯', timeStamp, message));
         
         if (mockResponse.response.content) {
             const preview = mockResponse.response.content.substring(0, 50);
             console.log(`   → Response: "${preview}${mockResponse.response.content.length > 50 ? '...' : ''}"`);
+        }
+        
+        // Log tool calls if present
+        if (mockResponse.response.toolCalls && mockResponse.response.toolCalls.length > 0) {
+            const toolNames = mockResponse.response.toolCalls.map((tc: any) => {
+                const toolName = tc.function?.name || tc.name || 'unknown';
+                return toolName;
+            });
+            console.log(`   → Tools: [${toolNames.join(', ')}]`);
         }
     }
 
     reset(): void {
         this.conversationStartTime = new Date();
         this.lastPhase = "CHAT";
+        this.currentAgent = null;
     }
 }
 

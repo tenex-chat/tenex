@@ -22,6 +22,9 @@ mock.module("../persistence", () => ({
     })),
 }));
 
+mock.module("@/tracing", () => ({
+    createTracingContext: mock(() => ({ id: "trace-123" }))
+}));
 describe("ConversationManager", () => {
     let manager: ConversationManager;
     const projectPath = "/test/project";

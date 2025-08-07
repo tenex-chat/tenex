@@ -28,15 +28,6 @@ export class TerminationHandler {
         const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
         const requiresTerminationEnforcement = !isChat && !isBrainstormPhase;
 
-        tracingLogger.info("Checking termination requirements", {
-            agent: context.agent.name,
-            isOrchestrator: context.agent.isOrchestrator,
-            phase: context.phase,
-            requiresTerminationEnforcement,
-            attempt,
-            hasTerminated: this.stateManager.hasTerminated(),
-        });
-
         // If terminated properly or termination not required, we're done
         if (this.stateManager.hasTerminated() || !requiresTerminationEnforcement) {
             return false;
@@ -151,24 +142,5 @@ export class TerminationHandler {
         const isChat = context.phase.toLowerCase() === PHASES.CHAT;
         const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
         return !isChat && !isBrainstormPhase;
-    }
-
-    /**
-     * Log termination attempt information
-     */
-    logTerminationAttempt(
-        attempt: number,
-        context: ExecutionContext,
-        tracingLogger: TracingLogger
-    ): void {
-        tracingLogger.info(
-            `🔄 Termination attempt ${attempt}/${ExecutionConfig.MAX_TERMINATION_ATTEMPTS}`,
-            {
-                agent: context.agent.name,
-                phase: context.phase,
-                requiresTerminationEnforcement: this.requiresTerminationEnforcement(context),
-                messageCount: this.stateManager.getStateSummary().contentLength,
-            }
-        );
     }
 }

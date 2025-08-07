@@ -77,33 +77,34 @@ export interface LLMService {
 }
 
 /**
- * LLM configuration - decoupled from implementation
+ * LLM Model Configuration - matches what's stored on disk in TenexLLMs.configurations
+ * Does NOT include credentials (apiKey, baseUrl) which are stored separately
  */
-export interface LLMConfig {
-    provider:
-        | "anthropic"
-        | "openai"
-        | "google"
-        | "ollama"
-        | "mistral"
-        | "groq"
-        | "openrouter"
-        | "deepseek";
+export interface LLMModelConfig {
+    provider: LLMProvider;
     model: string;
-    apiKey?: string;
-    baseUrl?: string;
     enableCaching?: boolean;
     temperature?: number;
     maxTokens?: number;
-    defaultOptions?: Partial<CompletionOptions>;
 }
 
 /**
- * A complete LLM configuration with its assigned name and credentials
+ * Resolved LLM Configuration - includes credentials for runtime use
+ * This is what the LLM service actually needs to make API calls
  */
-export interface LLMConfigWithName extends LLMConfig {
+export interface ResolvedLLMConfig extends LLMModelConfig {
+    apiKey?: string;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+}
+
+/**
+ * Named LLM configuration for UI display and management
+ */
+export interface LLMConfigWithName extends ResolvedLLMConfig {
     name: string;
 }
+
 
 /**
  * LLM Provider types
@@ -141,9 +142,9 @@ export const EVENT_KINDS = {
 } as const;
 
 /**
- * LLM configurations collection
+ * LLM configurations collection - resolved configs with credentials
  */
-export type LLMConfigs = Record<string, LLMConfig>;
+export type LLMConfigs = Record<string, ResolvedLLMConfig>;
 
 /**
  * LLM Preset configuration

@@ -60,40 +60,22 @@ export const TenexAgentsSchema = z.record(
 // LLM SCHEMA (llms.json)
 // =====================================================================================
 
+import type { LLMModelConfig, ProviderAuth } from "@/llm/types";
+
 export interface TenexLLMs {
     configurations: {
-        [namedConfig: string]: {
-            provider:
-                | "anthropic"
-                | "openai"
-                | "google"
-                | "ollama"
-                | "mistral"
-                | "groq"
-                | "openrouter"
-                | "deepseek";
-            model: string;
-            temperature?: number;
-            maxTokens?: number;
-            enableCaching?: boolean;
-        };
+        [namedConfig: string]: LLMModelConfig;
     };
     defaults?: {
         agents?: string;
         [agentSlug: string]: string | undefined;
     };
     credentials: {
-        [namedCredential: string]: {
-            apiKey?: string;
-            baseUrl?: string;
-            headers?: Record<string, string>;
-        };
+        [namedCredential: string]: ProviderAuth;
     };
 }
 
 import { LLM_PROVIDERS } from "@/llm/types";
-
-// ... existing code ...
 
 export const TenexLLMsSchema = z.object({
     configurations: z.record(

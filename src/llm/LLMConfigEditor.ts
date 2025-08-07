@@ -1,4 +1,4 @@
-import type { LLMConfig, LLMProvider } from "@/llm/types";
+import type { ResolvedLLMConfig, LLMProvider } from "@/llm/types";
 import { configService } from "@/services";
 import type { TenexLLMs } from "@/services/config/types";
 import { LLM_DEFAULTS } from "./constants";
@@ -198,7 +198,7 @@ export class LLMConfigEditor {
         );
 
         // 5. Build and test configuration
-        const newConfig: LLMConfig = {
+        const newConfig: ResolvedLLMConfig = {
             provider,
             model: modelSelection.model,
             enableCaching: configPrompts.enableCaching ?? modelSelection.supportsCaching,

@@ -20,8 +20,10 @@ import { getNDK } from "@/nostr";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { Agent } from "@/agents/types";
 import { Message } from "multi-llm-ts";
+import type { NostrEvent } from "@nostr-dev-kit/ndk";
 
 export class ConversationManager {
+    private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
     private conversations: Map<string, Conversation> = new Map();
     private conversationContexts: Map<string, TracingContext> = new Map();
     private conversationsDir: string;
@@ -320,34 +322,141 @@ export class ConversationManager {
         // Get or initialize the agent's state
         let agentState = conversation.agentStates.get(targetAgent.slug);
         if (!agentState) {
-            agentState = { lastProcessedMessageIndex: 0 };
+            // When initializing a new agent state, we need to determine the correct starting index
+            // The key is: should this agent see the conversation history or not?
+            let initialIndex = 0;
+            
+            if (triggeringEvent?.id) {
+                // Check if this agent is p-tagged in the triggering event
+                const isDirectlyAddressed = triggeringEvent.tags?.some(
+                    tag => tag[0] === "p" && tag[1] === targetAgent.pubkey
+                );
+                
+                if (isDirectlyAddressed) {
+                    // Find the triggering event's position in history
+                    const triggeringEventIndex = conversation.history.findIndex(
+                        e => e.id === triggeringEvent.id
+                    );
+                    
+                    // Only skip history if this is the FIRST message (index 0)
+                    // Otherwise, the agent should see prior conversation history
+                    if (triggeringEventIndex === 0) {
+                        // This is the conversation starter - no history to show
+                        initialIndex = 0;
+                        logger.info(`[CONV_MGR] Agent ${targetAgent.slug} p-tagged at conversation start`);
+                    } else if (triggeringEventIndex > 0) {
+                        // Agent is being brought into existing conversation
+                        // They should see history but not the current message
+                        initialIndex = 0; // Start from beginning to see all history
+                        logger.info(`[CONV_MGR] Agent ${targetAgent.slug} p-tagged mid-conversation, will see history`);
+                    }
+                }
+            }
+            
+            agentState = { lastProcessedMessageIndex: initialIndex };
             conversation.agentStates.set(targetAgent.slug, agentState);
-            logger.info(`[CONV_MGR] Initialized new agent state for ${targetAgent.slug}`);
+            logger.info(`[CONV_MGR] Initialized new agent state for ${targetAgent.slug} at index ${initialIndex}`);
         }
 
         const messagesForLLM: Message[] = [];
         const currentHistoryLength = conversation.history.length;
 
-        // === 1. Add historical context (messages the agent has not yet seen) ===
-        const missedEvents = conversation.history.slice(agentState.lastProcessedMessageIndex);
+        // === 1. Build complete conversation history ===
+        // We need to provide the FULL conversation history to maintain context
+        // This includes ALL messages, not just "missed" ones
         
-        if (missedEvents.length > 0) {
+        // First, collect ALL previous messages up to (but not including) the triggering event
+        const allPreviousMessages: NDKEvent[] = [];
+        for (const event of conversation.history) {
+            // Stop when we reach the triggering event (it will be added as the primary message)
+            if (triggeringEvent?.id && event.id === triggeringEvent.id) {
+                break;
+            }
+            if (event.content) {
+                allPreviousMessages.push(event);
+            }
+        }
+        
+        // Now separate into the agent's own messages and others' messages
+        const ownPreviousMessages: NDKEvent[] = [];
+        const othersPreviousMessages: NDKEvent[] = [];
+        
+        for (const event of allPreviousMessages) {
+            const eventAgentSlug = getAgentSlugFromEvent(event);
+            if (eventAgentSlug === targetAgent.slug) {
+                ownPreviousMessages.push(event);
+            } else {
+                othersPreviousMessages.push(event);
+            }
+        }
+        
+        // Build the conversation in proper order
+        // We need to interleave messages to maintain the conversation flow
+        let conversationIndex = 0;
+        const conversationHistory: { event: NDKEvent; isOwn: boolean }[] = [];
+        
+        for (const event of allPreviousMessages) {
+            const eventAgentSlug = getAgentSlugFromEvent(event);
+            conversationHistory.push({
+                event,
+                isOwn: eventAgentSlug === targetAgent.slug
+            });
+        }
+        
+        // Add messages in conversation order
+        for (const { event, isOwn } of conversationHistory) {
+            // Process nostr entities in historical messages
+            const processedContent = await this.processNostrEntities(event.content);
+            
+            if (isOwn) {
+                // Agent's own message - add as assistant
+                messagesForLLM.push(new Message("assistant", processedContent));
+                logger.debug(`[CONV_MGR] Added agent's own message as assistant message`);
+            } else if (isEventFromUser(event)) {
+                // User message - add as user
+                messagesForLLM.push(new Message("user", processedContent));
+                logger.debug(`[CONV_MGR] Added user message to history`);
+            } else {
+                // Another agent's message - add as system with attribution
+                const eventAgentSlug = getAgentSlugFromEvent(event);
+                const projectCtx = getProjectContext();
+                const sendingAgentName = eventAgentSlug ? 
+                    (projectCtx.agents.get(eventAgentSlug)?.name || "Another agent") : 
+                    "Unknown";
+                messagesForLLM.push(new Message("system", `[${sendingAgentName}]: ${processedContent}`));
+                logger.debug(`[CONV_MGR] Added other agent's message as system message`);
+            }
+        }
+        
+        // Now handle NEW messages that the agent hasn't processed yet (for awareness)
+        const missedEvents = conversation.history.slice(agentState.lastProcessedMessageIndex);
+        const newOthersMessages: NDKEvent[] = [];
+        
+        for (const event of missedEvents) {
+            if (!event.content) continue;
+            if (triggeringEvent?.id && event.id === triggeringEvent.id) continue; // Skip triggering event
+            
+            const eventAgentSlug = getAgentSlugFromEvent(event);
+            // Only include messages from others that aren't already in history
+            if (eventAgentSlug !== targetAgent.slug && !allPreviousMessages.includes(event)) {
+                newOthersMessages.push(event);
+            }
+        }
+        
+        // If there are NEW messages from others while the agent was away, add them in a block
+        if (newOthersMessages.length > 0) {
             let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
             
-            // Add handoff summary if provided
             if (handoff?.summary) {
                 contextBlock += `**Previous context**: ${handoff.summary}\n\n`;
             }
 
-            for (const event of missedEvents) {
-                if (!event.content) continue;
-                const sender = this.getEventSender(event, targetAgent.slug);
-                if (sender) { // Don't include the agent's own previous messages
-                    if (sender === "User") {
-                        contextBlock += `🟢 USER:\n${event.content}\n\n`;
-                    } else {
-                        contextBlock += `💬 ${sender}:\n${event.content}\n\n`;
-                    }
+            for (const event of newOthersMessages) {
+                const sender = this.getEventSenderForHistory(event, targetAgent.slug);
+                if (sender) {
+                    // Process nostr entities in new messages
+                    const processedContent = await this.processNostrEntities(event.content);
+                    contextBlock += `${sender}:\n${processedContent}\n\n`;
                 }
             }
             
@@ -355,22 +464,37 @@ export class ConversationManager {
             contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
             
             messagesForLLM.push(new Message("system", contextBlock));
-            logger.debug(`[CONV_MGR] Added historical context for ${targetAgent.slug}`, { 
-                missedEventsCount: missedEvents.length 
+            logger.debug(`[CONV_MGR] Added new messages while away for ${targetAgent.slug}`, { 
+                newMessagesCount: newOthersMessages.length 
             });
         }
 
         // === 2. Add "NEW INTERACTION" marker (if applicable) ===
-        // Always for orchestrator, or for any agent if there was historical context
-        const shouldAddMarker = targetAgent.isOrchestrator || missedEvents.length > 0;
+        // Only add for orchestrator handling brand new user messages (not continuations or p-tags)
+        const isDirectlyAddressed = triggeringEvent?.tags?.some(
+            tag => tag[0] === "p" && tag[1] === targetAgent.pubkey
+        );
+        // It's a new interaction if:
+        // - The orchestrator is handling it
+        // - It's from the user
+        // - There's no prior conversation history (first message)
+        // - The orchestrator is not directly addressed
+        const isFirstMessage = allPreviousMessages.length === 0;
+        const isNewUserMessage = triggeringEvent && isEventFromUser(triggeringEvent) && 
+                                 isFirstMessage && 
+                                 !isDirectlyAddressed;
+        const shouldAddMarker = targetAgent.isOrchestrator && isNewUserMessage;
         if (shouldAddMarker) {
             messagesForLLM.push(new Message("system", "=== NEW INTERACTION ==="));
         }
 
         // === 3. Add the current triggering event as the primary message ===
         if (triggeringEvent?.content) {
+            // Process nostr entities in the content
+            const processedContent = await this.processNostrEntities(triggeringEvent.content);
+            
             if (isEventFromUser(triggeringEvent)) {
-                messagesForLLM.push(new Message("user", triggeringEvent.content));
+                messagesForLLM.push(new Message("user", processedContent));
             } else {
                 // If from another agent, attribute it as a system message
                 const eventAgentSlug = getAgentSlugFromEvent(triggeringEvent);
@@ -378,11 +502,12 @@ export class ConversationManager {
                 const sendingAgentName = eventAgentSlug ? 
                     (projectCtx.agents.get(eventAgentSlug)?.name || "Another agent") : 
                     "Another agent";
-                messagesForLLM.push(new Message("system", `[${sendingAgentName}]: ${triggeringEvent.content}`));
+                messagesForLLM.push(new Message("system", `[${sendingAgentName}]: ${processedContent}`));
             }
         } else if (handoff?.message) {
             // If no explicit triggering event content, but a handoff message exists
-            messagesForLLM.push(new Message("user", handoff.message));
+            const processedHandoffMessage = await this.processNostrEntities(handoff.message);
+            messagesForLLM.push(new Message("user", processedHandoffMessage));
         }
 
         // === 4. Update agent's state for next turn ===
@@ -429,7 +554,7 @@ export class ConversationManager {
     }
 
     /**
-     * Helper to determine who sent an event
+     * Helper to determine who sent an event (for current context)
      */
     private getEventSender(event: NDKEvent, agentSlug: string): string | null {
         const eventAgentSlug = getAgentSlugFromEvent(event);
@@ -447,6 +572,31 @@ export class ConversationManager {
             return sendingAgent ? sendingAgent.name : "Another agent";
         } else {
             return "Unknown";
+        }
+    }
+
+    /**
+     * Helper to format event sender for conversation history
+     * This version includes the agent's own messages for context continuity
+     */
+    private getEventSenderForHistory(event: NDKEvent, agentSlug: string): string | null {
+        const eventAgentSlug = getAgentSlugFromEvent(event);
+        
+        if (isEventFromUser(event)) {
+            return "🟢 USER";
+        } else if (eventAgentSlug) {
+            const projectCtx = getProjectContext();
+            const sendingAgent = projectCtx.agents.get(eventAgentSlug);
+            const agentName = sendingAgent ? sendingAgent.name : "Another agent";
+            
+            // Mark the agent's own previous messages clearly
+            if (eventAgentSlug === agentSlug) {
+                return `💬 You (${agentName})`;
+            } else {
+                return `💬 ${agentName}`;
+            }
+        } else {
+            return "💬 Unknown";
         }
     }
 
@@ -522,6 +672,46 @@ export class ConversationManager {
      */
     getTracingContext(conversationId: string): TracingContext | undefined {
         return this.conversationContexts.get(conversationId);
+    }
+
+    /**
+     * Process a message to inline nostr entities
+     */
+    private async processNostrEntities(content: string): Promise<string> {
+        const ndk = getNDK();
+        let processedContent = content;
+        
+        // Find all nostr entities in the content
+        const entities = content.match(ConversationManager.NOSTR_ENTITY_REGEX);
+        if (!entities || entities.length === 0) {
+            return content;
+        }
+        
+        // Process each entity
+        for (const entity of entities) {
+            try {
+                // fetchEvent accepts bech32 directly
+                const event = await ndk.fetchEvent(entity);
+                
+                if (event) {
+                    // Inline the event content
+                    const inlinedContent = `<nostr-event entity="${entity}">${event.content}</nostr-event>`;
+                    processedContent = processedContent.replace(entity, inlinedContent);
+                    
+                    logger.debug(`[CONV_MGR] Inlined nostr entity`, {
+                        entity,
+                        kind: event.kind,
+                        contentLength: event.content?.length || 0
+                    });
+                } else {
+                    logger.warn(`[CONV_MGR] Failed to fetch nostr entity`, { entity });
+                }
+            } catch (error) {
+                logger.error(`[CONV_MGR] Error processing nostr entity`, { entity, error });
+            }
+        }
+        
+        return processedContent;
     }
 
     /**

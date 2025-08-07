@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import type { CompletionRequest, CompletionResponse, LLMConfig } from "./types";
+import type { CompletionRequest, CompletionResponse, ResolvedLLMConfig } from "./types";
 
 export interface LLMCallLogEntry {
     timestamp: string;
@@ -124,7 +124,7 @@ export class LLMCallLogger {
 
     async logLLMCall(
         configKey: string,
-        config: LLMConfig,
+        config: ResolvedLLMConfig,
         request: CompletionRequest,
         result: { response?: CompletionResponse; error?: Error },
         performance: { startTime: number; endTime: number }

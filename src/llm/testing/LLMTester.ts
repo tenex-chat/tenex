@@ -1,4 +1,5 @@
-import type { LLMConfig, LLMProvider } from "@/llm/types";
+import type { ResolvedLLMConfig, LLMProvider } from "@/llm/types";
+import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { igniteEngine, Message } from "multi-llm-ts";
 import { getModelsForProvider } from "../models";
@@ -10,7 +11,7 @@ export class LLMTester {
     /**
      * Test an LLM configuration by sending a test message
      */
-    async testLLMConfig(config: LLMConfig): Promise<boolean> {
+    async testLLMConfig(config: ResolvedLLMConfig): Promise<boolean> {
         try {
             const llmConfig = {
                 apiKey: config.apiKey,
@@ -55,16 +56,16 @@ export class LLMTester {
      */
     async testExistingConfiguration(
         configName: string,
-        configurations: Record<string, any>,
-        credentials: Record<string, any>
+        configurations: TenexLLMs['configurations'],
+        credentials: TenexLLMs['credentials']
     ): Promise<boolean> {
         const config = configurations[configName];
         if (!config) {
             throw new Error(`Configuration ${configName} not found`);
         }
 
-        // Build the full config with credentials
-        const fullConfig: LLMConfig = {
+        // Build the resolved config with credentials
+        const fullConfig: ResolvedLLMConfig = {
             provider: config.provider,
             model: config.model,
             enableCaching: config.enableCaching,
@@ -77,6 +78,7 @@ export class LLMTester {
         if (providerCredentials) {
             fullConfig.apiKey = providerCredentials.apiKey;
             fullConfig.baseUrl = providerCredentials.baseUrl;
+            fullConfig.headers = providerCredentials.headers;
         }
 
         return this.testLLMConfig(fullConfig);
@@ -85,7 +87,7 @@ export class LLMTester {
     /**
      * Validate configuration before testing
      */
-    validateConfigForTesting(config: LLMConfig): { valid: boolean; error?: string } {
+    validateConfigForTesting(config: ResolvedLLMConfig): { valid: boolean; error?: string } {
         if (!config.provider) {
             return { valid: false, error: "Provider is required" };
         }

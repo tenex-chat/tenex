@@ -107,7 +107,6 @@ async function handleReplyLogic(
                     continue;
                 }
                 targetAgent = agent;
-                logger.info(`Routing to p-tagged agent: ${agent.name} (${agent.pubkey})`);
                 break;
             }
         }
@@ -119,7 +118,6 @@ async function handleReplyLogic(
         targetAgent === orchestratorAgent &&
         !mentionedPubkeys.includes(orchestratorAgent.pubkey)
     ) {
-        logger.info("Event is not from user and doesn't p-tag any valid agent, skipping");
         return;
     }
 

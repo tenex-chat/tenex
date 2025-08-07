@@ -42,7 +42,6 @@ export const handleNewConversation = async (
                 );
                 if (agent) {
                     targetAgent = agent;
-                    logInfo(chalk.cyan(`Routing to p-tagged agent: ${agent.name}`));
                     break;
                 }
             }
