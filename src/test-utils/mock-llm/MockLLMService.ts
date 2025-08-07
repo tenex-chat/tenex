@@ -8,6 +8,7 @@ import type {
 } from "@/llm/types";
 import type { MockLLMConfig, MockLLMResponse } from "./types";
 import { logger } from "@/utils/logger";
+import { conversationalLogger } from "../conversational-logger";
 
 export class MockLLMService implements LLMService {
     private config: MockLLMConfig;
@@ -25,6 +26,7 @@ export class MockLLMService implements LLMService {
         iteration: number;
         agentIterations: Map<string, number>;
         lastAgentExecuted?: string;
+        continueToolArgs?: any;
     }> = new Map();
 
     constructor(config: MockLLMConfig = {}) {
@@ -200,14 +202,11 @@ export class MockLLMService implements LLMService {
         const agentIteration = context.agentIterations.get(agentName)!;
         
         if (this.config.debug) {
-            console.log('MockLLM: Finding response for', {
-                agentName,
+            conversationalLogger.logAgentThinking(agentName, {
                 phase,
-                lastUserMessage: lastUserMessage?.content?.substring(0, 100),
-                toolCalls,
+                userMessage: lastUserMessage?.content,
                 iteration: context.iteration,
-                agentIteration,
-                lastContinueCaller: context.lastContinueCaller
+                agentIteration
             });
         }
         
@@ -276,16 +275,36 @@ export class MockLLMService implements LLMService {
                 if (context.lastAgentExecuted !== trigger.afterAgent) continue;
             }
             
+            // Check for continue tool context (e.g. routing to verification)
+            if (trigger.continueToPhase && context.continueToolArgs) {
+                if (context.continueToolArgs.phase !== trigger.continueToPhase) continue;
+            }
+            
             // All conditions matched
             if (this.config.debug) {
-                console.log('MockLLM: Matched response', mockResponse);
+                conversationalLogger.logMatchedResponse(mockResponse);
             }
+            
+            // Log the response using conversational logger
+            if (this.config.debug && mockResponse.response) {
+                conversationalLogger.logAgentResponse(agentName, {
+                    content: mockResponse.response.content,
+                    toolCalls: mockResponse.response.toolCalls,
+                    phase,
+                    reason: mockResponse.response.reason
+                });
+            }
+            
             return mockResponse.response;
         }
         
         // Return default response
         if (this.config.debug) {
-            console.log('MockLLM: Using default response');
+            conversationalLogger.logAgentResponse('unknown', {
+                content: this.config.defaultResponse?.content || "Default mock response",
+                toolCalls: this.config.defaultResponse?.toolCalls,
+                reason: 'No matching response found, using default'
+            });
         }
         return this.config.defaultResponse || { content: "Default mock response" };
     }
@@ -375,6 +394,7 @@ export class MockLLMService implements LLMService {
         lastContinueCaller?: string;
         iteration?: number;
         lastAgentExecuted?: string;
+        continueToolArgs?: any;
     }): void {
         const conversationId = updates.conversationId || 'default';
         const context = this.getOrCreateContext(conversationId);
@@ -387,6 +407,9 @@ export class MockLLMService implements LLMService {
         }
         if (updates.lastAgentExecuted !== undefined) {
             context.lastAgentExecuted = updates.lastAgentExecuted;
+        }
+        if (updates.continueToolArgs !== undefined) {
+            context.continueToolArgs = updates.continueToolArgs;
         }
     }
     

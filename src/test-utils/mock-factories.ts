@@ -4,6 +4,7 @@ import type { Agent } from "@/agents/types";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { Conversation } from "@/conversations/types";
 import type { Phase } from "@/conversations/phases";
+import { PHASES } from "@/conversations/phases";
 import type { ToolCall } from "@/llm/types";
 import { EVENT_KINDS } from "@/llm/types";
 
@@ -92,7 +93,7 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
     return {
         id,
         title: "Mock Conversation",
-        phase: "chat",
+        phase: PHASES.CHAT,
         history: [],
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
@@ -100,13 +101,13 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
             summary: "Mock conversation summary",
             requirements: "Mock requirements",
             continueCallCounts: {
-                chat: 0,
-                brainstorm: 0,
-                plan: 0,
-                execute: 0,
-                verification: 0,
-                chores: 0,
-                reflection: 0
+                [PHASES.CHAT]: 0,
+                [PHASES.BRAINSTORM]: 0,
+                [PHASES.PLAN]: 0,
+                [PHASES.EXECUTE]: 0,
+                [PHASES.VERIFICATION]: 0,
+                [PHASES.CHORES]: 0,
+                [PHASES.REFLECTION]: 0
             }
         },
         phaseTransitions: [],
@@ -140,7 +141,7 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
     return {
         agent,
         conversationId: overrides?.conversationId || "mock-conv-" + Math.random().toString(36).substr(2, 9),
-        phase: "chat",
+        phase: PHASES.CHAT,
         projectPath: "/mock/project",
         triggeringEvent: mockEvent,
         publisher: mockPublisher,

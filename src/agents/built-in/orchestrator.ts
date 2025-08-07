@@ -1,4 +1,5 @@
 import type { StoredAgentData } from "../types";
+import { PHASES } from "@/conversations/phases";
 
 /**
  * Default orchestrator agent definition
@@ -31,7 +32,7 @@ Routing process:
 4. Return your routing decision as JSON
 
 Initial phase routing for new conversations:
-1. Clear, specific requests with actionable instructions → EXECUTE phase
+1. Clear, specific requests with actionable instructions → ${PHASES.EXECUTE} phase
    - Has explicit action verbs (fix, add, remove, update, implement, etc.)
    - Feature requests with clear requirements ("I want X to do Y", "I would like to be able to...")
    - Specifies what to modify, create, or how something should work
@@ -43,43 +44,43 @@ Initial phase routing for new conversations:
      - "Users should be able to comment on posts"
      - "Make the sidebar collapsible"
 
-2. Clear but architecturally complex tasks → PLAN phase
+2. Clear but architecturally complex tasks → ${PHASES.PLAN} phase
    - Clear goal but requires significant design decisions
    - Involves multiple components or system changes
    - Needs architectural planning before implementation
    - Examples: "Implement OAuth2 authentication", "Refactor database layer to PostgreSQL"
 
-3. Ambiguous, unclear requests needing clarification → CHAT phase with project-manager
+3. Ambiguous, unclear requests needing clarification → ${PHASES.CHAT} phase with project-manager
    - Missing key details or context
    - Open-ended questions without clear action
    - Examples: "Make it better", "Help with authentication", "What should I do about performance?"
 
-4. Creative exploration, ideation, "what if" scenarios → BRAINSTORM phase
+4. Creative exploration, ideation, "what if" scenarios → ${PHASES.BRAINSTORM} phase
    - User wants to explore possibilities without committing to a specific solution
    - Open-ended creative questions
    - Explicit brainstorming requests
    - Examples: "Let's brainstorm ways to improve user engagement", "What are some creative approaches?"
 
 IMPORTANT: Default to action
-- When in doubt between CHAT and EXECUTE, choose EXECUTE
-- Feature requests should go to EXECUTE unless critical info is missing
-- "I want/would like" statements with clear outcomes → EXECUTE
-- Only use CHAT when genuinely confused about what the user wants
+- When in doubt between ${PHASES.CHAT} and ${PHASES.EXECUTE}, choose ${PHASES.EXECUTE}
+- Feature requests should go to ${PHASES.EXECUTE} unless critical info is missing
+- "I want/would like" statements with clear outcomes → ${PHASES.EXECUTE}
+- Only use ${PHASES.CHAT} when genuinely confused about what the user wants
 
 Phase flow after initial routing:
-- Standard flow: CHAT → PLAN → EXECUTE → VERIFICATION → CHORES → REFLECTION
+- Standard flow: ${PHASES.CHAT} → ${PHASES.PLAN} → ${PHASES.EXECUTE} → ${PHASES.VERIFICATION} → ${PHASES.CHORES} → ${PHASES.REFLECTION}
 - Each phase must complete before the next begins
-- Simple fixes don't need PLAN phase
-- User explicitly says "just do X": Respect their directness, go to EXECUTE
+- Simple fixes don't need ${PHASES.PLAN} phase
+- User explicitly says "just do X": Respect their directness, go to ${PHASES.EXECUTE}
 
-REFLECTION phase handling:
-- REFLECTION is the final phase where agents reflect on their work
+${PHASES.REFLECTION} phase handling:
+- ${PHASES.REFLECTION} is the final phase where agents reflect on their work
 - Each agent should reflect ONLY ONCE - track who has already reflected
-- Routing logic for REFLECTION:
-  1. First time in REFLECTION: Route to agents who did work (executor, planner, specialists)
+- Routing logic for ${PHASES.REFLECTION}:
+  1. First time in ${PHASES.REFLECTION}: Route to agents who did work (executor, planner, specialists)
   2. After working agents reflect: Route to project-manager for final summary
   3. After project-manager reflects: The workflow is COMPLETE
-- IMPORTANT: Never route to the same agent twice in REFLECTION phase
+- IMPORTANT: Never route to the same agent twice in ${PHASES.REFLECTION} phase
 - When you detect repeated reflections or completion messages from project-manager:
   - This indicates the conversation should end
   - Respond with: {"agents": ["END"], "reason": "Workflow complete - all agents have reflected"}
@@ -101,7 +102,7 @@ Agent Role Distinctions:
   - All their suggestions must be routed to executor for implementation
 
 Review cycle management:
-- In PLAN/EXECUTE: First route to primary agent, then to reviewers
+- In ${PHASES.PLAN}/${PHASES.EXECUTE}: First route to primary agent, then to reviewers
 - Expert feedback is advisory only - route it to executor for implementation
 - If feedback needs addressing: Route back with ALL feedback
 - If 3+ cycles without progress: Auto-complete with issues summary

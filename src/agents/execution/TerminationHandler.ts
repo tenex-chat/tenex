@@ -4,6 +4,7 @@ import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
 import { getProjectContext } from "@/services/ProjectContext";
+import { PHASES } from "@/conversations/phases";
 
 /**
  * Handles termination logic for agent execution.
@@ -23,8 +24,8 @@ export class TerminationHandler {
         tracingLogger: TracingLogger
     ): boolean {
         // Check if this agent requires termination enforcement
-        const isChat = context.phase.toLowerCase() === "chat";
-        const isBrainstormPhase = context.phase.toLowerCase() === "brainstorm";
+        const isChat = context.phase.toLowerCase() === PHASES.CHAT;
+        const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
         const requiresTerminationEnforcement = !isChat && !isBrainstormPhase;
 
         tracingLogger.info("Checking termination requirements", {
@@ -147,8 +148,8 @@ export class TerminationHandler {
      * Check if the current phase/agent combination requires termination enforcement
      */
     requiresTerminationEnforcement(context: ExecutionContext): boolean {
-        const isChat = context.phase.toLowerCase() === "chat";
-        const isBrainstormPhase = context.phase.toLowerCase() === "brainstorm";
+        const isChat = context.phase.toLowerCase() === PHASES.CHAT;
+        const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
         return !isChat && !isBrainstormPhase;
     }
 

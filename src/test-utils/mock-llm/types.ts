@@ -21,6 +21,8 @@ export interface MockLLMResponse {
         previousAgent?: string;
         /** Respond differently after specific agent */
         afterAgent?: string;
+        /** Match when continue tool specifies a phase */
+        continueToPhase?: string;
     };
     /** The response to return when triggered */
     response: {

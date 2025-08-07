@@ -5,6 +5,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { Agent } from "@/agents/types";
 import { ConversationManager } from "@/conversations/ConversationManager";
 import type { Phase } from "@/conversations/phases";
+import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { createAgentAwareLLMService, loadLLMRouter } from "@/llm";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
@@ -84,7 +85,7 @@ export async function runDebugChat(
         const conversation: Conversation = {
             id: conversationId,
             title: "Debug Chat Session",
-            phase: "chat" as Phase,
+            phase: PHASES.CHAT,
             history: [],
             agentStates: new Map(),
             phaseStartedAt: Date.now(),
@@ -116,7 +117,7 @@ export async function runDebugChat(
         if (options.systemPrompt) {
             const systemPromptBuilder = new PromptBuilder().add("agent-system-prompt", {
                 agent,
-                phase: "chat" as Phase,
+                phase: PHASES.CHAT,
                 projectTitle: project.tagValue("title") || "Untitled Project",
                 projectRepository: project.tagValue("repo") || undefined,
             });
@@ -140,14 +141,14 @@ export async function runDebugChat(
             mockEvent.created_at = Math.floor(Date.now() / 1000);
             mockEvent.tags = [
                 ["conversation", conversationId],
-                ["phase", "chat"],
+                ["phase", PHASES.CHAT],
             ];
 
             // Create execution context
             const context: ExecutionContext = {
                 agent,
                 conversationId: conversation.id,
-                phase: "chat" as Phase,
+                phase: PHASES.CHAT,
                 projectPath,
                 triggeringEvent: mockEvent,
                 publisher: new (await import("@/nostr/NostrPublisher")).NostrPublisher({
@@ -218,7 +219,7 @@ export async function runDebugChat(
             if (input.toLowerCase() === "prompt") {
                 const systemPromptBuilder = new PromptBuilder().add("agent-system-prompt", {
                     agent,
-                    phase: "chat" as Phase,
+                    phase: PHASES.CHAT,
                     projectTitle: project.tagValue("title") || "Untitled Project",
                     projectRepository: project.tagValue("repo") || undefined,
                 });
@@ -253,14 +254,14 @@ export async function runDebugChat(
                 mockEvent.created_at = Math.floor(Date.now() / 1000);
                 mockEvent.tags = [
                     ["conversation", conversationId],
-                    ["phase", "chat"],
+                    ["phase", PHASES.CHAT],
                 ];
 
                 // Create execution context
                 const context: ExecutionContext = {
                     agent,
                     conversationId: conversation.id,
-                    phase: "chat" as Phase,
+                    phase: PHASES.CHAT,
                     projectPath,
                     triggeringEvent: mockEvent,
                     publisher: new (await import("@/nostr/NostrPublisher")).NostrPublisher({

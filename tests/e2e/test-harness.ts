@@ -10,14 +10,10 @@ import {
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
 import { ConversationManager } from "@/conversations/ConversationManager";
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import { AgentExecutor } from "@/agents/execution/AgentExecutor";
-import { RoutingBackend } from "@/agents/execution/RoutingBackend";
-import type { ExecutionContext } from "@/agents/execution/types";
 import type { ToolCall } from "@/llm/types";
 import { Message } from "multi-llm-ts";
 import { ConfigService } from "@/services/ConfigService";
 import { EVENT_KINDS } from "@/llm/types";
-import { logger } from "@/utils/logger";
 
 export interface E2ETestContext {
     projectPath: string;
@@ -359,149 +355,7 @@ function createMockPublisher() {
     };
 }
 
-/**
- * Create and execute an agent
- */
-export async function executeAgent(
-    context: E2ETestContext,
-    agentName: string,
-    conversationId: string,
-    userMessage: string,
-    options: {
-        onStreamContent?: (content: string) => void;
-        onStreamToolCall?: (toolCall: any) => void;
-        onComplete?: () => void;
-        onError?: (error: Error) => void;
-    } = {}
-): Promise<void> {
-    // Try both the provided name and lowercase version
-    const agent = context.agentRegistry.getAgent(agentName) || 
-                  context.agentRegistry.getAgent(agentName.toLowerCase());
-    if (!agent) {
-        console.error("Available agents:", context.agentRegistry.getAllAgents().map(a => ({ slug: a.slug, name: a.name })));
-        throw new Error(`Agent not found: ${agentName}`);
-    }
-    
-    const conversation = await context.conversationManager.getConversation(conversationId);
-    if (!conversation) {
-        throw new Error(`Conversation not found: ${conversationId}`);
-    }
-    
-    // Create a mock NDK event for the triggering event
-    const triggeringEvent = createMockNDKEvent({
-        kind: EVENT_KINDS.TASK,
-        content: userMessage,
-        created_at: Math.floor(Date.now() / 1000)
-    });
-    
-    // Create mock publisher
-    const mockPublisher = createMockPublisher();
-    
-    // Create AgentExecutor first for use in ExecutionContext
-    let agentExecutor: AgentExecutor | undefined;
-    
-    const executionContext: ExecutionContext = {
-        agent,
-        conversationId,
-        phase: conversation.phase,
-        projectPath: context.projectPath,
-        triggeringEvent,
-        publisher: mockPublisher,
-        conversationManager: context.conversationManager,
-        previousPhase: conversation.previousPhase,
-        handoff: conversation.phaseTransitions[conversation.phaseTransitions.length - 1],
-        claudeSessionId: undefined,
-        agentExecutor: undefined, // Will be set below
-        tracingContext: {
-            requestId: "test-request-" + Math.random().toString(36).substr(2, 9),
-            conversationId,
-            getRequest: () => ({ id: "test-request" }),
-            getConversation: () => ({ id: conversationId }),
-            getAgent: () => agent
-        } as any
-    };
-    
-    // Import getNDK for AgentExecutor
-    const { getNDK } = await import('@/nostr');
-    
-    // Create AgentExecutor with the correct constructor signature
-    agentExecutor = new AgentExecutor(
-        context.mockLLM as any,  // LLMService
-        getNDK(),  // NDK
-        context.conversationManager  // ConversationManager
-    );
-    
-    // Set the agentExecutor in the context
-    executionContext.agentExecutor = agentExecutor;
-    
-    // Use appropriate backend based on agent
-    if (agentName.toLowerCase() === "orchestrator") {
-        // For orchestrator, we need to get the routing decision without executing agents
-        // Build a simple orchestrator message
-        const orchestratorMessages = [
-            new Message("system", `You are the orchestrator. Current phase: ${conversation.phase}. You must respond with ONLY a JSON object in this exact format:
-{
-    "agents": ["agent-slug"],
-    "phase": "phase-name",
-    "reason": "Your reasoning here"
-}
 
-No other text, only valid JSON.`)
-        ];
-        
-        // Add user message if provided
-        if (userMessage) {
-            orchestratorMessages.push(new Message("user", userMessage));
-        }
-        
-        // Use the mock LLM directly to get routing decision
-        const response = await context.mockLLM.complete({
-            messages: orchestratorMessages,
-            options: {
-                configName: agent.llmConfig || "orchestrator",
-                agentName: agent.name
-            }
-        });
-        
-        // Stream the response
-        if (options.onStreamContent && response.content) {
-            options.onStreamContent(response.content);
-        }
-    } else {
-        // Execute non-orchestrator agents directly with mock LLM
-        // Build simple agent messages
-        const agentMessages = [
-            new Message("system", `You are the ${agent.slug || agent.name} agent. Current Phase: ${conversation.phase}.`),
-        ];
-        
-        if (userMessage) {
-            agentMessages.push(new Message("user", userMessage));
-        }
-        
-        // Get response from mock LLM
-        const response = await context.mockLLM.complete({
-            messages: agentMessages,
-            options: {
-                configName: agent.llmConfig || agent.name,
-                agentName: agent.name
-            }
-        });
-        
-        // Stream the response
-        if (options.onStreamContent && response.content) {
-            options.onStreamContent(response.content);
-        }
-        
-        // Process tool calls
-        if (response.toolCalls && response.toolCalls.length > 0) {
-            for (const toolCall of response.toolCalls) {
-                if (options.onStreamToolCall) {
-                    options.onStreamToolCall(toolCall);
-                }
-            }
-        }
-    }
-}
 
 /**
  * Create a conversation from a user message
@@ -737,26 +591,62 @@ export async function executeConversationFlow(
             // Record tool calls
             if (agentResult.toolCalls) {
                 for (const toolCall of agentResult.toolCalls) {
+                    // Handle different tool call structures
+                    let toolName: string;
+                    let toolArgs: any;
+                    
+                    if (toolCall.function) {
+                        // Standard OpenAI-style structure
+                        toolName = toolCall.function.name;
+                        toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                    } else if (toolCall.name) {
+                        // Simplified structure from our mock
+                        toolName = toolCall.name;
+                        toolArgs = toolCall.params || {};
+                    } else {
+                        console.warn('Unknown tool call structure:', toolCall);
+                        continue;
+                    }
+                    
                     trace.toolCalls.push({
                         agent: targetAgent,
-                        tool: toolCall.function.name,
-                        arguments: JSON.parse(toolCall.function.arguments || '{}'),
+                        tool: toolName,
+                        arguments: toolArgs,
                         timestamp: new Date()
                     });
                     
                     // Check for continue tool - means we need to go back to orchestrator
-                    if (toolCall.function.name === 'continue') {
+                    if (toolName === 'continue') {
                         lastAgentExecuted = targetAgent;
                         // Update mock LLM context for next iteration
                         if ((context.mockLLM as any).updateContext) {
                             (context.mockLLM as any).updateContext({
                                 lastContinueCaller: targetAgent,
+                                iteration: iteration,
+                                continueToolArgs: toolArgs  // Pass tool arguments for context
+                            });
+                        }
+                    } else if (toolName === 'complete') {
+                        // Set the last agent executed for routing context
+                        lastAgentExecuted = targetAgent;
+                        // Update mock LLM context for next iteration 
+                        if ((context.mockLLM as any).updateContext) {
+                            (context.mockLLM as any).updateContext({
+                                lastContinueCaller: targetAgent, 
+                                previousAgent: targetAgent,
                                 iteration: iteration
                             });
                         }
-                    } else if (toolCall.function.name === 'complete') {
-                        // Conversation complete
-                        return trace;
+                        
+                        // End conversation in specific scenarios:
+                        // 1. If orchestrator called complete (explicit end)
+                        // 2. If project-manager completed verification phase (workflow complete)
+                        // 3. If project-manager completed plan phase (plan review complete)
+                        if (targetAgent === 'orchestrator' || 
+                            (targetAgent === 'project-manager' && 
+                             (routingDecision.phase === 'verification' || routingDecision.phase === 'plan'))) {
+                            return trace;
+                        }
                     }
                 }
             }
@@ -801,18 +691,92 @@ async function executeAgentWithResult(
         toolCalls: []
     };
     
-    await executeAgent(context, agentName, conversationId, userMessage, {
-        onStreamContent: (content) => {
-            result.message += content;
-        },
-        onStreamToolCall: (toolCall) => {
-            result.toolCalls.push(toolCall);
-        }
-    });
-    
-    if (context.mockLLM.config?.debug) {
-        console.log(`Agent ${agentName} result:`, result);
+    // Try both the provided name and lowercase version
+    const agent = context.agentRegistry.getAgent(agentName) || 
+                  context.agentRegistry.getAgent(agentName.toLowerCase());
+    if (!agent) {
+        console.error("Available agents:", context.agentRegistry.getAllAgents().map(a => ({ slug: a.slug, name: a.name })));
+        throw new Error(`Agent not found: ${agentName}`);
     }
+    
+    const conversation = await context.conversationManager.getConversation(conversationId);
+    if (!conversation) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+    
+    // Use appropriate backend based on agent
+    if (agentName.toLowerCase() === "orchestrator") {
+        // For orchestrator, we need to get the routing decision without executing agents
+        // Build a simple orchestrator message
+        const orchestratorMessages = [
+            new Message("system", `You are the orchestrator. Current phase: ${conversation.phase}. You must respond with ONLY a JSON object in this exact format:
+{
+    "agents": ["agent-slug"],
+    "phase": "phase-name",
+    "reason": "Your reasoning here"
+}
+
+No other text, only valid JSON.`)
+        ];
+        
+        // Add user message if provided
+        if (userMessage) {
+            orchestratorMessages.push(new Message("user", userMessage));
+        }
+        
+        // Use the mock LLM directly to get routing decision
+        const response = await context.mockLLM.complete({
+            messages: orchestratorMessages,
+            options: {
+                configName: agent.llmConfig || "orchestrator",
+                agentName: agent.name
+            }
+        });
+        
+        // Stream the response
+        if (response.content) {
+            result.message = response.content;
+        }
+    } else {
+        // Execute non-orchestrator agents directly with mock LLM
+        // Build simple agent messages
+        const agentMessages = [
+            new Message("system", `You are the ${agent.slug || agent.name} agent. Current Phase: ${conversation.phase}.`),
+        ];
+        
+        if (userMessage) {
+            agentMessages.push(new Message("user", userMessage));
+        }
+        
+        // Get response from mock LLM
+        const response = await context.mockLLM.complete({
+            messages: agentMessages,
+            options: {
+                configName: agent.llmConfig || agent.name,
+                agentName: agent.name
+            }
+        });
+        
+        // Stream the response
+        if (response.content) {
+            result.message = response.content;
+        }
+        
+        // Process tool calls
+        if (response.toolCalls && response.toolCalls.length > 0) {
+            // Convert from LlmToolCallInfo format back to ToolCall format for compatibility
+            result.toolCalls = response.toolCalls.map(tc => ({
+                id: tc.name || 'mock-tool-call',
+                type: 'function' as const,
+                function: {
+                    name: tc.name,
+                    arguments: JSON.stringify(tc.params || {})
+                }
+            }));
+        }
+    }
+    
+    // Result is already logged by the conversational logger in MockLLMService
     
     return result;
 }

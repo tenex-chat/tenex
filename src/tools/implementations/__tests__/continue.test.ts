@@ -5,6 +5,7 @@ import { continueTool } from "../continue";
 import type { ExecutionContext } from "@/tools/types";
 import type { ToolExecutionResult } from "@/tools/executor";
 import { createToolExecutor } from "@/tools/executor";
+import { PHASES } from "@/conversations/phases";
 
 // Mock dependencies
 mock.module("@/services/ProjectContext", () => ({
@@ -32,7 +33,7 @@ describe("continueTool - Agent routing", () => {
     const mockConversation: Conversation = {
         id: "test-conversation",
         title: "Test Conversation",
-        phase: "chat",
+        phase: PHASES.CHAT,
         history: [
             {
                 id: "user-event-1",
@@ -67,7 +68,7 @@ describe("continueTool - Agent routing", () => {
         // Base context
         projectPath: "/test/project",
         conversationId: "test-conversation",
-        phase: "chat",
+        phase: PHASES.CHAT,
 
         // Execution context
         agent: mockOrchestrator,
@@ -97,7 +98,7 @@ describe("continueTool - Agent routing", () => {
     describe("Required parameters", () => {
         it("should fail when no agents specified", async () => {
             const result = await executeControl({
-                phase: "plan",
+                phase: PHASES.PLAN,
                 reason: "Need to plan the architecture",
             });
 
@@ -120,7 +121,7 @@ describe("continueTool - Agent routing", () => {
         it("should succeed with valid agents", async () => {
             const result = await executeControl({
                 agents: ["planner"],
-                phase: "plan",
+                phase: PHASES.PLAN,
                 reason: "Need to plan the architecture",
             });
 
@@ -131,7 +132,7 @@ describe("continueTool - Agent routing", () => {
             expect(result.success).toBe(true);
             expect(result.output?.type).toBe("continue");
             expect(result.output?.routing.agents).toEqual(["planner-pubkey"]);
-            expect(result.output?.routing.phase).toBe("plan");
+            expect(result.output?.routing.phase).toBe(PHASES.PLAN);
             expect(result.output?.routing.reason).toBe("Need to plan the architecture");
         });
     });
@@ -139,7 +140,7 @@ describe("continueTool - Agent routing", () => {
     describe("Explicit agent routing", () => {
         it("should route to specified agents even with phase", async () => {
             const result = await executeControl({
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 agents: ["frontend-expert", "backend-expert"],
                 reason: "Need expert review",
             });
@@ -147,7 +148,7 @@ describe("continueTool - Agent routing", () => {
             expect(result.success).toBe(true);
             expect(result.output?.type).toBe("continue");
             expect(result.output?.routing.agents).toEqual(["frontend-pubkey", "backend-pubkey"]);
-            expect(result.output?.routing.phase).toBe("execute");
+            expect(result.output?.routing.phase).toBe(PHASES.EXECUTE);
             expect(result.output?.routing.reason).toBe("Need expert review");
         });
 
@@ -179,14 +180,14 @@ describe("continueTool - Agent routing", () => {
         it("should route to executor for implementation", async () => {
             const result = await executeControl({
                 agents: ["executor"],
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 reason: "Implementing feature",
             });
 
             expect(result.success).toBe(true);
             expect(result.output?.type).toBe("continue");
             expect(result.output?.routing).toMatchObject({
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 agents: ["executor-pubkey"],
                 reason: "Implementing feature",
             });
@@ -207,7 +208,7 @@ describe("continueTool - Agent routing", () => {
             const executor = createToolExecutor(nonOrchestratorContext);
             const result = await executor.execute(continueTool, {
                 agents: ["executor"],
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 reason: "Test",
             });
 
@@ -228,7 +229,7 @@ describe("continueTool - Agent routing", () => {
 
             expect(result.success).toBe(true);
             if (result.success && result.value?.type === "continue") {
-                expect(result.value.routing.phase).toBe("chores");
+                expect(result.value.routing.phase).toBe(PHASES.CHORES);
             }
         });
 
@@ -242,7 +243,7 @@ describe("continueTool - Agent routing", () => {
 
             expect(result.success).toBe(true);
             if (result.success && result.value?.type === "continue") {
-                expect(result.value.routing.phase).toBe("reflection");
+                expect(result.value.routing.phase).toBe(PHASES.REFLECTION);
             }
         });
 

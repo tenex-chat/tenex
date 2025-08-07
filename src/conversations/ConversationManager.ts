@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Phase } from "@/conversations/phases";
+import { PHASES } from "@/conversations/phases";
 import type { AgentState, PhaseTransition } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
@@ -109,7 +110,7 @@ export class ConversationManager {
         const conversation: Conversation = {
             id,
             title,
-            phase: "chat", // All conversations start in chat phase
+            phase: PHASES.CHAT, // All conversations start in chat phase
             history: [event],
             agentStates: new Map<string, AgentState>(), // Initialize empty agent states
             phaseStartedAt: Date.now(),
@@ -192,7 +193,7 @@ export class ConversationManager {
             conversation.phaseStartedAt = Date.now();
 
             // Clear readFiles when transitioning from REFLECTION back to CHAT
-            if (previousPhase === "reflection" && phase === "chat") {
+            if (previousPhase === PHASES.REFLECTION && phase === PHASES.CHAT) {
                 conversation.metadata.readFiles = undefined;
             }
         }
@@ -213,13 +214,13 @@ export class ConversationManager {
         // Initialize continueCallCounts if not exists
         if (!conversation.metadata.continueCallCounts) {
             conversation.metadata.continueCallCounts = {
-                chat: 0,
-                brainstorm: 0,
-                plan: 0,
-                execute: 0,
-                verification: 0,
-                chores: 0,
-                reflection: 0,
+                [PHASES.CHAT]: 0,
+                [PHASES.BRAINSTORM]: 0,
+                [PHASES.PLAN]: 0,
+                [PHASES.EXECUTE]: 0,
+                [PHASES.VERIFICATION]: 0,
+                [PHASES.CHORES]: 0,
+                [PHASES.REFLECTION]: 0,
             };
         }
 

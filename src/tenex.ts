@@ -11,6 +11,7 @@ import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
 import { setupCommand } from "./commands/setup/index";
 import { initNDK } from "./nostr/ndkClient";
+import { PHASES } from "./conversations/phases";
 
 const program = new Command();
 
@@ -32,8 +33,8 @@ debug
     .option("--agent <name>", "Agent name", "default")
     .option(
         "--phase <phase>",
-        "Phase to show prompt for (chat, plan, execute, verification)",
-        "chat"
+        `Phase to show prompt for (${Object.values(PHASES).join(', ')})`,
+        PHASES.CHAT
     )
     .action((options) => runDebugSystemPrompt(options));
 debug

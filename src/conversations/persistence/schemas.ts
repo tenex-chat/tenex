@@ -1,18 +1,11 @@
 import { z } from "zod";
+import { ALL_PHASES } from "@/conversations/phases";
 
 const PhaseSchema = z
     .string()
     .transform((val) => val.toLowerCase())
     .pipe(
-        z.enum([
-            "chat",
-            "brainstorm",
-            "plan",
-            "execute",
-            "verification",
-            "chores",
-            "reflection",
-        ])
+        z.enum(ALL_PHASES as [string, ...string[]])
     );
 
 export const PhaseTransitionSchema = z.object({

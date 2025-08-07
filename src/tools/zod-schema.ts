@@ -233,10 +233,13 @@ export const ToolSchemas = {
     /**
      * Phase schema
      */
-    phase: () =>
-        z
-            .enum(["chat", "brainstorm", "plan", "execute", "verification", "chores", "reflection"])
-            .describe("Conversation phase"),
+    phase: () => {
+        // Import here to avoid circular dependencies
+        const { ALL_PHASES } = require("@/conversations/phases");
+        return z
+            .enum(ALL_PHASES as [string, ...string[]])
+            .describe("Conversation phase");
+    },
 
     /**
      * Agent pubkey schema

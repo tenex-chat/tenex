@@ -5,6 +5,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentState, Conversation } from "../types";
+import type { Phase } from "../phases";
 import {
     type AgentStateSchema,
     MetadataFileSchema,

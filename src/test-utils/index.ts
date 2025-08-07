@@ -8,9 +8,11 @@
  * - Assertion utilities
  */
 
-export * from "./mock-llm";
-export * from "./mock-factories";
-export * from "./mock-setup";
+export * from './mock-llm';
+export * from './mock-factories';
+export * from './mock-setup';
+export * from './conversational-logger';
+export * from './e2e-conversational-setup';
 
 import { mock, expect } from "bun:test";
 import * as fs from "node:fs/promises";
