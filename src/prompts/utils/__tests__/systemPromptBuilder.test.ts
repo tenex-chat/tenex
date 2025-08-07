@@ -8,12 +8,11 @@ import "@/prompts/fragments/available-agents";
 import "@/prompts/fragments/project";
 import "@/prompts/fragments/phase";
 import "@/prompts/fragments/retrieved-lessons";
-import "@/prompts/fragments/learn-tool";
 import "@/prompts/fragments/mcp-tools";
 import "@/prompts/fragments/tool-use";
 import "@/prompts/fragments/orchestrator-routing";
 import "@/prompts/fragments/expertise-boundaries";
-import "@/prompts/fragments/yield-back";
+import "@/prompts/fragments/agent-tools";
 
 describe("systemPromptBuilder with yield-back", () => {
     const baseAgent: Agent = {

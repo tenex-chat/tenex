@@ -10,7 +10,7 @@ export interface MockLLMResponse {
         /** Match specific tool calls in the conversation */
         previousToolCalls?: string[];
         /** Match agent name */
-        agentName?: string;
+        agentName?: string | RegExp;
         /** Match conversation phase */
         phase?: string;
         /** Match if message contains text */
