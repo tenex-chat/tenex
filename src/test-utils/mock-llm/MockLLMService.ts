@@ -241,8 +241,14 @@ export class MockLLMService implements LLMService {
             }
             
             if (trigger.agentName) {
-                if (trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
-                    continue;
+                if (typeof trigger.agentName === 'string') {
+                    if (trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
+                        continue;
+                    }
+                } else if (trigger.agentName instanceof RegExp) {
+                    if (!trigger.agentName.test(agentName)) {
+                        continue;
+                    }
                 }
             }
             

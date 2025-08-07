@@ -8,6 +8,9 @@ import { writeContextFileTool } from "@/tools/implementations/writeContextFile";
 import { completeTool } from "../tools/implementations/complete";
 import { shellTool } from "../tools/implementations/shell";
 
+// Agent slug constants
+export const PROJECT_MANAGER_AGENT = "project-manager" as const;
+
 /**
  * Get all available tools for an agent based on their role
  * All agents now have access to all tools except orchestrator-only tools
@@ -29,7 +32,7 @@ export function getDefaultToolsForAgent(agent: Agent): string[] {
             // Other non-orchestrator agents use complete tool to signal task completion
             tools.push(completeTool.name);
 
-            if (agent.slug === "project-manager") {
+            if (agent.slug === PROJECT_MANAGER_AGENT) {
                 tools.push(generateInventoryTool.name);
                 tools.push(writeContextFileTool.name);
                 tools.push(shellTool.name);

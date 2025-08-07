@@ -64,10 +64,88 @@ export class TaskPublisher {
         return task;
     }
 
-    async completeTask(_success: boolean, _options: TaskCompletionOptions): Promise<void> {
+    /**
+     * Completes the current task by publishing a completion event
+     * @param success - Whether the task completed successfully
+     * @param options - Additional metadata about the task completion
+     */
+    async completeTask(success: boolean, options: TaskCompletionOptions): Promise<void> {
         if (!this.currentTask) {
             throw new Error("No current task to complete. Call createTask first.");
         }
+
+        const task = this.currentTask;
+        const projectCtx = getProjectContext();
+
+        // Create a completion event as a reply to the task
+        const completionEvent = task.reply();
+        
+        // Build completion message
+        const status = success ? "completed" : "failed";
+        const statusEmoji = success ? "✅" : "❌";
+        
+        let content = `${statusEmoji} Task ${status}`;
+        
+        if (options.error) {
+            content += `\n\nError: ${options.error}`;
+        }
+        
+        if (options.messageCount) {
+            content += `\n\nMessages exchanged: ${options.messageCount}`;
+        }
+        
+        if (options.duration) {
+            const durationInSeconds = Math.round(options.duration / 1000);
+            content += `\nDuration: ${durationInSeconds}s`;
+        }
+        
+        if (options.totalCost) {
+            content += `\nCost: $${options.totalCost.toFixed(4)}`;
+        }
+
+        completionEvent.content = content;
+        
+        // Add status tag
+        completionEvent.tags.push(["status", status]);
+        
+        // Remove all p tags (we don't want to notify all participants)
+        completionEvent.tags = completionEvent.tags.filter((t) => t[0] !== "p");
+        
+        // Add session ID if available
+        if (options.sessionId) {
+            completionEvent.tags.push(["claude-session", options.sessionId]);
+        }
+        
+        // Add error tag if task failed
+        if (!success && options.error) {
+            completionEvent.tags.push(["error", options.error]);
+        }
+        
+        // Add project tag
+        completionEvent.tag(projectCtx.project);
+        
+        // Sign with the agent's signer
+        await completionEvent.sign(this.agent.signer);
+        
+        try {
+            await completionEvent.publish();
+            logger.debug("Published task completion", {
+                taskId: task.id,
+                status,
+                sessionId: options.sessionId,
+                success,
+            });
+        } catch (e) {
+            logger.error("Error publishing task completion: " + (e instanceof Error ? e.message : String(e)), {
+                taskId: task.id,
+                status,
+                sessionId: options.sessionId,
+            });
+            // Don't throw - task completion is best effort
+        }
+        
+        // Clear the current task after completion
+        this.currentTask = undefined;
     }
 
     async publishTaskProgress(content: string, sessionId?: string): Promise<void> {

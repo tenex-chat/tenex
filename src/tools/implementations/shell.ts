@@ -4,6 +4,7 @@ import { z } from "zod";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { ExecutionConfig } from "@/agents/execution/constants";
+import { PROJECT_MANAGER_AGENT } from "@/agents/constants";
 import { logger } from "@/utils/logger";
 
 const execAsync = promisify(exec);
@@ -20,6 +21,7 @@ const shellSchema = z.object({
 /**
  * Shell tool - allows agents to execute shell commands
  * Restricted to project-manager agent for safety
+ * Only available to the project-manager agent
  */
 export const shellTool: Tool<
     {
@@ -30,7 +32,7 @@ export const shellTool: Tool<
     string
 > = {
     name: "shell",
-    description: "Execute shell commands in the project directory",
+    description: "Execute shell commands in the project directory (restricted to project-manager agent only)",
 
     parameters: createZodSchema(shellSchema),
 
@@ -38,7 +40,7 @@ export const shellTool: Tool<
         const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input.value;
 
         // Safety check - only project-manager can use this tool
-        if (context.agent.slug !== "project-manager") {
+        if (context.agent.slug !== PROJECT_MANAGER_AGENT) {
             return failure({
                 kind: "validation",
                 field: "agent",
