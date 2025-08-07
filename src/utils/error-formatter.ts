@@ -96,8 +96,3 @@ export function formatToolError(error: ToolError): string {
     }
 }
 
-/**
- * Legacy export for backward compatibility
- * @deprecated Use formatAnyError instead
- */
-export { formatAnyError as formatError };

@@ -5,7 +5,7 @@
 import type { Tool, ToolError, Validated } from "./core";
 import type { ExecutionContext } from "./types";
 import { logger } from "@/utils/logger";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 
 /**
  * Metadata that tools can provide for better UI/logging
@@ -87,7 +87,7 @@ export class ToolExecutor {
         } catch (error) {
             logger.error("Tool execution failed", {
                 tool: tool.name,
-                error: formatError(error),
+                error: formatAnyError(error),
             });
 
             return {

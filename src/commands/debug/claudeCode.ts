@@ -128,7 +128,10 @@ function displaySDKMessage(message: SDKMessage): void {
         case "human":
             console.log(chalk.green(`[${timestamp}] HUMAN`));
             if ((message as SDKMessage & {message?: {content: string}}).message?.content) {
-                console.log(chalk.gray("Content:"), (message as SDKMessage & {message?: {content: string}}).message!.content);
+                const msg = (message as SDKMessage & {message?: {content: string}}).message;
+                if (msg?.content) {
+                    console.log(chalk.gray("Content:"), msg.content);
+                }
             }
             break;
 

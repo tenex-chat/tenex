@@ -3,7 +3,7 @@ import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationManager } from "../conversations";
 import { getProjectContext } from "../services";
-import { formatError } from "../utils/errors";
+import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { createNostrPublisher } from "../nostr/factory";
 
@@ -66,6 +66,6 @@ export const handleNewConversation = async (
 
         logInfo(chalk.green("✅ Conversation routed successfully"));
     } catch (error) {
-        logInfo(chalk.red(`❌ Failed to route conversation: ${formatError(error)}`));
+        logInfo(chalk.red(`❌ Failed to route conversation: ${formatAnyError(error)}`));
     }
 };
