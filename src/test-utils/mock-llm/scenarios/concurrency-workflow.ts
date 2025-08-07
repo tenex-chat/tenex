@@ -61,6 +61,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Creating authentication system for User A",
@@ -84,6 +85,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Implementing payment processing for User B",
@@ -107,6 +109,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Authentication plan ready for User A",
@@ -130,6 +133,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Payment plan ready for User B",
@@ -153,6 +157,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "executor",
@@ -176,6 +181,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "executor",
@@ -199,6 +205,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "orchestrator",
@@ -222,6 +229,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "orchestrator",
@@ -245,6 +253,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify authentication for User A",
@@ -268,6 +277,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify payment processing for User B",
@@ -291,6 +301,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
+                    message: null,
                     function: "completeConversation",
                     args: JSON.stringify({
                         summary: "Authentication system completed for User A",
@@ -313,6 +324,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
+                    message: null,
                     function: "completeConversation",
                     args: JSON.stringify({
                         summary: "Payment processing completed for User B",
@@ -335,6 +347,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Implementing payment processing for User C",
@@ -358,6 +371,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Payment plan ready for User C",
@@ -381,6 +395,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "executor",
@@ -404,6 +419,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
+                    message: null,
                     function: "handoff",
                     args: JSON.stringify({
                         toAgent: "orchestrator",
@@ -427,6 +443,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify payment processing for User C",
@@ -450,6 +467,7 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
+                    message: null,
                     function: "completeConversation",
                     args: JSON.stringify({
                         summary: "Payment processing completed for User C",

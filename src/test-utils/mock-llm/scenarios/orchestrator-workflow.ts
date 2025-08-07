@@ -19,6 +19,7 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
                 content: "I'll help you create a user authentication system. Let me first understand your requirements better.",
                 toolCalls: [{
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "User wants to create authentication system - gathering requirements",
@@ -42,6 +43,7 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
                 content: "I understand you want JWT-based authentication with OAuth support. Let me create a plan for this.",
                 toolCalls: [{
                     id: "2",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -64,6 +66,7 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
             response: {
                 toolCalls: [{
                     id: "3",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Requirements gathered, moving to planning phase",
@@ -111,6 +114,7 @@ Implement JWT-based authentication with OAuth provider support.
 - Enable CORS properly`,
                 toolCalls: [{
                     id: "4",
+                    message: null,
                     function: "writeContextFile",
                     args: JSON.stringify({
                         filename: "PLAN.md",
@@ -131,6 +135,7 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "5",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -153,6 +158,7 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "6",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Plan approved, starting implementation",
@@ -176,6 +182,7 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Starting implementation of the authentication system...",
                 toolCalls: [{
                     id: "7",
+                    message: null,
                     function: "writeFile",
                     args: JSON.stringify({
                         path: "src/auth/jwt.ts",
@@ -197,6 +204,7 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Created JWT manager, now implementing OAuth providers...",
                 toolCalls: [{
                     id: "8",
+                    message: null,
                     function: "writeFile",
                     args: JSON.stringify({
                         path: "src/auth/oauth.ts",
@@ -218,6 +226,7 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Running tests to verify the implementation...",
                 toolCalls: [{
                     id: "9",
+                    message: null,
                     function: "shell",
                     args: JSON.stringify({
                         command: "npm test",
@@ -239,6 +248,7 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Authentication system implemented successfully. All tests passing.",
                 toolCalls: [{
                     id: "10",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -261,6 +271,7 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "11",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Implementation complete, proceeding to verification",
@@ -292,6 +303,7 @@ Implement JWT-based authentication with OAuth provider support.
 The authentication system has been successfully implemented and verified.`,
                 toolCalls: [{
                     id: "12",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -314,6 +326,7 @@ The authentication system has been successfully implemented and verified.`,
                 content: "Task completed successfully! The authentication system has been implemented, tested, and verified.",
                 toolCalls: [{
                     id: "13",
+                    message: null,
                     function: "endConversation",
                     args: JSON.stringify({
                         reason: "Task completed successfully"

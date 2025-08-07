@@ -24,6 +24,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
                 content: "I'll analyze your codebase and generate a comprehensive inventory to help understand the project structure.",
                 toolCalls: [{
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "User wants to generate project inventory",
@@ -47,6 +48,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
                 content: "I'll now generate a comprehensive inventory of your project using our inventory analysis tool.",
                 toolCalls: [{
                     id: "2",
+                    message: null,
                     function: "generate_inventory",
                     args: JSON.stringify({})
                 }]
@@ -78,6 +80,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
 The inventory provides a thorough understanding of your codebase architecture, making it easier to navigate and work with the project.`,
                 toolCalls: [{
                     id: "3",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -100,6 +103,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
             response: {
                 toolCalls: [{
                     id: "4",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Inventory generation completed successfully",
@@ -123,6 +127,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
                 content: `Let me verify the inventory generation was successful.`,
                 toolCalls: [{
                     id: "5",
+                    message: null,
                     function: "readPath",
                     args: JSON.stringify({
                         path: "context/INVENTORY.md"
@@ -151,6 +156,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
 The inventory is ready to use for understanding and navigating your codebase.`,
                 toolCalls: [{
                     id: "6",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -180,6 +186,7 @@ The inventory is ready to use for understanding and navigating your codebase.`,
 The regenerated inventory reflects the current state of your codebase.`,
                 toolCalls: [{
                     id: "7",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         phaseComplete: true,
@@ -203,6 +210,7 @@ The regenerated inventory reflects the current state of your codebase.`,
                 content: `I encountered an issue while generating the inventory. Let me try an alternative approach.`,
                 toolCalls: [{
                     id: "8",
+                    message: null,
                     function: "shell",
                     args: JSON.stringify({
                         command: "ls -la context/",

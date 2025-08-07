@@ -17,6 +17,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I'll simulate an error condition.",
                 toolCalls: [{
                     id: "err1",
+                    message: null,
                     function: "shell",
                     args: JSON.stringify({
                         command: "exit 1",
@@ -38,6 +39,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I see the command failed. Let me try a different approach.",
                 toolCalls: [{
                     id: "err2",
+                    message: null,
                     function: "analyze",
                     args: JSON.stringify({
                         query: "What went wrong with the previous command?"
@@ -58,6 +60,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "This response is delayed to simulate network issues...",
                 toolCalls: [{
                     id: "timeout1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Testing timeout handling",
@@ -80,6 +83,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "Testing malformed tool call...",
                 toolCalls: [{
                     id: "bad1",
+                    message: null,
                     function: "continue",
                     args: "{ invalid json }" // Intentionally malformed
                 }]
@@ -122,16 +126,19 @@ export const errorHandlingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "mix1",
+                        message: null,
                         function: "readPath",
                         args: JSON.stringify({ path: "./exists.md" })
                     },
                     {
                         id: "mix2",
+                        message: null,
                         function: "readPath",
                         args: JSON.stringify({ path: "./does-not-exist.md" })
                     },
                     {
                         id: "mix3",
+                        message: null,
                         function: "shell",
                         args: JSON.stringify({ command: "echo 'success'" })
                     }
@@ -150,6 +157,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I notice we're stuck in a loop. Let me break out of this pattern.",
                 toolCalls: [{
                     id: "loop1",
+                    message: null,
                     function: "endConversation",
                     args: JSON.stringify({
                         reason: "Detected potential infinite loop"
@@ -168,6 +176,7 @@ export const errorHandlingScenario: MockLLMScenario = {
             response: {
                 toolCalls: [{
                     id: "phase1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Attempting invalid phase transition",
@@ -190,6 +199,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "Detecting concurrent modification conflict...",
                 toolCalls: [{
                     id: "conc1",
+                    message: null,
                     function: "writeFile",
                     args: JSON.stringify({
                         path: "src/shared.ts",
@@ -210,6 +220,7 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "A".repeat(10000), // Very large response
                 toolCalls: [{
                     id: "mem1",
+                    message: null,
                     function: "analyze",
                     args: JSON.stringify({
                         query: "Analyze this extremely large codebase with thousands of files"

@@ -20,6 +20,7 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I'll help you with that. Let me route this to the appropriate phase for planning.",
                 toolCalls: [{
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "User requested a new system implementation",
@@ -41,6 +42,7 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I've created a plan for implementing the requested system. The plan includes core components and basic functionality.",
                 toolCalls: [{
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Plan created for system implementation",
@@ -62,6 +64,7 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I've implemented the basic structure for the requested system. The implementation is ready for verification.",
                 toolCalls: [{
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Basic implementation completed",
@@ -89,7 +92,7 @@ export const networkResilienceScenario: MockLLMScenario = {
         // Generic fallback for any agent
         {
             trigger: {
-                agentName: /.*/
+                agentName: ".*"
             },
             response: {
                 content: "Processing your request...",

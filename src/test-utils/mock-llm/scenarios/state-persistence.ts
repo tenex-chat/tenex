@@ -20,6 +20,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "1",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Planning authentication system implementation",
@@ -42,6 +43,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "2",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Starting authentication implementation",
@@ -64,6 +66,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "3",
+                    message: null,
                     function: "writeContextFile",
                     args: JSON.stringify({
                         filename: "auth-implementation.md",
@@ -86,6 +89,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "4",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Analyzing project structure",
@@ -109,6 +113,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "5",
+                    message: null,
                     function: "complete",
                     args: JSON.stringify({
                         summary: "Project structure analyzed successfully",
@@ -130,6 +135,7 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "6",
+                    message: null,
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Creating feature as requested",

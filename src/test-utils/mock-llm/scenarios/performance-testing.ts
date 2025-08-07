@@ -71,6 +71,7 @@ export const performanceTestingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "4",
+                        message: null,
                         function: "complete",
                         args: JSON.stringify({
                             summary: "Completed slow tool execution",
@@ -112,6 +113,7 @@ export const performanceTestingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "6",
+                        message: null,
                         function: "complete",
                         args: JSON.stringify({
                             summary: "Processed large data response",

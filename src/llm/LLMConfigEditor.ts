@@ -7,10 +7,9 @@ import { logger } from "@/utils/logger";
 import search from "@inquirer/search";
 import chalk from "chalk";
 import inquirer from "inquirer";
-import type { ModelsList } from "multi-llm-ts";
-import { Message, igniteEngine } from "multi-llm-ts";
+import { igniteEngine } from "multi-llm-ts";
 import { LLM_DEFAULTS } from "./constants";
-import { getAllModels, getModelsForProvider } from "./models";
+import { getModelsForProvider } from "./models";
 
 type LLMConfigWithName = LLMConfig & {
     name: string;
@@ -658,7 +657,7 @@ export class LLMConfigEditor {
             }
             case "apiKey": {
                 if (config.provider !== "ollama") {
-                    const { apiKey } = await inquirer.prompt([
+                    await inquirer.prompt([
                         {
                             type: "password",
                             name: "apiKey",

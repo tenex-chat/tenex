@@ -1,7 +1,7 @@
 import { ClaudeCodeExecutor, type ClaudeCodeResult } from "@/claude/executor";
 import type { SDKMessage } from "@anthropic-ai/claude-code";
 import type { TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logError, logInfo, logDebug } from "@/utils/logger";
 import chalk from "chalk";
 import { colorizeJSON } from "@/utils/formatting";
@@ -104,7 +104,7 @@ export async function runDebugClaudeCode(
         console.log(chalk.cyan("\n========================\n"));
         logInfo("Claude Code debug execution completed");
     } catch (err) {
-        const errorMessage = formatError(err);
+        const errorMessage = formatAnyError(err);
         logError(`Failed to execute Claude Code debug: ${errorMessage}`);
         console.error(chalk.red("\nError:"), errorMessage);
         process.exit(1);

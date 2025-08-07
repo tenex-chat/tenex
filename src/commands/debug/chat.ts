@@ -11,7 +11,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { PromptBuilder } from "@/prompts";
 import { getProjectContext } from "@/services";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logDebug, logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -296,7 +296,7 @@ export async function runDebugChat(
 
                 console.log(); // Empty line for readability
             } catch (error) {
-                console.error(chalk.red("\nError:"), formatError(error));
+                console.error(chalk.red("\nError:"), formatAnyError(error));
             }
 
             rl.prompt();
@@ -307,7 +307,7 @@ export async function runDebugChat(
             process.exit(0);
         });
     } catch (err) {
-        const errorMessage = formatError(err);
+        const errorMessage = formatAnyError(err);
         logError(`Failed to start debug chat: ${errorMessage}`);
         process.exit(1);
     }
