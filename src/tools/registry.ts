@@ -11,7 +11,7 @@ import { shellTool } from "./implementations/shell";
 import type { Tool } from "./types";
 
 // Registry of all available tools
-const toolsMap = new Map<string, Tool>([
+const toolsMap = new Map<string, Tool<any, any>>([
     ["read_path", readPathTool],
     ["write_context_file", writeContextFileTool],
     ["continue", continueTool],
@@ -24,16 +24,16 @@ const toolsMap = new Map<string, Tool>([
     ["shell", shellTool],
 ]);
 
-export function getTool(name: string): Tool | undefined {
+export function getTool(name: string): Tool<any, any> | undefined {
     return toolsMap.get(name);
 }
 
-export function getTools(names: string[]): Tool[] {
+export function getTools(names: string[]): Tool<any, any>[] {
     return names
         .map((name) => toolsMap.get(name))
-        .filter((tool): tool is Tool => tool !== undefined);
+        .filter((tool): tool is Tool<any, any> => tool !== undefined);
 }
 
-export function getAllTools(): Tool[] {
+export function getAllTools(): Tool<any, any>[] {
     return Array.from(toolsMap.values());
 }

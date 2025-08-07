@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
+import { formatAnyError } from "@/utils/error-formatter";
 import type { Phase } from "@/conversations/phases";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { createNostrPublisher } from "@/nostr/factory";
@@ -142,14 +143,14 @@ export class RoutingBackend implements ExecutionBackend {
                 } catch (error) {
                     tracingLogger.error("Failed to execute target agent", {
                         agent: targetAgent.name,
-                        error: error instanceof Error ? error.message : String(error),
+                        error: formatAnyError(error),
                     });
                     // Continue with other agents even if one fails
                 }
             }
         } catch (error) {
             tracingLogger.error("Routing backend error", {
-                error: error instanceof Error ? error.message : String(error)
+                error: formatAnyError(error)
             });
             throw error;
         }

@@ -185,7 +185,7 @@ export class StreamStateManager {
     /**
      * Get the raw state (use sparingly, prefer specific methods)
      */
-    getState(): Readonly<StreamingState> {
+    getRawState(): Readonly<StreamingState> {
         return this.state;
     }
 
@@ -203,5 +203,54 @@ export class StreamStateManager {
             hasFinalResponse: !!this.state.finalResponse,
             startedToolsCount: this.state.startedTools.size,
         };
+    }
+
+    // Generic state management methods for extensibility
+    private customState: Map<string, any> = new Map();
+
+    /**
+     * Set a custom state value
+     */
+    setState(key: string, value: any): void {
+        this.customState.set(key, value);
+    }
+
+    /**
+     * Get a custom state value
+     */
+    getState(key: string): any {
+        return this.customState.get(key);
+    }
+
+    /**
+     * Check if a custom state exists
+     */
+    hasState(key: string): boolean {
+        return this.customState.has(key);
+    }
+
+    /**
+     * Delete a custom state value
+     */
+    deleteState(key: string): void {
+        this.customState.delete(key);
+    }
+
+    /**
+     * Get all custom state as an object
+     */
+    getAllState(): Record<string, any> {
+        const result: Record<string, any> = {};
+        this.customState.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    /**
+     * Clear all custom state
+     */
+    clear(): void {
+        this.customState.clear();
     }
 }
