@@ -4,7 +4,6 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { Agent } from "@/agents/types";
 import { ConversationManager } from "@/conversations/ConversationManager";
-import type { Phase } from "@/conversations/phases";
 import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { createAgentAwareLLMService, loadLLMRouter } from "@/llm";
@@ -93,6 +92,7 @@ export async function runDebugChat(
                 projectPath,
             },
             phaseTransitions: [],
+            orchestratorTurns: [],
             executionTime: {
                 totalSeconds: 0,
                 isActive: false,

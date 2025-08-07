@@ -259,7 +259,7 @@ Please re-route using the correct agent slug from the list above.`);
         messages: Message[], 
         context: ExecutionContext,
         tracingLogger: TracingLogger,
-        executionLogger?: ExecutionLogger
+        _executionLogger?: ExecutionLogger
     ): Promise<RoutingDecision> {
         // Add instruction to return JSON only
         const routingMessages = [

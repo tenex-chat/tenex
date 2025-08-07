@@ -69,11 +69,9 @@ export class AgentExecutor {
         const messages = await this.buildMessages(context, context.triggeringEvent);
         
         // Get the Claude session ID from the conversation state
-        const agentContext = this.conversationManager.getAgentContext(
-            context.conversationId,
-            context.agent.slug
-        );
-        const claudeSessionId = context.claudeSessionId || agentContext?.claudeSessionId;
+        const conversation = this.conversationManager.getConversation(context.conversationId);
+        const agentState = conversation?.agentStates.get(context.agent.slug);
+        const claudeSessionId = context.claudeSessionId || agentState?.claudeSessionId;
         
         if (claudeSessionId) {
             logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {
@@ -209,7 +207,7 @@ export class AgentExecutor {
         const messages: Message[] = [];
 
         // Get MCP tools for the prompt
-        const mcpTools = await mcpService.getAvailableTools();
+        const mcpTools = mcpService.getCachedTools();
 
         // Build system prompt using the shared function
         // Only pass the current agent's lessons
@@ -277,7 +275,7 @@ export class AgentExecutor {
         // Add MCP tools if available and agent has MCP access
         let allTools = tools;
         if (context.agent.mcp !== false) {
-            const mcpTools = await mcpService.getAvailableTools();
+            const mcpTools = mcpService.getCachedTools();
             allTools = [...tools, ...mcpTools];
         }
 

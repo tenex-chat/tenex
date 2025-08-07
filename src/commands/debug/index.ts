@@ -91,7 +91,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
             let mcpTools: Tool[] = [];
             try {
                 await mcpService.initialize(projectPath);
-                mcpTools = await mcpService.getAvailableTools();
+                mcpTools = mcpService.getCachedTools();
                 logInfo(`Loaded ${mcpTools.length} MCP tools`);
             } catch (error) {
                 logError(`Failed to initialize MCP service: ${error}`);

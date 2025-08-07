@@ -363,42 +363,8 @@ export class ReasonActLoop implements ExecutionBackend {
             // Mark this block as logged
             stateManager.markThinkingBlockLogged(thinkingContent);
             
-            const reasoningData = this.parseReasoningContent(thinkingContent);
-            
             // agentThinking removed - not in new event system
+            // Previously parsed reasoning data here but no longer needed
         });
-    }
-    
-    private parseReasoningContent(content: string): {
-        currentSituation?: string;
-        options?: string[];
-        decision?: string;
-        confidence?: number;
-        reasoning?: string;
-    } {
-        const lines = content.split('\n').map(line => line.trim()).filter(Boolean);
-        const result: Record<string, unknown> = {};
-        
-        lines.forEach(line => {
-            if (line.startsWith('- Current situation:')) {
-                result.currentSituation = line.substring('- Current situation:'.length).trim();
-            } else if (line.startsWith('- Options considered:')) {
-                result.options = line.substring('- Options considered:'.length).trim().split(',').map(o => o.trim());
-            } else if (line.startsWith('- Decision:')) {
-                result.decision = line.substring('- Decision:'.length).trim();
-            } else if (line.startsWith('- Confidence:')) {
-                const confStr = line.substring('- Confidence:'.length).trim();
-                result.confidence = parseFloat(confStr);
-            } else if (line.startsWith('- Reasoning:')) {
-                result.reasoning = line.substring('- Reasoning:'.length).trim();
-            }
-        });
-        
-        // If no structured reasoning found, use the whole content
-        if (Object.keys(result).length === 0) {
-            result.reasoning = content;
-        }
-        
-        return result;
     }
 }

@@ -177,7 +177,7 @@ export class ConversationManager {
             agent: agentName,
             from: previousPhase,
             to: phase,
-            reason: reason
+            reason: reason || ""
         });
 
         // Create transition record even for same-phase handoffs

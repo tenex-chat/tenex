@@ -232,7 +232,7 @@ export class ToolStreamHandler {
     private processToolResult(
         toolResult: ToolExecutionResult,
         tracingLogger: TracingLogger,
-        context: ExecutionContext
+        _context: ExecutionContext
     ): void {
         if (!toolResult.success || !toolResult.output) {
             tracingLogger.info("⚠️ Tool result unsuccessful or missing output", {

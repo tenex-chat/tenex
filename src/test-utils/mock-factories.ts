@@ -99,18 +99,10 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
         phaseStartedAt: Date.now(),
         metadata: {
             summary: "Mock conversation summary",
-            requirements: "Mock requirements",
-            continueCallCounts: {
-                [PHASES.CHAT]: 0,
-                [PHASES.BRAINSTORM]: 0,
-                [PHASES.PLAN]: 0,
-                [PHASES.EXECUTE]: 0,
-                [PHASES.VERIFICATION]: 0,
-                [PHASES.CHORES]: 0,
-                [PHASES.REFLECTION]: 0
-            }
+            requirements: "Mock requirements"
         },
         phaseTransitions: [],
+        orchestratorTurns: [],
         executionTime: {
             totalSeconds: 0,
             isActive: false,
