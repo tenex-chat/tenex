@@ -8,11 +8,7 @@
  */
 
 import type { Phase } from "@/conversations/phases";
-import type { Agent } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
-import type { ConversationManager } from "@/conversations/ConversationManager";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+
 
 // ============================================================================
 // Core Result Type

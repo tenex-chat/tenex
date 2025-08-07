@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { configService } from "@/services/ConfigService";
 
 export interface ConfigScope {

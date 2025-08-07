@@ -69,7 +69,11 @@ function zodToSchemaShape(schema: z.ZodType<unknown>, isOptional = false): Schem
             };
         }
         // Otherwise, use the first option
-        return zodToSchemaShape(options[0]!, isOptional);
+        const firstOption = options[0];
+        if (!firstOption) {
+            throw new Error("Union type must have at least one option");
+        }
+        return zodToSchemaShape(firstOption, isOptional);
     }
 
     if (schema instanceof z.ZodString) {

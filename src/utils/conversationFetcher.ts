@@ -184,7 +184,7 @@ function buildConversationTree(
     };
 }
 
-function formatConversationMarkdown(tree: ConversationTree, humanPubkey: string): string {
+function formatConversationMarkdown(tree: ConversationTree, _humanPubkey: string): string {
     const lines: string[] = [];
 
     lines.push("# Conversation Thread\n");
