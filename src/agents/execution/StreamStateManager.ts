@@ -186,19 +186,19 @@ export class StreamStateManager {
     }
 
     // Generic state management methods for extensibility
-    private customState: Map<string, any> = new Map();
+    private customState: Map<string, unknown> = new Map();
 
     /**
      * Set a custom state value
      */
-    setState(key: string, value: any): void {
+    setState(key: string, value: unknown): void {
         this.customState.set(key, value);
     }
 
     /**
      * Get a custom state value
      */
-    getState(key: string): any {
+    getState(key: string): unknown {
         return this.customState.get(key);
     }
 
@@ -219,8 +219,8 @@ export class StreamStateManager {
     /**
      * Get all custom state as an object
      */
-    getAllState(): Record<string, any> {
-        const result: Record<string, any> = {};
+    getAllState(): Record<string, unknown> {
+        const result: Record<string, unknown> = {};
         this.customState.forEach((value, key) => {
             result[key] = value;
         });

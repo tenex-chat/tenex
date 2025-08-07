@@ -1,9 +1,24 @@
 import type { Agent } from "./types";
 
+/**
+ * Check if an agent uses the Claude backend
+ * @param agent The agent to check
+ * @returns True if the agent uses Claude backend
+ */
 export const isClaudeBackend = (agent: Agent): boolean => agent.backend === "claude";
 
+/**
+ * Check if an agent uses the routing backend
+ * @param agent The agent to check
+ * @returns True if the agent uses routing backend
+ */
 export const isRoutingBackend = (agent: Agent): boolean => agent.backend === "routing";
 
+/**
+ * Check if an agent uses a toolless backend (Claude or routing)
+ * @param agent The agent to check
+ * @returns True if the agent uses a toolless backend
+ */
 export const isToollessBackend = (agent: Agent): boolean => 
     agent.backend === "claude" || agent.backend === "routing";
 
