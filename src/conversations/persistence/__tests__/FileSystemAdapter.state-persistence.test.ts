@@ -5,6 +5,7 @@ import * as path from "path";
 import * as fs from "fs/promises";
 import type { Conversation, AgentContext } from "@/conversations/types";
 import { EVENT_KINDS } from "@/llm/types";
+import { pathExists } from "@/lib/fs/filesystem";
 
 describe("FileSystemAdapter State Persistence Tests", () => {
     let testDir: string;
@@ -192,7 +193,7 @@ describe("FileSystemAdapter State Persistence Tests", () => {
             "conversations",
             `${conversationId}.json`
         );
-        const fileExists = await fs.access(conversationPath).then(() => true).catch(() => false);
+        const fileExists = await pathExists(conversationPath);
         expect(fileExists).toBe(true);
         
         // Load conversation

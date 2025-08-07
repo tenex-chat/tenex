@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { createTempDir, cleanupTempDir } from "@/test-utils";
+import { pathExists } from "@/lib/fs/filesystem";
 
 // Mock the inventory generation utilities
 const mockGenerateInventory = mock(async (projectPath: string) => {
@@ -96,7 +97,7 @@ describe("E2E: Simple Inventory Generation", () => {
         
         // Verify inventory file was created
         const inventoryPath = path.join(projectPath, "context", "INVENTORY.md");
-        const inventoryExists = await fs.access(inventoryPath).then(() => true).catch(() => false);
+        const inventoryExists = await pathExists(inventoryPath);
         expect(inventoryExists).toBe(true);
         
         // Verify content

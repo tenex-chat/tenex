@@ -9,9 +9,19 @@ import { logError } from "@/utils/logger";
 /**
  * Unified file system utilities combining patterns from CLI and shared packages
  * Provides both sync and async operations with consistent error handling
+ * 
+ * @module filesystem
+ * @description
+ * This module provides a comprehensive set of file system utilities with:
+ * - Path resolution and expansion (home directory ~)
+ * - Directory and file existence checks
+ * - JSON file read/write operations
+ * - Text file operations
+ * - Directory listing and management
+ * - File copying and deletion
+ * - Consistent error handling across all operations
  */
 
-// Path utilities
 // File operations
 export async function readFile(filePath: string, encoding?: BufferEncoding): Promise<string>;
 export async function readFile(filePath: string, encoding: null): Promise<Buffer>;
@@ -73,6 +83,16 @@ export function directoryExistsSync(dirPath: string): boolean {
             return false;
         }
         throw err;
+    }
+}
+
+// Path existence check (works for both files and directories)
+export async function pathExists(filePath: string): Promise<boolean> {
+    try {
+        await fsPromises.access(filePath);
+        return true;
+    } catch {
+        return false;
     }
 }
 

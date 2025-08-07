@@ -5,6 +5,7 @@ import { logger } from "@/utils/logger";
 import * as path from "path";
 import * as fs from "fs/promises";
 import type { Conversation } from "@/conversations/types";
+import { pathExists } from "@/lib/fs/filesystem";
 
 describe("FileSystemAdapter Integration Test", () => {
     let testDir: string;
@@ -90,7 +91,7 @@ describe("FileSystemAdapter Integration Test", () => {
             `${conversationId}.json`
         );
         
-        const fileExists = await fs.access(conversationPath).then(() => true).catch(() => false);
+        const fileExists = await pathExists(conversationPath);
         expect(fileExists).toBe(true);
         
         // Load conversation
@@ -215,7 +216,7 @@ describe("FileSystemAdapter Integration Test", () => {
             `${conversationId}.json`
         );
         
-        const archiveExists = await fs.access(archivePath).then(() => true).catch(() => false);
+        const archiveExists = await pathExists(archivePath);
         expect(archiveExists).toBe(true);
         
         // Verify metadata shows it as archived

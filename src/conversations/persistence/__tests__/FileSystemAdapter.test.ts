@@ -3,6 +3,7 @@ import { FileSystemAdapter } from "../FileSystemAdapter";
 import { createTempDir, cleanupTempDir, createMockConversation } from "@/test-utils";
 import path from "node:path";
 import * as fs from "node:fs/promises";
+import { pathExists } from "@/lib/fs/filesystem";
 
 describe("FileSystemAdapter", () => {
     let adapter: FileSystemAdapter;
@@ -27,7 +28,7 @@ describe("FileSystemAdapter", () => {
             
             await newAdapter.initialize();
             
-            const exists = await fs.stat(newPath).then(() => true).catch(() => false);
+            const exists = await pathExists(newPath);
             expect(exists).toBe(true);
         });
         
@@ -35,7 +36,7 @@ describe("FileSystemAdapter", () => {
             // Initialize again - should not throw
             await adapter.initialize();
             
-            const exists = await fs.stat(basePath).then(() => true).catch(() => false);
+            const exists = await pathExists(basePath);
             expect(exists).toBe(true);
         });
     });
@@ -51,7 +52,7 @@ describe("FileSystemAdapter", () => {
             
             // Check the conversations subdirectory
             const conversationsDir = path.join(basePath, "conversations");
-            const dirExists = await fs.stat(conversationsDir).then(() => true).catch(() => false);
+            const dirExists = await pathExists(conversationsDir);
             
             if (dirExists) {
                 const files = await fs.readdir(conversationsDir);
