@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NostrPublisher } from "./NostrPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -68,7 +69,7 @@ export class TypingIndicatorManager {
         } catch (error) {
             logger.error("Failed to start typing indicator", {
                 agent: this.publisher.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
                 retryCount: this.retryCount,
             });
             
@@ -139,7 +140,7 @@ export class TypingIndicatorManager {
             } catch (error) {
                 logger.error("Failed to stop typing indicator", {
                     agent: this.publisher.context.agent.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
                 
                 // Always reset state on error to prevent stuck indicators
@@ -181,7 +182,7 @@ export class TypingIndicatorManager {
             } catch (error) {
                 logger.error("Failed to force stop typing indicator", {
                     agent: this.publisher.context.agent.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
                 
                 // Always reset state on error

@@ -1,5 +1,6 @@
 import type { Tool } from "@/tools/types";
 import { createZodSchema, mcpSchemaToZod } from "@/tools/zod-schema";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 
@@ -75,7 +76,7 @@ export function adaptMCPTool(
                 logger.error(`MCP tool execution failed: ${namespacedName}`, {
                     serverName,
                     toolName: mcpTool.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
 
                 return {
@@ -83,7 +84,7 @@ export function adaptMCPTool(
                     error: {
                         kind: "execution" as const,
                         tool: namespacedName,
-                        message: error instanceof Error ? error.message : String(error),
+                        message: formatAnyError(error),
                         cause: error,
                     },
                 };
@@ -138,7 +139,7 @@ export function createTypedMCPTool<TInput extends z.ZodType<unknown>>(config: {
                 logger.error(`Typed MCP tool execution failed: ${namespacedName}`, {
                     serverName: config.serverName,
                     toolName: config.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
 
                 return {
@@ -146,7 +147,7 @@ export function createTypedMCPTool<TInput extends z.ZodType<unknown>>(config: {
                     error: {
                         kind: "execution" as const,
                         tool: namespacedName,
-                        message: error instanceof Error ? error.message : String(error),
+                        message: formatAnyError(error),
                         cause: error,
                     },
                 };

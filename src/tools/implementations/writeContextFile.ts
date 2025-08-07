@@ -5,6 +5,7 @@ import type { Tool } from "../types";
 import { createZodSchema } from "../types";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { getProjectContext } from "@/services";
 
@@ -135,7 +136,7 @@ Example workflow:
             } catch (error) {
                 // Log error but don't fail the tool execution
                 logger.error("Failed to publish NDKArticle", {
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
             }
 
@@ -151,7 +152,7 @@ Example workflow:
                 error: {
                     kind: "execution" as const,
                     tool: "write_context_file",
-                    message: `Failed to write file: ${error instanceof Error ? error.message : "Unknown error"}`,
+                    message: `Failed to write file: ${formatAnyError(error)}`,
                 },
             };
         }

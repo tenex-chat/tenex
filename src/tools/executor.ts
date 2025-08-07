@@ -94,7 +94,7 @@ export class ToolExecutor {
                 success: false,
                 error: {
                     kind: "system",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                     stack: error instanceof Error ? error.stack : undefined,
                 },
                 duration: Date.now() - startTime,

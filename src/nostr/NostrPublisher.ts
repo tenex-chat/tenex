@@ -8,6 +8,7 @@ import { EXECUTION_TAGS } from "@/nostr/tags";
 import type { LLMMetadata } from "@/nostr/types";
 import { getProjectContext } from "@/services";
 import type { ContinueFlow, Complete, EndConversation } from "@/tools/types";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent, type NDKTag } from "@nostr-dev-kit/ndk";
 import { TypingIndicatorManager } from "./TypingIndicatorManager";
@@ -147,7 +148,7 @@ export class NostrPublisher {
         } catch (error) {
             logger.error("Failed to publish response", {
                 agent: this.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -172,7 +173,7 @@ export class NostrPublisher {
         } catch (error) {
             logger.error("Failed to publish error", {
                 agent: this.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -219,7 +220,7 @@ export class NostrPublisher {
             logger.error("Failed to publish TENEX log", {
                 agent: this.context.agent.name,
                 tenexEvent: logData.event,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -277,7 +278,7 @@ export class NostrPublisher {
         } catch (error) {
             logger.error(`Failed to publish typing indicator ${state}`, {
                 agent: this.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -342,7 +343,7 @@ export class NostrPublisher {
                 tool: status.tool,
                 status: status.status,
                 agent: this.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -588,7 +589,7 @@ export class StreamPublisher {
         } catch (error) {
             logger.error("Failed to finalize streaming response", {
                 agent: this.publisher.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }
@@ -662,7 +663,7 @@ export class StreamPublisher {
             logger.error("Failed to publish scheduled content, content queued for retry", {
                 sequence: this.sequence + 1,
                 agent: this.publisher.context.agent.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }

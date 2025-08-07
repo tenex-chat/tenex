@@ -3,6 +3,7 @@ import { success, failure, createZodSchema } from "../types";
 import { z } from "zod";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { ExecutionConfig } from "@/agents/execution/constants";
 import { logger } from "@/utils/logger";
 
 const execAsync = promisify(exec);
@@ -13,7 +14,7 @@ const shellSchema = z.object({
         .string()
         .optional()
         .describe("Working directory for the command (defaults to project root)"),
-    timeout: z.number().optional().describe("Command timeout in milliseconds (default: 30000)"),
+    timeout: z.number().optional().describe(`Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`), 
 });
 
 /**
@@ -34,7 +35,7 @@ export const shellTool: Tool<
     parameters: createZodSchema(shellSchema),
 
     execute: async (input, context) => {
-        const { command, cwd, timeout = 30000 } = input.value;
+        const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input.value;
 
         // Safety check - only project-manager can use this tool
         if (context.agent.slug !== "project-manager") {

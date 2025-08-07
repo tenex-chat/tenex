@@ -1,6 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
+import { ExecutionConfig } from "../agents/execution/constants";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { ConversationManager } from "../conversations";
 import { NostrPublisher } from "../nostr";
@@ -131,7 +132,7 @@ async function handleReplyLogic(
         // If this transition was very recent (within last 30 seconds) and has handoff info
         if (
             recentTransition &&
-            Date.now() - recentTransition.timestamp < 30000 &&
+            Date.now() - recentTransition.timestamp < ExecutionConfig.RECENT_TRANSITION_THRESHOLD_MS &&
             recentTransition.summary
         ) {
             handoff = recentTransition;
