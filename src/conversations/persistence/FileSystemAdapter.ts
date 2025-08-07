@@ -116,7 +116,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
             const conversation: Conversation = {
                 id: data.id,
                 title: data.title,
-                phase: data.phase,
+                phase: data.phase as Phase, // Phase validation happens in schema parsing
                 history: data.history
                     .map((serializedEvent: string) => {
                         try {
@@ -130,7 +130,11 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 agentStates: agentStatesMap,
                 phaseStartedAt: data.phaseStartedAt,
                 metadata: data.metadata,
-                phaseTransitions: data.phaseTransitions,
+                phaseTransitions: data.phaseTransitions.map(transition => ({
+                    ...transition,
+                    from: transition.from as Phase, // Phase validation happens in schema parsing
+                    to: transition.to as Phase
+                })),
                 executionTime: data.executionTime || {
                     totalSeconds: 0,
                     isActive: false,

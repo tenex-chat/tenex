@@ -39,12 +39,6 @@ async function buildAll() {
       outdir: 'dist',
     });
 
-    // Build browser entry point (for events export)
-    await build({
-      ...sharedConfig,
-      entryPoints: ['src/browser.ts'],
-      outdir: 'dist',
-    });
 
     // Build CLI executable
     await build({

@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { AgentRegistry } from "../AgentRegistry";
 import type { AgentConfig } from "@/agents/types";
@@ -19,6 +20,7 @@ mock.module("@/services", () => ({
         loadTenexAgents: mock(),
         saveProjectAgents: mock(),
     },
+    getProjectContext: mock()
 }));
 
 // Mock built-in agents to avoid them being loaded during tests

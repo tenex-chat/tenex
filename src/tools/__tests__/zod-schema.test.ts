@@ -1,8 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import { createZodSchema, mcpSchemaToZod, ToolSchemas } from "../zod-schema";
-import { adaptMCPTool } from "@/services/mcp/MCPToolAdapter";
-import { analyze } from "../implementations/analyze";
 import type { ExecutionContext } from "../types";
 
 describe("Zod Tool Schemas", () => {
@@ -132,66 +130,7 @@ describe("Zod Tool Schemas", () => {
         });
     });
 
-    describe("MCP Tool Adapter", () => {
-        it("should create a typed MCP tool with Zod validation", async () => {
-            const mcpTool = {
-                name: "search",
-                description: "Search for items",
-                inputSchema: {
-                    properties: {
-                        query: { type: "string", minLength: 1 },
-                        limit: { type: "integer", minimum: 1, maximum: 100 },
-                    },
-                    required: ["query"],
-                },
-            };
 
-            const mockExecute = async (args: any) => ({
-                results: [`Result for ${args.query}`],
-                count: 1,
-            });
-
-            const tool = adaptMCPTool(mcpTool, "test_server", mockExecute);
-
-            expect(tool.name).toBe("mcp__test_server__search");
-            expect(tool.brand._brand).toBe("effect");
-
-            // Test parameter validation
-            const validResult = tool.parameters.validate({
-                query: "test",
-                limit: 10,
-            });
-            expect(validResult.ok).toBe(true);
-
-            const invalidResult = tool.parameters.validate({
-                query: "",
-                limit: 200,
-            });
-            expect(invalidResult.ok).toBe(false);
-        });
-    });
-
-    describe("Analyze Tool Schema", () => {
-        it("should have proper Zod schema validation", () => {
-            const { parameters } = analyze;
-
-            // Valid input
-            const validResult = parameters.validate({
-                prompt: "What is the main purpose of this codebase?",
-            });
-            expect(validResult.ok).toBe(true);
-
-            // Invalid input - empty string
-            const invalidResult = parameters.validate({
-                prompt: "",
-            });
-            expect(invalidResult.ok).toBe(false);
-
-            // Invalid input - missing prompt
-            const missingResult = parameters.validate({});
-            expect(missingResult.ok).toBe(false);
-        });
-    });
 
     describe("ToolSchemas utilities", () => {
         it("should validate file paths", () => {

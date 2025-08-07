@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Phase } from "@/conversations/phases";
+import { PHASES } from "@/conversations/phases";
 import { logger } from "@/utils/logger";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
@@ -174,7 +175,7 @@ function loadProjectContextSync(phase: Phase): {
     let contextFiles: string[] = [];
 
     // Load inventory content for chat and brainstorm phases
-    if (phase === "chat" || phase === "brainstorm") {
+    if (phase === PHASES.CHAT || phase === PHASES.BRAINSTORM) {
         try {
             const inventoryPath = path.join(process.cwd(), "context", "INVENTORY.md");
             if (fs.existsSync(inventoryPath)) {

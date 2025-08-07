@@ -8,6 +8,7 @@ import {
     ensureExecutionTimeInitialized,
 } from "../executionTime";
 import type { Conversation, Phase } from "../types";
+import { PHASES } from "../phases";
 
 // Mock Date.now for controlled time testing
 let mockTime = 1000000;
@@ -18,7 +19,7 @@ function createTestConversation(id: string): Conversation {
     const conversation: Conversation = {
         id,
         title: "Test Conversation",
-        phase: "chat" as Phase,
+        phase: PHASES.CHAT,
         history: [],
         metadata: {},
         phaseTransitions: [],
@@ -185,7 +186,7 @@ describe("Execution Time Tracking", () => {
             const conversation: Conversation = {
                 id: "loaded-conv-1",
                 title: "Loaded",
-                phase: "chat" as Phase,
+                phase: PHASES.CHAT,
                 history: [],
                 metadata: {},
                 phaseTransitions: [],
@@ -228,7 +229,7 @@ describe("Execution Time Tracking", () => {
             const conversation: Conversation = {
                 id: "partial-conv-1",
                 title: "Partial",
-                phase: "chat" as Phase,
+                phase: PHASES.CHAT,
                 history: [],
                 metadata: {},
                 phaseTransitions: [],

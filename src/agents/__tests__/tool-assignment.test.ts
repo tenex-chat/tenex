@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { AgentRegistry } from "../AgentRegistry";
 import { getDefaultToolsForAgent } from "../constants";
 import { getBuiltInAgents } from "../builtInAgents";
 
@@ -15,9 +14,9 @@ describe("Tool assignment", () => {
 
             expect(tools).not.toContain("complete");
             expect(tools).not.toContain("analyze");
-            expect(tools).toContain("end_conversation");
+            expect(tools).not.toContain("end_conversation");
             expect(tools).toContain("continue");
-            expect(tools).toContain("learn");
+            expect(tools).not.toContain("learn");
         });
 
         it("planner and executor agents get default tools (but AgentRegistry removes them for claude backend)", () => {

@@ -6,6 +6,9 @@ import {
     retryWithBackoff
 } from "../error-handler";
 
+mock.module("@/tracing", () => ({
+    createTracingContext: mock(() => ({ id: "trace-123" }))
+}));
 describe("error-handler", () => {
     beforeEach(() => {
         mock.restore();
