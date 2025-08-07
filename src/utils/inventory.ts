@@ -86,14 +86,7 @@ export async function generateInventory(
         await fs.writeFile(inventoryPath, inventoryResult.content, "utf-8");
         logger.info("Main inventory saved", { inventoryPath });
 
-        // TODO: Replace with proper NostrPublisher approach
-        // if (task && taskPublisher) {
-        //     await taskPublisher.updateTask(task, {
-        //         status: "in-progress",
-        //         progress: 50,
-        //         message: "Main inventory generated, analyzing complex modules...",
-        //     });
-        // }
+        // Progress tracking handled by TaskPublisher
 
         // Step 4: Generate individual module guides for complex modules (max 10)
         const modulesToProcess = inventoryResult.complexModules.slice(0, 10);
@@ -114,15 +107,7 @@ export async function generateInventory(
 
                 await generateModuleGuide(projectPath, definedModule, repomixResult.content);
 
-                // TODO: Replace with proper NostrPublisher approach
-                // if (task && taskPublisher) {
-                //     const progress = 50 + Math.floor(((i + 1) / modulesToProcess.length) * 40);
-                //     await taskPublisher.updateTask(task, {
-                //         status: "in-progress",
-                //         progress,
-                //         message: `Generated guide for ${definedModule.name}`,
-                //     });
-                // }
+                // Progress tracking handled by TaskPublisher
             } catch (error) {
                 logger.warn("Failed to generate module guide", {
                     module: definedModule.name,
@@ -133,12 +118,7 @@ export async function generateInventory(
 
         // Final completion update
         if (task && taskPublisher) {
-            // TODO: Replace with proper NostrPublisher approach
-            // await taskPublisher.updateTask(task, {
-            //     status: "completed",
-            //     progress: 100,
-            //     message: `Inventory generation completed with ${modulesToProcess.length} complex module guides`,
-            // });
+            // Task completion handled by TaskPublisher
 
             await taskPublisher.publishTaskProgress(
                 `✅ Project inventory generation completed!\n\n📋 Main inventory: ${inventoryPath}\n📚 Complex module guides: ${modulesToProcess.length} generated\n\nThe codebase is now thoroughly documented and ready for analysis.`

@@ -375,7 +375,7 @@ describe("Lesson Metrics", () => {
         });
     });
 
-    // TODO: logLessonMetrics function doesn't exist - these tests need to be updated or the function needs to be created
+    // Tests for logLessonMetrics - skipped as function not implemented
     describe.skip("logLessonMetrics", () => {
         it("should log comprehensive metrics", () => {
             const lessons = [

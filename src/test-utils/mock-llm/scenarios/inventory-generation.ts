@@ -24,16 +24,13 @@ export const inventoryGenerationScenario: MockLLMScenario = {
                 content: "I'll analyze your codebase and generate a comprehensive inventory to help understand the project structure.",
                 toolCalls: [{
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "User wants to generate project inventory",
-                            suggestedPhase: "execute",
-                            confidence: 95,
-                            reasoning: "This is a straightforward task that can be executed immediately"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "User wants to generate project inventory",
+                        suggestedPhase: "execute",
+                        confidence: 95,
+                        reasoning: "This is a straightforward task that can be executed immediately"
+                    })
                 }]
             },
             priority: 10
@@ -50,11 +47,8 @@ export const inventoryGenerationScenario: MockLLMScenario = {
                 content: "I'll now generate a comprehensive inventory of your project using our inventory analysis tool.",
                 toolCalls: [{
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "generate_inventory",
-                        arguments: JSON.stringify({})
-                    }
+                    function: "generate_inventory",
+                    args: JSON.stringify({})
                 }]
             },
             priority: 10
@@ -84,16 +78,13 @@ export const inventoryGenerationScenario: MockLLMScenario = {
 The inventory provides a thorough understanding of your codebase architecture, making it easier to navigate and work with the project.`,
                 toolCalls: [{
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: true,
-                            suggestedNextPhase: "verification",
-                            summary: "Project inventory generated successfully"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: true,
+                        suggestedNextPhase: "verification",
+                        summary: "Project inventory generated successfully"
+                    })
                 }]
             },
             priority: 9
@@ -109,16 +100,13 @@ The inventory provides a thorough understanding of your codebase architecture, m
             response: {
                 toolCalls: [{
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Inventory generation completed successfully",
-                            suggestedPhase: "verification",
-                            confidence: 100,
-                            reasoning: "Task completed, moving to verification"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Inventory generation completed successfully",
+                        suggestedPhase: "verification",
+                        confidence: 100,
+                        reasoning: "Task completed, moving to verification"
+                    })
                 }]
             },
             priority: 9
@@ -135,13 +123,10 @@ The inventory provides a thorough understanding of your codebase architecture, m
                 content: `Let me verify the inventory generation was successful.`,
                 toolCalls: [{
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "readPath",
-                        arguments: JSON.stringify({
-                            path: "context/INVENTORY.md"
-                        })
-                    }
+                    function: "readPath",
+                    args: JSON.stringify({
+                        path: "context/INVENTORY.md"
+                    })
                 }]
             },
             priority: 10
@@ -166,15 +151,12 @@ The inventory provides a thorough understanding of your codebase architecture, m
 The inventory is ready to use for understanding and navigating your codebase.`,
                 toolCalls: [{
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: false,
-                            summary: "Inventory generation verified - task completed successfully"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: false,
+                        summary: "Inventory generation verified - task completed successfully"
+                    })
                 }]
             },
             priority: 9
@@ -185,7 +167,7 @@ The inventory is ready to use for understanding and navigating your codebase.`,
             trigger: {
                 agentName: "Executor",
                 phase: "execute",
-                toolResult: /inventory.*regenerated/i
+                messageContains: /inventory.*regenerated/i
             },
             response: {
                 content: `I've successfully regenerated your project inventory. The existing inventory has been updated with:
@@ -198,16 +180,13 @@ The inventory is ready to use for understanding and navigating your codebase.`,
 The regenerated inventory reflects the current state of your codebase.`,
                 toolCalls: [{
                     id: "7",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: true,
-                            suggestedNextPhase: "verification",
-                            summary: "Project inventory regenerated with latest changes"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: true,
+                        suggestedNextPhase: "verification",
+                        summary: "Project inventory regenerated with latest changes"
+                    })
                 }]
             },
             priority: 8
@@ -218,20 +197,17 @@ The regenerated inventory reflects the current state of your codebase.`,
             trigger: {
                 agentName: "Executor",
                 phase: "execute",
-                toolResult: /error.*inventory|failed.*generate/i
+                messageContains: /error.*inventory|failed.*generate/i
             },
             response: {
                 content: `I encountered an issue while generating the inventory. Let me try an alternative approach.`,
                 toolCalls: [{
                     id: "8",
-                    type: "function",
-                    function: {
-                        name: "shell",
-                        arguments: JSON.stringify({
-                            command: "ls -la context/",
-                            purpose: "Check if context directory exists"
-                        })
-                    }
+                    function: "shell",
+                    args: JSON.stringify({
+                        command: "ls -la context/",
+                        purpose: "Check if context directory exists"
+                    })
                 }]
             },
             priority: 8

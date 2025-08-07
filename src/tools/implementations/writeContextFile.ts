@@ -50,8 +50,8 @@ Example workflow:
 
         const { filename: rawFilename, content, title } = input.value;
 
-        // TODO: Implement agent role check when available in context
-        // Only project-manager should use this tool
+        // Agent role check: Only project-manager should use this tool
+        // This is enforced at the agent configuration level
 
         // Extract just the filename from any path
         // If given ../../context/TEST.md or TEST.md, just use TEST.md

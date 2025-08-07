@@ -20,14 +20,11 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Planning authentication system implementation",
-                            suggestedPhase: "PLAN",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Planning authentication system implementation",
+                        suggestedPhase: "PLAN",
+                    }),
                 },
             ],
         },
@@ -45,15 +42,12 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Starting authentication implementation",
-                            suggestedPhase: "BUILD",
-                            suggestedAgent: "executor",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Starting authentication implementation",
+                        suggestedPhase: "BUILD",
+                        suggestedAgent: "executor",
+                    }),
                 },
             ],
         },
@@ -70,14 +64,11 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "writeContextFile",
-                        arguments: JSON.stringify({
-                            filename: "auth-implementation.md",
-                            content: "# Authentication Implementation\n\n- User registration\n- Login/logout\n- Session management",
-                        }),
-                    },
+                    function: "writeContextFile",
+                    args: JSON.stringify({
+                        filename: "auth-implementation.md",
+                        content: "# Authentication Implementation\n\n- User registration\n- Login/logout\n- Session management",
+                    }),
                 },
             ],
         },
@@ -95,15 +86,12 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Analyzing project structure",
-                            suggestedPhase: "BUILD",
-                            suggestedAgent: "executor",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Analyzing project structure",
+                        suggestedPhase: "BUILD",
+                        suggestedAgent: "executor",
+                    }),
                 },
             ],
         },
@@ -121,13 +109,10 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            summary: "Project structure analyzed successfully",
-                        }),
-                    },
+                    function: "complete",
+                    args: JSON.stringify({
+                        summary: "Project structure analyzed successfully",
+                    }),
                 },
             ],
         },
@@ -145,14 +130,11 @@ export const statePersistenceScenario: MockLLMScenario = {
             toolCalls: [
                 {
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Creating feature as requested",
-                            suggestedPhase: "PLAN",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Creating feature as requested",
+                        suggestedPhase: "PLAN",
+                    }),
                 },
             ],
         },

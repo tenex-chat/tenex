@@ -188,7 +188,7 @@ function displaySDKMessage(message: SDKMessage): void {
         default:
             // Log unknown message types for debugging
             console.log(chalk.gray(`[${timestamp}] ${message.type.toUpperCase()}`));
-            logDebug(`Unknown message type: ${message.type}`, "claude-code", message);
+            logDebug(`Unknown message type: ${message.type}`, "general", "debug", message);
     }
 
     console.log(); // Empty line for readability

@@ -71,14 +71,11 @@ export const performanceTestingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "4",
-                        type: "function",
-                        function: {
-                            name: "complete",
-                            arguments: JSON.stringify({
-                                summary: "Completed slow tool execution",
-                                details: ["Tool executed with 3 second delay"],
-                            }),
-                        },
+                        function: "complete",
+                        args: JSON.stringify({
+                            summary: "Completed slow tool execution",
+                            details: ["Tool executed with 3 second delay"],
+                        }),
                     },
                 ],
             },
@@ -115,14 +112,11 @@ export const performanceTestingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "6",
-                        type: "function",
-                        function: {
-                            name: "complete",
-                            arguments: JSON.stringify({
-                                summary: "Processed large data response",
-                                details: ["Generated 50KB response"],
-                            }),
-                        },
+                        function: "complete",
+                        args: JSON.stringify({
+                            summary: "Processed large data response",
+                            details: ["Generated 50KB response"],
+                        }),
                     },
                 ],
             },

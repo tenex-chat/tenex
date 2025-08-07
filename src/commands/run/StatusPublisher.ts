@@ -57,7 +57,7 @@ export class StatusPublisher {
             } else {
                 logWarning("ProjectContext not initialized for status event");
             }
-        } catch (_err) {
+        } catch {
             logWarning("Could not load agent information for status event");
         }
     }
@@ -86,7 +86,7 @@ export class StatusPublisher {
                     }
                 }
             }
-        } catch (_err) {
+        } catch {
             logWarning("Could not load LLM information for status event model tags");
         }
     }

@@ -6,7 +6,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            messageContent: /routing.*decision/i,
+            messageContains: /routing.*decision/i,
             userMessage: /User A/
         },
         response: {
@@ -21,7 +21,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            messageContent: /routing.*decision/i,
+            messageContains: /routing.*decision/i,
             userMessage: /User B/
         },
         response: {
@@ -36,7 +36,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            messageContent: /routing.*decision/i,
+            messageContains: /routing.*decision/i,
             userMessage: /User C/
         },
         response: {
@@ -61,14 +61,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Creating authentication system for User A",
-                            suggestedPhase: "plan",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Creating authentication system for User A",
+                        suggestedPhase: "plan",
+                    }),
                 } as any,
             ],
         },
@@ -87,14 +84,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Implementing payment processing for User B",
-                            suggestedPhase: "plan",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Implementing payment processing for User B",
+                        suggestedPhase: "plan",
+                    }),
                 } as any,
             ],
         },
@@ -113,14 +107,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Authentication plan ready for User A",
-                            suggestedPhase: "implementation",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Authentication plan ready for User A",
+                        suggestedPhase: "implementation",
+                    }),
                 } as any,
             ],
         },
@@ -139,14 +130,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Payment plan ready for User B",
-                            suggestedPhase: "implementation",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Payment plan ready for User B",
+                        suggestedPhase: "implementation",
+                    }),
                 } as any,
             ],
         },
@@ -165,14 +153,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "executor",
-                            context: "Implement authentication system for User A as planned",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "executor",
+                        context: "Implement authentication system for User A as planned",
+                    }),
                 } as any,
             ],
         },
@@ -191,14 +176,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "executor",
-                            context: "Implement payment processing for User B as planned",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "executor",
+                        context: "Implement payment processing for User B as planned",
+                    }),
                 } as any,
             ],
         },
@@ -217,14 +199,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "orchestrator",
-                            context: "Authentication implementation completed for User A",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "orchestrator",
+                        context: "Authentication implementation completed for User A",
+                    }),
                 } as any,
             ],
         },
@@ -243,14 +222,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "orchestrator",
-                            context: "Payment implementation completed for User B",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "orchestrator",
+                        context: "Payment implementation completed for User B",
+                    }),
                 } as any,
             ],
         },
@@ -269,14 +245,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Ready to verify authentication for User A",
-                            suggestedPhase: "verification",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Ready to verify authentication for User A",
+                        suggestedPhase: "verification",
+                    }),
                 } as any,
             ],
         },
@@ -295,14 +268,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Ready to verify payment processing for User B",
-                            suggestedPhase: "verification",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Ready to verify payment processing for User B",
+                        suggestedPhase: "verification",
+                    }),
                 } as any,
             ],
         },
@@ -321,13 +291,10 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "completeConversation",
-                        arguments: JSON.stringify({
-                            summary: "Authentication system completed for User A",
-                        }),
-                    },
+                    function: "completeConversation",
+                    args: JSON.stringify({
+                        summary: "Authentication system completed for User A",
+                    }),
                 } as any,
             ],
         },
@@ -346,13 +313,10 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "completeConversation",
-                        arguments: JSON.stringify({
-                            summary: "Payment processing completed for User B",
-                        }),
-                    },
+                    function: "completeConversation",
+                    args: JSON.stringify({
+                        summary: "Payment processing completed for User B",
+                    }),
                 } as any,
             ],
         },
@@ -371,14 +335,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Implementing payment processing for User C",
-                            suggestedPhase: "plan",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Implementing payment processing for User C",
+                        suggestedPhase: "plan",
+                    }),
                 } as any,
             ],
         },
@@ -397,14 +358,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Payment plan ready for User C",
-                            suggestedPhase: "implementation",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Payment plan ready for User C",
+                        suggestedPhase: "implementation",
+                    }),
                 } as any,
             ],
         },
@@ -423,14 +381,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "executor",
-                            context: "Implement payment processing for User C as planned",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "executor",
+                        context: "Implement payment processing for User C as planned",
+                    }),
                 } as any,
             ],
         },
@@ -449,14 +404,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "handoff",
-                        arguments: JSON.stringify({
-                            toAgent: "orchestrator",
-                            context: "Payment implementation completed for User C",
-                        }),
-                    },
+                    function: "handoff",
+                    args: JSON.stringify({
+                        toAgent: "orchestrator",
+                        context: "Payment implementation completed for User C",
+                    }),
                 } as any,
             ],
         },
@@ -475,14 +427,11 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Ready to verify payment processing for User C",
-                            suggestedPhase: "verification",
-                        }),
-                    },
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Ready to verify payment processing for User C",
+                        suggestedPhase: "verification",
+                    }),
                 } as any,
             ],
         },
@@ -501,13 +450,10 @@ const concurrencyResponses: MockLLMResponse[] = [
             toolCalls: [
                 {
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "completeConversation",
-                        arguments: JSON.stringify({
-                            summary: "Payment processing completed for User C",
-                        }),
-                    },
+                    function: "completeConversation",
+                    args: JSON.stringify({
+                        summary: "Payment processing completed for User C",
+                    }),
                 } as any,
             ],
         },

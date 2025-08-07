@@ -8,11 +8,9 @@ import {
     type TracingContext,
     createPhaseExecutionContext,
     createTracingContext,
-    createTracingLogger,
 } from "@/tracing";
 import { logger } from "@/utils/logger";
 import { NDKArticle, type NDKEvent } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
 import { ensureExecutionTimeInitialized } from "./executionTime";
 import { FileSystemAdapter } from "./persistence";
 import type { ConversationPersistenceAdapter } from "./persistence/types";

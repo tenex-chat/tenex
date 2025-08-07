@@ -59,10 +59,25 @@ export class MockLLMService implements LLMService {
         }
         
         // Convert to CompletionResponse format that matches multi-llm-ts v4
+        const toolCalls = response.toolCalls ? response.toolCalls.map(tc => {
+            // Handle both old and new formats
+            if (typeof tc === 'object' && 'function' in tc && typeof tc.function === 'object') {
+                // Old format with function object
+                return {
+                    id: tc.id,
+                    message: null,
+                    function: (tc.function as any).name,
+                    args: (tc.function as any).arguments || '{}'
+                };
+            }
+            // Already in correct format
+            return tc;
+        }) : [];
+        
         return {
             type: 'text',
             content: response.content || "",
-            toolCalls: response.toolCalls || [],
+            toolCalls: [],
             usage: {
                 prompt_tokens: 100,
                 completion_tokens: 50,
@@ -108,10 +123,18 @@ export class MockLLMService implements LLMService {
         // Send tool calls
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
+                // Handle both old and new formats
+                const toolName = typeof toolCall.function === 'string' 
+                    ? toolCall.function 
+                    : (toolCall.function as any).name;
+                const toolArgs = typeof toolCall.function === 'string'
+                    ? toolCall.args
+                    : (toolCall.function as any).arguments || '{}';
+                    
                 yield { 
                     type: 'tool_start', 
-                    tool: toolCall.function.name,
-                    args: JSON.parse(toolCall.function.arguments || '{}')
+                    tool: toolName,
+                    args: JSON.parse(toolArgs)
                 };
             }
         }
@@ -122,7 +145,7 @@ export class MockLLMService implements LLMService {
             response: {
                 type: 'text',
                 content: response.content || "",
-                toolCalls: response.toolCalls || [],
+                toolCalls: [],
                 usage: {
                     prompt_tokens: 100,
                     completion_tokens: 50,
@@ -136,8 +159,10 @@ export class MockLLMService implements LLMService {
         const systemMessage = messages.find(m => m.role === 'system');
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
         const toolCalls = messages
-            .filter(m => m.tool_calls && m.tool_calls.length > 0)
-            .flatMap(m => m.tool_calls!.map(tc => tc.function.name));
+            .filter(m => (m as any).tool_calls && (m as any).tool_calls.length > 0)
+            .flatMap(m => (m as any).tool_calls!.map((tc: any) => 
+                typeof tc.function === 'string' ? tc.function : tc.function.name
+            ));
         
         // Extract agent name and phase from system prompt
         const agentName = this.extractAgentName(systemMessage?.content || '');
@@ -183,8 +208,8 @@ export class MockLLMService implements LLMService {
                     continue; // No user message, but trigger expects one
                 }
                 const matches = trigger.userMessage instanceof RegExp
-                    ? trigger.userMessage.test(lastUserMessage.content)
-                    : lastUserMessage.content.includes(trigger.userMessage);
+                    ? trigger.userMessage.test(lastUserMessage.content!)
+                    : lastUserMessage.content!.includes(trigger.userMessage);
                 if (!matches) continue;
             }
             
@@ -196,14 +221,8 @@ export class MockLLMService implements LLMService {
             }
             
             if (trigger.agentName) {
-                if (typeof trigger.agentName === 'string') {
-                    if (trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
-                        continue;
-                    }
-                } else if (trigger.agentName instanceof RegExp) {
-                    if (!trigger.agentName.test(agentName)) {
-                        continue;
-                    }
+                if (trigger.agentName.toLowerCase() !== agentName.toLowerCase()) {
+                    continue;
                 }
             }
             
@@ -257,9 +276,9 @@ export class MockLLMService implements LLMService {
         for (const pattern of patterns) {
             const match = systemPrompt.match(pattern);
             if (match) {
-                const name = match[1].toLowerCase();
+                const name = match[1]?.toLowerCase();
                 // Handle special cases
-                if (name === 'the') continue; // Skip if we accidentally matched "the"
+                if (!name || name === 'the') continue; // Skip if we accidentally matched "the"
                 return name;
             }
         }
@@ -289,7 +308,7 @@ export class MockLLMService implements LLMService {
         for (const pattern of patterns) {
             const match = systemPrompt.match(pattern);
             if (match) {
-                return match[1].toLowerCase();
+                return match[1]?.toLowerCase() || 'unknown';
             }
         }
         

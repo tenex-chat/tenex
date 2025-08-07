@@ -19,16 +19,13 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
                 content: "I'll help you create a user authentication system. Let me first understand your requirements better.",
                 toolCalls: [{
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "User wants to create authentication system - gathering requirements",
-                            suggestedPhase: "CHAT",
-                            confidence: 90,
-                            reasoning: "Need to understand authentication requirements before planning"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "User wants to create authentication system - gathering requirements",
+                        suggestedPhase: "CHAT",
+                        confidence: 90,
+                        reasoning: "Need to understand authentication requirements before planning"
+                    })
                 }]
             },
             priority: 10
@@ -45,16 +42,13 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
                 content: "I understand you want JWT-based authentication with OAuth support. Let me create a plan for this.",
                 toolCalls: [{
                     id: "2",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: true,
-                            suggestedNextPhase: "PLAN",
-                            summary: "Requirements gathered: JWT auth with OAuth providers"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: true,
+                        suggestedNextPhase: "PLAN",
+                        summary: "Requirements gathered: JWT auth with OAuth providers"
+                    })
                 }]
             },
             priority: 10
@@ -70,16 +64,13 @@ export const orchestratorWorkflowScenario: MockLLMScenario = {
             response: {
                 toolCalls: [{
                     id: "3",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Requirements gathered, moving to planning phase",
-                            suggestedPhase: "PLAN",
-                            confidence: 95,
-                            reasoning: "Requirements are clear, ready to create implementation plan"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Requirements gathered, moving to planning phase",
+                        suggestedPhase: "PLAN",
+                        confidence: 95,
+                        reasoning: "Requirements are clear, ready to create implementation plan"
+                    })
                 }]
             },
             priority: 9
@@ -120,14 +111,11 @@ Implement JWT-based authentication with OAuth provider support.
 - Enable CORS properly`,
                 toolCalls: [{
                     id: "4",
-                    type: "function",
-                    function: {
-                        name: "writeContextFile",
-                        arguments: JSON.stringify({
-                            filename: "PLAN.md",
-                            content: "# Authentication Implementation Plan\n\n[Plan content here]..."
-                        })
-                    }
+                    function: "writeContextFile",
+                    args: JSON.stringify({
+                        filename: "PLAN.md",
+                        content: "# Authentication Implementation Plan\n\n[Plan content here]..."
+                    })
                 }]
             },
             priority: 10
@@ -143,16 +131,13 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "5",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: true,
-                            suggestedNextPhase: "EXECUTE",
-                            summary: "Comprehensive authentication plan created"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: true,
+                        suggestedNextPhase: "EXECUTE",
+                        summary: "Comprehensive authentication plan created"
+                    })
                 }]
             },
             priority: 9
@@ -168,16 +153,13 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "6",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Plan approved, starting implementation",
-                            suggestedPhase: "EXECUTE",
-                            confidence: 98,
-                            reasoning: "Plan is comprehensive and ready for implementation"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Plan approved, starting implementation",
+                        suggestedPhase: "EXECUTE",
+                        confidence: 98,
+                        reasoning: "Plan is comprehensive and ready for implementation"
+                    })
                 }]
             },
             priority: 9
@@ -194,14 +176,11 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Starting implementation of the authentication system...",
                 toolCalls: [{
                     id: "7",
-                    type: "function",
-                    function: {
-                        name: "writeFile",
-                        arguments: JSON.stringify({
-                            path: "src/auth/jwt.ts",
-                            content: "import jwt from 'jsonwebtoken';\n\nexport class JWTManager {\n  // Implementation\n}"
-                        })
-                    }
+                    function: "writeFile",
+                    args: JSON.stringify({
+                        path: "src/auth/jwt.ts",
+                        content: "import jwt from 'jsonwebtoken';\n\nexport class JWTManager {\n  // Implementation\n}"
+                    })
                 }]
             },
             priority: 10
@@ -218,14 +197,11 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Created JWT manager, now implementing OAuth providers...",
                 toolCalls: [{
                     id: "8",
-                    type: "function",
-                    function: {
-                        name: "writeFile",
-                        arguments: JSON.stringify({
-                            path: "src/auth/oauth.ts",
-                            content: "export class OAuthProvider {\n  // OAuth implementation\n}"
-                        })
-                    }
+                    function: "writeFile",
+                    args: JSON.stringify({
+                        path: "src/auth/oauth.ts",
+                        content: "export class OAuthProvider {\n  // OAuth implementation\n}"
+                    })
                 }]
             },
             priority: 9
@@ -242,14 +218,11 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Running tests to verify the implementation...",
                 toolCalls: [{
                     id: "9",
-                    type: "function",
-                    function: {
-                        name: "shell",
-                        arguments: JSON.stringify({
-                            command: "npm test",
-                            cwd: "."
-                        })
-                    }
+                    function: "shell",
+                    args: JSON.stringify({
+                        command: "npm test",
+                        cwd: "."
+                    })
                 }]
             },
             priority: 8
@@ -266,16 +239,13 @@ Implement JWT-based authentication with OAuth provider support.
                 content: "Authentication system implemented successfully. All tests passing.",
                 toolCalls: [{
                     id: "10",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: true,
-                            suggestedNextPhase: "VERIFICATION",
-                            summary: "Authentication system implemented with JWT and OAuth"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: true,
+                        suggestedNextPhase: "VERIFICATION",
+                        summary: "Authentication system implemented with JWT and OAuth"
+                    })
                 }]
             },
             priority: 9
@@ -291,16 +261,13 @@ Implement JWT-based authentication with OAuth provider support.
             response: {
                 toolCalls: [{
                     id: "11",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Implementation complete, proceeding to verification",
-                            suggestedPhase: "VERIFICATION",
-                            confidence: 100,
-                            reasoning: "All components implemented and tests passing"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Implementation complete, proceeding to verification",
+                        suggestedPhase: "VERIFICATION",
+                        confidence: 100,
+                        reasoning: "All components implemented and tests passing"
+                    })
                 }]
             },
             priority: 9
@@ -325,15 +292,12 @@ Implement JWT-based authentication with OAuth provider support.
 The authentication system has been successfully implemented and verified.`,
                 toolCalls: [{
                     id: "12",
-                    type: "function",
-                    function: {
-                        name: "complete",
-                        arguments: JSON.stringify({
-                            phaseComplete: true,
-                            readyForNext: false,
-                            summary: "Authentication system verified and ready for use"
-                        })
-                    }
+                    function: "complete",
+                    args: JSON.stringify({
+                        phaseComplete: true,
+                        readyForNext: false,
+                        summary: "Authentication system verified and ready for use"
+                    })
                 }]
             },
             priority: 10
@@ -350,13 +314,10 @@ The authentication system has been successfully implemented and verified.`,
                 content: "Task completed successfully! The authentication system has been implemented, tested, and verified.",
                 toolCalls: [{
                     id: "13",
-                    type: "function",
-                    function: {
-                        name: "endConversation",
-                        arguments: JSON.stringify({
-                            reason: "Task completed successfully"
-                        })
-                    }
+                    function: "endConversation",
+                    args: JSON.stringify({
+                        reason: "Task completed successfully"
+                    })
                 }]
             },
             priority: 9

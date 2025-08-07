@@ -20,15 +20,12 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I'll help you with that. Let me route this to the appropriate phase for planning.",
                 toolCalls: [{
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "User requested a new system implementation",
-                            suggestedPhase: "plan",
-                            suggestedAgent: "planner"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "User requested a new system implementation",
+                        suggestedPhase: "plan",
+                        suggestedAgent: "planner"
+                    })
                 }]
             },
             priority: 10
@@ -44,15 +41,12 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I've created a plan for implementing the requested system. The plan includes core components and basic functionality.",
                 toolCalls: [{
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Plan created for system implementation",
-                            suggestedPhase: "implementation",
-                            suggestedAgent: "executor"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Plan created for system implementation",
+                        suggestedPhase: "implementation",
+                        suggestedAgent: "executor"
+                    })
                 }]
             },
             priority: 10
@@ -68,15 +62,12 @@ export const networkResilienceScenario: MockLLMScenario = {
                 content: "I've implemented the basic structure for the requested system. The implementation is ready for verification.",
                 toolCalls: [{
                     id: "1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Basic implementation completed",
-                            suggestedPhase: "verification",
-                            suggestedAgent: "orchestrator"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Basic implementation completed",
+                        suggestedPhase: "verification",
+                        suggestedAgent: "orchestrator"
+                    })
                 }]
             },
             priority: 10

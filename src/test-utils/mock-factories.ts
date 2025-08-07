@@ -105,8 +105,8 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
                 plan: 0,
                 execute: 0,
                 verification: 0,
-                complete: 0,
-                endConversation: 0
+                chores: 0,
+                reflection: 0
             }
         },
         phaseTransitions: [],
@@ -152,11 +152,9 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
 export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
     return {
         id: "tool-" + Math.random().toString(36).substr(2, 9),
-        type: "function",
-        function: {
-            name: "analyze",
-            arguments: JSON.stringify({ query: "Mock query" })
-        },
+        message: null,
+        function: "analyze",
+        args: JSON.stringify({ query: "Mock query" }),
         ...overrides
     };
 }

@@ -2,7 +2,7 @@
  * Simplified tool executor
  */
 
-import type { Tool, ToolError } from "./core";
+import type { Tool, ToolError, Validated } from "./core";
 import type { ExecutionContext } from "./types";
 import { logger } from "@/utils/logger";
 import { formatError } from "@/utils/errors";

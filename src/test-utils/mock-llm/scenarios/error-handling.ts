@@ -17,14 +17,11 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I'll simulate an error condition.",
                 toolCalls: [{
                     id: "err1",
-                    type: "function",
-                    function: {
-                        name: "shell",
-                        arguments: JSON.stringify({
-                            command: "exit 1",
-                            cwd: "."
-                        })
-                    }
+                    function: "shell",
+                    args: JSON.stringify({
+                        command: "exit 1",
+                        cwd: "."
+                    })
                 }]
             },
             priority: 10
@@ -41,13 +38,10 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I see the command failed. Let me try a different approach.",
                 toolCalls: [{
                     id: "err2",
-                    type: "function",
-                    function: {
-                        name: "analyze",
-                        arguments: JSON.stringify({
-                            query: "What went wrong with the previous command?"
-                        })
-                    }
+                    function: "analyze",
+                    args: JSON.stringify({
+                        query: "What went wrong with the previous command?"
+                    })
                 }]
             },
             priority: 9
@@ -64,16 +58,13 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "This response is delayed to simulate network issues...",
                 toolCalls: [{
                     id: "timeout1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Testing timeout handling",
-                            suggestedPhase: "CHAT",
-                            confidence: 50,
-                            reasoning: "Network seems slow"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Testing timeout handling",
+                        suggestedPhase: "CHAT",
+                        confidence: 50,
+                        reasoning: "Network seems slow"
+                    })
                 }]
             },
             priority: 10
@@ -89,11 +80,8 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "Testing malformed tool call...",
                 toolCalls: [{
                     id: "bad1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: "{ invalid json }" // Intentionally malformed
-                    }
+                    function: "continue",
+                    args: "{ invalid json }" // Intentionally malformed
                 }]
             },
             priority: 10
@@ -134,27 +122,18 @@ export const errorHandlingScenario: MockLLMScenario = {
                 toolCalls: [
                     {
                         id: "mix1",
-                        type: "function",
-                        function: {
-                            name: "readPath",
-                            arguments: JSON.stringify({ path: "./exists.md" })
-                        }
+                        function: "readPath",
+                        args: JSON.stringify({ path: "./exists.md" })
                     },
                     {
                         id: "mix2",
-                        type: "function",
-                        function: {
-                            name: "readPath",
-                            arguments: JSON.stringify({ path: "./does-not-exist.md" })
-                        }
+                        function: "readPath",
+                        args: JSON.stringify({ path: "./does-not-exist.md" })
                     },
                     {
                         id: "mix3",
-                        type: "function",
-                        function: {
-                            name: "shell",
-                            arguments: JSON.stringify({ command: "echo 'success'" })
-                        }
+                        function: "shell",
+                        args: JSON.stringify({ command: "echo 'success'" })
                     }
                 ]
             },
@@ -171,13 +150,10 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "I notice we're stuck in a loop. Let me break out of this pattern.",
                 toolCalls: [{
                     id: "loop1",
-                    type: "function",
-                    function: {
-                        name: "endConversation",
-                        arguments: JSON.stringify({
-                            reason: "Detected potential infinite loop"
-                        })
-                    }
+                    function: "endConversation",
+                    args: JSON.stringify({
+                        reason: "Detected potential infinite loop"
+                    })
                 }]
             },
             priority: 15
@@ -192,16 +168,13 @@ export const errorHandlingScenario: MockLLMScenario = {
             response: {
                 toolCalls: [{
                     id: "phase1",
-                    type: "function",
-                    function: {
-                        name: "continue",
-                        arguments: JSON.stringify({
-                            summary: "Attempting invalid phase transition",
-                            suggestedPhase: "INVALID_PHASE", // Invalid phase
-                            confidence: 10,
-                            reasoning: "Testing phase validation"
-                        })
-                    }
+                    function: "continue",
+                    args: JSON.stringify({
+                        summary: "Attempting invalid phase transition",
+                        suggestedPhase: "INVALID_PHASE", // Invalid phase
+                        confidence: 10,
+                        reasoning: "Testing phase validation"
+                    })
                 }]
             },
             priority: 10
@@ -217,14 +190,11 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "Detecting concurrent modification conflict...",
                 toolCalls: [{
                     id: "conc1",
-                    type: "function",
-                    function: {
-                        name: "writeFile",
-                        arguments: JSON.stringify({
-                            path: "src/shared.ts",
-                            content: "// Version A"
-                        })
-                    }
+                    function: "writeFile",
+                    args: JSON.stringify({
+                        path: "src/shared.ts",
+                        content: "// Version A"
+                    })
                 }]
             },
             priority: 10
@@ -240,13 +210,10 @@ export const errorHandlingScenario: MockLLMScenario = {
                 content: "A".repeat(10000), // Very large response
                 toolCalls: [{
                     id: "mem1",
-                    type: "function",
-                    function: {
-                        name: "analyze",
-                        arguments: JSON.stringify({
-                            query: "Analyze this extremely large codebase with thousands of files"
-                        })
-                    }
+                    function: "analyze",
+                    args: JSON.stringify({
+                        query: "Analyze this extremely large codebase with thousands of files"
+                    })
                 }]
             },
             priority: 10
