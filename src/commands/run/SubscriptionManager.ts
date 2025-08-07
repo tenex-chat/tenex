@@ -86,40 +86,17 @@ export class SubscriptionManager {
             authors: agentPubkeys,
         };
         
-        logger.info("📚 Setting up agent lessons subscription", {
-            projectId: project.id,
-            projectTagId: project.tagId(),
-            agentCount: agentPubkeys.length,
-            kinds: NDKAgentLesson.kinds,
-            filter: lessonFilter,
-        });
-
         const lessonSubscription = ndk.subscribe(lessonFilter, {
             closeOnEose: false,
             groupable: false,
-        });
-
-        lessonSubscription.on("event", (event: NDKEvent) => {
-            try {
-                // Convert to NDKAgentLesson
-                const lesson = NDKAgentLesson.from(event);
-                
-                logger.info("📖 Received agent lesson event", {
-                    lessonId: lesson.id,
-                    lessonTitle: lesson.title,
-                    authorPubkey: lesson.pubkey,
-                    projectTag: lesson.tags.find(t => t[0] === "a")?.[1],
-                    createdAt: lesson.created_at,
-                });
-
-                // Add to project context
-                projectCtx.addLesson(lesson.pubkey, lesson);
-                logger.debug("✅ Lesson added to project context", {
-                    agentPubkey: lesson.pubkey,
-                    currentLessonCount: projectCtx.getLessonsForAgent(lesson.pubkey).length,
-                });
-            } catch (error) {
-                logger.error("❌ Error processing agent lesson:", error);
+        }, {
+            onEvent: (event: NDKEvent) => {
+                try {
+                    const lesson = NDKAgentLesson.from(event);
+                    projectCtx.addLesson(lesson.pubkey, lesson);
+                } catch (error) {
+                    logger.error("❌ Error processing agent lesson:", error);
+                }
             }
         });
 

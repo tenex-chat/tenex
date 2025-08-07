@@ -3,7 +3,7 @@ import { AgentExecutor } from "../AgentExecutor";
 import { createMockLLMService, MockFactory } from "@/test-utils";
 import type { ExecutionContext } from "../types";
 import type { Agent } from "@/agents/types";
-import type { Message } from "@/llm/types";
+import { Message } from "multi-llm-ts";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import { NDK } from "@nostr-dev-kit/ndk";
 
@@ -21,7 +21,25 @@ describe("AgentExecutor", () => {
                 projectPath: "/test/project",
                 configService: {
                     getProjectPath: () => "/test/project"
-                }
+                },
+                project: {
+                    tags: [
+                        ["title", "Test Project"],
+                        ["repo", "test-repo"]
+                    ]
+                },
+                agents: new Map([
+                    ["test-agent", {
+                        id: "test-agent-id",
+                        name: "test-agent",
+                        slug: "test-agent",
+                        pubkey: "test-agent-pubkey",
+                        systemPrompt: "You are the test-agent agent",
+                        tools: ["analyze", "complete"],
+                        backend: "claude"
+                    }]
+                ]),
+                getLessonsForAgent: () => []
             })
         }));
         
@@ -65,6 +83,25 @@ describe("AgentExecutor", () => {
                 })
             }
         }));
+        
+        mock.module("@/prompts/utils/systemPromptBuilder", () => ({
+            buildSystemPrompt: () => "You are a test agent. Help users with their tasks."
+        }));
+        
+        mock.module("@/services/mcp/MCPService", () => ({
+            mcpService: {
+                getAvailableTools: async () => []
+            }
+        }));
+        
+        mock.module("@/nostr", () => ({
+            NostrPublisher: class {
+                constructor() {}
+                async publishTypingIndicator() {}
+                async publishResponse() {}
+                cleanup() {}
+            }
+        }));
         // Create mock LLM service
         mockLLM = createMockLLMService([{
             name: "test-agent-responses",
@@ -92,16 +129,36 @@ describe("AgentExecutor", () => {
         
         // Create mock conversation manager
         mockConversationManager = {
-            getConversation: mock(async () => ({
+            getConversation: mock(() => ({
                 id: "test-conversation-id",
-                phase: "PLAN",
-                messages: [],
-                createdAt: new Date(),
-                updatedAt: new Date()
+                title: "Test Conversation",
+                phase: "CHAT",
+                history: [],
+                agentStates: new Map(),
+                phaseStartedAt: Date.now(),
+                metadata: {},
+                phaseTransitions: [],
+                orchestratorTurns: [],
+                executionTime: {
+                    totalSeconds: 0,
+                    isActive: false,
+                    lastUpdated: Date.now()
+                }
+            })),
+            buildAgentMessages: mock(async () => ({
+                messages: [
+                    new Message("user", "Test user message")
+                ],
+                claudeSessionId: undefined
+            })),
+            buildOrchestratorRoutingContext: mock(async () => ({
+                user_request: "Test user request",
+                routing_history: [],
+                current_routing: null
             })),
             saveConversation: mock(async () => {}),
             updateState: mock(async () => {}),
-            getAgentContext: mock(async () => null),
+            getAgentContext: mock(() => null),
             setAgentContext: mock(async () => {}),
             updatePhase: mock(async () => {})
         } as any;
@@ -111,6 +168,7 @@ describe("AgentExecutor", () => {
             id: "test-agent-id",
             name: "test-agent",
             slug: "test-agent",
+            pubkey: "test-agent-pubkey",
             description: "Test agent for unit tests",
             tools: ["analyze", "complete"],
             systemPrompt: "You are the test-agent agent. Help users with their tasks.",
@@ -122,16 +180,28 @@ describe("AgentExecutor", () => {
             projectId: "test-project",
             llmProvider: "anthropic",
             model: "claude-3-opus-20240229",
-            temperature: 0.7
+            temperature: 0.7,
+            isOrchestrator: false
+        };
+        
+        // Create mock publisher
+        const mockPublisher = {
+            publishTypingIndicator: mock(async () => {}),
+            publishResponse: mock(async () => {}),
+            cleanup: mock(() => {})
         };
         
         // Create mock execution context
         mockContext = {
             agent: mockAgent,
             conversationId: "test-conversation-id",
+            phase: "CHAT",
+            projectPath: "/test/project",
             messages: [],
             tools: [],
             toolContext: {},
+            conversationManager: mockConversationManager,
+            publisher: mockPublisher as any,
             onStreamStart: mock(() => {}),
             onStreamToken: mock(() => {}),
             onStreamToolCall: mock(() => {}),
@@ -254,23 +324,34 @@ describe("AgentExecutor", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error) {
                 expect(error).toBe(testError);
-                expect(mockContext.onError).toHaveBeenCalledWith(testError);
+                // AgentExecutor no longer calls onError - it just rethrows
             }
         });
         
-        it("should throw error for unknown backend", async () => {
+        it("should default to reason-act-loop for unknown backend", async () => {
             // Update agent with unknown backend
             (mockContext.agent as any).backend = "unknown-backend";
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            // Mock ReasonActLoop for unknown backend (defaults to reason-act-loop)
+            mock.module("@/agents/execution/ReasonActLoop", () => ({
+                ReasonActLoop: class {
+                    async execute(messages: Message[], tools: any[], context: ExecutionContext) {
+                        context.onStreamStart?.();
+                        context.onStreamToken?.("Using default backend");
+                        context.onComplete?.({
+                            content: "Default backend response",
+                            toolCalls: []
+                        });
+                    }
+                }
+            }));
             
-            try {
-                await executor.execute(mockContext);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error) {
-                expect((error as Error).message).toContain("Unknown agent backend");
-                expect(mockContext.onError).toHaveBeenCalled();
-            }
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            await executor.execute(mockContext);
+            
+            // Should use default backend successfully
+            expect(mockContext.onStreamStart).toHaveBeenCalled();
+            expect(mockContext.onStreamToken).toHaveBeenCalledWith("Using default backend");
         });
     });
     

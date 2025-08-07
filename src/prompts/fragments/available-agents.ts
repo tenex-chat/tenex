@@ -59,7 +59,6 @@ As Orchestrator:
 - Implementation work MUST go to the Executor agent
 - Planning work goes to the Planner agent
 - Domain expertise comes from specialist agents (advisory only)
-- Don't implement solutions yourself - delegate using the continue tool
 - Remember: Only the Executor can modify the system`
             : currentAgentObj?.slug === 'executor'
             ? `

@@ -44,12 +44,6 @@ export class AgentPublisher {
 
             await profileEvent.sign(signer);
             await profileEvent.publish();
-
-            logger.info("Published agent profile", {
-                agentName,
-                pubkey: signer.pubkey,
-                avatar: avatarUrl,
-            });
         } catch (error) {
             logger.error("Failed to publish agent profile", {
                 error,

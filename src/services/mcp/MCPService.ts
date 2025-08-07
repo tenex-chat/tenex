@@ -233,10 +233,6 @@ export class MCPService {
         return tools;
     }
 
-    // Keep the async method for compatibility
-    async getAvailableTools(): Promise<Tool[]> {
-        return this.getCachedTools();
-    }
 
     private convertMCPToolToTenexTool(serverName: string, mcpTool: MCPTool): Tool {
         // Use the adapter to create a type-safe tool with Zod schemas

@@ -788,12 +788,6 @@ export class AgentRegistry {
         // Republish kind:0 for each agent
         for (const [slug, agent] of this.agents) {
             try {
-                logger.debug(`Republishing kind:0 for agent: ${slug}`, {
-                    agentName: agent.name,
-                    agentRole: agent.role,
-                    pubkey: agent.pubkey,
-                });
-
                 await publisher.publishAgentProfile(
                     agent.signer,
                     agent.name,
@@ -801,8 +795,6 @@ export class AgentRegistry {
                     projectName,
                     projectPubkey
                 );
-
-                logger.info(`Successfully republished kind:0 for agent: ${slug}`);
             } catch (error) {
                 logger.error(`Failed to republish kind:0 for agent: ${slug}`, {
                     error,
@@ -811,7 +803,5 @@ export class AgentRegistry {
                 // Continue with other agents even if one fails
             }
         }
-
-        logger.info("Completed republishing kind:0 events for all agents");
     }
 }

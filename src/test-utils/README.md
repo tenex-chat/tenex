@@ -46,7 +46,6 @@ The `mock-factories.ts` file provides factory functions for creating mock object
 - `createMockPhaseTransition()` - Creates a mock phase transition
 - `createMockFileSystem()` - Creates a mock file system structure
 - `MockBuilder` - A builder class for complex mock objects
-- `MockFactory` - Namespace providing all factory functions for backwards compatibility
 
 ## Mock LLM Service
 

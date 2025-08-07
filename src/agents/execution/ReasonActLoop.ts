@@ -241,17 +241,14 @@ export class ReasonActLoop implements ExecutionBackend {
 
         // Build metadata for finalization
         const metadata: Record<string, unknown> = {};
-        const continueFlow = stateManager.getContinueFlow();
         const termination = stateManager.getTermination();
         
-        if (continueFlow) {
-            metadata.continueMetadata = continueFlow;
-        } else if (termination) {
+        if (termination) {
             metadata.completeMetadata = termination;
         }
 
         // Only finalize if there's content or metadata
-        if (!context.agent.isOrchestrator || continueFlow || termination) {
+        if (!context.agent.isOrchestrator || termination) {
             await streamPublisher.finalize({
                 llmMetadata,
                 ...metadata,
@@ -297,7 +294,6 @@ export class ReasonActLoop implements ExecutionBackend {
 
         // Add additional properties for AgentExecutor
         return Object.assign(baseEvent, {
-            continueFlow: stateManager.getContinueFlow(),
             termination: stateManager.getTermination(),
         }) as StreamEvent;
     }
@@ -325,7 +321,7 @@ export class ReasonActLoop implements ExecutionBackend {
             }
         }
 
-        publisher?.publishTypingIndicator("stop");
+        await publisher?.publishTypingIndicator("stop");
 
         yield {
             type: "error",
@@ -369,16 +365,7 @@ export class ReasonActLoop implements ExecutionBackend {
             
             const reasoningData = this.parseReasoningContent(thinkingContent);
             
-            this.executionLogger?.agentThinking(
-                context.agent.name,
-                reasoningData.reasoning || thinkingContent,
-                {
-                    userMessage: reasoningData.currentSituation,
-                    considerations: reasoningData.options,
-                    leaningToward: reasoningData.decision,
-                    confidence: reasoningData.confidence
-                }
-            );
+            // agentThinking removed - not in new event system
         });
     }
     

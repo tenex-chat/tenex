@@ -132,18 +132,8 @@ export class ToolPlugin extends Plugin {
 
                 // Check if it's a control flow result
                 if (typeof output === "object" && output !== null && "type" in output) {
-                    if (
-                        output.type === "continue" &&
-                        "routing" in output &&
-                        typeof output.routing === "object" &&
-                        output.routing !== null &&
-                        "agents" in output.routing &&
-                        Array.isArray(output.routing.agents)
-                    ) {
-                        outputMessage = `Routing to ${output.routing.agents.length} agents`;
-                    }
                     // Check if it's a termination result
-                    else if (
+                    if (
                         output.type === "complete" &&
                         "completion" in output &&
                         typeof output.completion === "object" &&

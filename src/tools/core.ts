@@ -51,18 +51,6 @@ export interface Tool<Input = unknown, Output = unknown> {
 // Control Flow and Termination Types
 // ============================================================================
 
-export interface ContinueFlow {
-    readonly type: "continue";
-    readonly routing: RoutingDecision;
-}
-
-export interface RoutingDecision {
-    readonly phase?: Phase;
-    readonly agents: NonEmptyArray<string>; // Agent pubkeys
-    readonly reason: string;
-    readonly context?: Readonly<Record<string, unknown>>;
-}
-
 /**
  * Termination types that end execution
  */

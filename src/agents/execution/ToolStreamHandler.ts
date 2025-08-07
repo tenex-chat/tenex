@@ -7,7 +7,7 @@ import { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
-import { isContinueFlow, isComplete, isEndConversation } from "./control-flow-types";
+import { isComplete, isEndConversation } from "./control-flow-types";
 
 /**
  * Handles tool-related events in the LLM stream.
@@ -40,10 +40,8 @@ export class ToolStreamHandler {
             this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
         }
 
-        // Flush stream for non-continue tools
-        if (toolName !== "continue") {
-            await streamPublisher?.flush();
-        }
+        // Flush stream for all tools
+        await streamPublisher?.flush();
 
         // Publish typing indicator with tool information
         if (publisher) {
@@ -91,7 +89,7 @@ export class ToolStreamHandler {
 
         // Flush stream and stop typing indicator
         await streamPublisher?.flush();
-        publisher?.publishTypingIndicator("stop");
+        await publisher?.publishTypingIndicator("stop");
 
         // Check if this is a terminal tool
         return this.isTerminalResult(toolResult);
@@ -236,20 +234,6 @@ export class ToolStreamHandler {
         tracingLogger: TracingLogger,
         context: ExecutionContext
     ): void {
-        tracingLogger.info("🔧 Processing tool result", {
-            success: toolResult.success,
-            hasOutput: !!toolResult.output,
-            outputType:
-                toolResult.output &&
-                typeof toolResult.output === "object" &&
-                toolResult.output !== null &&
-                "type" in toolResult.output
-                    ? String(toolResult.output.type)
-                    : "none",
-            agent: context.agent.name,
-            isOrchestrator: context.agent.isOrchestrator,
-        });
-
         if (!toolResult.success || !toolResult.output) {
             tracingLogger.info("⚠️ Tool result unsuccessful or missing output", {
                 success: toolResult.success,
@@ -260,64 +244,20 @@ export class ToolStreamHandler {
 
         const output = toolResult.output;
 
-        // Check if it's a continue flow
-        if (isContinueFlow(output)) {
-            const wasSet = this.stateManager.setContinueFlow(output);
-            if (!wasSet) {
-                tracingLogger.info(
-                    "⚠️ Multiple continue calls detected - ignoring additional calls",
-                    {
-                        existingAgents: this.stateManager.getContinueFlow()?.routing.agents,
-                        newAgents: output.routing.agents,
-                    }
-                );
-                return;
-            }
-            
-            // Log routing decision
-            if (this.executionLogger) {
-                this.executionLogger.routingDecision(
-                    context.agent.name,
-                    [...output.routing.agents],
-                    output.routing.reason,
-                    {
-                        targetPhase: output.routing.phase,
-                        confidence: 0.85
-                    }
-                );
-            }
-        }
-
         // Check if it's a termination
         if (isComplete(output)) {
             this.stateManager.setTermination(output);
             
-            if (this.executionLogger) {
-                this.executionLogger.agentDecision(
-                    context.agent.name,
-                    "completion",
-                    "complete_task",
-                    output.completion.summary || "Task completed",
-                    { confidence: 0.9 }
-                );
-            }
+            // agentDecision removed - not in new event system
         } else if (isEndConversation(output)) {
             this.stateManager.setTermination(output);
             
-            if (this.executionLogger) {
-                this.executionLogger.agentDecision(
-                    context.agent.name,
-                    "completion",
-                    "end_conversation",
-                    output.result.summary || "Conversation ended",
-                    { confidence: 0.95 }
-                );
-            }
+            // agentDecision removed - not in new event system
         }
     }
 
     /**
-     * Check if tool result is terminal (continue, complete, or end_conversation)
+     * Check if tool result is terminal (complete or end_conversation)
      */
     private isTerminalResult(result: ToolExecutionResult): boolean {
         if (!result.success || !result.output) {
@@ -326,7 +266,6 @@ export class ToolStreamHandler {
 
         const output = result.output as Record<string, unknown>;
         return (
-            output.type === "continue" ||
             output.type === "complete" ||
             output.type === "end_conversation"
         );

@@ -52,6 +52,7 @@ export const completeTool = createToolDefinition<z.infer<typeof completeSchema>,
             conversationId: context.conversationId,
             publisher: context.publisher,
             triggeringEvent: context.triggeringEvent,
+            conversationManager: context.conversationManager,
         });
 
         // Return success with the completion

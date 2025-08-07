@@ -167,11 +167,24 @@ export class LLMCallLogger {
                 },
 
                 request: {
-                    messages: request.messages.map((msg) => ({
-                        role: msg.role,
-                        content: msg.content,
-                        contentLength: msg.content.length,
-                    })),
+                    messages: request.messages.map((msg) => {
+                        // Parse JSON content for orchestrator to make logs more readable
+                        let content = msg.content;
+                        if (request.options?.agentName === "Orchestrator" && msg.role === "user") {
+                            try {
+                                const parsed = JSON.parse(msg.content);
+                                content = parsed; // Store as object, not string
+                            } catch {
+                                // Not JSON or parsing failed, keep as-is
+                            }
+                        }
+                        
+                        return {
+                            role: msg.role,
+                            content,
+                            contentLength: msg.content.length,
+                        };
+                    }),
                     options: request.options as Record<string, unknown> | undefined,
                     messageCount: request.messages.length,
                     totalRequestLength,

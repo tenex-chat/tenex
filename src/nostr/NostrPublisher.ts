@@ -7,14 +7,14 @@ import { getNDK } from "@/nostr";
 import { EXECUTION_TAGS } from "@/nostr/tags";
 import type { LLMMetadata } from "@/nostr/types";
 import { getProjectContext } from "@/services";
-import type { ContinueFlow, Complete, EndConversation } from "@/tools/types";
+import type { Complete, EndConversation } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent, type NDKTag } from "@nostr-dev-kit/ndk";
 import { TypingIndicatorManager } from "./TypingIndicatorManager";
 
 // Tool execution status interface (from ToolExecutionPublisher)
-export interface ToolExecutionStatus {
+interface ToolExecutionStatus {
     tool: string;
     status: "starting" | "running" | "completed" | "failed";
     args?: Record<string, unknown>;
@@ -35,14 +35,13 @@ export interface NostrPublisherContext {
 export interface ResponseOptions {
     content: string;
     llmMetadata?: LLMMetadata;
-    continueMetadata?: ContinueFlow;
     completeMetadata?: Complete | EndConversation;
     additionalTags?: NDKTag[];
     destinationPubkeys?: string[];
 }
 
 // TENEX logging types
-export interface TenexLogData {
+interface TenexLogData {
     event: string;
     agent: string;
     details: Record<string, unknown>;
@@ -50,9 +49,8 @@ export interface TenexLogData {
 }
 
 // Metadata for finalizing stream
-export interface FinalizeMetadata {
+interface FinalizeMetadata {
     llmMetadata?: LLMMetadata;
-    continueMetadata?: ContinueFlow;
     completeMetadata?: Complete | EndConversation;
 }
 
@@ -66,7 +64,9 @@ export class NostrPublisher {
     /**
      * Clean up any resources (e.g., pending timers).
      */
-    cleanup(): void {
+    async cleanup(): Promise<void> {
+        // Force stop typing indicator if still active
+        await this.typingIndicatorManager.forceStop();
         this.typingIndicatorManager.cleanup();
     }
 
@@ -102,14 +102,12 @@ export class NostrPublisher {
 
             // Add metadata tags
             this.addLLMMetadata(reply, options.llmMetadata);
-            this.addRoutingMetadata(reply, options.continueMetadata);
 
             // Debug logging for metadata
             logger.debug("Adding metadata to response", {
                 hasLLMMetadata: !!options.llmMetadata,
                 llmModel: options.llmMetadata?.model,
                 llmCost: options.llmMetadata?.cost,
-                hasContinueMetadata: !!options.continueMetadata,
                 hasCompleteMetadata: !!options.completeMetadata,
             });
 
@@ -427,42 +425,6 @@ export class NostrPublisher {
         }
     }
 
-    private addRoutingMetadata(event: NDKEvent, continueMetadata?: ContinueFlow): void {
-        if (!continueMetadata?.routing) return;
-
-        const { routing } = continueMetadata;
-
-        // Add phase information
-        if (routing.phase) {
-            event.tag(["new-phase", routing.phase]);
-        }
-
-        // Only add phase-transition tag if phase is actually changing
-        const conversation = this.getConversation();
-        const currentPhase = conversation.phase;
-
-        const isPhaseTransition = routing.phase && routing.phase !== currentPhase;
-        if (isPhaseTransition) {
-            event.tag(["phase-from", currentPhase]);
-        }
-
-        // Add routing reason
-        if (routing.reason) {
-            event.tag(["routing-reason", routing.reason]);
-        }
-
-        // Routing message no longer exists - content is used instead
-
-        // Add routing context summary if provided
-        if (routing.context && typeof routing.context.summary === "string") {
-            event.tag(["routing-summary", routing.context.summary]);
-        }
-
-        // Add agents as a tag for debugging/tracing
-        if (routing.agents && routing.agents.length > 0) {
-            event.tag(["routing-agents", routing.agents.join(",")]);
-        }
-    }
 }
 
 export class StreamPublisher {
@@ -631,9 +593,7 @@ export class StreamPublisher {
             streamingEvent.content = this.accumulatedContent; // Send complete status, not just the delta
             
             // Tag the conversation
-            // First try lowercase 'e', then uppercase 'E' for legacy support
             const conversationTag = this.publisher.context.triggeringEvent.tagValue("e") || 
-                                   this.publisher.context.triggeringEvent.tagValue("E") || 
                                    this.publisher.context.triggeringEvent.id;
             streamingEvent.tag(["e", conversationTag]);
             

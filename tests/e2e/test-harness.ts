@@ -173,25 +173,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: a
                         const toolName = toolCall.function.name;
                         const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
                         
-                        if (toolName === 'continue') {
-                            // For continue tool, import and use the actual continue tool
-                            const { continueTool } = await import('@/tools/implementations/continue');
-                            const result = await continueTool.execute(
-                                { value: toolArgs },
-                                context
-                            );
-                            
-                            if (result.success && result.value.type === 'continue') {
-                                // The continue tool returns control flow info
-                                // In real Claude backend, this would trigger orchestrator
-                                // For tests, we just need to ensure the tool was called
-                                await publisher.publishResponse(
-                                    `Routing to ${toolArgs.agents.join(', ')}: ${toolArgs.reason}`,
-                                    null,
-                                    false
-                                );
-                            }
-                        } else if (toolName === 'complete') {
+                        if (toolName === 'complete') {
                             // For complete tool, call the completion handler
                             const { handleAgentCompletion } = await import('@/agents/execution/completionHandler');
                             await handleAgentCompletion(
@@ -623,7 +605,6 @@ export async function executeConversationFlow(
                             (context.mockLLM as any).updateContext({
                                 lastContinueCaller: targetAgent,
                                 iteration: iteration,
-                                continueToolArgs: toolArgs  // Pass tool arguments for context
                             });
                         }
                     } else if (toolName === 'complete') {
@@ -632,7 +613,6 @@ export async function executeConversationFlow(
                         // Update mock LLM context for next iteration 
                         if ((context.mockLLM as any).updateContext) {
                             (context.mockLLM as any).updateContext({
-                                lastContinueCaller: targetAgent, 
                                 previousAgent: targetAgent,
                                 iteration: iteration
                             });
@@ -764,7 +744,6 @@ No other text, only valid JSON.`)
         
         // Process tool calls
         if (response.toolCalls && response.toolCalls.length > 0) {
-            // Convert from LlmToolCallInfo format back to ToolCall format for compatibility
             result.toolCalls = response.toolCalls.map(tc => ({
                 id: tc.name || 'mock-tool-call',
                 type: 'function' as const,

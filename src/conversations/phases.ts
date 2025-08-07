@@ -60,7 +60,7 @@ export const PHASE_DEFINITIONS: Record<Phase, PhaseDefinition> = {
             "Delay action if the user's demand is clear",
             "If the user's command contains an imperative verb + concrete target (e.g. 'add', 'remove', 'replace') and no explicit question, switch to execute without further checks",
         ],
-        constraints: ["Default to action - most tasks can go directly to execution"],
+        constraints: [],
     },
     [PHASES.BRAINSTORM]: {
         description: "Creative exploration and ideation",

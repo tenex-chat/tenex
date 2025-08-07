@@ -62,7 +62,7 @@ export class TerminationHandler {
      */
     getReminderMessage(context: ExecutionContext): string {
         if (context.agent.isOrchestrator) {
-            return `I see you've finished processing, but you haven't used the 'continue' tool yet. As the orchestrator, you MUST use the 'continue' tool to route to appropriate agents for the next task. Remember: you are a silent router - use continue() to route, never speak to users directly.`;
+            return `I see you've finished processing, but you haven't provided routing instructions yet. As the orchestrator, you MUST route to appropriate agents for the next task. Remember: you are a silent router - provide routing instructions, never speak to users directly.`;
         } else {
             return "I see you've finished responding, but you haven't used the 'complete' tool yet. As a non-orchestrator agent, you MUST use the 'complete' tool to signal that your work is done and report back to the orchestrator. Please use the 'complete' tool now with a summary of what you accomplished.";
         }
@@ -117,7 +117,7 @@ export class TerminationHandler {
                 agent: context.agent.name,
                 phase: context.phase,
             });
-            throw new Error("Orchestrator must use continue() tool to route messages");
+            throw new Error("Orchestrator must provide routing instructions");
         } else {
             // For non-orchestrator, complete back to orchestrator
             const projectContext = getProjectContext();

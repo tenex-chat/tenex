@@ -1,4 +1,4 @@
-import type { ToolExecutionResult, ContinueFlow, Complete, EndConversation } from "@/tools/types";
+import type { ToolExecutionResult, Complete, EndConversation } from "@/tools/types";
 import type { CompletionResponse } from "@/llm/types";
 import type { StreamPublisher } from "@/nostr/NostrPublisher";
 
@@ -7,7 +7,6 @@ import type { StreamPublisher } from "@/nostr/NostrPublisher";
  */
 export interface StreamingState {
     allToolResults: ToolExecutionResult[];
-    continueFlow: ContinueFlow | undefined;
     termination: Complete | EndConversation | undefined;
     finalResponse: CompletionResponse | undefined;
     fullContent: string;
@@ -33,7 +32,6 @@ export class StreamStateManager {
     private createInitialState(): StreamingState {
         return {
             allToolResults: [],
-            continueFlow: undefined,
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
@@ -87,23 +85,6 @@ export class StreamStateManager {
         return this.state.allToolResults;
     }
 
-    /**
-     * Set the continue flow (only if not already set)
-     */
-    setContinueFlow(flow: ContinueFlow): boolean {
-        if (this.state.continueFlow) {
-            return false; // Already set, ignore
-        }
-        this.state.continueFlow = flow;
-        return true;
-    }
-
-    /**
-     * Get the continue flow
-     */
-    getContinueFlow(): ContinueFlow | undefined {
-        return this.state.continueFlow;
-    }
 
     /**
      * Set the termination (complete or end_conversation)
@@ -120,10 +101,10 @@ export class StreamStateManager {
     }
 
     /**
-     * Check if the stream has terminated (either continue flow or termination)
+     * Check if the stream has terminated
      */
     hasTerminated(): boolean {
-        return !!(this.state.termination || this.state.continueFlow);
+        return !!this.state.termination;
     }
 
     /**
@@ -197,7 +178,6 @@ export class StreamStateManager {
             hasContent: this.state.fullContent.length > 0,
             contentLength: this.state.fullContent.length,
             toolResultCount: this.state.allToolResults.length,
-            hasContinueFlow: !!this.state.continueFlow,
             hasTermination: !!this.state.termination,
             terminationType: this.state.termination?.type,
             hasFinalResponse: !!this.state.finalResponse,

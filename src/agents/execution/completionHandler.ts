@@ -3,6 +3,7 @@ import type { Complete } from "@/tools/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Agent } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ConversationManager } from "@/conversations/ConversationManager";
 
 /**
  * Shared completion logic used by both the complete() tool and ClaudeBackend
@@ -16,6 +17,7 @@ export interface CompletionOptions {
     conversationId: string;
     publisher: NostrPublisher;
     triggeringEvent?: NDKEvent;
+    conversationManager?: ConversationManager;
 }
 
 /**
@@ -23,13 +25,22 @@ export interface CompletionOptions {
  * This is the core logic extracted from the complete() tool
  */
 export async function handleAgentCompletion(options: CompletionOptions): Promise<Complete> {
-    const { response, summary, publisher } = options;
+    const { response, summary, publisher, agent, conversationId, conversationManager } = options;
 
     const projectContext = getProjectContext();
     const orchestratorAgent = projectContext.getProjectAgent();
 
     // Always route completions to the orchestrator for phase control
     const respondToPubkey = orchestratorAgent.pubkey;
+
+    // Track completion in orchestrator turn if conversation manager available
+    if (conversationManager) {
+        await conversationManager.addCompletionToTurn(
+            conversationId,
+            agent.slug,
+            summary || response
+        );
+    }
 
     // Publish the completion event
     await publisher.publishResponse({

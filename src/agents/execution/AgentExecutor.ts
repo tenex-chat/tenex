@@ -85,7 +85,6 @@ export class AgentExecutor {
         }
 
         // Build full context with additional properties
-        // Keep fallbacks for backward compatibility with tests
         const fullContext: ExecutionContext = {
             ...context,
             publisher:
@@ -115,36 +114,46 @@ export class AgentExecutor {
             
             // Log execution flow start
             executionLogger.logEvent({
-                type: "execution_flow_start",
+                type: "execution_start",
+                timestamp: new Date(),
                 conversationId: context.conversationId,
+                agent: context.agent.name,
                 narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`
             });
 
-            // Publish typing indicator start
-            await fullContext.publisher.publishTypingIndicator("start");
+            // Publish typing indicator start (skip for orchestrator)
+            if (!context.agent.isOrchestrator) {
+                await fullContext.publisher.publishTypingIndicator("start");
+            }
 
             await this.executeWithStreaming(fullContext, messages, tracingContext);
             
             // Log execution flow complete
             executionLogger.logEvent({
-                type: "execution_flow_complete",
+                type: "execution_complete",
+                timestamp: new Date(),
                 conversationId: context.conversationId,
+                agent: context.agent.name,
                 narrative: `Agent ${context.agent.name} completed execution successfully`,
                 success: true
             });
 
-            // Stop typing indicator after successful execution
-            await fullContext.publisher.publishTypingIndicator("stop");
+            // Stop typing indicator after successful execution (skip for orchestrator)
+            if (!context.agent.isOrchestrator) {
+                await fullContext.publisher.publishTypingIndicator("stop");
+            }
             
             // Clean up the publisher resources
-            fullContext.publisher.cleanup();
+            await fullContext.publisher.cleanup();
 
             // Conversation updates are now handled by NostrPublisher
         } catch (error) {
             // Log execution flow failure
             executionLogger.logEvent({
-                type: "execution_flow_complete",
+                type: "execution_complete",
+                timestamp: new Date(),
                 conversationId: context.conversationId,
+                agent: context.agent.name,
                 narrative: `Agent ${context.agent.name} execution failed: ${error instanceof Error ? error.message : String(error)}`,
                 success: false
             });
@@ -158,11 +167,13 @@ export class AgentExecutor {
 
             // Conversation saving is now handled by NostrPublisher
 
-            // Ensure typing indicator is stopped even on error
-            await fullContext.publisher.publishTypingIndicator("stop");
+            // Ensure typing indicator is stopped even on error (skip for orchestrator)
+            if (!context.agent.isOrchestrator) {
+                await fullContext.publisher.publishTypingIndicator("stop");
+            }
             
             // Clean up the publisher resources
-            fullContext.publisher.cleanup();
+            await fullContext.publisher.cleanup();
 
             throw error;
         }
@@ -208,28 +219,11 @@ export class AgentExecutor {
         >();
         const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
         
-        // Debug logging for lesson retrieval
-        logger.info("🔍 Retrieving lessons for agent", {
-            agentName: context.agent.name,
-            agentPubkey: context.agent.pubkey,
-            lessonsFound: currentAgentLessons.length,
-            totalLessonsInContext: projectCtx.getAllLessons().length,
-            allAgentPubkeys: Array.from(projectCtx.agentLessons.keys()),
-        });
-        
         if (currentAgentLessons.length > 0) {
             agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
-            logger.debug("📚 Lessons will be included in system prompt", {
-                agentName: context.agent.name,
-                lessonTitles: currentAgentLessons.slice(0, 5).map(l => l.title),
-            });
-        } else {
-            logger.debug("📚 No lessons found for agent", {
-                agentName: context.agent.name,
-                agentPubkey: context.agent.pubkey,
-            });
         }
 
+        // Build system prompt for all agents (including orchestrator)
         const systemPrompt = buildSystemPrompt({
             agent: context.agent,
             phase: context.phase,
@@ -244,16 +238,27 @@ export class AgentExecutor {
 
         messages.push(new Message("system", systemPrompt));
 
-        // Use the new unified buildAgentMessages method
-        const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
-            context.conversationId,
-            context.agent,
-            context.triggeringEvent,
-            context.handoff
-        );
+        // Orchestrator gets structured routing context, others get conversation transcript
+        if (context.agent.isOrchestrator) {
+            const routingContext = await context.conversationManager.buildOrchestratorRoutingContext(
+                context.conversationId,
+                context.triggeringEvent
+            );
+            
+            // Send as structured JSON to orchestrator
+            messages.push(new Message("user", JSON.stringify(routingContext, null, 2)));
+        } else {
+            // Use the existing buildAgentMessages method for non-orchestrator agents
+            const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
+                context.conversationId,
+                context.agent,
+                context.triggeringEvent,
+                context.handoff
+            );
 
-        // Add the agent's messages
-        messages.push(...agentMessages);
+            // Add the agent's messages
+            messages.push(...agentMessages);
+        }
 
         return messages;
     }

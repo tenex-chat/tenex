@@ -26,7 +26,6 @@ export class MockLLMService implements LLMService {
         iteration: number;
         agentIterations: Map<string, number>;
         lastAgentExecuted?: string;
-        continueToolArgs?: any;
     }> = new Map();
 
     constructor(config: MockLLMConfig = {}) {
@@ -68,22 +67,12 @@ export class MockLLMService implements LLMService {
             let args: any = {};
             
             if (typeof tc === 'object' && 'function' in tc) {
-                if (typeof tc.function === 'object') {
-                    // Old format with function object
-                    functionName = (tc.function as any).name;
-                    try {
-                        args = JSON.parse((tc.function as any).arguments || '{}');
-                    } catch {
-                        args = {};
-                    }
-                } else {
-                    // New format with function as string
-                    functionName = tc.function;
-                    try {
-                        args = JSON.parse(tc.args || '{}');
-                    } catch {
-                        args = {};
-                    }
+                // Format with function as string
+                functionName = tc.function;
+                try {
+                    args = JSON.parse(tc.args || '{}');
+                } catch {
+                    args = {};
                 }
             } else {
                 functionName = 'unknown';
@@ -108,15 +97,6 @@ export class MockLLMService implements LLMService {
         } as CompletionResponse;
     }
 
-    /**
-     * Backward compatibility method for tests using the old chat interface
-     */
-    async chat(messages: Message[], model?: string): Promise<CompletionResponse> {
-        return this.complete({
-            messages,
-            options: { configName: model || 'mock-model' }
-        });
-    }
     
     async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
         const messages = request.messages;
@@ -145,13 +125,8 @@ export class MockLLMService implements LLMService {
         // Send tool calls
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
-                // Handle both old and new formats
-                const toolName = typeof toolCall.function === 'string' 
-                    ? toolCall.function 
-                    : (toolCall.function as any).name;
-                const toolArgs = typeof toolCall.function === 'string'
-                    ? toolCall.args
-                    : (toolCall.function as any).arguments || '{}';
+                const toolName = toolCall.function;
+                const toolArgs = toolCall.args || '{}';
                     
                 yield { 
                     type: 'tool_start', 
@@ -275,10 +250,6 @@ export class MockLLMService implements LLMService {
                 if (context.lastAgentExecuted !== trigger.afterAgent) continue;
             }
             
-            // Check for continue tool context (e.g. routing to verification)
-            if (trigger.continueToPhase && context.continueToolArgs) {
-                if (context.continueToolArgs.phase !== trigger.continueToPhase) continue;
-            }
             
             // All conditions matched
             if (this.config.debug) {
@@ -394,7 +365,6 @@ export class MockLLMService implements LLMService {
         lastContinueCaller?: string;
         iteration?: number;
         lastAgentExecuted?: string;
-        continueToolArgs?: any;
     }): void {
         const conversationId = updates.conversationId || 'default';
         const context = this.getOrCreateContext(conversationId);
@@ -407,9 +377,6 @@ export class MockLLMService implements LLMService {
         }
         if (updates.lastAgentExecuted !== undefined) {
             context.lastAgentExecuted = updates.lastAgentExecuted;
-        }
-        if (updates.continueToolArgs !== undefined) {
-            context.continueToolArgs = updates.continueToolArgs;
         }
     }
     

@@ -40,13 +40,7 @@ export class RoutingBackend implements ExecutionBackend {
         const executionLogger = createExecutionLogger(tracingContext, "agent");
 
         try {
-            // Log routing analysis start
-            executionLogger.logEvent({
-                type: "routing_analysis",
-                agent: context.agent.name,
-                messageAnalysis: "Analyzing message for routing",
-                candidateAgents: Array.from(getProjectContext().agents.keys())
-            });
+            // Log routing analysis start (removed - not in new event system)
 
             // Get routing decision from LLM
             const routingDecision = await this.getRoutingDecision(messages, context, tracingLogger, executionLogger);
@@ -61,6 +55,21 @@ export class RoutingBackend implements ExecutionBackend {
                     confidence: 0.9
                 }
             );
+
+            // Start a new orchestrator turn to track this routing decision
+            const turnId = await this.conversationManager.startOrchestratorTurn(
+                context.conversationId,
+                (routingDecision.phase || context.phase) as Phase,
+                routingDecision.agents,
+                routingDecision.reason
+            );
+            
+            tracingLogger.info("Started orchestrator turn", {
+                turnId,
+                phase: routingDecision.phase || context.phase,
+                agents: routingDecision.agents,
+                reason: routingDecision.reason
+            });
 
             // Update phase if transitioning
             if (routingDecision.phase && routingDecision.phase !== context.phase) {
@@ -90,8 +99,10 @@ export class RoutingBackend implements ExecutionBackend {
                     });
                     // Log the end of conversation
                     executionLogger.logEvent({
-                        type: "execution_flow_complete" as const,
+                        type: "execution_complete",
+                        timestamp: new Date(),
                         conversationId: context.conversationId,
+                        agent: context.agent.name,
                         narrative: routingDecision.reason,
                         success: true
                     });
@@ -186,15 +197,7 @@ Please re-route using the correct agent slug from the list above.`);
         
         tracingLogger.info("📚 Routing lesson learned", lesson);
         
-        // Log the feedback
-        const executionLogger = createExecutionLogger(context.tracingContext || createTracingContext(context.conversationId), "agent");
-        executionLogger.logEvent({
-            type: "routing_analysis",
-            agent: context.agent.name,
-            messageAnalysis: `Routing error: Invalid agent "${invalidAgentSlug}"`,
-            candidateAgents: availableAgents,
-            phaseConsiderations: `Need to re-route to valid agent`
-        });
+        // Log the feedback (removed - not in new event system)
         
         // Build messages with the feedback
         const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
@@ -287,20 +290,7 @@ No other text, only valid JSON.`)
         }
         
         // Extract and log reasoning if present in the response
-        if (executionLogger && response.content) {
-            const thinkingMatch = response.content.match(/<thinking>([\s\S]*?)<\/thinking>/);
-            if (thinkingMatch && thinkingMatch[1]) {
-                const thinking = thinkingMatch[1].trim();
-                executionLogger.agentThinking(
-                    context.agent.name,
-                    thinking,
-                    {
-                        userMessage: messages[messages.length - 1]?.content,
-                        confidence: 0.85
-                    }
-                );
-            }
-        }
+        // (agentThinking removed - not in new event system)
 
         try {
             // Parse the JSON response

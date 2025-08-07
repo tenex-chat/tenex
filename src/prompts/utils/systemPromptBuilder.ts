@@ -50,14 +50,20 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
             phase,
             projectTitle,
             projectRepository,
-        })
-        .add("conversation-history-instructions", {
-            isOrchestrator: agent.isOrchestrator || false,
-        })
-        .add("available-agents", {
-            agents: availableAgents,
-            currentAgent: agent,
         });
+    
+    // Only add conversation-history instructions for non-orchestrator agents
+    // Orchestrator receives structured JSON, not conversation history
+    if (!agent.isOrchestrator) {
+        systemPromptBuilder.add("conversation-history-instructions", {
+            isOrchestrator: false,
+        });
+    }
+    
+    systemPromptBuilder.add("available-agents", {
+        agents: availableAgents,
+        currentAgent: agent,
+    });
     
     // Add voice mode instructions if this is a voice mode event
     // But skip for orchestrator since it doesn't speak to users
@@ -118,8 +124,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     // .add("tool-use", {});
 
     // Add orchestrator-specific routing instructions for orchestrator agents using reason-act-loop backend
-    // The routing backend doesn't need these instructions as it uses structured output
-    if (agent.isOrchestrator && agent.backend !== "routing") {
+    if (agent.isOrchestrator) {
         systemPromptBuilder
             .add("orchestrator-routing-instructions", {})
             .add("orchestrator-reasoning", {}); // Add orchestrator-specific reasoning

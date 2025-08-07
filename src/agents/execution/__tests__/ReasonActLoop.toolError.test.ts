@@ -25,7 +25,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
 
         // Simulate a tool_complete event with an error
         const event = {
-            tool: "continue",
+            tool: "complete",
             result: {
                 __typedResult: serializeToolResult({
                     success: false,
@@ -64,7 +64,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
 
         // Verify publishError was called with the correct error message
         expect(mockPublisher.publishError).toHaveBeenCalledWith(
-            'Tool "continue" failed: Agents not found: user. Available agents: executor, planner, project-manager, orchestrator, yagni'
+            'Tool "complete" failed: Agents not found: user. Available agents: executor, planner, project-manager, orchestrator, yagni'
         );
         expect(mockPublisher.publishError).toHaveBeenCalledTimes(1);
     });
@@ -89,7 +89,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
 
         // Simulate a tool_complete event with success
         const event = {
-            tool: "continue",
+            tool: "complete",
             result: {
                 __typedResult: serializeToolResult({
                     success: true,

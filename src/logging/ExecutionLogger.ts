@@ -6,162 +6,23 @@ import chalk from "chalk";
 import type { Phase } from "@/conversations/phases";
 
 /**
- * Event types for structured logging
+ * Simplified event system using discriminated unions
+ * All events share common base properties and extend with specific fields
  */
-export type EventType =
-    | "agent_thinking"
-    | "agent_decision"
-    | "agent_handoff"
-    | "phase_transition_trigger"
-    | "phase_transition_decision"
-    | "phase_transition_executed"
-    | "routing_analysis"
-    | "routing_decision"
-    | "tool_execution_start"
-    | "tool_execution_complete"
-    | "conversation_start"
-    | "conversation_complete"
-    | "execution_flow_start"
-    | "execution_flow_complete";
-
-export interface AgentThinkingEvent {
-    type: "agent_thinking";
+export type LogEvent = {
+    timestamp: Date;
+    conversationId: string;
     agent: string;
-    reasoning: string;
-    context: {
-        userMessage?: string;
-        considerations?: string[];
-        leaningToward?: string;
-        confidence?: number;
-    };
-}
-
-export interface AgentDecisionEvent {
-    type: "agent_decision";
-    agent: string;
-    decisionType: "routing" | "tool_use" | "phase_transition" | "completion";
-    decision: string;
-    reasoning: string;
-    confidence?: number;
-    alternatives?: string[];
-}
-
-export interface AgentHandoffEvent {
-    type: "agent_handoff";
-    from: string;
-    to: string;
-    task: string;
-    context?: string;
-    phase: Phase;
-}
-
-export interface PhaseTransitionTriggerEvent {
-    type: "phase_transition_trigger";
-    conversationId: string;
-    currentPhase: Phase;
-    trigger: string;
-    triggerAgent: string;
-    signal: string;
-}
-
-export interface PhaseTransitionDecisionEvent {
-    type: "phase_transition_decision";
-    conversationId: string;
-    from: Phase;
-    to: Phase;
-    decisionBy: string;
-    reason: string;
-    confidence?: number;
-}
-
-export interface PhaseTransitionExecutedEvent {
-    type: "phase_transition_executed";
-    conversationId: string;
-    from: Phase;
-    to: Phase;
-    handoffTo?: string;
-    handoffMessage?: string;
-    duration?: number;
-}
-
-export interface RoutingAnalysisEvent {
-    type: "routing_analysis";
-    agent: string;
-    messageAnalysis: string;
-    candidateAgents: string[];
-    phaseConsiderations?: string;
-}
-
-export interface RoutingDecisionEvent {
-    type: "routing_decision";
-    agent: string;
-    targetAgents: string[];
-    targetPhase?: Phase;
-    reason: string;
-    confidence?: number;
-}
-
-export interface ToolExecutionStartEvent {
-    type: "tool_execution_start";
-    agent: string;
-    tool: string;
-    parameters?: Record<string, unknown>;
-}
-
-export interface ToolExecutionCompleteEvent {
-    type: "tool_execution_complete";
-    agent: string;
-    tool: string;
-    status: "success" | "error";
-    duration: number;
-    result?: string;
-    error?: string;
-}
-
-export interface ConversationStartEvent {
-    type: "conversation_start";
-    conversationId: string;
-    title?: string;
-    userMessage: string;
-    eventId?: string;
-}
-
-export interface ConversationCompleteEvent {
-    type: "conversation_complete";
-    conversationId: string;
-    finalPhase: Phase;
-    totalDuration: number;
-    success: boolean;
-}
-
-export interface ExecutionFlowStartEvent {
-    type: "execution_flow_start";
-    conversationId: string;
-    narrative: string;
-}
-
-export interface ExecutionFlowCompleteEvent {
-    type: "execution_flow_complete";
-    conversationId: string;
-    narrative: string;
-    success: boolean;
-}
-
-export type LogEvent =
-    | AgentThinkingEvent
-    | AgentDecisionEvent
-    | AgentHandoffEvent
-    | PhaseTransitionTriggerEvent
-    | PhaseTransitionDecisionEvent
-    | PhaseTransitionExecutedEvent
-    | RoutingAnalysisEvent
-    | RoutingDecisionEvent
-    | ToolExecutionStartEvent
-    | ToolExecutionCompleteEvent
-    | ConversationStartEvent
-    | ConversationCompleteEvent
-    | ExecutionFlowStartEvent
-    | ExecutionFlowCompleteEvent;
+} & (
+    | { type: "tool_call"; tool: string; args?: any; }
+    | { type: "tool_result"; tool: string; status: "success" | "error"; result?: any; error?: string; duration: number; }
+    | { type: "phase_transition"; from: Phase; to: Phase; reason: string; }
+    | { type: "routing"; targetAgents: string[]; targetPhase?: Phase; reason: string; }
+    | { type: "conversation_start"; userMessage: string; eventId?: string; }
+    | { type: "conversation_complete"; finalPhase: Phase; success: boolean; duration: number; }
+    | { type: "execution_start"; narrative: string; }
+    | { type: "execution_complete"; narrative: string; success: boolean; }
+);
 
 /**
  * Unified execution logger for structured event logging
@@ -189,36 +50,23 @@ export class ExecutionLogger {
      * Log an event with structured formatting
      */
     logEvent(event: LogEvent): void {
+        // Add timestamp if not present
+        if (!event.timestamp) {
+            event.timestamp = new Date();
+        }
+
         switch (event.type) {
-            case "agent_thinking":
-                this.logAgentThinking(event);
+            case "tool_call":
+                this.logToolCall(event);
                 break;
-            case "agent_decision":
-                this.logAgentDecision(event);
+            case "tool_result":
+                this.logToolResult(event);
                 break;
-            case "agent_handoff":
-                this.logAgentHandoff(event);
+            case "phase_transition":
+                this.logPhaseTransition(event);
                 break;
-            case "phase_transition_trigger":
-                this.logPhaseTransitionTrigger(event);
-                break;
-            case "phase_transition_decision":
-                this.logPhaseTransitionDecision(event);
-                break;
-            case "phase_transition_executed":
-                this.logPhaseTransitionExecuted(event);
-                break;
-            case "routing_analysis":
-                this.logRoutingAnalysis(event);
-                break;
-            case "routing_decision":
-                this.logRoutingDecision(event);
-                break;
-            case "tool_execution_start":
-                this.logToolExecutionStart(event);
-                break;
-            case "tool_execution_complete":
-                this.logToolExecutionComplete(event);
+            case "routing":
+                this.logRouting(event);
                 break;
             case "conversation_start":
                 this.logConversationStart(event);
@@ -226,161 +74,41 @@ export class ExecutionLogger {
             case "conversation_complete":
                 this.logConversationComplete(event);
                 break;
+            case "execution_start":
+                this.logExecutionStart(event);
+                break;
+            case "execution_complete":
+                this.logExecutionComplete(event);
+                break;
         }
     }
 
-    // Agent Events
-    private logAgentThinking(event: AgentThinkingEvent): void {
-        console.log();
-        console.log(chalk.blue(`🤔 AGENT THINKING [${chalk.bold(event.agent)}]`));
-        
-        if (event.context.userMessage) {
-            console.log(chalk.gray(`    ├─ User: "${this.truncate(event.context.userMessage, 60)}"`));
-        }
-        
-        console.log(chalk.white(`    ├─ Reasoning: ${event.reasoning}`));
-        
-        if (event.context.considerations?.length) {
-            console.log(chalk.gray(`    ├─ Considering: ${event.context.considerations.join(", ")}`));
-        }
-        
-        if (event.context.leaningToward) {
-            console.log(chalk.yellow(`    ├─ Leaning toward: ${event.context.leaningToward}`));
-        }
-        
-        if (event.context.confidence !== undefined) {
-            const confColor = event.context.confidence > 0.8 ? chalk.green : 
-                            event.context.confidence > 0.5 ? chalk.yellow : chalk.red;
-            console.log(confColor(`    └─ Confidence: ${(event.context.confidence * 100).toFixed(0)}%`));
-        }
-    }
-
-    private logAgentDecision(event: AgentDecisionEvent): void {
-        console.log();
-        console.log(chalk.green(`✅ AGENT DECISION [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Type: ${event.decisionType}`));
-        console.log(chalk.white(`    ├─ Decision: ${chalk.bold(event.decision)}`));
-        console.log(chalk.gray(`    ├─ Reasoning: ${event.reasoning}`));
-        
-        if (event.alternatives?.length) {
-            console.log(chalk.dim(`    ├─ Alternatives: ${event.alternatives.join(", ")}`));
-        }
-        
-        if (event.confidence !== undefined) {
-            const confColor = event.confidence > 0.8 ? chalk.green : 
-                            event.confidence > 0.5 ? chalk.yellow : chalk.red;
-            console.log(confColor(`    └─ Confidence: ${(event.confidence * 100).toFixed(0)}%`));
-        }
-    }
-
-    private logAgentHandoff(event: AgentHandoffEvent): void {
-        console.log();
-        console.log(chalk.magenta(`🤝 AGENT HANDOFF`));
-        console.log(chalk.white(`    ├─ From: ${chalk.bold(event.from)} → ${chalk.bold(event.to)}`));
-        console.log(chalk.white(`    ├─ Task: "${this.truncate(event.task, 80)}"`));
-        if (event.context) {
-            console.log(chalk.gray(`    ├─ Context: ${event.context}`));
-        }
-        console.log(chalk.dim(`    └─ Phase: ${event.phase}`));
-    }
-
-    // Phase Transition Events
-    private logPhaseTransitionTrigger(event: PhaseTransitionTriggerEvent): void {
-        console.log();
-        console.log(chalk.yellow(`⚡ PHASE TRANSITION TRIGGER [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ├─ Current phase: ${chalk.bold(event.currentPhase)}`));
-        console.log(chalk.white(`    ├─ Trigger: ${event.trigger}`));
-        console.log(chalk.white(`    ├─ Triggered by: ${chalk.bold(event.triggerAgent)}`));
-        console.log(chalk.yellow(`    └─ Signal: ${event.signal}`));
-    }
-
-    private logPhaseTransitionDecision(event: PhaseTransitionDecisionEvent): void {
-        console.log();
-        console.log(chalk.cyan(`🔄 PHASE TRANSITION DECISION [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ├─ ${chalk.red(event.from)} → ${chalk.green(event.to)}`));
-        console.log(chalk.white(`    ├─ Decided by: ${chalk.bold(event.decisionBy)}`));
-        console.log(chalk.gray(`    ├─ Reason: ${event.reason}`));
-        
-        if (event.confidence !== undefined) {
-            const confColor = event.confidence > 0.8 ? chalk.green : 
-                            event.confidence > 0.5 ? chalk.yellow : chalk.red;
-            console.log(confColor(`    └─ Confidence: ${(event.confidence * 100).toFixed(0)}%`));
-        }
-    }
-
-    private logPhaseTransitionExecuted(event: PhaseTransitionExecutedEvent): void {
-        console.log();
-        console.log(chalk.greenBright(`✅ PHASE TRANSITION EXECUTED [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ├─ ${chalk.bold.red(event.from)} → ${chalk.bold.green(event.to)}`));
-        
-        if (event.handoffTo) {
-            console.log(chalk.white(`    ├─ Handed off to: ${chalk.bold(event.handoffTo)}`));
-        }
-        
-        if (event.handoffMessage) {
-            console.log(chalk.gray(`    ├─ Message: "${this.truncate(event.handoffMessage, 80)}"`));
-        }
-        
-        if (event.duration) {
-            console.log(chalk.dim(`    └─ Duration: ${(event.duration / 1000).toFixed(1)}s`));
-        }
-    }
-
-    // Routing Events
-    private logRoutingAnalysis(event: RoutingAnalysisEvent): void {
-        console.log();
-        console.log(chalk.blue(`🔍 ROUTING ANALYSIS [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Analysis: ${event.messageAnalysis}`));
-        console.log(chalk.white(`    ├─ Candidates: ${event.candidateAgents.join(", ")}`));
-        
-        if (event.phaseConsiderations) {
-            console.log(chalk.gray(`    └─ Phase considerations: ${event.phaseConsiderations}`));
-        }
-    }
-
-    private logRoutingDecision(event: RoutingDecisionEvent): void {
-        console.log();
-        console.log(chalk.green(`📍 ROUTING DECISION [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Target agents: ${chalk.bold(event.targetAgents.join(", "))}`));
-        
-        if (event.targetPhase) {
-            console.log(chalk.white(`    ├─ Target phase: ${chalk.bold(event.targetPhase)}`));
-        }
-        
-        console.log(chalk.gray(`    ├─ Reason: ${event.reason}`));
-        
-        if (event.confidence !== undefined) {
-            const confColor = event.confidence > 0.8 ? chalk.green : 
-                            event.confidence > 0.5 ? chalk.yellow : chalk.red;
-            console.log(confColor(`    └─ Confidence: ${(event.confidence * 100).toFixed(0)}%`));
-        }
-    }
-
-    // Tool Execution Events
-    private logToolExecutionStart(event: ToolExecutionStartEvent): void {
+    // Tool Events
+    private logToolCall(event: LogEvent & { type: "tool_call" }): void {
         const key = `${event.agent}-${event.tool}`;
         this.startTimes.set(key, Date.now());
 
         console.log();
-        console.log(chalk.yellow(`🔧 TOOL EXECUTION START [${chalk.bold(event.agent)}]`));
+        console.log(chalk.yellow(`🔧 TOOL CALL [${chalk.bold(event.agent)}]`));
         console.log(chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)}`));
         
-        if (event.parameters && Object.keys(event.parameters).length > 0) {
-            console.log(chalk.gray(`    └─ Parameters: ${this.formatParams(event.parameters)}`));
+        if (event.args && Object.keys(event.args).length > 0) {
+            console.log(chalk.gray(`    └─ Arguments: ${this.formatParams(event.args)}`));
         }
     }
 
-    private logToolExecutionComplete(event: ToolExecutionCompleteEvent): void {
+    private logToolResult(event: LogEvent & { type: "tool_result" }): void {
         const statusColor = event.status === "success" ? chalk.green : chalk.red;
         const statusIcon = event.status === "success" ? "✅" : "❌";
 
         console.log();
-        console.log(statusColor(`${statusIcon} TOOL EXECUTION COMPLETE [${chalk.bold(event.agent)}]`));
+        console.log(statusColor(`${statusIcon} TOOL RESULT [${chalk.bold(event.agent)}]`));
         console.log(chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)} → ${statusColor(event.status.toUpperCase())}`));
         console.log(chalk.dim(`    ├─ Duration: ${(event.duration / 1000).toFixed(2)}s`));
         
         if (event.result) {
-            console.log(chalk.gray(`    ├─ Result: ${this.truncate(event.result, 80)}`));
+            const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+            console.log(chalk.gray(`    ├─ Result: ${this.truncate(resultStr, 80)}`));
         }
         
         if (event.error) {
@@ -388,10 +116,32 @@ export class ExecutionLogger {
         }
     }
 
-    // Conversation Events
-    private logConversationStart(event: ConversationStartEvent): void {
+    // Phase Transition
+    private logPhaseTransition(event: LogEvent & { type: "phase_transition" }): void {
         console.log();
-        console.log(chalk.bold.cyan(`🗣️  NEW CONVERSATION [${this.shortId(event.conversationId)}]${event.title ? ` "${event.title}"` : ""}`));
+        console.log(chalk.cyan(`🔄 PHASE TRANSITION [${this.shortId(event.conversationId)}]`));
+        console.log(chalk.white(`    ├─ ${chalk.red(event.from)} → ${chalk.green(event.to)}`));
+        console.log(chalk.white(`    ├─ Agent: ${chalk.bold(event.agent)}`));
+        console.log(chalk.gray(`    └─ Reason: ${event.reason}`));
+    }
+
+    // Routing
+    private logRouting(event: LogEvent & { type: "routing" }): void {
+        console.log();
+        console.log(chalk.green(`📍 ROUTING [${chalk.bold(event.agent)}]`));
+        console.log(chalk.white(`    ├─ Target agents: ${chalk.bold(event.targetAgents.join(", "))}`));
+        
+        if (event.targetPhase) {
+            console.log(chalk.white(`    ├─ Target phase: ${chalk.bold(event.targetPhase)}`));
+        }
+        
+        console.log(chalk.gray(`    └─ Reason: ${event.reason}`));
+    }
+
+    // Conversation Events
+    private logConversationStart(event: LogEvent & { type: "conversation_start" }): void {
+        console.log();
+        console.log(chalk.bold.cyan(`🗣️  NEW CONVERSATION [${this.shortId(event.conversationId)}]`));
         console.log(chalk.white(`    User: ${chalk.italic(this.truncate(event.userMessage, 80))}`));
         
         if (event.eventId) {
@@ -400,16 +150,32 @@ export class ExecutionLogger {
         console.log();
     }
 
-    private logConversationComplete(event: ConversationCompleteEvent): void {
+    private logConversationComplete(event: LogEvent & { type: "conversation_complete" }): void {
         const statusColor = event.success ? chalk.green : chalk.red;
         const statusIcon = event.success ? "✅" : "❌";
 
         console.log();
         console.log(statusColor(`${statusIcon} CONVERSATION COMPLETE [${this.shortId(event.conversationId)}]`));
         console.log(chalk.white(`    ├─ Final phase: ${chalk.bold(event.finalPhase)}`));
-        console.log(chalk.white(`    ├─ Duration: ${formatDuration(event.totalDuration)}`));
+        console.log(chalk.white(`    ├─ Duration: ${formatDuration(event.duration)}`));
         console.log(statusColor(`    └─ Success: ${event.success}`));
         console.log();
+    }
+
+    // Execution Flow Events
+    private logExecutionStart(event: LogEvent & { type: "execution_start" }): void {
+        console.log();
+        console.log(chalk.cyan(`▶️  EXECUTION START [${this.shortId(event.conversationId)}]`));
+        console.log(chalk.white(`    ${event.narrative}`));
+    }
+
+    private logExecutionComplete(event: LogEvent & { type: "execution_complete" }): void {
+        const statusColor = event.success ? chalk.green : chalk.red;
+        const statusIcon = event.success ? "✅" : "❌";
+
+        console.log();
+        console.log(statusColor(`${statusIcon} EXECUTION COMPLETE [${this.shortId(event.conversationId)}]`));
+        console.log(chalk.white(`    ${event.narrative}`));
     }
 
     // Helper methods
@@ -434,55 +200,15 @@ export class ExecutionLogger {
         return String(value);
     }
 
-
-    // Quick logging methods
-    agentThinking(agent: string, reasoning: string, context?: AgentThinkingEvent["context"]): void {
-        this.logEvent({
-            type: "agent_thinking",
-            agent,
-            reasoning,
-            context: context || {}
-        });
-    }
-
-    agentDecision(
-        agent: string, 
-        decisionType: AgentDecisionEvent["decisionType"], 
-        decision: string,
-        reasoning: string,
-        options?: { confidence?: number; alternatives?: string[] }
-    ): void {
-        this.logEvent({
-            type: "agent_decision",
-            agent,
-            decisionType,
-            decision,
-            reasoning,
-            ...options
-        });
-    }
-
-    routingDecision(
-        agent: string,
-        targetAgents: string[],
-        reason: string,
-        options?: { targetPhase?: Phase; confidence?: number }
-    ): void {
-        this.logEvent({
-            type: "routing_decision",
-            agent,
-            targetAgents,
-            reason,
-            ...options
-        });
-    }
-
+    // Quick logging methods for backward compatibility
     toolStart(agent: string, tool: string, parameters?: Record<string, unknown>): void {
         this.logEvent({
-            type: "tool_execution_start",
+            type: "tool_call",
+            timestamp: new Date(),
+            conversationId: this.context.conversationId || "",
             agent,
             tool,
-            parameters
+            args: parameters
         });
     }
 
@@ -494,13 +220,42 @@ export class ExecutionLogger {
         options?: { result?: string; error?: string }
     ): void {
         this.logEvent({
-            type: "tool_execution_complete",
+            type: "tool_result",
+            timestamp: new Date(),
+            conversationId: this.context.conversationId || "",
             agent,
             tool,
             status,
             duration,
-            ...options
+            result: options?.result,
+            error: options?.error
         });
+    }
+
+    routingDecision(
+        agent: string,
+        targetAgents: string[],
+        reason: string,
+        options?: { targetPhase?: Phase; }
+    ): void {
+        this.logEvent({
+            type: "routing",
+            timestamp: new Date(),
+            conversationId: this.context.conversationId || "",
+            agent,
+            targetAgents,
+            reason,
+            targetPhase: options?.targetPhase
+        });
+    }
+
+    // Legacy method stubs for compatibility (no-op)
+    agentThinking(): void {
+        // No-op - removed in simplification
+    }
+
+    agentDecision(): void {
+        // No-op - removed in simplification
     }
 }
 

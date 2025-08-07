@@ -24,11 +24,6 @@ describe("Tool Registry", () => {
         expect(writeContextFileTool?.parameters).toBeDefined();
         expect(writeContextFileTool?.parameters.shape).toBeDefined();
 
-        const continueTool = getTool("continue");
-        expect(continueTool).toBeDefined();
-        expect(continueTool?.description).toBeDefined();
-        expect(continueTool?.parameters).toBeDefined();
-
         const completeTool = getTool("complete");
         expect(completeTool).toBeDefined();
         expect(completeTool?.description).toBeDefined();
@@ -44,7 +39,6 @@ describe("Tool Registry", () => {
         const expectedTools = [
             "read_path",
             "write_context_file",
-            "continue",
             "complete",
             "end_conversation",
             "analyze",

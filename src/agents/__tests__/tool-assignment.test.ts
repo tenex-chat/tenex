@@ -4,7 +4,7 @@ import { getBuiltInAgents } from "../builtInAgents";
 
 describe("Tool assignment", () => {
     describe("getDefaultToolsForAgent", () => {
-        it("orchestrator agent should not have complete tool", () => {
+        it("orchestrator agent should have no tools (uses JSON response)", () => {
             const mockAgent = {
                 isOrchestrator: true,
                 isBuiltIn: true,
@@ -12,10 +12,11 @@ describe("Tool assignment", () => {
             } as any;
             const tools = getDefaultToolsForAgent(mockAgent);
 
+            expect(tools).toHaveLength(0);
             expect(tools).not.toContain("complete");
             expect(tools).not.toContain("analyze");
             expect(tools).not.toContain("end_conversation");
-            expect(tools).toContain("continue");
+            expect(tools).not.toContain("continue");
             expect(tools).not.toContain("learn");
         });
 

@@ -65,8 +65,9 @@ export class ConversationManager {
         // Log conversation start
         executionLogger.logEvent({
             type: "conversation_start",
+            timestamp: new Date(),
             conversationId: id,
-            title,
+            agent: "system",
             userMessage: event.content || "",
             eventId: event.id
         });
@@ -121,6 +122,7 @@ export class ConversationManager {
                 referencedArticle,
             },
             phaseTransitions: [], // Initialize empty phase transitions array
+            orchestratorTurns: [], // Initialize empty orchestrator turns array
             executionTime: {
                 totalSeconds: 0,
                 isActive: false,
@@ -169,12 +171,13 @@ export class ConversationManager {
         
         // Log phase transition
         executionLogger.logEvent({
-            type: "phase_transition_trigger",
+            type: "phase_transition",
+            timestamp: new Date(),
             conversationId: id,
-            currentPhase: previousPhase,
-            trigger: "agent_request",
-            triggerAgent: agentName,
-            signal: `${previousPhase} → ${phase}`
+            agent: agentName,
+            from: previousPhase,
+            to: phase,
+            reason: reason
         });
 
         // Create transition record even for same-phase handoffs
@@ -207,41 +210,6 @@ export class ConversationManager {
         await this.persistence.save(conversation);
     }
 
-    async incrementContinueCallCount(conversationId: string, phase: Phase): Promise<void> {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        // Initialize continueCallCounts if not exists
-        if (!conversation.metadata.continueCallCounts) {
-            conversation.metadata.continueCallCounts = {
-                [PHASES.CHAT]: 0,
-                [PHASES.BRAINSTORM]: 0,
-                [PHASES.PLAN]: 0,
-                [PHASES.EXECUTE]: 0,
-                [PHASES.VERIFICATION]: 0,
-                [PHASES.CHORES]: 0,
-                [PHASES.REFLECTION]: 0,
-            };
-        }
-
-        // Increment the count for the current phase
-        const currentCount = conversation.metadata.continueCallCounts[phase] || 0;
-        conversation.metadata.continueCallCounts[phase] = currentCount + 1;
-
-        // Save after updating count
-        await this.persistence.save(conversation);
-    }
-
-    getContinueCallCount(conversationId: string, phase: Phase): number {
-        const conversation = this.conversations.get(conversationId);
-        if (!conversation) {
-            return 0;
-        }
-
-        return conversation.metadata.continueCallCounts?.[phase] || 0;
-    }
 
     async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
         const conversation = this.conversations.get(conversationId);
@@ -520,6 +488,101 @@ export class ConversationManager {
     }
 
     /**
+     * Build structured routing context for the orchestrator
+     */
+    async buildOrchestratorRoutingContext(
+        conversationId: string,
+        triggeringEvent?: NDKEvent
+    ): Promise<import("./types").OrchestratorRoutingContext> {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            throw new Error(`Conversation ${conversationId} not found`);
+        }
+
+        // Get original user request from first event
+        const user_request = conversation.history[0]?.content || "";
+        
+        // Build routing history from orchestrator turns
+        const routing_history: import("./types").RoutingEntry[] = [];
+        let current_routing: import("./types").RoutingEntry | null = null;
+        
+        // Process completed turns
+        for (const turn of conversation.orchestratorTurns) {
+            if (turn.isCompleted) {
+                routing_history.push({
+                    phase: turn.phase,
+                    agents: turn.agents,
+                    completions: turn.completions,
+                    reason: turn.reason,
+                    timestamp: turn.timestamp
+                });
+            } else {
+                // This is the current active turn
+                // Check if triggering event is a completion for this turn
+                if (triggeringEvent) {
+                    const newCompletion = this.extractCompletionFromEvent(triggeringEvent);
+                    if (newCompletion && turn.agents.includes(newCompletion.agent)) {
+                        // Add this completion to the turn
+                        turn.completions.push(newCompletion);
+                        
+                        // Check if all agents have now completed
+                        const completedAgents = new Set(turn.completions.map(c => c.agent));
+                        if (turn.agents.every(agent => completedAgents.has(agent))) {
+                            // Turn is now complete, add to history
+                            routing_history.push({
+                                phase: turn.phase,
+                                agents: turn.agents,
+                                completions: turn.completions,
+                                reason: turn.reason,
+                                timestamp: turn.timestamp
+                            });
+                            // Mark turn as completed
+                            turn.isCompleted = true;
+                            current_routing = null; // Need new routing
+                        } else {
+                            // Still waiting for other agents
+                            current_routing = {
+                                phase: turn.phase,
+                                agents: turn.agents,
+                                completions: turn.completions,
+                                reason: turn.reason,
+                                timestamp: turn.timestamp
+                            };
+                        }
+                    } else {
+                        // No new completion, turn still active
+                        current_routing = {
+                            phase: turn.phase,
+                            agents: turn.agents,
+                            completions: turn.completions,
+                            reason: turn.reason,
+                            timestamp: turn.timestamp
+                        };
+                    }
+                } else {
+                    // No triggering event, turn still active
+                    current_routing = {
+                        phase: turn.phase,
+                        agents: turn.agents,
+                        completions: turn.completions,
+                        reason: turn.reason,
+                        timestamp: turn.timestamp
+                    };
+                }
+            }
+        }
+        
+        // If no orchestrator turns yet (fresh conversation), current_routing is null
+        // Orchestrator will need to make first routing decision
+        
+        return {
+            user_request,
+            routing_history,
+            current_routing
+        };
+    }
+
+    /**
      * Update an agent's state (e.g., to store Claude session ID)
      */
     async updateAgentState(
@@ -750,21 +813,109 @@ export class ConversationManager {
         await this.persistence.save(conversation);
     }
 
-    // DEPRECATED: Temporary method for backward compatibility during migration
-    getAgentContext(conversationId: string, agentSlug: string): { claudeSessionId?: string } | undefined {
+
+    /**
+     * Start a new orchestrator turn (called when orchestrator uses continue())
+     */
+    async startOrchestratorTurn(
+        conversationId: string,
+        phase: Phase,
+        agents: string[],
+        reason?: string
+    ): Promise<string> {
         const conversation = this.conversations.get(conversationId);
         if (!conversation) {
-            return undefined;
+            throw new Error(`Conversation ${conversationId} not found`);
         }
+
+        // Generate unique turn ID
+        const turnId = `turn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         
-        const agentState = conversation.agentStates.get(agentSlug);
-        if (!agentState) {
-            return undefined;
+        const turn: import("./types").OrchestratorTurn = {
+            turnId,
+            timestamp: Date.now(),
+            phase,
+            agents,
+            completions: [],
+            reason,
+            isCompleted: false
+        };
+
+        conversation.orchestratorTurns.push(turn);
+        await this.persistence.save(conversation);
+        
+        logger.info(`[CONV_MGR] Started orchestrator turn ${turnId}`, { 
+            conversationId, 
+            phase, 
+            agents 
+        });
+        
+        return turnId;
+    }
+
+    /**
+     * Add a completion to the current orchestrator turn
+     */
+    async addCompletionToTurn(
+        conversationId: string,
+        agentSlug: string,
+        message: string
+    ): Promise<void> {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            throw new Error(`Conversation ${conversationId} not found`);
         }
+
+        // Find the most recent incomplete turn that includes this agent
+        const currentTurn = [...conversation.orchestratorTurns]
+            .reverse()
+            .find(turn => !turn.isCompleted && turn.agents.includes(agentSlug));
+
+        if (!currentTurn) {
+            logger.warn(`[CONV_MGR] No active turn found for agent ${agentSlug}`, { 
+                conversationId 
+            });
+            return;
+        }
+
+        // Add completion
+        currentTurn.completions.push({
+            agent: agentSlug,
+            message,
+            timestamp: Date.now()
+        });
+
+        // Check if all expected agents have completed
+        const completedAgents = new Set(currentTurn.completions.map(c => c.agent));
+        if (currentTurn.agents.every(agent => completedAgents.has(agent))) {
+            currentTurn.isCompleted = true;
+            logger.info(`[CONV_MGR] Orchestrator turn ${currentTurn.turnId} completed`, {
+                conversationId,
+                completions: currentTurn.completions.length
+            });
+        }
+
+        await this.persistence.save(conversation);
+    }
+
+    /**
+     * Extract completion from an event (if it's a complete() tool call)
+     */
+    private extractCompletionFromEvent(event: NDKEvent): import("./types").Completion | null {
+        // Check if event has ["tool", "complete"] tag
+        const isCompletion = event.tags?.some(
+            tag => tag[0] === "tool" && tag[1] === "complete"
+        );
         
-        // Return a minimal object that satisfies the claudeSessionId check
+        if (!isCompletion || !event.content) return null;
+        
+        const agentSlug = getAgentSlugFromEvent(event);
+        if (!agentSlug) return null;
+        
         return {
-            claudeSessionId: agentState.claudeSessionId
+            agent: agentSlug,
+            message: event.content,
+            timestamp: event.created_at
         };
     }
 }

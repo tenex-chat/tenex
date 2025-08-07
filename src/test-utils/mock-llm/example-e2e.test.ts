@@ -26,10 +26,13 @@ describe("Example E2E Test with Mock LLM", () => {
         const userMessage = "Create a user authentication system with JWT and OAuth";
         
         // The mock will automatically respond based on the scenario
-        const response = await mockLLM.chat([
-            { role: "system", content: "You are the Orchestrator agent. Current Phase: CHAT" },
-            { role: "user", content: userMessage }
-        ], "mock-model");
+        const response = await mockLLM.complete({
+            messages: [
+                { role: "system", content: "You are the Orchestrator agent. Current Phase: CHAT" },
+                { role: "user", content: userMessage }
+            ],
+            options: { configName: "mock-model" }
+        });
         
         // Verify orchestrator response
         expect(response.content).toContain("I'll help you create a user authentication system");
@@ -45,10 +48,13 @@ describe("Example E2E Test with Mock LLM", () => {
         // Add error scenario
         mockLLM = createMockLLMService(['error-handling']);
         
-        const response = await mockLLM.chat([
-            { role: "system", content: "You are the Executor agent" },
-            { role: "user", content: "simulate an error" }
-        ], "mock-model");
+        const response = await mockLLM.complete({
+            messages: [
+                { role: "system", content: "You are the Executor agent" },
+                { role: "user", content: "simulate an error" }
+            ],
+            options: { configName: "mock-model" }
+        });
         
         expect(response.toolCalls).toBeDefined();
         expect(response.toolCalls[0].name).toBe("shell");

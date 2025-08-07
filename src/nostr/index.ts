@@ -3,8 +3,6 @@ export { NostrPublisher, StreamPublisher } from "./NostrPublisher";
 export type {
     NostrPublisherContext,
     ResponseOptions,
-    FinalizeMetadata,
-    ToolExecutionStatus,
 } from "./NostrPublisher";
 export { TypingIndicatorManager } from "./TypingIndicatorManager";
 

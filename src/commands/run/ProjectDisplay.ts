@@ -25,7 +25,7 @@ export class ProjectDisplay {
         logInfo(chalk.gray("Repository: ") + chalk.white(repoTag));
         logInfo(chalk.gray("Path:       ") + chalk.white(projectPath));
         if (project.id) {
-            logInfo(chalk.gray("Event ID:   ") + chalk.gray(`${project.id.substring(0, 16)}...`));
+            logInfo(chalk.gray("Event ID:   ") + chalk.gray(project.id));
         }
     }
 
@@ -76,7 +76,7 @@ export class ProjectDisplay {
         }
         if (agent.eventId) {
             logInfo(
-                chalk.gray("Event ID:    ") + chalk.gray(`${agent.eventId.substring(0, 16)}...`)
+                chalk.gray("Event ID:    ") + chalk.gray(agent.eventId)
             );
         }
     }

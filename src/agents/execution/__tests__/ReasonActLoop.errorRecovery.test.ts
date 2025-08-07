@@ -200,7 +200,7 @@ describe("ReasonActLoop - Error Recovery", () => {
         );
 
         const event = {
-            tool: "continue",
+            tool: "complete",
             result: {
                 __typedResult: serializeToolResult({
                     success: false,
@@ -243,7 +243,7 @@ describe("ReasonActLoop - Error Recovery", () => {
         expect(tracingLogger.error).toHaveBeenCalledWith(
             "Failed to publish tool error",
             expect.objectContaining({
-                tool: "continue",
+                tool: "complete",
                 originalError: {
                     kind: "validation",
                     field: "unknown", // Field is not serialized, so it becomes "unknown"

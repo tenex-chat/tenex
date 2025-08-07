@@ -491,7 +491,7 @@ export function logConversationError(
     console.log();
 }
 
-// Export a logger object for compatibility
+// Main logger interface
 export const logger = {
     info: (message: string, ...args: unknown[]) => logInfo(message, undefined, "normal", ...args),
     error: (message: string, error?: unknown) => logError(message, error),
