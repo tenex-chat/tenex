@@ -1,6 +1,7 @@
 import { generateInventory, updateInventory } from "@/utils/inventory";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
+import { handleCliError } from "@/utils/cli-error";
 import { Command } from "commander";
 
 export const inventoryCommand = new Command("inventory")
@@ -28,8 +29,7 @@ inventoryCommand
             console.log("📋 Main inventory saved to context/INVENTORY.md");
             console.log("📚 Complex module guides (if any) saved to context/ directory");
         } catch (error) {
-            logger.error("Failed to generate inventory", { error });
-            process.exit(1);
+            handleCliError(error, "Failed to generate inventory");
         }
     });
 
@@ -53,7 +53,6 @@ inventoryCommand
             console.log(`📝 Updated inventory for ${files.length} file(s)`);
             console.log("📋 Updated inventory saved to context/INVENTORY.md");
         } catch (error) {
-            logger.error("Failed to update inventory", { error });
-            process.exit(1);
+            handleCliError(error, "Failed to update inventory");
         }
     });
