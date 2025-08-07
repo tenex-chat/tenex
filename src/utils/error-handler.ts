@@ -1,7 +1,9 @@
 import { formatAnyError } from "./error-formatter";
-import { createTracingLogger } from "@/tracing";
+import { createTracingContext, createTracingLogger } from "@/tracing";
 
-const logger = createTracingLogger("ErrorHandler");
+// Create a global tracing context for error handling utilities
+const errorHandlerContext = createTracingContext("global-error-handler");
+const logger = createTracingLogger(errorHandlerContext);
 
 /**
  * Standard error handler for async operations with logging

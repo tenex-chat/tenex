@@ -137,7 +137,7 @@ describe("AgentExecutor", () => {
             onStreamToolCall: mock(() => {}),
             onComplete: mock(() => {}),
             onError: mock((error: Error) => {
-                console.error("Test error:", error);
+                // Error handled in mock
             })
         };
     });
