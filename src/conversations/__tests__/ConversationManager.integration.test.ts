@@ -189,11 +189,11 @@ describe("ConversationManager - Integration Tests", () => {
             userMsg
         );
 
-        // Orchestrator should get NEW INTERACTION marker
+        // Orchestrator should NOT get NEW INTERACTION marker (no messages while away)
         const hasNewInteraction = messages.some(m => 
             m.content === "=== NEW INTERACTION ==="
         );
-        expect(hasNewInteraction).toBe(true);
+        expect(hasNewInteraction).toBe(false);
 
         // No history block (first message)
         const hasHistory = messages.some(m => 

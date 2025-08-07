@@ -60,25 +60,32 @@ This standard format ensures compatibility with LLM APIs and provides clear conv
 
 ### "Messages While You Were Away" Block
 
-This special block is used ONLY when there are genuinely new messages from other participants that the agent hasn't seen. It serves to:
+This special block is used ONLY when there are genuinely new messages from other participants that the agent hasn't seen yet (messages after the agent's `lastProcessedMessageIndex`). It serves to:
 - Alert the agent to activity that occurred while it was inactive
 - Provide handoff context when agents transition work
 - Highlight important updates that need immediate attention
+- Show messages from other agents that have been added since the agent last processed the conversation
 
 The block is NOT used when:
 - The agent's own messages are being provided (these are `assistant` messages)
 - The agent is continuing a direct conversation with the user
-- There are no new messages from others
+- There are no new messages from others since the agent's last interaction
 
 ### NEW INTERACTION Marker
 
-The "=== NEW INTERACTION ===" marker is added ONLY when:
-- The orchestrator agent is handling the message
-- It's the very first message of a new conversation
-- The user hasn't directly addressed any specific agent
-- There's no prior conversation history
+The "=== NEW INTERACTION ===" marker works in conjunction with the "MESSAGES WHILE YOU WERE AWAY" block to differentiate between:
+- The backfilled context (messages while away)
+- The new message that the agent needs to respond to
 
-This marker helps the orchestrator understand it's starting fresh, not continuing an existing thread.
+The marker is added ONLY when:
+- A "MESSAGES WHILE YOU WERE AWAY" block has been added
+- The agent needs a clear delineation between the backfilled messages and the current triggering event
+
+The marker is NOT added when:
+- There's no "MESSAGES WHILE YOU WERE AWAY" block
+- The conversation flow is already clear (e.g., direct user message with no intervening messages)
+
+This dual-marker system ensures agents can distinguish between context they're being caught up on versus the actual message they need to respond to.
 
 ## Agent Participation Patterns
 
@@ -206,10 +213,24 @@ Critical scenarios that must be tested:
 4. **Session ID management** across interactions
 5. **Phase transitions** with context preservation
 6. **Agent handoffs** with summary context
-7. **NEW INTERACTION marker** appearing only for fresh orchestrator starts
+7. **NEW INTERACTION marker** appearing only when MESSAGES WHILE YOU WERE AWAY is present
 8. **Complete history preservation** across all scenarios
 
 ## Implementation Notes
+
+### Message Building Logic
+
+The `buildAgentMessages` function follows this sequence:
+1. **Build complete conversation history** - All messages up to but not including the triggering event
+2. **Check for messages while away** - Messages from others after `lastProcessedMessageIndex`
+3. **Add MESSAGES WHILE YOU WERE AWAY block** - Only if there are new messages from others
+4. **Add NEW INTERACTION marker** - Only if a "while away" block was added
+5. **Add the triggering event** - The actual message to respond to
+
+Key implementation details:
+- Messages from others after `lastProcessedMessageIndex` are included in "MESSAGES WHILE YOU WERE AWAY"
+- The check no longer excludes messages already in `allPreviousMessages` 
+- NEW INTERACTION marker is conditional on the presence of the "while away" block
 
 Key functions involved in the conversation management:
 - `buildAgentMessages`: Constructs the complete message context for an agent

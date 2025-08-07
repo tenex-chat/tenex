@@ -437,11 +437,14 @@ export class ConversationManager {
             if (triggeringEvent?.id && event.id === triggeringEvent.id) continue; // Skip triggering event
             
             const eventAgentSlug = getAgentSlugFromEvent(event);
-            // Only include messages from others that aren't already in history
-            if (eventAgentSlug !== targetAgent.slug && !allPreviousMessages.includes(event)) {
+            // Include messages from others that the agent hasn't seen yet
+            if (eventAgentSlug !== targetAgent.slug) {
                 newOthersMessages.push(event);
             }
         }
+        
+        // Track if we added a "MESSAGES WHILE YOU WERE AWAY" block
+        let addedMessagesWhileAway = false;
         
         // If there are NEW messages from others while the agent was away, add them in a block
         if (newOthersMessages.length > 0) {
@@ -464,27 +467,15 @@ export class ConversationManager {
             contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
             
             messagesForLLM.push(new Message("system", contextBlock));
+            addedMessagesWhileAway = true;
             logger.debug(`[CONV_MGR] Added new messages while away for ${targetAgent.slug}`, { 
                 newMessagesCount: newOthersMessages.length 
             });
         }
 
         // === 2. Add "NEW INTERACTION" marker (if applicable) ===
-        // Only add for orchestrator handling brand new user messages (not continuations or p-tags)
-        const isDirectlyAddressed = triggeringEvent?.tags?.some(
-            tag => tag[0] === "p" && tag[1] === targetAgent.pubkey
-        );
-        // It's a new interaction if:
-        // - The orchestrator is handling it
-        // - It's from the user
-        // - There's no prior conversation history (first message)
-        // - The orchestrator is not directly addressed
-        const isFirstMessage = allPreviousMessages.length === 0;
-        const isNewUserMessage = triggeringEvent && isEventFromUser(triggeringEvent) && 
-                                 isFirstMessage && 
-                                 !isDirectlyAddressed;
-        const shouldAddMarker = targetAgent.isOrchestrator && isNewUserMessage;
-        if (shouldAddMarker) {
+        // Only add when we've shown messages while away, to differentiate the new message
+        if (addedMessagesWhileAway) {
             messagesForLLM.push(new Message("system", "=== NEW INTERACTION ==="));
         }
 

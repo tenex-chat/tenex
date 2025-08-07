@@ -207,8 +207,27 @@ export class AgentExecutor {
             NDKAgentLesson[]
         >();
         const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
+        
+        // Debug logging for lesson retrieval
+        logger.info("🔍 Retrieving lessons for agent", {
+            agentName: context.agent.name,
+            agentPubkey: context.agent.pubkey,
+            lessonsFound: currentAgentLessons.length,
+            totalLessonsInContext: projectCtx.getAllLessons().length,
+            allAgentPubkeys: Array.from(projectCtx.agentLessons.keys()),
+        });
+        
         if (currentAgentLessons.length > 0) {
             agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
+            logger.debug("📚 Lessons will be included in system prompt", {
+                agentName: context.agent.name,
+                lessonTitles: currentAgentLessons.slice(0, 5).map(l => l.title),
+            });
+        } else {
+            logger.debug("📚 No lessons found for agent", {
+                agentName: context.agent.name,
+                agentPubkey: context.agent.pubkey,
+            });
         }
 
         const systemPrompt = buildSystemPrompt({

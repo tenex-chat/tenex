@@ -320,11 +320,11 @@ describe("ConversationManager - Agent Context Management", () => {
                 userEvent
             );
 
-            // Should have NEW INTERACTION marker
+            // Should NOT have NEW INTERACTION marker (no messages while away)
             const hasNewInteraction = messages.some(m => 
                 m.content === "=== NEW INTERACTION ==="
             );
-            expect(hasNewInteraction).toBe(true);
+            expect(hasNewInteraction).toBe(false);
         });
 
         it("should NOT show NEW INTERACTION when orchestrator is p-tagged", async () => {

@@ -76,6 +76,7 @@ export class SubscriptionManager {
         const agentPubkeys = Array.from(projectCtx.agents.values()).map((agent) => agent.pubkey);
 
         if (agentPubkeys.length === 0) {
+            logger.warn("⚠️ No agent pubkeys found for lesson subscription");
             return;
         }
 
@@ -83,8 +84,15 @@ export class SubscriptionManager {
         const lessonFilter: NDKFilter = {
             kinds: NDKAgentLesson.kinds,
             authors: agentPubkeys,
-            "#a": [project.tagId()], // Scoped to this project
         };
+        
+        logger.info("📚 Setting up agent lessons subscription", {
+            projectId: project.id,
+            projectTagId: project.tagId(),
+            agentCount: agentPubkeys.length,
+            kinds: NDKAgentLesson.kinds,
+            filter: lessonFilter,
+        });
 
         const lessonSubscription = ndk.subscribe(lessonFilter, {
             closeOnEose: false,
@@ -95,13 +103,23 @@ export class SubscriptionManager {
             try {
                 // Convert to NDKAgentLesson
                 const lesson = NDKAgentLesson.from(event);
+                
+                logger.info("📖 Received agent lesson event", {
+                    lessonId: lesson.id,
+                    lessonTitle: lesson.title,
+                    authorPubkey: lesson.pubkey,
+                    projectTag: lesson.tags.find(t => t[0] === "a")?.[1],
+                    createdAt: lesson.created_at,
+                });
 
                 // Add to project context
-                if (lesson.pubkey) {
-                    projectCtx.addLesson(lesson.pubkey, lesson);
-                }
+                projectCtx.addLesson(lesson.pubkey, lesson);
+                logger.debug("✅ Lesson added to project context", {
+                    agentPubkey: lesson.pubkey,
+                    currentLessonCount: projectCtx.getLessonsForAgent(lesson.pubkey).length,
+                });
             } catch (error) {
-                logger.error("Error processing agent lesson:", error);
+                logger.error("❌ Error processing agent lesson:", error);
             }
         });
 
