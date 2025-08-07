@@ -13,6 +13,7 @@ import "@/prompts/fragments/tool-use";
 import "@/prompts/fragments/orchestrator-routing";
 import "@/prompts/fragments/expertise-boundaries";
 import "@/prompts/fragments/agent-tools";
+import "@/prompts/fragments/agent-reasoning";
 
 describe("systemPromptBuilder with yield-back", () => {
     const baseAgent: Agent = {
