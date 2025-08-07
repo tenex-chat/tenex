@@ -17,7 +17,6 @@ import {
     type NDKSubscription,
     filterAndRelaySetFromBech32,
 } from "@nostr-dev-kit/ndk";
-import type { NDKKind } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 
 export class SubscriptionManager {

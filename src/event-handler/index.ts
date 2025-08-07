@@ -2,7 +2,6 @@ import { type NDKEvent, type NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
-import { getEventKindName } from "../commands/run/constants";
 import { ConversationManager } from "../conversations/ConversationManager";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";

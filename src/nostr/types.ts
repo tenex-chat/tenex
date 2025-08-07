@@ -1,4 +1,3 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface LLMMetadata {
     model: string;

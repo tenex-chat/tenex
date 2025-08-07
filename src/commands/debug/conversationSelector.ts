@@ -57,7 +57,7 @@ export async function selectConversation(conversationManager: ConversationManage
     });
     
     // Add separator and cancel option
-    choices.push(new inquirer.Separator() as any);
+    choices.push(new inquirer.Separator() as unknown as ConversationChoice);
     choices.push({
         name: chalk.red("Cancel"),
         value: "cancel",

@@ -1,7 +1,7 @@
 import { STATUS_INTERVAL_MS, STATUS_KIND } from "@/commands/run/constants";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -42,7 +42,7 @@ export class StatusPublisher {
             await event.sign(projectCtx.signer);
             await event.publish();
         } catch (err) {
-            const errorMessage = formatError(err);
+            const errorMessage = formatAnyError(err);
             logWarning(`Failed to publish status event: ${errorMessage}`);
         }
     }

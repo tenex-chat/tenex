@@ -64,7 +64,7 @@ export class TaskPublisher {
         return task;
     }
 
-    async completeTask(success: boolean, options: TaskCompletionOptions): Promise<void> {
+    async completeTask(_success: boolean, _options: TaskCompletionOptions): Promise<void> {
         if (!this.currentTask) {
             throw new Error("No current task to complete. Call createTask first.");
         }

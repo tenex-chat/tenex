@@ -17,7 +17,7 @@ interface TimelineEvent {
     duration?: number;
 }
 
-export const timeline: CommandModule<{}, { conversationId?: string }> = {
+export const timeline: CommandModule<Record<string, never>, { conversationId?: string }> = {
     command: "timeline [conversationId]",
     describe: "Display a timeline of all events in a conversation",
     

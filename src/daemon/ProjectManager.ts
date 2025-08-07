@@ -2,7 +2,6 @@ import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { Agent } from "@/agents/types";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
@@ -14,7 +13,6 @@ import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 // createAgent functionality has been moved to AgentRegistry
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import chalk from "chalk";

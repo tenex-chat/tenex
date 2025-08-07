@@ -1,13 +1,12 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
-import { Message } from "multi-llm-ts";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { ConversationManager } from "../conversations";
 import { NostrPublisher } from "../nostr";
 import { isEventFromUser } from "../nostr/utils";
 import { getProjectContext } from "../services";
-import { formatError } from "../utils/errors";
+import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 
 const logInfo = logger.info.bind(logger);
@@ -49,7 +48,7 @@ export const handleChatMessage = async (
     try {
         await handleReplyLogic(event, context, mentionedPubkeys);
     } catch (error) {
-        logInfo(chalk.red(`❌ Failed to route reply: ${formatError(error)}`));
+        logInfo(chalk.red(`❌ Failed to route reply: ${formatAnyError(error)}`));
     }
 };
 

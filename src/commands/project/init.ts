@@ -3,7 +3,7 @@ import { logger } from "@/utils/logger";
 import { Command } from "commander";
 import { ProjectManager } from "../../daemon/ProjectManager";
 import { getNDK, initNDK, shutdownNDK } from "../../nostr/ndkClient";
-import { formatError } from "../../utils/errors";
+import { formatAnyError } from "../../utils/error-formatter";
 
 export const projectInitCommand = new Command("init")
     .description("Initialize a new TENEX project")
@@ -37,7 +37,7 @@ export const projectInitCommand = new Command("init")
 
             process.exit(0);
         } catch (err) {
-            const errorMessage = formatError(err);
+            const errorMessage = formatAnyError(err);
             logger.error(`Failed to create project: ${errorMessage}`);
             process.exit(1);
         }

@@ -4,7 +4,15 @@ import { directoryExists, ensureDirectory } from "./filesystem.js";
 /**
  * Get paths for common .tenex files
  */
-export function getTenexPaths(projectPath: string) {
+export function getTenexPaths(projectPath: string): {
+    tenexDir: string;
+    agentsJson: string;
+    configJson: string;
+    llmsJson: string;
+    agentsDir: string;
+    rulesDir: string;
+    conversationsDir: string;
+} {
     const tenexDir = path.join(projectPath, ".tenex");
     return {
         tenexDir,

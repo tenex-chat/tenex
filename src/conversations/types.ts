@@ -1,5 +1,4 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Message } from "multi-llm-ts";
 import type { Phase } from "./phases";
 
 // Simplified agent state to track what an agent has seen

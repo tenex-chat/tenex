@@ -1,10 +1,9 @@
-import { type LogModule, logger as baseLogger } from "@/utils/logger";
+import type { LogModule } from "@/utils/logger";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger } from "@/tracing";
 import { formatDuration } from "@/utils/formatting";
 import chalk from "chalk";
 import type { Phase } from "@/conversations/phases";
-import type { Agent } from "@/agents/types";
 
 /**
  * Event types for structured logging

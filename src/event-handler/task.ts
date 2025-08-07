@@ -1,9 +1,9 @@
-import type { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
+import type { NDKTask } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationManager } from "../conversations";
 import { getProjectContext } from "../services";
-import { formatError } from "../utils/errors";
+import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { Agent } from "@/agents";
 import { createNostrPublisher } from "../nostr/factory";
@@ -89,6 +89,6 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
 
         logInfo(chalk.green("✅ Task conversation created and routed successfully"));
     } catch (error) {
-        logInfo(chalk.red(`❌ Failed to create task conversation: ${formatError(error)}`));
+        logInfo(chalk.red(`❌ Failed to create task conversation: ${formatAnyError(error)}`));
     }
 };

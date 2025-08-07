@@ -46,7 +46,7 @@ export const agentToolsFragment: PromptFragment<AgentToolsArgs> = {
             typeof args === "object" &&
             args !== null &&
             "agent" in args &&
-            typeof (args as any).agent === "object"
+            typeof (args as {agent: unknown}).agent === "object"
         );
     },
     expectedArgs: "{ agent: Agent }",

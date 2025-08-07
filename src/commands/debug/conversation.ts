@@ -1,11 +1,11 @@
 import { getNDK } from "@/nostr/ndkClient";
 import { fetchConversation } from "@/utils/conversationFetcher";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
 
-export async function runDebugConversation(nevent: string) {
+export async function runDebugConversation(nevent: string): Promise<void> {
     try {
         const projectPath = process.cwd();
 
@@ -25,7 +25,7 @@ export async function runDebugConversation(nevent: string) {
 
         logInfo("Conversation displayed successfully");
     } catch (err) {
-        const errorMessage = formatError(err);
+        const errorMessage = formatAnyError(err);
         logError(`Failed to fetch conversation: ${errorMessage}`);
         console.error(chalk.red(`\nError: ${errorMessage}`));
         process.exit(1);

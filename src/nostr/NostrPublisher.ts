@@ -10,7 +10,6 @@ import { getProjectContext } from "@/services";
 import type { ContinueFlow, Complete, EndConversation } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent, type NDKTag } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
 import { TypingIndicatorManager } from "./TypingIndicatorManager";
 
 // Tool execution status interface (from ToolExecutionPublisher)

@@ -7,7 +7,7 @@ import { loadLLMRouter } from "@/llm";
 import { getNDK, shutdownNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
@@ -32,13 +32,13 @@ export const projectRunCommand = new Command("run")
             // Start the project listener
             await runProjectListener(projectPath, ndk);
         } catch (err) {
-            const errorMessage = formatError(err);
+            const errorMessage = formatAnyError(err);
             logger.error(`Failed to start project: ${errorMessage}`);
             process.exit(1);
         }
     });
 
-async function runProjectListener(projectPath: string, ndk: NDK) {
+async function runProjectListener(projectPath: string, ndk: NDK): Promise<void> {
     try {
         const projectCtx = getProjectContext();
         const project = projectCtx.project;
@@ -89,7 +89,7 @@ async function runProjectListener(projectPath: string, ndk: NDK) {
             // This promise never resolves, keeping the listener active
         });
     } catch (err) {
-        const errorMessage = formatError(err);
+        const errorMessage = formatAnyError(err);
         logger.error(`Failed to run project listener: ${errorMessage}`);
         throw err;
     }

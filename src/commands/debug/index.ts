@@ -4,7 +4,7 @@ import { buildSystemPrompt } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import type { Tool } from "@/tools/types";
-import { formatError } from "@/utils/errors";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
@@ -45,7 +45,7 @@ interface DebugSystemPromptOptions {
     phase: string;
 }
 
-export async function runDebugSystemPrompt(options: DebugSystemPromptOptions) {
+export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
     try {
         const projectPath = process.cwd();
 
@@ -132,7 +132,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions) {
         logInfo("System prompt displayed successfully");
         process.exit(0);
     } catch (err) {
-        const errorMessage = formatError(err);
+        const errorMessage = formatAnyError(err);
         logError(`Failed to generate system prompt: ${errorMessage}`);
         process.exit(1);
     }

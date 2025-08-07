@@ -1,12 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Phase } from "@/conversations/phases";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
-import type { AgentState, ConversationMetadata as ConvMetadata, Conversation } from "../types";
+import type { AgentState, Conversation } from "../types";
 import {
     type AgentStateSchema,
     MetadataFileSchema,
