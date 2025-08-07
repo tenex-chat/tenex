@@ -221,7 +221,9 @@ describe("readPath tool", () => {
                 // Restore permissions
                 try {
                     require('fs').chmodSync(testFile, 0o644);
-                } catch {}
+                } catch (error) {
+                    // Cleanup error ignored in test teardown
+                }
             }
         });
 

@@ -136,7 +136,9 @@ describe("ProjectManager", () => {
         // Clean up temp directory
         try {
             await fs.rm(tempDir, { recursive: true, force: true });
-        } catch {}
+        } catch (error) {
+            // Cleanup error ignored in test teardown
+        }
         mock.restore();
     });
 

@@ -2,6 +2,7 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import { determineConfigLocation, getConfigLocationDescription } from "@/utils/configLocation";
 import { confirm, input } from "@inquirer/prompts";
 import { Command } from "commander";
 
@@ -18,26 +19,7 @@ export const agentAddCommand = new Command("add")
         try {
             // Determine where to save
             const projectPath = process.cwd();
-            const isProject = await configService.projectConfigExists(projectPath, "config.json");
-
-            let useProject = false;
-            if (options.global && options.project) {
-                logger.error("Cannot use both --global and --project flags");
-                process.exit(1);
-            } else if (options.global) {
-                useProject = false;
-            } else if (options.project) {
-                if (!isProject) {
-                    logger.error(
-                        "Not in a TENEX project directory. Use --global flag or run from a project."
-                    );
-                    process.exit(1);
-                }
-                useProject = true;
-            } else {
-                // Default: use project if in one, otherwise global
-                useProject = isProject;
-            }
+            const useProject = await determineConfigLocation(options, projectPath);
 
             // Interactive wizard
             const name = await input({
@@ -122,7 +104,7 @@ export const agentAddCommand = new Command("add")
             // Use AgentRegistry to ensure agent (this handles all file operations and Nostr publishing)
             const agent = await registry.ensureAgent(name, agentConfig);
 
-            const location = useProject ? "project" : "global";
+            const location = getConfigLocationDescription(useProject);
             logger.info(
                 `✅ Local agent "${name}" created successfully in ${location} configuration`
             );
@@ -130,7 +112,11 @@ export const agentAddCommand = new Command("add")
             logger.info(`   Pubkey: ${agent.pubkey}`);
             logger.info(`   Stored in: ${basePath}/agents/`);
         } catch (error) {
-            logger.error("Failed to create agent:", error);
+            if (error instanceof Error) {
+                logger.error("Failed to create agent:", error.message);
+            } else {
+                logger.error("Failed to create agent:", error);
+            }
             process.exit(1);
         }
     });

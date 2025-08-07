@@ -310,7 +310,7 @@ describe("MCPService", () => {
             const tools = await service.getAvailableTools();
 
             expect(tools).toHaveLength(1);
-            expect(tools[0].name).toBe("test-server/test-tool");
+            expect(tools[0].name).toBe("mcp__test-server__test-tool");
             expect(tools[0].description).toBe("A test tool");
         });
 
@@ -318,27 +318,29 @@ describe("MCPService", () => {
             const tools = await service.getAvailableTools();
             const tool = tools[0];
 
-            expect(tool.parameters).toHaveLength(3);
-
-            const inputParam = tool.parameters.find((p) => p.name === "input");
-            expect(inputParam).toEqual({
-                name: "input",
+            // Check that parameters has correct shape
+            expect(tool.parameters).toBeDefined();
+            expect(tool.parameters.shape).toBeDefined();
+            expect(tool.parameters.shape.type).toBe("object");
+            expect(tool.parameters.shape.properties).toBeDefined();
+            
+            // Check properties
+            const properties = tool.parameters.shape.properties;
+            expect(properties.input).toEqual({
                 type: "string",
                 description: "Test input",
                 required: true,
             });
 
-            const countParam = tool.parameters.find((p) => p.name === "count");
-            expect(countParam).toEqual({
-                name: "count",
+            expect(properties.count).toEqual({
                 type: "number",
                 description: "Test count",
                 required: false,
+                min: undefined,
+                max: undefined,
             });
 
-            const enabledParam = tool.parameters.find((p) => p.name === "enabled");
-            expect(enabledParam).toEqual({
-                name: "enabled",
+            expect(properties.enabled).toEqual({
                 type: "boolean",
                 description: "Test flag",
                 required: false,
@@ -382,17 +384,18 @@ describe("MCPService", () => {
             const tools = await service.getAvailableTools();
             const tool = tools[0];
 
-            const nestedParam = tool.parameters.find((p) => p.name === "nested");
-            expect(nestedParam?.type).toBe("object");
-            expect(nestedParam?.required).toBe(true);
+            // Check parameters shape
+            expect(tool.parameters.shape.type).toBe("object");
+            const properties = tool.parameters.shape.properties;
+            
+            expect(properties.nested?.type).toBe("object");
+            expect(properties.nested?.required).toBe(true);
 
-            const itemsParam = tool.parameters.find((p) => p.name === "items");
-            expect(itemsParam?.type).toBe("array");
-            expect(itemsParam?.required).toBe(true);
+            expect(properties.items?.type).toBe("array");
+            expect(properties.items?.required).toBe(true);
 
-            const choiceParam = tool.parameters.find((p) => p.name === "choice");
-            expect(choiceParam?.type).toBe("string");
-            expect(choiceParam?.required).toBe(false);
+            expect(properties.choice?.type).toBe("string");
+            expect(properties.choice?.required).toBe(false);
         });
 
         it("should cache tools after first fetch", async () => {

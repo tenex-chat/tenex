@@ -22,7 +22,7 @@ const MCPToolSchema = z.object({
     description: z.string().optional(),
     inputSchema: z
         .object({
-            properties: z.record(z.any()).optional(),
+            properties: z.record(z.unknown()).optional(),
             required: z.array(z.string()).optional(),
         })
         .optional(),
@@ -240,7 +240,8 @@ export class MCPService {
 
     private convertMCPToolToTenexTool(serverName: string, mcpTool: MCPTool): Tool {
         // Use the adapter to create a type-safe tool with Zod schemas
-        return adaptMCPTool(mcpTool, serverName, (args) =>
+        // Cast to any to handle type mismatch between z.record(z.unknown()) and expected properties type
+        return adaptMCPTool(mcpTool as any, serverName, (args) =>
             this.executeTool(serverName, mcpTool.name, args)
         ) as Tool;
     }
@@ -332,7 +333,9 @@ export class MCPService {
                 if (mcpClient.process) {
                     mcpClient.process.kill("SIGKILL");
                 }
-            } catch {}
+            } catch (error) {
+                // Process already terminated, ignore error
+            }
         }
     }
 

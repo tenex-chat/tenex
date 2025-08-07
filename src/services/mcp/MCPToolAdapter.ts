@@ -19,7 +19,7 @@ interface MCPPropertyDefinition {
     maxItems?: number;
 }
 
-interface MCPTool {
+export interface MCPTool {
     name: string;
     description?: string;
     inputSchema?: {

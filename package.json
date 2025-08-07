@@ -52,8 +52,6 @@
         "chalk": "^5.4.1",
         "commander": "^13.1.0",
         "inquirer": "^12.6.3",
-        "js-base64": "^3.7.7",
-        "jwt-js-decode": "^1.9.0",
         "multi-llm-ts": "^4.0.3",
         "nostr-tools": "^2.15.0",
         "repomix": "^1.1.0",
