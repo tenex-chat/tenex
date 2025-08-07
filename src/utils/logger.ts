@@ -163,14 +163,41 @@ function formatModulePrefix(module?: LogModule): string {
     return chalk.dim(`[${module.toUpperCase()}] `);
 }
 
-export function logError(message: string, error?: unknown, module?: LogModule): void {
-    if (!shouldLog("error", module)) return;
-    const prefix = globalConfig.useEmoji ? "❌" : globalConfig.useLabels ? "[ERROR]" : "";
+type LogLevel = "error" | "info" | "success" | "warning" | "debug";
+
+interface LogConfig {
+    emoji: string;
+    label: string;
+    color: typeof chalk.red;
+    consoleFn: typeof console.log;
+}
+
+const logConfigs: Record<LogLevel, LogConfig> = {
+    error: { emoji: "❌", label: "[ERROR]", color: chalk.redBright, consoleFn: console.error },
+    info: { emoji: "ℹ️", label: "[INFO]", color: chalk.blueBright, consoleFn: console.log },
+    success: { emoji: "✅", label: "[SUCCESS]", color: chalk.greenBright, consoleFn: console.log },
+    warning: { emoji: "⚠️", label: "[WARNING]", color: chalk.yellowBright, consoleFn: console.warn },
+    debug: { emoji: "🔍", label: "[DEBUG]", color: chalk.magentaBright, consoleFn: console.log },
+};
+
+function formatLogMessage(
+    level: LogLevel,
+    message: string,
+    module?: LogModule
+): string {
+    const config = logConfigs[level];
+    const prefix = globalConfig.useEmoji ? config.emoji : globalConfig.useLabels ? config.label : "";
     const modulePrefix = formatModulePrefix(module);
     const fullMessage = prefix
         ? `${prefix} ${modulePrefix}${message}`
         : `${modulePrefix}${message}`;
-    console.error(chalk.redBright(fullMessage), error || "");
+    return config.color(fullMessage);
+}
+
+export function logError(message: string, error?: unknown, module?: LogModule): void {
+    if (!shouldLog("error", module)) return;
+    const formatted = formatLogMessage("error", message, module);
+    console.error(formatted, error || "");
 }
 
 export function logInfo(
@@ -180,12 +207,8 @@ export function logInfo(
     ...args: unknown[]
 ): void {
     if (!shouldLog("info", module, verbosity)) return;
-    const prefix = globalConfig.useEmoji ? "ℹ️" : globalConfig.useLabels ? "[INFO]" : "";
-    const modulePrefix = formatModulePrefix(module);
-    const fullMessage = prefix
-        ? `${prefix} ${modulePrefix}${message}`
-        : `${modulePrefix}${message}`;
-    console.log(chalk.blueBright(fullMessage), ...args);
+    const formatted = formatLogMessage("info", message, module);
+    console.log(formatted, ...args);
 }
 
 export function logSuccess(
@@ -194,12 +217,8 @@ export function logSuccess(
     verbosity: VerbosityLevel = "normal"
 ): void {
     if (!shouldLog("success", module, verbosity)) return;
-    const prefix = globalConfig.useEmoji ? "✅" : globalConfig.useLabels ? "[SUCCESS]" : "";
-    const modulePrefix = formatModulePrefix(module);
-    const fullMessage = prefix
-        ? `${prefix} ${modulePrefix}${message}`
-        : `${modulePrefix}${message}`;
-    console.log(chalk.greenBright(fullMessage));
+    const formatted = formatLogMessage("success", message, module);
+    console.log(formatted);
 }
 
 export function logWarning(
@@ -209,12 +228,8 @@ export function logWarning(
     ...args: unknown[]
 ): void {
     if (!shouldLog("warning", module, verbosity)) return;
-    const prefix = globalConfig.useEmoji ? "⚠️" : globalConfig.useLabels ? "[WARNING]" : "";
-    const modulePrefix = formatModulePrefix(module);
-    const fullMessage = prefix
-        ? `${prefix} ${modulePrefix}${message}`
-        : `${modulePrefix}${message}`;
-    console.warn(chalk.yellowBright(fullMessage), ...args);
+    const formatted = formatLogMessage("warning", message, module);
+    console.warn(formatted, ...args);
 }
 
 export function logDebug(
@@ -224,12 +239,8 @@ export function logDebug(
     ...args: unknown[]
 ): void {
     if (!shouldLog("debug", module, verbosity)) return;
-    const prefix = globalConfig.useEmoji ? "🔍" : globalConfig.useLabels ? "[DEBUG]" : "";
-    const modulePrefix = formatModulePrefix(module);
-    const fullMessage = prefix
-        ? `${prefix} ${modulePrefix}${message}`
-        : `${modulePrefix}${message}`;
-    console.log(chalk.magentaBright(fullMessage), ...args);
+    const formatted = formatLogMessage("debug", message, module);
+    console.log(formatted, ...args);
 }
 
 // Agent Logger class for contextual logging

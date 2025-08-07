@@ -1,44 +1,80 @@
 import type { Tool } from "@/tools/types";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
+/**
+ * Simplified agent representation for UI display and selection
+ */
 export interface AgentSummary {
+    /** Display name of the agent */
     name: string;
+    /** Primary role/function of the agent */
     role: string;
+    /** Nostr public key for agent identity */
     pubkey: string;
 }
 
+/**
+ * Complete agent configuration and identity
+ */
 export interface Agent {
+    /** Display name of the agent */
     name: string;
+    /** Nostr public key for agent identity */
     pubkey: string;
+    /** Cryptographic signer for Nostr events */
     signer: NDKPrivateKeySigner;
+    /** Primary role/function of the agent */
     role: string;
-    description?: string; // Agent description from NDKAgent event
+    /** Agent description from NDKAgent event */
+    description?: string;
+    /** System instructions that guide agent behavior */
     instructions?: string;
-    useCriteria?: string; // Criteria for when this agent should be selected
+    /** Criteria for when this agent should be selected by orchestrator */
+    useCriteria?: string;
+    /** LLM configuration identifier */
     llmConfig: string;
-    tools: Tool[]; // Actual tool instances
-    mcp?: boolean; // Whether this agent has access to MCP tools (defaults to true except for orchestrator)
-    eventId?: string; // NDKAgent event ID
-    slug: string; // Agent slug/key from agents.json
-    isOrchestrator?: boolean; // Whether this agent is the orchestrator agent
-    isBuiltIn?: boolean; // Whether this is a built-in agent (executor, planner)
-    backend?: "reason-act-loop" | "claude" | "routing"; // Execution backend to use (defaults to 'reason-act-loop')
+    /** Tool instances available to this agent */
+    tools: Tool[];
+    /** Whether this agent has access to MCP tools (defaults to true except for orchestrator) */
+    mcp?: boolean;
+    /** NDKAgent event ID for persisted configuration */
+    eventId?: string;
+    /** Agent slug/key from agents.json configuration */
+    slug: string;
+    /** Whether this agent is the orchestrator agent */
+    isOrchestrator?: boolean;
+    /** Whether this is a built-in agent (executor, planner) */
+    isBuiltIn?: boolean;
+    /** Execution backend to use (defaults to 'reason-act-loop') */
+    backend?: "reason-act-loop" | "claude" | "routing";
 }
 
+/**
+ * Arguments passed to tool functions during execution
+ */
 export interface ToolCallArguments {
-    // Common tool arguments
-    command?: string; // For shell tools
-    path?: string; // For file tools
-    mode?: string; // For claude_code tool
-    prompt?: string; // For claude_code tool
+    /** Shell command to execute (for shell tools) */
+    command?: string;
+    /** File system path (for file tools) */
+    path?: string;
+    /** Operation mode (for claude_code tool) */
+    mode?: string;
+    /** User prompt or query (for claude_code tool) */
+    prompt?: string;
 
-    // Allow other tool arguments
+    /** Allow additional tool-specific arguments */
     [key: string]: string | number | boolean | undefined;
 }
 
+/**
+ * Represents a tool invocation request
+ */
 export interface ToolCall {
+    /** Name/identifier of the tool to call */
     tool: string;
+    /** Arguments to pass to the tool */
     args: ToolCallArguments;
+    /** Optional unique identifier for tracking */
     id?: string;
 }
 
