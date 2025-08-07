@@ -45,3 +45,10 @@ The codebase has approximately 90+ TypeScript type errors that should be address
 
 ## Notes
 These errors don't appear to be causing immediate runtime issues but reduce the effectiveness of TypeScript's type safety guarantees. Fixing them would improve code maintainability and catch potential bugs at compile time.
+
+## Update (2025-08-07)
+After fixing several issues, the following remain:
+- Mock LLM service type incompatibilities with tool calls
+- Phase enum missing 'complete' value in test mocks
+- LogModule enum missing 'claude-code' value
+- These are primarily in test utilities and don't affect production code

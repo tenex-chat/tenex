@@ -12,7 +12,6 @@ import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import type NDK from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 import { Command } from "commander";
 
 export const projectRunCommand = new Command("run")

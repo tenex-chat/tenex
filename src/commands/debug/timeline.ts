@@ -5,7 +5,6 @@ import type { CommandModule } from "yargs";
 import { ConversationManager } from "@/conversations/ConversationManager";
 import type { LLMCallLogEntry } from "@/llm/callLogger";
 import type { ToolCallLogEntry } from "@/tools/toolLogger";
-import { getProjectContext } from "@/services/ProjectContext";
 import { selectConversation } from "./conversationSelector";
 import { formatDuration } from "@/utils/formatting";
 
@@ -121,7 +120,7 @@ export const timeline: CommandModule<{}, { conversationId?: string }> = {
                             },
                             duration: entry.durationMs
                         });
-                    } catch (e) {
+                    } catch {
                         // Skip invalid lines
                     }
                 }
@@ -156,7 +155,7 @@ export const timeline: CommandModule<{}, { conversationId?: string }> = {
                             },
                             duration: entry.performance.durationMs
                         });
-                    } catch (e) {
+                    } catch {
                         // Skip invalid lines
                     }
                 }
@@ -301,7 +300,7 @@ export const timeline: CommandModule<{}, { conversationId?: string }> = {
 };
 
 // Helper function to find log files
-async function findLogFiles(logDir: string, conversationId: string): Promise<string[]> {
+async function findLogFiles(logDir: string, _conversationId: string): Promise<string[]> {
     try {
         const files = await fs.readdir(logDir);
         return files

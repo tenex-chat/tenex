@@ -34,8 +34,8 @@ export class RoutingBackend implements ExecutionBackend {
         _publisher: NostrPublisher
     ): Promise<void> {
         const tracingContext = context.tracingContext || createTracingContext(context.conversationId);
-        const tracingLogger = createTracingLogger(tracingContext, "routing");
-        const executionLogger = createExecutionLogger(tracingContext, "routing");
+        const tracingLogger = createTracingLogger(tracingContext, "agent");
+        const executionLogger = createExecutionLogger(tracingContext, "agent");
 
         try {
             // Log routing analysis start
@@ -95,9 +95,9 @@ export class RoutingBackend implements ExecutionBackend {
                     // Log the end of conversation
                     executionLogger.logEvent({
                         type: "execution_flow_complete" as const,
-                        agent: context.agent.name,
-                        reason: routingDecision.reason,
-                        phase: context.phase
+                        conversationId: context.conversationId,
+                        narrative: routingDecision.reason,
+                        success: true
                     });
                     // Don't execute any more agents
                     break;
@@ -192,7 +192,7 @@ No other text, only valid JSON.`)
         // Extract and log reasoning if present in the response
         if (executionLogger && response.content) {
             const thinkingMatch = response.content.match(/<thinking>([\s\S]*?)<\/thinking>/);
-            if (thinkingMatch) {
+            if (thinkingMatch && thinkingMatch[1]) {
                 const thinking = thinkingMatch[1].trim();
                 executionLogger.agentThinking(
                     context.agent.name,

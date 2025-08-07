@@ -1,7 +1,7 @@
-import type { MockLLMScenario } from "../types";
+import type { MockLLMScenario, MockLLMResponse } from "../types";
 import type { ToolCall } from "@/llm/types";
 
-export const concurrencyWorkflowScenarios: MockLLMScenario[] = [
+const concurrencyResponses: MockLLMResponse[] = [
     // Routing decisions for orchestrator
     {
         trigger: {
@@ -512,5 +512,13 @@ export const concurrencyWorkflowScenarios: MockLLMScenario[] = [
             ],
         },
         priority: 5,
+    },
+];
+
+export const concurrencyWorkflowScenarios: MockLLMScenario[] = [
+    {
+        name: "concurrency-workflow",
+        description: "Mock responses for concurrent conversation workflow testing",
+        responses: concurrencyResponses,
     },
 ];

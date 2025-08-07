@@ -1,7 +1,6 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
 import type { ConversationManager } from "@/conversations/ConversationManager";
-import type { Conversation } from "@/conversations/types";
 import { formatDuration } from "@/utils/formatting";
 
 interface ConversationChoice {
@@ -82,7 +81,7 @@ export async function selectConversation(conversationManager: ConversationManage
         }
         
         return conversationId;
-    } catch (error) {
+    } catch {
         // Handle Ctrl+C
         console.log(chalk.red("\nCancelled."));
         return null;

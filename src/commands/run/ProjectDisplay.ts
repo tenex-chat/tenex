@@ -1,5 +1,4 @@
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 const logInfo = logger.info.bind(logger);
 import type { Agent } from "@/agents/types";
 import { getProjectContext } from "@/services";

@@ -1,6 +1,11 @@
 import { NDKEvent, NDKTag } from "@nostr-dev-kit/ndk";
-import type { Project } from "@/services/ConfigService";
 import type { Phase } from "@/conversations/phases";
+
+// Project interface for tagging
+interface Project {
+    pubkey: string;
+    name?: string;
+}
 
 /**
  * Centralized Nostr event tagging utilities
@@ -61,7 +66,7 @@ export function cleanEventTags(
     event: NDKEvent, 
     tagsToClean: string[] = ["p", "e", "a"]
 ): void {
-    event.tags = event.tags.filter(tag => !tagsToClean.includes(tag[0]));
+    event.tags = event.tags.filter(tag => tag[0] && !tagsToClean.includes(tag[0]));
 }
 
 /**

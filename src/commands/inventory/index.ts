@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { generateInventory, updateInventory } from "@/utils/inventory";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
