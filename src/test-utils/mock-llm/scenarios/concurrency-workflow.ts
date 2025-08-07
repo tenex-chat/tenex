@@ -100,7 +100,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "plan",
-            messageContent: /User A/,
+            messageContains: /User A/,
         },
         response: {
             content: "## Authentication System Plan for User A\n\n1. Create user model\n2. Implement JWT tokens\n3. Add login endpoints",
@@ -123,7 +123,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "plan",
-            messageContent: /User B/,
+            messageContains: /User B/,
         },
         response: {
             content: "## Payment Processing Plan for User B\n\n1. Integrate payment gateway\n2. Create payment models\n3. Add webhook handlers",
@@ -146,7 +146,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /User A/,
+            messageContains: /User A/,
         },
         response: {
             content: "Handing off to Executor agent to implement authentication for User A.",
@@ -169,7 +169,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /User B/,
+            messageContains: /User B/,
         },
         response: {
             content: "Handing off to Executor agent to implement payment processing for User B.",
@@ -192,7 +192,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "executor",
             phase: "implementation",
-            messageContent: /User A/,
+            messageContains: /User A/,
         },
         response: {
             content: "Implementing authentication system for User A:\n\n1. Creating user model...\n2. Setting up JWT...\n3. Adding endpoints...\n\nAuthentication system implemented successfully!",
@@ -215,7 +215,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "executor",
             phase: "implementation",
-            messageContent: /User B/,
+            messageContains: /User B/,
         },
         response: {
             content: "Implementing payment processing for User B:\n\n1. Integrating payment gateway...\n2. Creating payment models...\n3. Setting up webhooks...\n\nPayment processing implemented successfully!",
@@ -238,7 +238,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /completed for User A/,
+            messageContains: /completed for User A/,
         },
         response: {
             content: "Authentication system has been implemented for User A. Moving to verification.",
@@ -261,7 +261,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /completed for User B/,
+            messageContains: /completed for User B/,
         },
         response: {
             content: "Payment processing has been implemented for User B. Moving to verification.",
@@ -284,7 +284,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "verification",
-            messageContent: /User A/,
+            messageContains: /User A/,
         },
         response: {
             content: "✅ Authentication system for User A has been successfully implemented and verified!",
@@ -306,7 +306,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "verification",
-            messageContent: /User B/,
+            messageContains: /User B/,
         },
         response: {
             content: "✅ Payment processing for User B has been successfully implemented and verified!",
@@ -351,7 +351,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "plan",
-            messageContent: /User C/,
+            messageContains: /User C/,
         },
         response: {
             content: "## Payment Processing Plan for User C\n\n1. Integrate payment gateway\n2. Create payment models\n3. Add webhook handlers",
@@ -374,7 +374,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /User C/,
+            messageContains: /User C/,
         },
         response: {
             content: "Handing off to Executor agent to implement payment processing for User C.",
@@ -397,7 +397,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "executor",
             phase: "implementation",
-            messageContent: /User C/,
+            messageContains: /User C/,
         },
         response: {
             content: "Implementing payment processing for User C:\n\n1. Integrating payment gateway...\n2. Creating payment models...\n3. Setting up webhooks...\n\nPayment processing implemented successfully!",
@@ -420,7 +420,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "implementation",
-            messageContent: /completed for User C/,
+            messageContains: /completed for User C/,
         },
         response: {
             content: "Payment processing has been implemented for User C. Moving to verification.",
@@ -443,7 +443,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         trigger: {
             agentName: "orchestrator",
             phase: "verification",
-            messageContent: /User C/,
+            messageContains: /User C/,
         },
         response: {
             content: "✅ Payment processing for User C has been successfully implemented and verified!",

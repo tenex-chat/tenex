@@ -18,6 +18,7 @@ import type { Conversation, ConversationMetadata } from "./types";
 import { getNDK } from "@/nostr";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { Agent } from "@/agents/types";
+import { Message } from "multi-llm-ts";
 
 export class ConversationManager {
     private conversations: Map<string, Conversation> = new Map();

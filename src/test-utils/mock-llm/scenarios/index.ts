@@ -15,7 +15,7 @@ import { performanceTestingScenario } from "./performance-testing";
 import { concurrencyWorkflowScenarios } from "./concurrency-workflow";
 import { inventoryGenerationScenario } from "./inventory-generation";
 import { networkResilienceScenario } from "./network-resilience";
-import type { MockLLMScenario, MockScenario } from "../types";
+import type { MockLLMScenario } from "../types";
 
 /**
  * All available mock scenarios for testing
@@ -31,16 +31,12 @@ export const allScenarios: MockLLMScenario[] = [
 ];
 
 /**
- * Concurrency testing scenario
+ * Concurrency testing scenarios
  */
-export const concurrencyScenario: MockLLMScenario = {
-    name: "concurrency-workflow",
-    description: "Test multiple simultaneous conversations",
-    responses: concurrencyWorkflowScenarios
-};
+export const concurrencyScenarios = concurrencyWorkflowScenarios;
 
-// Add concurrency scenario to all scenarios
-allScenarios.push(concurrencyScenario);
+// Add concurrency scenarios to all scenarios
+allScenarios.push(...concurrencyWorkflowScenarios);
 
 /**
  * Get a specific scenario by name

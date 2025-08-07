@@ -8,9 +8,8 @@ import {
     createAgentMessageEvent,
 } from "@/test-utils/mocks/events";
 import { ensureDirectory, removeDirectory, fileExists, readFile } from "@/lib/fs";
+import { createTempDir, cleanupTempDir } from "@/test-utils";
 import path from "node:path";
-import fs from "node:fs/promises";
-import os from "node:os";
 
 describe("ConversationManager Integration Tests", () => {
     let manager: ConversationManager;
@@ -19,7 +18,7 @@ describe("ConversationManager Integration Tests", () => {
 
     beforeEach(async () => {
         // Create temporary test directory
-        testDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-test-"));
+        testDir = await createTempDir("tenex-conversation-test-");
         conversationsDir = path.join(testDir, ".tenex", "conversations");
 
         // Initialize manager with real file system
@@ -32,11 +31,7 @@ describe("ConversationManager Integration Tests", () => {
         await manager.cleanup();
 
         // Remove test directory
-        try {
-            await fs.rm(testDir, { recursive: true, force: true });
-        } catch (_error) {
-            // Ignore cleanup errors
-        }
+        await cleanupTempDir(testDir);
     });
 
     describe("Persistence to File System", () => {
