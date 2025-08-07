@@ -10,6 +10,7 @@
 
 export * from "./mock-llm";
 export * from "./mock-factories";
+export * from "./mock-setup";
 
 import { mock, expect } from "bun:test";
 import * as fs from "node:fs/promises";
