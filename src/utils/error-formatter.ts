@@ -1,14 +1,43 @@
+import type { ToolError } from "@/tools/types";
+
 /**
- * Format various error types into human-readable strings
+ * Comprehensive error formatter that handles all error types in the codebase
+ * Consolidates error formatting logic from various parts of the system
  */
-export function formatToolError(error: unknown): string {
+export function formatAnyError(error: unknown): string {
+    // Handle null/undefined
+    if (error == null) {
+        return "Unknown error";
+    }
+    
+    // Handle strings
     if (typeof error === "string") {
         return error;
-    } else if (error && typeof error === "object" && "message" in error) {
-        return (error as { message: string }).message;
-    } else if (error && typeof error === "object") {
-        // Try to extract meaningful properties from the error object
+    }
+    
+    // Handle Error instances
+    if (error instanceof Error) {
+        return error.message;
+    }
+    
+    // Handle objects
+    if (typeof error === "object") {
         const errorObj = error as Record<string, unknown>;
+        
+        // Check for ToolError structure (with type guard)
+        if ("kind" in errorObj && "message" in errorObj) {
+            const kind = errorObj.kind;
+            if (kind === "validation" || kind === "execution" || kind === "system") {
+                return formatToolError(errorObj as unknown as ToolError);
+            }
+        }
+        
+        // Check for simple message property
+        if ("message" in errorObj && typeof errorObj.message === "string") {
+            return errorObj.message;
+        }
+        
+        // Try to extract meaningful properties from the error object
         const parts: string[] = [];
         
         // Common error properties
@@ -17,6 +46,8 @@ export function formatToolError(error: unknown): string {
         if ("tool" in errorObj) parts.push(`tool: ${errorObj.tool}`);
         if ("code" in errorObj) parts.push(`code: ${errorObj.code}`);
         if ("statusCode" in errorObj) parts.push(`statusCode: ${errorObj.statusCode}`);
+        if ("errno" in errorObj) parts.push(`errno: ${errorObj.errno}`);
+        if ("syscall" in errorObj) parts.push(`syscall: ${errorObj.syscall}`);
         
         // If we found specific properties, use them
         if (parts.length > 0) {
@@ -25,11 +56,48 @@ export function formatToolError(error: unknown): string {
         
         // Otherwise, try to stringify the object
         try {
-            return JSON.stringify(error);
+            const str = JSON.stringify(error);
+            // Don't return huge JSON strings
+            if (str.length > 200) {
+                return "[Complex Error Object]";
+            }
+            return str;
         } catch {
             return "[Complex Error Object]";
         }
-    } else {
-        return String(error);
+    }
+    
+    // Fallback to String conversion
+    return String(error);
+}
+
+/**
+ * Format ToolError objects into human-readable strings
+ */
+export function formatToolError(error: ToolError): string {
+    switch (error.kind) {
+        case "validation":
+            // If the field is empty and message is just "Required", make it clearer
+            if (error.field === "" && error.message === "Required") {
+                return `Validation error: Missing required parameter`;
+            }
+            return error.field 
+                ? `Validation error in ${error.field}: ${error.message}`
+                : `Validation error: ${error.message}`;
+        case "execution":
+            return error.tool 
+                ? `Execution error in ${error.tool}: ${error.message}`
+                : `Execution error: ${error.message}`;
+        case "system":
+            return `System error: ${error.message}`;
+        default:
+            // This should never happen with proper ToolError types
+            return (error as any).message || "Unknown error";
     }
 }
+
+/**
+ * Legacy export for backward compatibility
+ * @deprecated Use formatAnyError instead
+ */
+export { formatAnyError as formatError };

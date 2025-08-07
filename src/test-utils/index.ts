@@ -11,7 +11,7 @@
 export * from "./mock-llm";
 export * from "./mock-factories";
 
-import { mock } from "bun:test";
+import { mock, expect } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -113,8 +113,8 @@ export function mockFileSystem(files: Map<string, string>) {
 export class ConsoleCapture {
     private logs: string[] = [];
     private errors: string[] = [];
-    private originalLog: typeof console.log;
-    private originalError: typeof console.error;
+    private originalLog: typeof console.log = console.log;
+    private originalError: typeof console.error = console.error;
     
     start(): void {
         this.originalLog = console.log;

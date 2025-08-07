@@ -99,7 +99,15 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
         metadata: {
             summary: "Mock conversation summary",
             requirements: "Mock requirements",
-            continueCallCounts: {}
+            continueCallCounts: {
+                chat: 0,
+                brainstorm: 0,
+                plan: 0,
+                execute: 0,
+                verification: 0,
+                complete: 0,
+                endConversation: 0
+            }
         },
         phaseTransitions: [],
         executionTime: {
