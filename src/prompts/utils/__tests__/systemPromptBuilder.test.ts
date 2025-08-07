@@ -31,9 +31,9 @@ describe("systemPromptBuilder with yield-back", () => {
             projectTitle: "Test Project",
         });
 
-        expect(systemPrompt).toContain("Task Completion Requirements");
+        expect(systemPrompt).toContain("When to use complete() tool");
         expect(systemPrompt).toContain("complete");
-        expect(systemPrompt).toContain("star topology");
+        expect(systemPrompt).toContain("orchestrator");
     });
 
     it("should NOT include yield-back fragment for orchestrator agents", () => {
@@ -44,8 +44,8 @@ describe("systemPromptBuilder with yield-back", () => {
         });
 
         // Orchestrator should not have the yield-back fragment section
-        expect(systemPrompt).not.toContain("Task Completion Requirements");
-        expect(systemPrompt).not.toContain("As a non-orchestrator agent");
+        expect(systemPrompt).not.toContain("When to use complete() tool");
+        expect(systemPrompt).not.toContain("When NOT to use complete()");
     });
 
     it("should include yield-back for custom non-orchestrator agents", () => {
@@ -62,8 +62,8 @@ describe("systemPromptBuilder with yield-back", () => {
             projectTitle: "Test Project",
         });
 
-        expect(systemPrompt).toContain("Task Completion Requirements");
-        expect(systemPrompt).toContain("When to Use the 'complete' Tool");
-        expect(systemPrompt).toContain("How to Use the 'complete' Tool");
+        expect(systemPrompt).toContain("When to use complete() tool");
+        expect(systemPrompt).toContain("complete");
+        expect(systemPrompt).toContain("orchestrator");
     });
 });

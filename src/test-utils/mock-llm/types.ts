@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "@/llm/types";
+import type { ToolCall } from "@/llm/types";
 
 export interface MockLLMResponse {
     /** The messages that should trigger this response */

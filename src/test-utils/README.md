@@ -57,15 +57,6 @@ The `mock-llm/` directory provides a comprehensive mock LLM service for determin
 - Support for custom response patterns
 - Deterministic behavior for E2E testing
 
-## Error Handler Utility
-
-The `error-handler.ts` file provides consistent error handling patterns:
-
-- `handleAsyncError()` - Handle async operations with logging
-- `handleSyncError()` - Handle sync operations with logging  
-- `logAndThrow()` - Log errors and re-throw
-- `retryWithBackoff()` - Retry operations with exponential backoff
-
 ## Test Assertions
 
 Custom assertion helpers are available via the `assertions` object:

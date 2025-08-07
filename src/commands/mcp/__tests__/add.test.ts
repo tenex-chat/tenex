@@ -24,6 +24,17 @@ mock.module("@/services/ConfigService", () => ({
     },
 }));
 
+// Mock logger
+const mockLogger = {
+    info: mock(),
+    error: mock(),
+    warning: mock(),
+    debug: mock(),
+};
+mock.module("@/utils/logger", () => ({
+    logger: mockLogger,
+}));
+
 // Mock process.exit
 const mockProcessExit = mock();
 const originalProcessExit = process.exit;
@@ -55,6 +66,8 @@ describe("MCP add command", () => {
         mockConsoleLog.mockReset();
         mockConsoleError.mockReset();
         mockProcessExit.mockReset();
+        mockLogger.info.mockReset();
+        mockLogger.error.mockReset();
 
         // Replace console methods
         console.log = mockConsoleLog;
@@ -125,7 +138,7 @@ describe("MCP add command", () => {
                 }
             );
 
-            expect(mockConsoleLog).toHaveBeenCalledWith(
+            expect(mockLogger.info).toHaveBeenCalledWith(
                 expect.stringContaining("Added MCP server 'test-server' to project configuration")
             );
         });

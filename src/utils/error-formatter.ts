@@ -90,10 +90,11 @@ export function formatToolError(error: ToolError): string {
                 : `Execution error: ${error.message}`;
         case "system":
             return `System error: ${error.message}`;
-        default:
+        default: {
             // This should never happen with proper ToolError types
             const unknownError = error as Record<string, unknown>;
             return (typeof unknownError.message === 'string' ? unknownError.message : null) || "Unknown error";
+        }
     }
 }
 
