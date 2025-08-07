@@ -1,4 +1,5 @@
 import type { MockLLMScenario } from "../types";
+import { PHASES } from "@/conversations/phases";
 
 /**
  * Inventory generation workflow scenario
@@ -17,7 +18,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
         {
             trigger: {
                 agentName: "Orchestrator",
-                phase: "chat",
+                phase: PHASES.CHAT,
                 userMessage: /generate.*inventory|analyze.*codebase|understand.*project/i
             },
             response: {
@@ -28,7 +29,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
                     function: "continue",
                     args: JSON.stringify({
                         summary: "User wants to generate project inventory",
-                        suggestedPhase: "execute",
+                        suggestedPhase: PHASES.EXECUTE,
                         confidence: 95,
                         reasoning: "This is a straightforward task that can be executed immediately"
                     })
@@ -41,7 +42,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
         {
             trigger: {
                 agentName: "Executor", 
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 systemPrompt: /inventory|analyze.*codebase/i
             },
             response: {
@@ -60,7 +61,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
         {
             trigger: {
                 agentName: "Executor",
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 previousToolCalls: ["generate_inventory"]
             },
             response: {
@@ -85,7 +86,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
                     args: JSON.stringify({
                         phaseComplete: true,
                         readyForNext: true,
-                        suggestedNextPhase: "verification",
+                        suggestedNextPhase: PHASES.VERIFICATION,
                         summary: "Project inventory generated successfully"
                     })
                 }]
@@ -97,7 +98,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
         {
             trigger: {
                 agentName: "Orchestrator",
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 previousToolCalls: ["complete"]
             },
             response: {
@@ -107,7 +108,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Inventory generation completed successfully",
-                        suggestedPhase: "verification",
+                        suggestedPhase: PHASES.VERIFICATION,
                         confidence: 100,
                         reasoning: "Task completed, moving to verification"
                     })
@@ -120,7 +121,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
         {
             trigger: {
                 agentName: "Executor",
-                phase: "verification",
+                phase: PHASES.VERIFICATION,
                 systemPrompt: /inventory.*generated/i
             },
             response: {
@@ -141,7 +142,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
         {
             trigger: {
                 agentName: "Executor",
-                phase: "verification",
+                phase: PHASES.VERIFICATION,
                 previousToolCalls: ["readPath"]
             },
             response: {
@@ -172,7 +173,7 @@ The inventory is ready to use for understanding and navigating your codebase.`,
         {
             trigger: {
                 agentName: "Executor",
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 messageContains: /inventory.*regenerated/i
             },
             response: {
@@ -191,7 +192,7 @@ The regenerated inventory reflects the current state of your codebase.`,
                     args: JSON.stringify({
                         phaseComplete: true,
                         readyForNext: true,
-                        suggestedNextPhase: "verification",
+                        suggestedNextPhase: PHASES.VERIFICATION,
                         summary: "Project inventory regenerated with latest changes"
                     })
                 }]
@@ -203,7 +204,7 @@ The regenerated inventory reflects the current state of your codebase.`,
         {
             trigger: {
                 agentName: "Executor",
-                phase: "execute",
+                phase: PHASES.EXECUTE,
                 messageContains: /error.*inventory|failed.*generate/i
             },
             response: {

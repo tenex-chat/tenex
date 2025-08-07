@@ -1,3 +1,20 @@
+
+export interface ModelSelectionResult {
+    model: string;
+    supportsCaching: boolean;
+}
+
+export interface ConfigurationPrompts {
+    configName: string;
+    enableCaching?: boolean;
+    setAsDefault: boolean;
+}
+
+export interface ApiKeyResult {
+    apiKey: string;
+    isNew: boolean;
+}
+
 /**
  * Clean LLM types with single responsibility
  * No agent or orchestration concerns
@@ -82,17 +99,27 @@ export interface LLMConfig {
 }
 
 /**
+ * A complete LLM configuration with its assigned name and credentials
+ */
+export interface LLMConfigWithName extends LLMConfig {
+    name: string;
+}
+
+/**
  * LLM Provider types
  */
-export type LLMProvider =
-    | "openai"
-    | "openrouter"
-    | "anthropic"
-    | "google"
-    | "groq"
-    | "deepseek"
-    | "ollama"
-    | "mistral";
+export const LLM_PROVIDERS = [
+    "openai",
+    "openrouter",
+    "anthropic",
+    "google",
+    "groq",
+    "deepseek",
+    "ollama",
+    "mistral",
+] as const;
+
+export type LLMProvider = (typeof LLM_PROVIDERS)[number];
 
 /**
  * Event kinds used in the TENEX system

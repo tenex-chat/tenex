@@ -291,7 +291,7 @@ export class MockLLMService implements LLMService {
                     content: mockResponse.response.content,
                     toolCalls: mockResponse.response.toolCalls,
                     phase,
-                    reason: mockResponse.response.reason
+                    reason: 'Mock response matched'
                 });
             }
             

@@ -1,5 +1,6 @@
 import type { MockLLMScenario, MockLLMResponse } from "../types";
 import type { ToolCall } from "@/llm/types";
+import { PHASES } from "@/conversations/phases";
 
 const concurrencyResponses: MockLLMResponse[] = [
     // Routing decisions for orchestrator
@@ -12,7 +13,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         response: {
             content: JSON.stringify({
                 agents: ["orchestrator"],
-                phase: "chat",
+                phase: PHASES.CHAT,
                 reason: "User A wants to create an authentication system. Starting in chat phase to understand requirements."
             })
         },
@@ -27,7 +28,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         response: {
             content: JSON.stringify({
                 agents: ["orchestrator"],
-                phase: "chat",
+                phase: PHASES.CHAT,
                 reason: "User B wants payment processing. Starting in chat phase to understand requirements."
             })
         },
@@ -42,7 +43,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         response: {
             content: JSON.stringify({
                 agents: ["orchestrator"],
-                phase: "chat",
+                phase: PHASES.CHAT,
                 reason: "User C wants payment processing. Starting in chat phase to understand requirements."
             })
         },
@@ -53,7 +54,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "chat",
+            phase: PHASES.CHAT,
             userMessage: /create.*user.*authentication.*A/i,
         },
         response: {
@@ -65,7 +66,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Creating authentication system for User A",
-                        suggestedPhase: "plan",
+                        suggestedPhase: PHASES.PLAN,
                     }),
                 } as any,
             ],
@@ -77,7 +78,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "chat",
+            phase: PHASES.CHAT,
             userMessage: /implement.*payment.*processing.*B/i,
         },
         response: {
@@ -89,7 +90,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Implementing payment processing for User B",
-                        suggestedPhase: "plan",
+                        suggestedPhase: PHASES.PLAN,
                     }),
                 } as any,
             ],
@@ -101,7 +102,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "plan",
+            phase: PHASES.PLAN,
             messageContains: /User A/,
         },
         response: {
@@ -113,7 +114,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Authentication plan ready for User A",
-                        suggestedPhase: "implementation",
+                        suggestedPhase: PHASES.EXECUTE,
                     }),
                 } as any,
             ],
@@ -125,7 +126,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "plan",
+            phase: PHASES.PLAN,
             messageContains: /User B/,
         },
         response: {
@@ -137,7 +138,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Payment plan ready for User B",
-                        suggestedPhase: "implementation",
+                        suggestedPhase: PHASES.EXECUTE,
                     }),
                 } as any,
             ],
@@ -149,7 +150,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User A/,
         },
         response: {
@@ -173,7 +174,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User B/,
         },
         response: {
@@ -197,7 +198,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "executor",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User A/,
         },
         response: {
@@ -221,7 +222,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "executor",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User B/,
         },
         response: {
@@ -245,7 +246,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /completed for User A/,
         },
         response: {
@@ -257,7 +258,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify authentication for User A",
-                        suggestedPhase: "verification",
+                        suggestedPhase: PHASES.VERIFICATION,
                     }),
                 } as any,
             ],
@@ -269,7 +270,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /completed for User B/,
         },
         response: {
@@ -281,7 +282,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify payment processing for User B",
-                        suggestedPhase: "verification",
+                        suggestedPhase: PHASES.VERIFICATION,
                     }),
                 } as any,
             ],
@@ -293,7 +294,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "verification",
+            phase: PHASES.VERIFICATION,
             messageContains: /User A/,
         },
         response: {
@@ -316,7 +317,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "verification",
+            phase: PHASES.VERIFICATION,
             messageContains: /User B/,
         },
         response: {
@@ -339,7 +340,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "chat",
+            phase: PHASES.CHAT,
             userMessage: /implement.*payment.*processing.*C/i,
         },
         response: {
@@ -351,7 +352,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Implementing payment processing for User C",
-                        suggestedPhase: "plan",
+                        suggestedPhase: PHASES.PLAN,
                     }),
                 } as any,
             ],
@@ -363,7 +364,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "plan",
+            phase: PHASES.PLAN,
             messageContains: /User C/,
         },
         response: {
@@ -375,7 +376,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Payment plan ready for User C",
-                        suggestedPhase: "implementation",
+                        suggestedPhase: PHASES.EXECUTE,
                     }),
                 } as any,
             ],
@@ -387,7 +388,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User C/,
         },
         response: {
@@ -411,7 +412,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "executor",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /User C/,
         },
         response: {
@@ -435,7 +436,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "implementation",
+            phase: PHASES.EXECUTE,
             messageContains: /completed for User C/,
         },
         response: {
@@ -447,7 +448,7 @@ const concurrencyResponses: MockLLMResponse[] = [
                     function: "continue",
                     args: JSON.stringify({
                         summary: "Ready to verify payment processing for User C",
-                        suggestedPhase: "verification",
+                        suggestedPhase: PHASES.VERIFICATION,
                     }),
                 } as any,
             ],
@@ -459,7 +460,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     {
         trigger: {
             agentName: "orchestrator",
-            phase: "verification",
+            phase: PHASES.VERIFICATION,
             messageContains: /User C/,
         },
         response: {
