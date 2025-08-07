@@ -51,8 +51,7 @@ export class RoutingBackend implements ExecutionBackend {
                 routingDecision.agents,
                 routingDecision.reason,
                 {
-                    targetPhase: routingDecision.phase as Phase,
-                    confidence: 0.9
+                    targetPhase: routingDecision.phase as Phase
                 }
             );
 
@@ -170,6 +169,7 @@ export class RoutingBackend implements ExecutionBackend {
         originalReason: string
     ): Promise<void> {
         const tracingLogger = createTracingLogger(context.tracingContext || createTracingContext(context.conversationId), "agent");
+        const executionLogger = createExecutionLogger(context.tracingContext || createTracingContext(context.conversationId), "agent");
         
         // Create a feedback message that will help the orchestrator learn
         const feedbackMessage = new Message("system", `
