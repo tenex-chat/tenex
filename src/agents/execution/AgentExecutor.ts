@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { LLMService } from "@/llm/types";
 import { NostrPublisher } from "@/nostr";
@@ -152,7 +153,7 @@ export class AgentExecutor {
                 timestamp: new Date(),
                 conversationId: context.conversationId,
                 agent: context.agent.name,
-                narrative: `Agent ${context.agent.name} execution failed: ${error instanceof Error ? error.message : String(error)}`,
+                narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
                 success: false
             });
             // Stop execution time tracking even on error

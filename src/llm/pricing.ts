@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 /**
  * OpenRouter pricing service for dynamic LLM cost calculation
  */
@@ -105,7 +106,7 @@ export class OpenRouterPricingService {
             this.cacheExpiry = Date.now() + this.cacheValidityMs;
         } catch (error) {
             logger.error("Failed to refresh OpenRouter pricing cache", {
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             throw error;
         }

@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import chalk from "chalk";
 import { logInfo, logError, logDebug } from "@/utils/logger";
 
@@ -14,7 +15,7 @@ export function debugLog(message: string, ...args: unknown[]): void {
 }
 
 export function debugError(message: string, error?: unknown): void {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatAnyError(error);
     if (process.env.DEBUG || process.env.TENEX_DEBUG) {
         logError(`${message}: ${errorMessage}`, "general");
     } else {

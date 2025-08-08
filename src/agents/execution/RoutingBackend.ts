@@ -315,9 +315,9 @@ No other text, only valid JSON.`)
         } catch (error) {
             tracingLogger.error("Failed to parse routing decision", {
                 response: response.content,
-                error: error instanceof Error ? error.message : String(error)
+                error: formatAnyError(error)
             });
-            throw new Error(`Failed to parse routing decision: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(`Failed to parse routing decision: ${formatAnyError(error)}`);
         }
     }
 }

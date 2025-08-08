@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { AgentPublisher } from "@/agents/AgentPublisher";
@@ -507,7 +508,7 @@ export class AgentRegistry {
         } catch (error) {
             logger.error("Failed to update agent LLM config", {
                 agentSlug: agent.slug,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
             return false;
         }

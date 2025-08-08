@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { loadLLMRouter } from "@/llm";
@@ -111,7 +112,7 @@ export async function generateInventory(
             } catch (error) {
                 logger.warn("Failed to generate module guide", {
                     module: definedModule.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: formatAnyError(error),
                 });
             }
         }

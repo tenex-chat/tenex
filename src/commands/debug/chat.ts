@@ -167,7 +167,7 @@ export async function runDebugChat(
             } catch (error) {
                 console.error(
                     chalk.red("\nError:"),
-                    error instanceof Error ? error.message : String(error)
+                    formatAnyError(error)
                 );
             }
             return;

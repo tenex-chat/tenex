@@ -10,18 +10,9 @@ import { getProjectContext } from "@/services";
 import type { Complete, EndConversation } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { NDKEvent, type NDKTag } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { TypingIndicatorManager } from "./TypingIndicatorManager";
 
-// Tool execution status interface (from ToolExecutionPublisher)
-interface ToolExecutionStatus {
-    tool: string;
-    status: "starting" | "running" | "completed" | "failed";
-    args?: Record<string, unknown>;
-    result?: unknown;
-    error?: string;
-    duration?: number;
-}
 
 // Context passed to publisher on creation
 export interface NostrPublisherContext {
@@ -36,7 +27,7 @@ export interface ResponseOptions {
     content: string;
     llmMetadata?: LLMMetadata;
     completeMetadata?: Complete | EndConversation;
-    additionalTags?: NDKTag[];
+    additionalTags?: string[][];
     destinationPubkeys?: string[];
 }
 
@@ -275,71 +266,6 @@ export class NostrPublisher {
             return event;
         } catch (error) {
             logger.error(`Failed to publish typing indicator ${state}`, {
-                agent: this.context.agent.name,
-                error: formatAnyError(error),
-            });
-            throw error;
-        }
-    }
-
-    async publishToolStatus(status: ToolExecutionStatus): Promise<NDKEvent> {
-        try {
-            const event = this.context.triggeringEvent.reply();
-
-            // Add base tags
-            this.addBaseTags(event);
-
-            // Add tool-specific tags
-            event.tag(["tool", status.tool]);
-            event.tag(["status", status.status]);
-
-            // Build human-readable content (keeping existing format)
-            const contentParts: string[] = [];
-
-            switch (status.status) {
-                case "starting":
-                    contentParts.push(`🔧 Preparing to run ${status.tool}...`);
-                    if (status.args) {
-                        contentParts.push(`Parameters: ${JSON.stringify(status.args, null, 2)}`);
-                    }
-                    break;
-
-                case "running":
-                    contentParts.push(`🏃 Running ${status.tool}...`);
-                    break;
-
-                case "completed":
-                    contentParts.push(`✅ ${status.tool} completed`);
-                    if (status.duration) {
-                        contentParts.push(`Duration: ${status.duration}ms`);
-                    }
-                    break;
-
-                case "failed":
-                    contentParts.push(`❌ ${status.tool} failed`);
-                    if (status.error) {
-                        contentParts.push(`Error: ${status.error}`);
-                    }
-                    break;
-            }
-
-            event.content = contentParts.join("\n");
-
-            await event.sign(this.context.agent.signer);
-            await event.publish();
-
-            logger.debug("Published tool execution status", {
-                tool: status.tool,
-                status: status.status,
-                eventId: event.id,
-                agent: this.context.agent.name,
-            });
-
-            return event;
-        } catch (error) {
-            logger.error("Failed to publish tool execution status", {
-                tool: status.tool,
-                status: status.status,
                 agent: this.context.agent.name,
                 error: formatAnyError(error),
             });

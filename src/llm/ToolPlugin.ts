@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import { getToolLogger } from "@/tools/toolLogger";
 import type {
     Tool,
@@ -209,7 +210,7 @@ export class ToolPlugin extends Plugin {
                 error: {
                     kind: "execution",
                     tool: this.tool.name,
-                    message: error instanceof Error ? error.message : String(error),
+                    message: formatAnyError(error),
                 },
                 duration,
             };
@@ -231,12 +232,12 @@ export class ToolPlugin extends Plugin {
 
             logger.error(`Tool execution failed: ${this.tool.name}`, {
                 tool: this.tool.name,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
                 duration,
                 parameters,
             });
 
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage = formatAnyError(error);
             return {
                 success: false,
                 output: "",

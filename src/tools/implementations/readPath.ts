@@ -4,6 +4,7 @@ import type { Tool } from "../types";
 import { createZodSchema } from "../types";
 import { resolveAndValidatePath } from "../utils";
 import { z } from "zod";
+import { formatAnyError } from "@/utils/error-formatter";
 
 const readPathSchema = z.object({
     path: z.string().describe("The file or directory path to read (absolute or relative to project root)"),
@@ -107,7 +108,7 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
                 error: {
                     kind: "execution" as const,
                     tool: "read_path",
-                    message: `Failed to read ${path}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                    message: `Failed to read ${path}: ${formatAnyError(error)}`,
                     cause: error,
                 },
             };

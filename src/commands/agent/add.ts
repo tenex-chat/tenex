@@ -2,7 +2,8 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
-import { determineConfigLocation, getConfigLocationDescription } from "@/utils/configLocation";
+import { resolveConfigScope, formatConfigScope } from "@/utils/cli-config-scope";
+import { handleCliError } from "@/utils/cli-error";
 import { confirm, input } from "@inquirer/prompts";
 import { Command } from "commander";
 
@@ -19,7 +20,13 @@ export const agentAddCommand = new Command("add")
         try {
             // Determine where to save
             const projectPath = process.cwd();
-            const useProject = await determineConfigLocation(options, projectPath);
+            const scope = await resolveConfigScope(options, projectPath);
+            
+            if (scope.error) {
+                throw new Error(scope.error);
+            }
+            
+            const useProject = scope.isProject;
 
             // Interactive wizard
             const name = await input({
@@ -104,9 +111,9 @@ export const agentAddCommand = new Command("add")
             // Use AgentRegistry to ensure agent (this handles all file operations and Nostr publishing)
             const agent = await registry.ensureAgent(name, agentConfig);
 
-            const location = getConfigLocationDescription(useProject);
+            const location = formatConfigScope(scope);
             logger.info(
-                `✅ Local agent "${name}" created successfully in ${location} configuration`
+                `✅ Local agent "${name}" created successfully in ${location}`
             );
             logger.info(`   Name: ${name}`);
             logger.info(`   Pubkey: ${agent.pubkey}`);

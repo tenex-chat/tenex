@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import { fragmentRegistry } from "./FragmentRegistry";
 import type { FragmentConfig, PromptFragment } from "./types";
 
@@ -55,7 +56,7 @@ export class PromptBuilder {
                         content: fragment.template(config.args),
                     };
                 } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    const errorMessage = formatAnyError(error);
                     const receivedArgs = JSON.stringify(config.args, null, 2);
                     throw new Error(
                         `Error executing fragment "${config.fragmentId}":\n` +

@@ -2,6 +2,7 @@ import { startExecutionTime, stopExecutionTime } from "@/conversations/execution
 import type { Conversation } from "@/conversations/types";
 import type { TaskPublisher } from "@/nostr/TaskPublisher";
 import { logger } from "@/utils/logger";
+import { formatAnyError } from "@/utils/error-formatter";
 import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { NDKTask, NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { ClaudeCodeExecutor } from "./executor";
@@ -173,7 +174,7 @@ export class ClaudeTaskOrchestrator {
                 stopExecutionTime(options.conversation);
             }
 
-            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            const errorMessage = formatAnyError(error);
 
             // Check if this was an abort
             const isAborted =

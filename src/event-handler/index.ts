@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import { type NDKEvent, type NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -153,7 +154,7 @@ export class EventHandler {
         } catch (error) {
             logger.error("Failed to handle LLM config change", {
                 eventId: event.id,
-                error: error instanceof Error ? error.message : String(error),
+                error: formatAnyError(error),
             });
         }
     }

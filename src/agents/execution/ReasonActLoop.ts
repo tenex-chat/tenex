@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import type { LLMService, Tool } from "@/llm/types";
 import type { StreamEvent } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
@@ -306,7 +307,7 @@ export class ReasonActLoop implements ExecutionBackend {
         context: ExecutionContext
     ): AsyncGenerator<StreamEvent> {
         tracingLogger.error("Streaming error", {
-            error: error instanceof Error ? error.message : String(error),
+            error: formatAnyError(error),
             agent: context.agent.name,
         });
 
@@ -325,7 +326,7 @@ export class ReasonActLoop implements ExecutionBackend {
 
         yield {
             type: "error",
-            error: error instanceof Error ? error.message : String(error),
+            error: formatAnyError(error),
         };
     }
 

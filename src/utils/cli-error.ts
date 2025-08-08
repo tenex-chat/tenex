@@ -1,3 +1,4 @@
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "./logger";
 
 /**
@@ -11,7 +12,7 @@ export function handleCliError(
     context?: string,
     exitCode = 1
 ): never {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatAnyError(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
 
     // Log error with context

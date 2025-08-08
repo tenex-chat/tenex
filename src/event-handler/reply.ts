@@ -173,7 +173,7 @@ async function handleReplyLogic(
     try {
         await agentExecutor.execute(executionContext);
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = formatAnyError(error);
 
         // Check if it's an insufficient credits error
         const isCreditsError =
