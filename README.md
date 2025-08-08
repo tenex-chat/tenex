@@ -84,17 +84,9 @@ bun run tenex
 
 ### Quick Start
 
-1. **Initialize a new project**:
-```bash
-tenex project init my-app
-```
+1. **Create a new project** using the [TENEX Web Client](https://github.com/tenex-chat/web-client) or iOS client
 
-2. **Start a conversation**:
-```bash
-tenex project run
-```
-
-3. **Example interaction**:
+2. **Example interaction**:
 ```
 You: Create a REST API for a todo application with authentication
 
@@ -181,9 +173,7 @@ Built on Nostr from the ground up, not as an afterthought. This enables censorsh
 
 ## 📈 Roadmap
 
-- [ ] Visual Studio Code extension
-- [ ] Web-based interface
-- [ ] Agent marketplace for community contributions
+- [ ] Web-based interface improvements
 - [ ] Multi-model ensemble execution
 - [ ] Real-time collaborative editing
 - [ ] Advanced debugging and profiling tools
@@ -191,13 +181,6 @@ Built on Nostr from the ground up, not as an afterthought. This enables censorsh
 ## 📄 License
 
 MIT - see [LICENSE](LICENSE) file for details
-
-## 🙏 Acknowledgments
-
-Built with ❤️ on top of:
-- [Nostr Protocol](https://nostr.com) - Decentralized communication
-- [NDK](https://github.com/nostr-dev-kit/ndk) - Nostr Development Kit
-- The amazing LLM providers making this possible
 
 ## 📞 Contact & Support
 
@@ -207,6 +190,6 @@ Built with ❤️ on top of:
 
 ---
 
-**Ready to experience the future of software development?** Start with `tenex project init` and let your AI agents handle the rest.
+**Ready to experience the future of software development?** Create your first project using the [TENEX Web Client](https://github.com/tenex-chat/web-client) and let your AI agents handle the rest.
 
 > "The best code is the code you don't have to write. The second best is code written by agents who learn from every line they produce." - TENEX Philosophy
