@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import { handleCliError } from "@/utils/cli-error";
 import { Command } from "commander";
+import chalk from "chalk";
 
 export const inventoryCommand = new Command("inventory")
     .description("Manage project inventory")
@@ -25,9 +26,9 @@ inventoryCommand
 
             await generateInventory(projectPath);
 
-            console.log("\n✅ Inventory generation completed successfully!");
-            console.log("📋 Main inventory saved to context/INVENTORY.md");
-            console.log("📚 Complex module guides (if any) saved to context/ directory");
+            logger.info(chalk.green("\n✅ Inventory generation completed successfully!"));
+            logger.info(chalk.blue("📋 Main inventory saved to context/INVENTORY.md"));
+            logger.info(chalk.blue("📚 Complex module guides (if any) saved to context/ directory"));
         } catch (error) {
             handleCliError(error, "Failed to generate inventory");
         }

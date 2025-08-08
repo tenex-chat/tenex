@@ -349,7 +349,7 @@ export class MockLLMService implements LLMService {
         this.responses.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
     
-    getRequestHistory(): Array<{ messages: Message[]; model: string; response: MockLLMResponse['response'] }> {
+    getRequestHistory(): Array<{ messages: Message[]; model?: string; response: MockLLMResponse['response'] }> {
         return this.requestHistory;
     }
     

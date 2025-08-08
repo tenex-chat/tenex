@@ -13,10 +13,7 @@ export function setupConversationalLogging(): void {
         console.log('\n🎭 E2E Test Session with Conversational Logging');
         console.log(`📅 ${new Date().toISOString()}`);
         console.log(`${'='.repeat(60)}`);
-        
-        return true;
     }
-    return false;
 }
 
 /**

@@ -61,10 +61,12 @@ src/
 
 ## Documentation
 
-See the `docs/` directory for detailed documentation:
+See the `documentation/` directory for detailed documentation:
 
-- [Agent Execution Architecture](docs/AGENT-EXECUTION-ARCHITECTURE.md)
-- [Routing System Design](docs/routing-system-redesign.md)
+- [Agent Execution Architecture](documentation/agent-execution-architecture.md)
+- [Event-Driven Architecture](documentation/event-driven-architecture.md)
+- [Prompt System Architecture](documentation/prompt-system-architecture.md)
+- [Tool System Architecture](documentation/tool-system-architecture.md)
 
 ## License
 
