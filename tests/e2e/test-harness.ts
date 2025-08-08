@@ -780,7 +780,7 @@ function extractRoutingDecision(orchestratorResult: AgentExecutionResult): Routi
         if (parsed.agents && Array.isArray(parsed.agents)) {
             return parsed;
         }
-    } catch (e) {
+    } catch (_e) {
         // Not a routing decision
     }
     return null;

@@ -1,5 +1,3 @@
-import { logger } from "@/utils/logger";
-
 /**
  * Conversational logger that formats test output as a natural dialog
  * showing phase transitions and agent interactions
@@ -89,7 +87,7 @@ export class ConversationalLogger {
                         console.log(this.formatLogLine(agentName, '🎯', timeStamp, message));
                         return;
                     }
-                } catch (e) {
+                } catch (_e) {
                     // Not a JSON routing response, handle normally
                 }
             }
@@ -130,7 +128,7 @@ export class ConversationalLogger {
                         const message = `${formattedAgent}: "Continuing with next phase - ${args.summary || args.reason || 'proceeding'}"`;
                         console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                     }
-                } catch (e) {
+                } catch (_e) {
                     const message = `${formattedAgent}: "Continuing workflow..."`;
                     console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                 }
@@ -143,7 +141,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Task completed - ${args.finalResponse || args.summary || 'done'}"`;
                     console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
-                } catch (e) {
+                } catch (_e) {
                     const message = `${formattedAgent}: "Task completed successfully"`;
                     console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
                 }
@@ -156,7 +154,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Executing: ${args.command}"`;
                     console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
-                } catch (e) {
+                } catch (_e) {
                     const message = `${formattedAgent}: "Executing shell command..."`;
                     console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
                 }
@@ -169,7 +167,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Analyzing project structure in ${args.paths?.join(', ') || 'current directory'}"`;
                     console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
-                } catch (e) {
+                } catch (_e) {
                     const message = `${formattedAgent}: "Generating project inventory..."`;
                     console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
                 }
@@ -183,7 +181,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Writing to ${args.path || args.filename || 'file'}"`;
                     console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
-                } catch (e) {
+                } catch (_e) {
                     const message = `${formattedAgent}: "Writing file..."`;
                     console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
                 }

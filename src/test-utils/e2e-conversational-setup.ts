@@ -5,7 +5,7 @@ import { conversationalLogger } from "./conversational-logger";
  * This can be imported and used to automatically enable conversational output
  * without modifying individual test files.
  */
-export function setupConversationalLogging() {
+export function setupConversationalLogging(): void {
     if (process.env.DEBUG === 'true') {
         conversationalLogger.reset();
         

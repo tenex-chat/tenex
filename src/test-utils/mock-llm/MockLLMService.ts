@@ -3,11 +3,9 @@ import type {
     Message,
     CompletionRequest,
     CompletionResponse,
-    StreamEvent,
-    ToolCall
+    StreamEvent
 } from "@/llm/types";
 import type { MockLLMConfig, MockLLMResponse } from "./types";
-import { logger } from "@/utils/logger";
 import { conversationalLogger } from "../conversational-logger";
 
 export class MockLLMService implements LLMService {
@@ -351,7 +349,7 @@ export class MockLLMService implements LLMService {
         this.responses.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
     
-    getRequestHistory() {
+    getRequestHistory(): Array<{ messages: Message[]; model: string; response: MockLLMResponse['response'] }> {
         return this.requestHistory;
     }
     
@@ -380,7 +378,7 @@ export class MockLLMService implements LLMService {
         }
     }
     
-    private getOrCreateContext(conversationId: string) {
+    private getOrCreateContext(conversationId: string): { iteration: number; agentIterations: Map<string, number>; lastContinueCaller?: string; lastAgentExecuted?: string } {
         if (!this.conversationContext.has(conversationId)) {
             this.conversationContext.set(conversationId, {
                 iteration: 0,
