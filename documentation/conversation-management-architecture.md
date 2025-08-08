@@ -2,472 +2,1026 @@
 
 ## Executive Summary
 
-The Conversation Management system is the central nervous system of TENEX, orchestrating all multi-agent interactions and maintaining state across distributed, asynchronous conversations. This sophisticated system tracks the complete lifecycle of conversations through phases, manages individual agent states to ensure proper context awareness, handles orchestrator routing decisions, and provides persistent storage with recovery capabilities. The architecture uniquely solves the challenge of maintaining conversational coherence across multiple autonomous agents while ensuring each agent sees only the context relevant to their participation.
+The Conversation Management system is the foundational infrastructure that orchestrates multi-agent interactions, maintains state consistency, and enables coherent task execution across TENEX. Built on an event-driven Nostr protocol foundation, it provides sophisticated message routing, context management, and state persistence while maintaining agent autonomy. The architecture uniquely combines event sourcing principles with phase-based workflow orchestration to deliver a seamless conversational experience backed by deterministic execution guarantees.
+
+## Table of Contents
+
+1. [Core Architecture](#core-architecture)
+2. [State Management](#state-management)
+3. [Message Building and Context](#message-building-and-context)
+4. [Event-Driven Integration](#event-driven-integration)
+5. [Persistence Layer](#persistence-layer)
+6. [Phase Management Integration](#phase-management-integration)
+7. [Agent State Tracking](#agent-state-tracking)
+8. [Orchestrator Turn Management](#orchestrator-turn-management)
+9. [Recovery and Resilience](#recovery-and-resilience)
+10. [Performance Optimizations](#performance-optimizations)
+11. [Questions and Uncertainties](#questions-and-uncertainties)
 
 ## Core Architecture
 
 ### System Overview
 
-The ConversationManager implements a layered state management architecture:
+The ConversationManager serves as the central hub for all conversation-related operations:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   Nostr Event Stream                     │
-│                 (User & Agent Messages)                  │
+│                   Nostr Events                           │
+│              (User messages, Agent responses)            │
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────┐
-│               ConversationManager                        │
-│         (Central State & Context Manager)                │
+│             ConversationManager                          │
+│         (Central State Orchestrator)                     │
 │                                                          │
-│  • Conversation Creation & Lifecycle                     │
-│  • Phase Management & Transitions                        │
-│  • Agent State Tracking (per-agent views)                │
-│  • Message History Management                            │
-│  • Orchestrator Routing Context                          │
-│  • Persistence Coordination                              │
-└──────┬──────────────┬──────────────┬────────────────────┘
-       │              │              │
-       ▼              ▼              ▼
-┌──────────┐  ┌──────────────┐  ┌──────────────┐
-│  Agent    │  │ Orchestrator │  │ Persistence  │
-│ Executor  │  │   Routing    │  │   Adapter    │
-└───────────┘  └──────────────┘  └──────────────┘
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  State Management                                │   │
+│  │  • Active conversations map                      │   │
+│  │  • Agent states per conversation                 │   │
+│  │  • Phase transitions                            │   │
+│  │  • Orchestrator turns                           │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  Message Building                                │   │
+│  │  • Historical context assembly                   │   │
+│  │  • Agent-specific views                         │   │
+│  │  • Incremental processing                       │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  Persistence                                     │   │
+│  │  • File-based state storage                     │   │
+│  │  • Atomic writes                                │   │
+│  │  • Recovery mechanisms                          │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+         ┌────────────┼────────────┐
+         ▼            ▼            ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ Agent 1 │ │ Agent 2 │ │ Agent 3 │
+    └─────────┘ └─────────┘ └─────────┘
 ```
 
-## Key Components
+### Core Components
 
-### 1. ConversationManager (Core Manager)
-**Location**: `src/conversations/ConversationManager.ts`
+#### ConversationManager Class (src/conversations/ConversationManager.ts)
 
-The singleton manager that orchestrates all conversation state:
+The central class that manages all conversation lifecycle operations:
 
-#### Core Responsibilities:
+**Key Responsibilities:**
+- **State Management**: Maintains in-memory state of all active conversations
+- **Message Building**: Constructs agent-specific message contexts
+- **Phase Orchestration**: Manages phase transitions and enforcement
+- **Turn Tracking**: Monitors orchestrator routing decisions
+- **Persistence**: Handles saving and loading conversation state
+- **Event Processing**: Integrates with Nostr event system
 
-- **Conversation Lifecycle**: Creates, loads, archives, and completes conversations
-- **Phase Management**: Tracks and transitions between conversation phases (chat, plan, execute, etc.)
-- **Agent State Tracking**: Maintains per-agent view of conversation history
-- **Message Building**: Constructs appropriate context for each agent based on their participation
-- **Orchestrator Support**: Provides structured routing context for orchestrator decisions
-- **Persistence Management**: Coordinates with adapters for durable storage
+**Core Data Structures:**
+```typescript
+class ConversationManager {
+    private conversations: Map<string, Conversation>;
+    private conversationContexts: Map<string, TracingContext>;
+    private projectContext: ProjectContext;
+    private stateDir: string;
+}
+```
 
-#### Critical Design Decisions:
+### Implementation Architecture
 
-**1. Per-Agent State Tracking**
+The conversation management system is built on several key architectural patterns:
 
-Each agent maintains its own view of the conversation through an `AgentState`:
+#### 1. **Event Sourcing Pattern**
+All state changes originate from Nostr events, providing:
+- Immutable audit trail
+- Natural event replay capability
+- Distributed state synchronization
+- Crash recovery through event reconstruction
+
+#### 2. **Repository Pattern for Persistence**
+File-based storage with atomic operations:
+- Each conversation stored as separate JSON file
+- Atomic writes prevent corruption
+- Lazy loading for memory efficiency
+- Recovery mechanisms for corrupted state
+
+#### 3. **Builder Pattern for Messages**
+Sophisticated message construction:
+- Agent-specific context windows
+- Incremental processing markers
+- Role-based message transformation
+- Handoff context preservation
+
+#### 4. **State Machine for Phases**
+Deterministic phase transitions:
+- Enforced quality gates
+- Valid transition paths
+- Automatic phase advancement
+- Rollback prevention
+
+## State Management
+
+### Conversation State Structure
+
+The complete state of a conversation is captured in the Conversation interface:
+
+```typescript
+interface Conversation {
+    // Core Identity
+    id: string;                              // Unique conversation identifier
+    title: string;                           // Human-readable title
+    createdAt: number;                       // Creation timestamp
+    updatedAt: number;                       // Last update timestamp
+    
+    // Workflow State
+    phase: Phase;                            // Current phase (chat/plan/execute/etc)
+    phaseStartedAt?: number;                 // When current phase started
+    phaseTransitions: PhaseTransition[];    // Complete transition history
+    
+    // Message History
+    history: NDKEvent[];                     // All conversation events
+    agentStates: Map<string, AgentState>;   // Per-agent processing state
+    
+    // Orchestration
+    orchestratorTurns: OrchestratorTurn[];  // Routing decision history
+    
+    // Execution Tracking
+    executionTime: {
+        startTime?: number;                  // Execution start
+        endTime?: number;                    // Execution end
+        totalExecutionTime?: number;         // Total duration
+    };
+    
+    // Metadata
+    metadata: ConversationMetadata;         // Extensible metadata
+    
+    // Session Management
+    readFiles?: string[];                    // Files accessed (cleared on reflection)
+}
+```
+
+### State Lifecycle
+
+#### 1. Creation
+```typescript
+async handleNewConversation(initialEvent: NDKEvent): Promise<Conversation> {
+    const id = extractConversationId(initialEvent);
+    const conversation: Conversation = {
+        id,
+        title: extractTitle(initialEvent) || generateTitle(),
+        phase: PHASES.CHAT,
+        history: [initialEvent],
+        agentStates: new Map(),
+        phaseTransitions: [],
+        orchestratorTurns: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        metadata: {}
+    };
+    
+    this.conversations.set(id, conversation);
+    await this.saveConversation(conversation);
+    return conversation;
+}
+```
+
+#### 2. Updates
+```typescript
+async updateConversation(
+    conversationId: string,
+    updates: Partial<Conversation>
+): Promise<void> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation) throw new Error(`Conversation ${conversationId} not found`);
+    
+    // Apply updates
+    Object.assign(conversation, updates, {
+        updatedAt: Date.now()
+    });
+    
+    // Persist atomically
+    await this.saveConversation(conversation);
+}
+```
+
+#### 3. Loading
+```typescript
+private async loadConversation(conversationId: string): Promise<Conversation | null> {
+    const filePath = this.getConversationFilePath(conversationId);
+    
+    try {
+        const data = await fs.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(data);
+        
+        // Reconstruct complex types
+        const conversation: Conversation = {
+            ...parsed,
+            agentStates: new Map(parsed.agentStates),
+            history: parsed.history.map(reconstructNDKEvent)
+        };
+        
+        return conversation;
+    } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+    }
+}
+```
+
+### State Consistency Guarantees
+
+The system provides several consistency guarantees:
+
+1. **Atomic Updates**: All state changes are atomic at the conversation level
+2. **Write-Through Cache**: In-memory state always reflects persisted state
+3. **Recovery on Crash**: State can be fully recovered from disk
+4. **Event Ordering**: History maintains strict chronological order
+5. **Phase Integrity**: Invalid phase transitions are prevented
+
+## Message Building and Context
+
+### Agent-Specific Message Construction
+
+The system builds tailored message contexts for each agent based on their processing state:
+
+```typescript
+async buildAgentMessages(
+    agent: Agent,
+    conversation: Conversation,
+    triggeringEvent?: NDKEvent
+): Promise<Message[]> {
+    const messages: Message[] = [];
+    const agentState = conversation.agentStates.get(agent.slug) || {
+        lastProcessedMessageIndex: 0
+    };
+    
+    // Add historical messages up to last processed
+    const historicalMessages = conversation.history
+        .slice(0, agentState.lastProcessedMessageIndex);
+    
+    // Add unprocessed messages with marker
+    const unprocessedMessages = conversation.history
+        .slice(agentState.lastProcessedMessageIndex);
+    
+    if (unprocessedMessages.length > 0) {
+        messages.push({
+            role: 'system',
+            content: '=== MESSAGES WHILE YOU WERE AWAY ==='
+        });
+    }
+    
+    // Transform messages based on sender
+    for (const event of conversation.history) {
+        const message = await this.transformEventToMessage(event, agent);
+        messages.push(message);
+    }
+    
+    return messages;
+}
+```
+
+### Message Role Assignment
+
+The system assigns appropriate roles based on the message source:
+
+```typescript
+private determineMessageRole(
+    event: NDKEvent,
+    viewingAgent: Agent
+): 'user' | 'assistant' | 'system' {
+    const senderPubkey = event.pubkey;
+    
+    // Messages from the viewing agent
+    if (senderPubkey === viewingAgent.pubkey) {
+        return 'assistant';
+    }
+    
+    // Messages from users
+    if (this.isUserPubkey(senderPubkey)) {
+        return 'user';
+    }
+    
+    // Messages from other agents
+    return 'system';
+}
+```
+
+### Context Window Management
+
+The system implements sophisticated context window management:
+
+1. **Incremental Processing**: Agents only see new messages since last execution
+2. **Historical Context**: Full history available for reference
+3. **Phase Context**: Recent phase transitions included
+4. **Handoff Context**: Information from routing decisions
+5. **Metadata Preservation**: Referenced articles, voice mode, etc.
+
+### Message Building Pipeline
+
+```
+Event Reception
+    ↓
+Conversation Lookup/Creation
+    ↓
+Agent State Retrieval
+    ↓
+Historical Message Assembly
+    ↓
+Unprocessed Message Marking
+    ↓
+Role Assignment
+    ↓
+Content Transformation
+    ↓
+System Context Injection
+    ↓
+Final Message Array
+```
+
+## Event-Driven Integration
+
+### Nostr Event Processing
+
+The system processes various Nostr event types:
+
+```typescript
+async handleEvent(event: NDKEvent): Promise<void> {
+    const eventType = this.determineEventType(event);
+    
+    switch (eventType) {
+        case 'user_message':
+            await this.handleUserMessage(event);
+            break;
+        case 'agent_response':
+            await this.handleAgentResponse(event);
+            break;
+        case 'orchestrator_routing':
+            await this.handleOrchestratorRouting(event);
+            break;
+        case 'phase_transition':
+            await this.handlePhaseTransition(event);
+            break;
+        case 'completion':
+            await this.handleCompletion(event);
+            break;
+    }
+}
+```
+
+### Event Tag Processing
+
+The system extracts rich metadata from Nostr event tags:
+
+```typescript
+interface EventMetadata {
+    conversationId?: string;      // 'd' tag
+    phase?: string;               // 'phase' tag
+    replyTo?: string;            // 'e' tag
+    mentions?: string[];         // 'p' tags
+    tool?: string;              // 'tool' tag
+    completion?: object;        // 'complete' tag
+    voice?: boolean;           // 'voice' tag
+}
+```
+
+### Event Ordering and Consistency
+
+The system maintains strict event ordering:
+
+1. **Chronological Order**: Events processed in timestamp order
+2. **Causal Consistency**: Reply chains maintained
+3. **Atomic Processing**: Each event fully processed before next
+4. **Idempotency**: Duplicate events safely ignored
+
+## Persistence Layer
+
+### Storage Architecture
+
+The persistence layer uses a file-based approach optimized for conversation workloads:
+
+```
+.tenex/
+├── state/
+│   └── conversations/
+│       ├── conv_abc123.json
+│       ├── conv_def456.json
+│       └── conv_ghi789.json
+├── logs/
+│   ├── execution/
+│   └── tracing/
+└── cache/
+    └── mcp_tools.json
+```
+
+### Atomic Write Operations
+
+All persistence operations use atomic writes to prevent corruption:
+
+```typescript
+private async saveConversation(conversation: Conversation): Promise<void> {
+    const filePath = this.getConversationFilePath(conversation.id);
+    const tempPath = `${filePath}.tmp`;
+    
+    // Serialize conversation
+    const data = JSON.stringify({
+        ...conversation,
+        agentStates: Array.from(conversation.agentStates.entries()),
+        history: conversation.history.map(serializeNDKEvent)
+    }, null, 2);
+    
+    // Write to temp file
+    await fs.writeFile(tempPath, data, 'utf-8');
+    
+    // Atomic rename
+    await fs.rename(tempPath, filePath);
+}
+```
+
+### Recovery Mechanisms
+
+The system implements multiple recovery strategies:
+
+#### 1. Corrupted File Recovery
+```typescript
+private async recoverConversation(conversationId: string): Promise<Conversation | null> {
+    // Try backup file
+    const backupPath = `${this.getConversationFilePath(conversationId)}.bak`;
+    if (await this.fileExists(backupPath)) {
+        return this.loadConversationFromPath(backupPath);
+    }
+    
+    // Reconstruct from events
+    const events = await this.fetchConversationEvents(conversationId);
+    if (events.length > 0) {
+        return this.reconstructFromEvents(conversationId, events);
+    }
+    
+    return null;
+}
+```
+
+#### 2. Incomplete Write Recovery
+- Detect `.tmp` files on startup
+- Validate partial writes
+- Complete or rollback transaction
+
+#### 3. State Reconstruction
+- Fetch events from Nostr relays
+- Rebuild conversation state
+- Validate against persisted state
+
+### Performance Optimizations
+
+#### 1. Lazy Loading
+Conversations loaded on-demand:
+```typescript
+async getConversation(id: string): Promise<Conversation | null> {
+    // Check memory cache first
+    if (this.conversations.has(id)) {
+        return this.conversations.get(id);
+    }
+    
+    // Load from disk
+    const conversation = await this.loadConversation(id);
+    if (conversation) {
+        this.conversations.set(id, conversation);
+    }
+    
+    return conversation;
+}
+```
+
+#### 2. Write Batching
+Multiple updates batched:
+```typescript
+private pendingWrites = new Map<string, Conversation>();
+private writeTimer: NodeJS.Timeout;
+
+async scheduleWrite(conversation: Conversation): Promise<void> {
+    this.pendingWrites.set(conversation.id, conversation);
+    
+    if (!this.writeTimer) {
+        this.writeTimer = setTimeout(() => this.flushWrites(), 100);
+    }
+}
+```
+
+#### 3. Selective Serialization
+Only changed fields persisted:
+```typescript
+private async saveConversationDelta(
+    conversationId: string,
+    changes: Partial<Conversation>
+): Promise<void> {
+    const existing = await this.loadConversation(conversationId);
+    const updated = { ...existing, ...changes };
+    await this.saveConversation(updated);
+}
+```
+
+## Phase Management Integration
+
+### Phase Transition Handling
+
+The ConversationManager orchestrates phase transitions:
+
+```typescript
+async transitionPhase(
+    conversationId: string,
+    newPhase: Phase,
+    context: PhaseTransitionContext
+): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+    const oldPhase = conversation.phase;
+    
+    // Validate transition
+    if (!this.isValidTransition(oldPhase, newPhase)) {
+        throw new Error(`Invalid transition: ${oldPhase} → ${newPhase}`);
+    }
+    
+    // Record transition
+    const transition: PhaseTransition = {
+        from: oldPhase,
+        to: newPhase,
+        timestamp: Date.now(),
+        reason: context.reason,
+        agentPubkey: context.agentPubkey,
+        agentName: context.agentName,
+        message: context.message
+    };
+    
+    // Update conversation
+    conversation.phase = newPhase;
+    conversation.phaseStartedAt = Date.now();
+    conversation.phaseTransitions.push(transition);
+    
+    // Special handling for REFLECTION → CHAT
+    if (oldPhase === PHASES.REFLECTION && newPhase === PHASES.CHAT) {
+        conversation.readFiles = [];
+    }
+    
+    await this.saveConversation(conversation);
+}
+```
+
+### Phase-Aware Message Building
+
+Messages include phase context:
+
+```typescript
+private addPhaseContext(
+    messages: Message[],
+    conversation: Conversation
+): Message[] {
+    const recentTransition = this.getRecentTransition(conversation);
+    
+    if (recentTransition && this.isRecent(recentTransition)) {
+        messages.push({
+            role: 'system',
+            content: this.formatPhaseTransition(recentTransition)
+        });
+    }
+    
+    return messages;
+}
+```
+
+## Agent State Tracking
+
+### Per-Agent State Management
+
+Each agent maintains independent state within a conversation:
+
 ```typescript
 interface AgentState {
-    lastProcessedMessageIndex: number; // Last seen message in history
-    claudeSessionId?: string;          // Claude Code session tracking
+    lastProcessedMessageIndex: number;  // Last message seen
+    claudeSessionId?: string;          // Session continuity
+    customState?: Record<string, any>; // Agent-specific data
 }
 ```
 
-This design ensures:
-- Agents only see messages relevant to them
-- Late-joining agents get appropriate context
-- Session continuity for stateful agents (like Claude)
-
-**2. Single Source of Truth**
-
-The `history: NDKEvent[]` array is the canonical record of all conversation events. All agent views are derived from this single source, preventing synchronization issues.
-
-**3. Phase-Based Workflow**
-
-Conversations flow through defined phases:
-- **chat**: Requirements gathering
-- **brainstorm**: Creative exploration  
-- **plan**: Architecture and design
-- **execute**: Implementation
-- **verification**: Testing and validation
-- **chores**: Documentation and cleanup
-- **reflection**: Learning and insights
-
-### 2. Message Context Building
-**Method**: `buildAgentMessages()`
-
-This critical method constructs the appropriate message context for each agent:
-
-#### Context Building Algorithm:
-
-1. **Initialize Agent State**: Create or retrieve the agent's view state
-2. **Build Historical Context**: Include all previous messages up to the triggering event
-3. **Attribute Messages**: Mark messages as user/assistant/system based on sender
-4. **Handle Missing Messages**: Add "MESSAGES WHILE YOU WERE AWAY" block for context
-5. **Add Triggering Event**: Include the current message that triggered the agent
-6. **Update State**: Record what the agent has now seen
-
-#### Special Cases:
-
-**P-Tagged Agents**: When an agent is directly mentioned via p-tag:
-- At conversation start: Agent sees no prior history
-- Mid-conversation: Agent sees full history for context
-
-**Nostr Entity Processing**: The system automatically:
-- Detects nostr entities (nevent, naddr, etc.) in messages
-- Fetches and inlines the referenced content
-- Preserves entity references for traceability
-
-### 3. Orchestrator Routing Context
-**Method**: `buildOrchestratorRoutingContext()`
-
-Provides structured JSON context for orchestrator routing decisions:
+### State Update Mechanism
 
 ```typescript
-interface OrchestratorRoutingContext {
-    user_request: string;              // Original user request
-    routing_history: RoutingEntry[];   // Past routing decisions
-    current_routing: RoutingEntry | null; // Active routing state
+async updateAgentState(
+    conversationId: string,
+    agentSlug: string,
+    updates: Partial<AgentState>
+): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+    const currentState = conversation.agentStates.get(agentSlug) || {
+        lastProcessedMessageIndex: 0
+    };
+    
+    const newState = { ...currentState, ...updates };
+    conversation.agentStates.set(agentSlug, newState);
+    
+    await this.saveConversation(conversation);
 }
 ```
 
-#### Orchestrator Turn Management:
+### Session Continuity
 
-The system tracks orchestrator "turns" - coordinated multi-agent executions:
-
-1. **Turn Creation**: `startOrchestratorTurn()` initiates a new routing decision
-2. **Completion Tracking**: `addCompletionToTurn()` records agent completions
-3. **Turn Resolution**: Marks turns complete when all routed agents finish
-4. **History Building**: Converts completed turns into routing history
-
-This enables the orchestrator to:
-- Understand what's been tried before
-- Avoid routing loops
-- Make informed next-step decisions
-- Track multi-agent coordination
-
-### 4. Persistence Layer
-**Implementation**: `FileSystemAdapter`
-
-The persistence system provides durable storage with:
-
-#### Storage Strategy:
-
-- **Active Conversations**: Stored in `.tenex/conversations/`
-- **Archived Conversations**: Moved to `.tenex/conversations/archive/`
-- **Metadata Index**: Maintained in `metadata.json` for fast lookups
-- **Serialization**: NDKEvents serialized with full signature preservation
-
-#### Key Features:
-
-**Atomic Updates**: Metadata updates are serialized through a lock mechanism to prevent race conditions
-
-**Recovery Support**: Handles daemon restarts gracefully:
-- Detects orphaned active sessions
-- Resets execution time tracking
-- Preserves conversation state
-
-**Search Capabilities**: Supports searching by:
-- Title (fuzzy matching)
-- Phase
-- Date range
-- Archive status
-
-### 5. Phase Transition System
-
-Phase transitions are first-class entities with full tracking:
+The system maintains session continuity for stateful backends:
 
 ```typescript
-interface PhaseTransition {
-    from: Phase;
-    to: Phase;
-    message: string;      // Context for transition
-    timestamp: number;
-    agentPubkey: string;  // Who initiated
-    agentName: string;    // Human-readable
-    reason?: string;      // Why transition occurred
-    summary?: string;     // State summary for handoff
+private async getOrCreateSessionId(
+    agent: Agent,
+    conversation: Conversation
+): Promise<string | undefined> {
+    if (!agent.supportsSessions) return undefined;
+    
+    const agentState = conversation.agentStates.get(agent.slug);
+    if (agentState?.claudeSessionId) {
+        return agentState.claudeSessionId;
+    }
+    
+    // Create new session
+    const sessionId = generateSessionId();
+    await this.updateAgentState(
+        conversation.id,
+        agent.slug,
+        { claudeSessionId: sessionId }
+    );
+    
+    return sessionId;
 }
 ```
 
-#### Transition Rules:
+## Orchestrator Turn Management
 
-The system enforces valid phase transitions:
-- `chat` → `execute`, `plan`, `brainstorm`
-- `execute` → `verification`, `chat`
-- `verification` → `chores`, `execute`, `chat`
-- `reflection` → `chat` (terminal reflection)
+### Turn Tracking
 
-#### Special Behaviors:
-
-**Reflection Reset**: When transitioning from `reflection` back to `chat`, the system clears `readFiles` metadata to prevent stale security context.
-
-### 6. Execution Time Tracking
-
-The system tracks actual execution time across:
-- Multiple sessions (daemon restarts)
-- Active and inactive periods
-- Per-conversation granularity
+The system tracks orchestrator routing decisions:
 
 ```typescript
-interface ExecutionTime {
-    totalSeconds: number;          // Cumulative time
-    currentSessionStart?: number;   // Active session start
-    isActive: boolean;             // Currently executing
-    lastUpdated: number;           // For crash recovery
+interface OrchestratorTurn {
+    turnId: string;                    // Unique turn identifier
+    timestamp: number;                 // When turn started
+    phase: Phase;                      // Target phase
+    agents: string[];                  // Agents to execute
+    completions: Completion[];         // Agent completions
+    reason?: string;                   // Routing rationale
+    isCompleted: boolean;             // All agents done?
 }
 ```
 
-## Critical Implementation Details
+### Turn Lifecycle
 
-### 1. Message Attribution Strategy
+#### 1. Turn Creation
+```typescript
+async startOrchestratorTurn(
+    conversationId: string,
+    routing: RoutingDecision
+): Promise<string> {
+    const turnId = generateTurnId();
+    const turn: OrchestratorTurn = {
+        turnId,
+        timestamp: Date.now(),
+        phase: routing.phase || this.getCurrentPhase(conversationId),
+        agents: routing.agents,
+        completions: [],
+        reason: routing.reason,
+        isCompleted: false
+    };
+    
+    const conversation = await this.getConversation(conversationId);
+    conversation.orchestratorTurns.push(turn);
+    await this.saveConversation(conversation);
+    
+    return turnId;
+}
+```
 
-The system uses different attribution strategies based on context:
+#### 2. Completion Tracking
+```typescript
+async addCompletionToTurn(
+    conversationId: string,
+    agentSlug: string,
+    completion: CompletionInfo
+): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+    const currentTurn = this.getCurrentTurn(conversation);
+    
+    if (!currentTurn) {
+        throw new Error('No active orchestrator turn');
+    }
+    
+    // Add completion
+    currentTurn.completions.push({
+        agentSlug,
+        timestamp: Date.now(),
+        summary: completion.summary,
+        metadata: completion.metadata
+    });
+    
+    // Check if turn is complete
+    const expectedAgents = new Set(currentTurn.agents);
+    const completedAgents = new Set(
+        currentTurn.completions.map(c => c.agentSlug)
+    );
+    
+    if (expectedAgents.size === completedAgents.size) {
+        currentTurn.isCompleted = true;
+    }
+    
+    await this.saveConversation(conversation);
+}
+```
 
-**For Historical Context**:
-- User messages: Added as "user" role
-- Agent's own messages: Added as "assistant" role
-- Other agents: Added as "system" with attribution
+### Turn-Based Routing Context
 
-**For Current Context**:
-- Clearly marks "MESSAGES WHILE YOU WERE AWAY"
-- Uses "NEW INTERACTION" separator
-- Preserves sender attribution for clarity
+The system provides routing context based on turn history:
 
-### 2. Conversation Initialization Flow
+```typescript
+private buildRoutingContext(conversation: Conversation): RoutingContext {
+    const turns = conversation.orchestratorTurns;
+    const currentTurn = turns[turns.length - 1];
+    
+    return {
+        routing_history: turns.slice(0, -1).map(turn => ({
+            agents: turn.agents,
+            phase: turn.phase,
+            reason: turn.reason
+        })),
+        current_routing: currentTurn ? {
+            agents: currentTurn.agents,
+            phase: currentTurn.phase,
+            completions: currentTurn.completions.map(c => c.summary)
+        } : null
+    };
+}
+```
 
-1. **Event Reception**: New conversation event arrives
-2. **Conversation Creation**: Manager creates conversation with initial state
-3. **Article Reference Check**: Detects and fetches NDKArticle references (30023 events)
-4. **Tracing Context**: Creates unique tracing context for debugging
-5. **Initial Phase**: Sets to CHAT phase by default
-6. **Agent State Init**: Prepares empty agent state map
-7. **Persistence**: Immediately saves to disk
+## Recovery and Resilience
 
-### 3. Agent Context Building Nuances
+### Crash Recovery
 
-**Late-Joining Agents**: When an agent joins mid-conversation:
-- They see the full conversation history for context
-- Their state starts at index 0 to process all messages
-- System tracks what they've "seen" for future turns
+The system implements comprehensive crash recovery:
 
-**Multi-Agent Coordination**: When multiple agents work simultaneously:
-- Each maintains independent state
-- Orchestrator tracks completion through turns
-- Context building ensures no message duplication
+```typescript
+async recoverFromCrash(): Promise<void> {
+    // 1. Detect incomplete writes
+    const tempFiles = await this.findTempFiles();
+    for (const tempFile of tempFiles) {
+        await this.recoverTempFile(tempFile);
+    }
+    
+    // 2. Validate persisted state
+    const conversationFiles = await this.listConversationFiles();
+    for (const file of conversationFiles) {
+        await this.validateAndRepair(file);
+    }
+    
+    // 3. Sync with Nostr events
+    await this.syncWithNostr();
+    
+    // 4. Resume incomplete turns
+    for (const [id, conversation] of this.conversations) {
+        await this.resumeIncompleteTurns(conversation);
+    }
+}
+```
 
-**Session Continuity**: For stateful agents (Claude):
-- Session IDs preserved across turns
-- Passed through event tags
-- Maintained in agent state
+### Error Boundaries
 
-### 4. Orchestrator Integration Points
+Multiple error boundaries prevent cascading failures:
 
-The ConversationManager provides three key integration points:
+```typescript
+async safeExecute<T>(
+    operation: () => Promise<T>,
+    fallback: T,
+    context: string
+): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        this.logger.error(`Error in ${context}:`, error);
+        
+        // Report to monitoring
+        this.reportError(error, context);
+        
+        // Return fallback
+        return fallback;
+    }
+}
+```
 
-1. **Routing Context Building**: Structured JSON for routing decisions
-2. **Turn Management**: Tracks multi-agent coordination
-3. **Completion Extraction**: Identifies complete() tool calls in events
+### State Validation
 
-This enables the orchestrator to operate as an "invisible router" that never directly responds to users but coordinates agent collaboration.
+Continuous state validation ensures consistency:
 
-### 5. Persistence Serialization Details
-
-**NDKEvent Serialization**: Events are serialized with `serialize(true, true)` to preserve:
-- Full event content
-- Signature data
-- All tags and metadata
-
-**Map to Object Conversion**: Agent states are converted from Map to plain object for JSON serialization, then reconstructed on load.
-
-**Zod Validation**: All loaded data is validated against schemas to ensure data integrity and handle migration gracefully.
-
-## State Management Patterns
-
-### 1. Optimistic Updates
-
-The system performs optimistic updates followed by persistence:
-1. Update in-memory state immediately
-2. Persist to disk asynchronously
-3. Handle persistence failures gracefully
-
-### 2. Event Sourcing Pattern
-
-All state changes derive from the event stream:
-- Events are the source of truth
-- State is reconstructed from events
-- Enables replay and recovery
-
-### 3. Agent Isolation
-
-Each agent operates in isolation:
-- Independent state tracking
-- No shared mutable state
-- Context derived at execution time
-
-## Security Considerations
-
-### 1. File Access Tracking
-
-The system tracks `readFiles` in metadata to:
-- Prevent unauthorized file writes
-- Scope agent permissions
-- Clear on phase transitions
-
-### 2. Event Validation
-
-All incoming events are validated for:
-- Valid signatures
-- Proper tag structure
-- Expected event kinds
-
-### 3. Persistence Isolation
-
-Each conversation is isolated:
-- Separate file storage
-- No cross-conversation access
-- Archived conversations are read-only
+```typescript
+private validateConversationState(conversation: Conversation): ValidationResult {
+    const issues: string[] = [];
+    
+    // Check phase validity
+    if (!Object.values(PHASES).includes(conversation.phase)) {
+        issues.push(`Invalid phase: ${conversation.phase}`);
+    }
+    
+    // Check history ordering
+    for (let i = 1; i < conversation.history.length; i++) {
+        if (conversation.history[i].created_at < conversation.history[i-1].created_at) {
+            issues.push('History not in chronological order');
+        }
+    }
+    
+    // Check agent states
+    for (const [agent, state] of conversation.agentStates) {
+        if (state.lastProcessedMessageIndex > conversation.history.length) {
+            issues.push(`Agent ${agent} has invalid message index`);
+        }
+    }
+    
+    return { valid: issues.length === 0, issues };
+}
+```
 
 ## Performance Optimizations
 
-### 1. Lazy Loading
+### Memory Management
 
-Conversations are loaded on-demand:
-- Metadata cached in memory
-- Full conversation loaded when accessed
-- Automatic cleanup of inactive conversations
+#### 1. Conversation Cache Eviction
+```typescript
+private async evictOldConversations(): Promise<void> {
+    const maxCacheSize = 100;
+    const maxAge = 3600000; // 1 hour
+    
+    if (this.conversations.size > maxCacheSize) {
+        const sorted = Array.from(this.conversations.entries())
+            .sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+        
+        // Keep most recent
+        const toKeep = sorted.slice(0, maxCacheSize / 2);
+        this.conversations = new Map(toKeep);
+    }
+}
+```
 
-### 2. Incremental Updates
+#### 2. History Truncation
+```typescript
+private truncateHistory(
+    history: NDKEvent[],
+    maxSize: number = 1000
+): NDKEvent[] {
+    if (history.length <= maxSize) return history;
+    
+    // Keep first and last messages
+    const keep = Math.floor(maxSize / 2);
+    return [
+        ...history.slice(0, keep),
+        ...history.slice(-keep)
+    ];
+}
+```
 
-Only changed data is persisted:
-- Metadata updates are incremental
-- Event history appends only
-- State updates are minimal
+### Query Optimization
 
-### 3. Lock-Free Reads
+#### 1. Indexed Lookups
+```typescript
+private buildIndices(): void {
+    this.conversationsByPhase = new Map();
+    this.conversationsByAgent = new Map();
+    
+    for (const [id, conv] of this.conversations) {
+        // Index by phase
+        if (!this.conversationsByPhase.has(conv.phase)) {
+            this.conversationsByPhase.set(conv.phase, new Set());
+        }
+        this.conversationsByPhase.get(conv.phase).add(id);
+        
+        // Index by agent
+        for (const agent of conv.agentStates.keys()) {
+            if (!this.conversationsByAgent.has(agent)) {
+                this.conversationsByAgent.set(agent, new Set());
+            }
+            this.conversationsByAgent.get(agent).add(id);
+        }
+    }
+}
+```
 
-Read operations are lock-free:
-- Multiple agents can read simultaneously
-- Writes are serialized through locks
-- Metadata updates are atomic
+#### 2. Batch Operations
+```typescript
+async processEventBatch(events: NDKEvent[]): Promise<void> {
+    // Group by conversation
+    const byConversation = new Map<string, NDKEvent[]>();
+    for (const event of events) {
+        const convId = this.extractConversationId(event);
+        if (!byConversation.has(convId)) {
+            byConversation.set(convId, []);
+        }
+        byConversation.get(convId).push(event);
+    }
+    
+    // Process in parallel
+    await Promise.all(
+        Array.from(byConversation.entries()).map(([id, events]) =>
+            this.processConversationEvents(id, events)
+        )
+    );
+}
+```
 
-## Error Recovery Mechanisms
+### Caching Strategies
 
-### 1. Crash Recovery
+#### 1. Message Template Caching
+```typescript
+private messageTemplateCache = new Map<string, Message>();
 
-On daemon restart:
-- Active execution times are reset
-- Conversations are reloaded from disk
-- Agent states are preserved
+private getCachedMessage(event: NDKEvent, agent: Agent): Message {
+    const key = `${event.id}:${agent.slug}`;
+    
+    if (!this.messageTemplateCache.has(key)) {
+        const message = this.transformEventToMessage(event, agent);
+        this.messageTemplateCache.set(key, message);
+    }
+    
+    return this.messageTemplateCache.get(key);
+}
+```
 
-### 2. Corruption Handling
+#### 2. Routing Context Caching
+```typescript
+private routingContextCache = new Map<string, {
+    context: RoutingContext;
+    timestamp: number;
+}>();
 
-If conversation data is corrupted:
-- Zod validation catches issues
-- Conversation skipped but not lost
-- Metadata rebuilt from valid conversations
+private getCachedRoutingContext(conversationId: string): RoutingContext | null {
+    const cached = this.routingContextCache.get(conversationId);
+    if (!cached) return null;
+    
+    // Check age (5 seconds)
+    if (Date.now() - cached.timestamp > 5000) {
+        this.routingContextCache.delete(conversationId);
+        return null;
+    }
+    
+    return cached.context;
+}
+```
 
-### 3. Missing Events
+## Questions and Uncertainties
 
-If events fail to load:
-- Conversation continues with available events
-- Missing events logged but not fatal
-- State remains consistent
+### Architectural Questions
 
-## Integration Points
+1. **Event Ordering Guarantees**: How does the system handle out-of-order events from distributed Nostr relays?
 
-### 1. Event Handlers
+2. **Conversation Merging**: Can conversations be merged if they're discovered to be duplicates?
 
-- `newConversation`: Creates and initiates conversations
-- `reply`: Adds events and triggers agents
-- `task`: Handles task-specific routing
+3. **Multi-User Conversations**: How does the system handle conversations with multiple human participants?
 
-### 2. Agent Executor
+4. **Conversation Forking**: Can conversations branch into parallel threads?
 
-- Requests message context via `buildAgentMessages()`
-- Updates agent states after execution
-- Triggers phase transitions
+5. **Cross-Conversation Context**: How do agents access learnings from other conversations?
 
-### 3. Routing Backend
+### Implementation Questions
 
-- Fetches orchestrator routing context
-- Records routing decisions as turns
-- Manages completion tracking
+6. **Memory Limits**: What happens when conversation history exceeds available memory?
 
-### 4. Nostr Publisher
+7. **Persistence Format Evolution**: How are schema migrations handled for persisted conversations?
 
-- Reads conversation state for context
-- Updates conversation with published events
-- Maintains event ordering
+8. **Relay Synchronization**: How does the system handle conflicting events from different relays?
 
-## Future Considerations
+9. **Agent State Conflicts**: What happens when multiple agents update state simultaneously?
 
-### 1. Scalability
+10. **Session Recovery**: How are Claude sessions recovered after system restart?
 
-Current limitations:
-- All conversations loaded in memory
-- Single-node architecture
-- File-based persistence
+### Performance Questions
 
-Potential improvements:
-- Database-backed persistence
-- Distributed state management
-- Event streaming architecture
+11. **Large History Performance**: How does message building scale with very long conversations?
 
-### 2. Advanced Features
+12. **Concurrent Access**: How does the system handle multiple agents accessing the same conversation?
 
-Possible enhancements:
-- Conversation branching/merging
-- Time-travel debugging
-- Real-time collaboration
-- Advanced search capabilities
+13. **Write Amplification**: Could frequent small updates cause excessive disk I/O?
 
-### 3. Performance Monitoring
+14. **Cache Invalidation**: When should cached routing contexts be invalidated?
 
-Areas for instrumentation:
-- Context building performance
-- Persistence operation metrics
-- Memory usage patterns
-- Event processing throughput
+15. **Index Maintenance**: What's the cost of maintaining multiple indices?
 
-## Open Questions and Uncertainties
+### Behavioral Questions
 
-### 1. Conversation Lifecycle
+16. **Phase Rollback**: Should the system support rolling back to previous phases on error?
 
-- **When should conversations be archived?** Currently manual, but could be automated based on age, inactivity, or completion status.
-- **How to handle very long conversations?** The current in-memory model may struggle with conversations containing thousands of events.
-- **Should completed conversations be immutable?** Currently they can be modified after completion.
+17. **Turn Timeout**: Should orchestrator turns have timeouts?
 
-### 2. Agent State Management
+18. **Partial Completions**: How should partially completed turns be handled?
 
-- **How to handle agent version changes?** If an agent's behavior changes significantly, should its state be reset?
-- **What about shared agent state across conversations?** Currently each conversation has isolated agent state.
-- **Should agent states be versioned?** For debugging and rollback capabilities.
+19. **Agent Failure**: What happens when an agent fails mid-conversation?
 
-### 3. Phase Transition Logic
+20. **Conversation Archival**: When and how should old conversations be archived?
 
-- **Are phase transition rules too rigid?** Some workflows might benefit from more flexible transitions.
-- **Should phases be pluggable?** Current phases are hardcoded, but projects might need custom phases.
-- **How to handle phase timeout?** No mechanism exists for timing out stuck phases.
+### Future Considerations
 
-### 4. Orchestrator Routing
+21. **Distributed State**: Could conversation state be distributed across multiple nodes?
 
-- **How to prevent routing loops?** Current system tracks history but doesn't explicitly prevent loops.
-- **Should routing decisions be reversible?** No undo mechanism exists for routing decisions.
-- **How to handle routing conflicts?** When multiple orchestrators operate on the same conversation.
+22. **Real-time Collaboration**: Could multiple orchestrators work on the same conversation?
 
-### 5. Performance and Scale
+23. **Conversation Templates**: Should the system support conversation templates?
 
-- **What's the maximum practical conversation size?** No limits are enforced, but performance degradation is likely.
-- **How to handle concurrent modifications?** Current locking is coarse-grained and might bottleneck.
-- **Should old messages be pruned?** No mechanism exists to trim conversation history.
+24. **State Versioning**: Should conversation state be versioned for rollback?
 
-### 6. Error Handling
-
-- **How to recover from partial state corruption?** Current approach skips entire conversations.
-- **What about event replay for recovery?** No mechanism to replay events to rebuild state.
-- **Should there be automatic error correction?** Currently all error handling is manual.
-
-### 7. Security Model
-
-- **How to implement fine-grained permissions?** Current file tracking is basic.
-- **Should agent capabilities be conversation-scoped?** Currently agents have global capabilities.
-- **How to audit agent actions?** No explicit audit log beyond event history.
-
-### 8. Integration Challenges
-
-- **How to handle external event sources?** System assumes all events come through Nostr.
-- **What about non-Nostr message formats?** No adapter pattern for other protocols.
-- **How to integrate with external state stores?** Persistence is currently file-only.
-
-These questions represent areas where the architecture might need evolution based on real-world usage patterns and requirements that emerge over time.
+25. **External Storage**: Could large conversations use external storage (S3, etc.)?

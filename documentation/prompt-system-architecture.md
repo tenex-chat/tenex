@@ -2,7 +2,51 @@
 
 ## Executive Summary
 
-The Prompt System Architecture is the sophisticated compositional engine that constructs context-aware system prompts for agents in TENEX. Unlike traditional template-based systems, it implements a fragment-based approach with priority ordering, conditional inclusion, and runtime composition. This system enables consistent agent behavior while allowing dynamic adaptation to conversation phases, available tools, and project-specific requirements. The architecture's power lies in its ability to maintain separation of concerns while composing complex prompts from reusable, testable fragments.
+The Prompt System Architecture is the sophisticated compositional engine that constructs context-aware system prompts for agents in TENEX. It implements a fragment-based approach with priority ordering, conditional inclusion, and runtime composition. This system enables consistent agent behavior while allowing dynamic adaptation to conversation phases, available tools, and project-specific requirements. The architecture's power lies in its ability to maintain separation of concerns while composing complex prompts from reusable, testable fragments.
+
+## Table of Contents
+
+1. [System Philosophy and Design Rationale](#system-philosophy-and-design-rationale)
+2. [Core Architecture](#core-architecture)
+3. [Fragment System](#fragment-system)
+4. [Dynamic Composition](#dynamic-composition)
+5. [Registration and Initialization](#registration-and-initialization)
+6. [Data Flow Architecture](#data-flow-architecture)
+7. [Runtime Execution Pipeline](#runtime-execution-pipeline)
+8. [Priority Resolution Mechanics](#priority-resolution-mechanics)
+9. [Type System and Safety Guarantees](#type-system-and-safety-guarantees)
+10. [Memory and Performance Characteristics](#memory-and-performance-characteristics)
+11. [Integration Patterns](#integration-patterns)
+12. [Advanced Fragment Patterns](#advanced-fragment-patterns)
+13. [Testing Architecture](#testing-architecture)
+14. [Best Practices](#best-practices)
+15. [Questions and Uncertainties](#questions-and-uncertainties)
+
+## System Philosophy and Design Rationale
+
+### Core Design Principles
+
+The prompt system embodies several fundamental design principles:
+
+#### 1. Composition Over Inheritance
+Rather than using inheritance hierarchies or template inheritance, the system embraces composition through fragments. Each fragment represents an atomic unit of prompt logic that can be combined with others to create complex behaviors.
+
+#### 2. Runtime Flexibility with Compile-Time Safety
+The system leverages TypeScript's type system for compile-time guarantees while maintaining runtime flexibility through dynamic fragment registration and conditional composition.
+
+#### 3. Fail-Safe Degradation
+When fragments encounter errors or missing data, they return empty strings rather than throwing exceptions, ensuring prompt generation always succeeds even with partial data.
+
+#### 4. Single Responsibility Fragments
+Each fragment handles exactly one concern - agent identity, tool descriptions, phase constraints, etc. This separation enables independent testing and evolution.
+
+### Architectural Trade-offs
+
+The system makes deliberate trade-offs:
+- **Flexibility vs Performance**: Dynamic composition at runtime over pre-compiled templates
+- **Type Safety vs Dynamism**: Type erasure in registry for heterogeneous storage
+- **Simplicity vs Power**: Side-effect registration over explicit configuration
+- **Consistency vs Customization**: Priority system over arbitrary ordering
 
 ## Core Architecture
 
@@ -60,7 +104,6 @@ The `FragmentRegistry` serves as the central repository for all prompt fragments
 - **Simple API**: Provides basic CRUD operations (register, get, has, clear, getAllIds)
 
 **Registration Pattern:**
-Fragments register themselves at module load time through side effects:
 ```typescript
 // At the bottom of each fragment file:
 fragmentRegistry.register(myFragment);
@@ -105,9 +148,9 @@ interface PromptFragment<T = unknown> {
 - **Self-documenting**: `expectedArgs` helps with debugging
 - **Flexible priority**: Default priority of 50 allows fragments to position themselves relative to others
 
-### Fragment System
+## Fragment System
 
-#### Fragment Categories
+### Fragment Categories
 
 The system organizes fragments into logical categories:
 
@@ -137,7 +180,7 @@ The system organizes fragments into logical categories:
    - `referenced-article`: External content context
    - `retrieved-lessons`: Historical learnings
 
-#### Priority System
+### Priority System
 
 The priority system ensures consistent prompt structure:
 
@@ -151,9 +194,22 @@ The priority system ensures consistent prompt structure:
 
 Lower priority numbers appear earlier in the final prompt, establishing foundational context before specific instructions.
 
-### Dynamic Composition
+### Priority Ranges and Semantics
 
-#### buildSystemPrompt Function
+```
+[1-10]    Foundation Layer   - Core identity, fundamental purpose
+[11-20]   Context Layer      - Situational awareness, phase info
+[21-30]   Capability Layer   - Tools, agents, available actions
+[31-50]   Project Layer      - Project-specific context
+[51-80]   Instruction Layer  - General behavioral guidelines
+[81-90]   Reasoning Layer    - Output format, thinking structure
+[91-299]  Override Layer     - Special conditions, exceptions
+[300+]    Appendix Layer     - Reference material, examples
+```
+
+## Dynamic Composition
+
+### buildSystemPrompt Function
 
 The `buildSystemPrompt` function (src/prompts/utils/systemPromptBuilder.ts) orchestrates the entire prompt generation process. It serves as the single source of truth for how prompts are assembled.
 
@@ -180,7 +236,7 @@ The `buildSystemPrompt` function (src/prompts/utils/systemPromptBuilder.ts) orch
    - Referenced articles only when metadata present
    - Lessons only when relevant to current agent/phase
 
-#### Fragment Arguments Flow
+### Fragment Arguments Flow
 
 The system passes rich context to fragments:
 
@@ -203,9 +259,48 @@ interface BuildSystemPromptOptions {
 
 This context flows through the builder to individual fragments, allowing them to generate contextually appropriate content.
 
-### Registration and Initialization
+### Conditional Composition Engine
 
-#### Module Loading Strategy
+The system supports multiple types of conditions:
+
+#### 1. Agent Type Conditions
+```typescript
+if (!agent.isOrchestrator) {
+    systemPromptBuilder
+        .add("conversation-history-instructions", { isOrchestrator: false })
+        .add("mcp-tools", { tools: mcpTools })
+        .add("agent-reasoning", {});
+}
+```
+
+#### 2. Phase-Based Conditions
+```typescript
+template: ({ phase }) => {
+    if (phase === PHASES.EXECUTE) {
+        return "Focus on implementation details...";
+    }
+    return "Focus on planning and structure...";
+}
+```
+
+#### 3. Data Availability Conditions
+```typescript
+if (conversation?.metadata?.referencedArticle) {
+    systemPromptBuilder.add("referenced-article", 
+        conversation.metadata.referencedArticle);
+}
+```
+
+#### 4. Feature Flag Conditions
+```typescript
+if (!agent.isOrchestrator && isVoiceMode(triggeringEvent)) {
+    systemPromptBuilder.add("voice-mode", { isVoiceMode: true });
+}
+```
+
+## Registration and Initialization
+
+### Module Loading Strategy
 
 The system uses a side-effect based registration pattern:
 
@@ -224,7 +319,7 @@ The system uses a side-effect based registration pattern:
    - Priority system handles ordering
    - No dependency on import sequence
 
-#### Fragment Lifecycle
+### Fragment Lifecycle
 
 1. **Definition**: Fragment object created with id, priority, template, and validators
 2. **Registration**: Fragment registered with global registry on module load
@@ -233,34 +328,542 @@ The system uses a side-effect based registration pattern:
 5. **Execution**: Template function called with validated arguments
 6. **Composition**: Result incorporated based on priority order
 
-### Error Handling and Validation
+### Registration Phase
 
-#### Validation Layers
+Fragment registration occurs during module initialization through JavaScript's module loading mechanism:
 
-1. **Fragment Existence**:
-   - Builder throws if fragment ID not found
-   - Lists available fragments in error message
+#### 1. Module Load Trigger
+```typescript
+// When src/prompts/index.ts is imported
+import "./fragments/agent-common";  // Side effect: registers fragments
+import "./fragments/phase-definitions";
+import "./fragments/orchestrator-routing";
+// ... more fragment imports
+```
 
-2. **Argument Validation**:
-   - Optional type guard validates arguments
-   - Detailed error messages with expected vs received
-   - Falls back to template execution for dynamic validation
+#### 2. Fragment Definition and Registration
+```typescript
+// In each fragment file
+const myFragment: PromptFragment<MyArgs> = {
+    id: "my-fragment",
+    priority: 20,
+    template: (args) => generateContent(args),
+    validateArgs: (args): args is MyArgs => validateStructure(args)
+};
 
-3. **Template Execution**:
-   - Catches template errors and provides context
-   - Shows fragment ID and provided arguments
-   - Helps identify data structure mismatches
+// Registration happens immediately
+fragmentRegistry.register(myFragment);
+```
 
-#### Error Message Quality
+#### 3. Registry Storage
+```typescript
+// In FragmentRegistry
+register<T>(fragment: PromptFragment<T>): void {
+    if (!fragment.id) {
+        throw new Error("Fragment must have an id");
+    }
+    // Type erasure here - stored as unknown
+    this.fragments.set(fragment.id, fragment as PromptFragment<unknown>);
+}
+```
 
-The system prioritizes developer experience with detailed errors:
+## Data Flow Architecture
+
+### Context Propagation Pipeline
+
+The prompt system implements a sophisticated context propagation pipeline that flows data from event handlers through multiple transformation layers:
+
+```
+Event Reception → Context Extraction → Data Enrichment → Fragment Arguments → Template Execution
+```
+
+#### Stage 1: Event Reception
+```typescript
+// Entry point in event handler
+const event: NDKEvent = await subscription.getEvent();
+const context = {
+    conversationId: event.tags.find(t => t[0] === 'd')?.[1],
+    agent: findAgentByPubkey(event.pubkey),
+    phase: determinePhase(event),
+    triggeringEvent: event
+};
+```
+
+#### Stage 2: Context Extraction
+```typescript
+// In AgentExecutor.buildMessages()
+const projectCtx = getProjectContext();
+const conversation = conversationManager.getConversation(context.conversationId);
+const tagMap = new Map(project.tags.map(t => [t[0], t[1]]));
+```
+
+#### Stage 3: Data Enrichment
+```typescript
+// Gathering runtime data
+const availableAgents = Array.from(projectCtx.agents.values());
+const mcpTools = mcpService.getCachedTools();
+const agentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
+```
+
+#### Stage 4: Fragment Arguments
+```typescript
+// Building options object
+const options: BuildSystemPromptOptions = {
+    agent: context.agent,
+    phase: context.phase,
+    projectTitle: tagMap.get("title") || "Untitled",
+    projectRepository: tagMap.get("repo"),
+    availableAgents,
+    conversation,
+    agentLessons: agentLessonsMap,
+    mcpTools,
+    triggeringEvent
+};
+```
+
+#### Stage 5: Template Execution
+```typescript
+// In fragment template
+template: ({ agent, phase, projectTitle }) => {
+    // Access to full context for generating content
+    return generateContextualContent(agent, phase, projectTitle);
+}
+```
+
+### Data Transformation Patterns
+
+The system employs several data transformation patterns:
+
+#### 1. Map Transformation
+```typescript
+// Converting arrays to maps for efficient lookup
+const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
+agentLessonsMap.set(agent.pubkey, lessons);
+```
+
+#### 2. Filtering and Projection
+```typescript
+// In available-agents fragment
+const availableForHandoff = agents.filter(a => 
+    a.pubkey !== currentAgent.pubkey && 
+    !a.isOrchestrator
+);
+```
+
+#### 3. Aggregation
+```typescript
+// In mcp-tools fragment
+const toolsByServer = tools.reduce((acc, tool) => {
+    const server = tool.metadata?.serverName || 'unknown';
+    acc[server] = acc[server] || [];
+    acc[server].push(tool);
+    return acc;
+}, {});
+```
+
+## Runtime Execution Pipeline
+
+### Execution Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Event Handler (src/event-handler/*)                             │
+│ • Receives Nostr event                                          │
+│ • Determines handler type                                       │
+│ • Creates ExecutionContext                                      │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ AgentExecutor.execute() (src/agents/execution/AgentExecutor.ts) │
+│ • Validates context                                             │
+│ • Builds messages array                                         │
+│ • Selects execution backend                                     │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ AgentExecutor.buildMessages()                                   │
+│ • Gathers project context                                       │
+│ • Collects runtime data                                         │
+│ • Calls buildSystemPrompt()                                     │
+│ • Adds conversation context                                     │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ buildSystemPrompt() (src/prompts/utils/systemPromptBuilder.ts)  │
+│ • Creates PromptBuilder instance                                │
+│ • Adds fragments conditionally                                  │
+│ • Returns built prompt string                                   │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ PromptBuilder.build() (src/prompts/core/PromptBuilder.ts)       │
+│ • Filters by conditions                                         │
+│ • Validates arguments                                           │
+│ • Executes templates                                            │
+│ • Sorts by priority                                             │
+│ • Joins content                                                 │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Execution Backend (ReasonActLoop/Routing)                       │
+│ • Sends prompt to LLM                                          │
+│ • Streams response                                              │
+│ • Processes tool calls                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Critical Execution Points
+
+#### 1. Context Assembly Point
+Location: `AgentExecutor.buildMessages()` lines 183-262
+
+This is where all context comes together:
+- Project configuration
+- Conversation state
+- Available agents
+- MCP tools
+- Agent lessons
+- Triggering event
+
+#### 2. Fragment Selection Point
+Location: `buildSystemPrompt()` lines 34-149
+
+Critical decisions made here:
+- Which fragments to include
+- What arguments to pass
+- Conditional logic evaluation
+- Agent-type specific branching
+
+#### 3. Priority Resolution Point
+Location: `PromptBuilder.build()` line 68
+
+The sort operation that determines final prompt structure:
+```typescript
+.sort((a, b) => a.priority - b.priority)
+```
+
+### Composition Phase
+
+During prompt building, fragments undergo a multi-stage composition process:
+
+#### 1. Fragment Collection
+```typescript
+// In PromptBuilder
+add<T>(fragmentId: string, args: T, condition?: (args: T) => boolean): this {
+    this.fragments.push({
+        fragmentId,
+        args,
+        condition: condition ? 
+            (unknownArgs) => condition(unknownArgs as T) : 
+            undefined
+    });
+    return this;
+}
+```
+
+#### 2. Conditional Evaluation
+```typescript
+// During build()
+const activeFragments = this.fragments.filter((config) => 
+    !config.condition || config.condition(config.args)
+);
+```
+
+#### 3. Validation and Execution
+```typescript
+// For each active fragment
+const fragment = fragmentRegistry.get(config.fragmentId);
+if (fragment.validateArgs && !fragment.validateArgs(config.args)) {
+    throw new Error(/* detailed error */);
+}
+const content = fragment.template(config.args);
+```
+
+#### 4. Priority Sorting
+```typescript
+// Sort by priority (lower = higher priority)
+fragmentsWithContent.sort((a, b) => a.priority - b.priority);
+```
+
+#### 5. Final Assembly
+```typescript
+// Join non-empty content
+return fragmentsWithPriority
+    .map((f) => f.content)
+    .filter((content) => content.trim().length > 0)
+    .join("\n\n");
+```
+
+## Priority Resolution Mechanics
+
+### Priority Conflict Resolution
+
+When fragments have identical priorities, the system maintains insertion order:
 
 ```typescript
-throw new Error(
-    `Fragment "${fragmentId}" received invalid arguments.\n` +
-    `Expected: ${expectedDesc}\n` +
-    `Received: ${receivedArgs}`
-);
+// In PromptBuilder.build()
+fragmentsWithPriority.sort((a, b) => a.priority - b.priority);
+// JavaScript's sort is stable, preserving insertion order for equal priorities
+```
+
+### Dynamic Priority Patterns
+
+While fragments have static priorities, the system achieves dynamic behavior through:
+
+#### 1. Conditional Inclusion
+```typescript
+// Higher priority fragment only included in specific conditions
+if (isVoiceMode(triggeringEvent)) {
+    builder.add("voice-mode", { isVoiceMode: true }); // Priority 20
+}
+```
+
+#### 2. Content Adaptation
+```typescript
+// Same priority, different content based on context
+template: ({ agent }) => {
+    if (agent.isOrchestrator) {
+        return "## Routing Instructions\n...";  // Orchestrator version
+    }
+    return "## Execution Guidelines\n...";      // Regular agent version
+}
+```
+
+### Condition Evaluation Order
+
+Conditions are evaluated in two phases:
+
+1. **Build-time conditions** (in buildSystemPrompt):
+   - Determines which fragments to add
+   - Based on static context
+
+2. **Runtime conditions** (in PromptBuilder.build):
+   - Fragment-level condition functions
+   - Can access fragment arguments
+
+## Type System and Safety Guarantees
+
+### Type Safety Layers
+
+The system implements multiple layers of type safety:
+
+#### 1. Compile-Time Type Safety
+```typescript
+// Fragment definition with generic type
+interface PromptFragment<T = unknown> {
+    template: (args: T) => string;
+    validateArgs?: (args: unknown) => args is T;
+}
+```
+
+#### 2. Runtime Type Validation
+```typescript
+// Type guard pattern
+validateArgs: (args): args is AgentToolsArgs => {
+    return (
+        typeof args === "object" &&
+        args !== null &&
+        "agent" in args &&
+        typeof (args as any).agent === "object"
+    );
+}
+```
+
+#### 3. Error Message Type Information
+```typescript
+expectedArgs: "{ agent: Agent }"  // Helps developers understand requirements
+```
+
+### Type Erasure Strategy
+
+The FragmentRegistry uses type erasure for storage:
+
+```typescript
+private fragments = new Map<string, PromptFragment<unknown>>();
+```
+
+**Rationale:**
+- Allows heterogeneous fragment storage
+- Simplifies registry implementation
+- Validation happens at usage time
+
+### Type Flow Through System
+
+```
+TypeScript Types → Fragment Definition → Type Erasure (Registry) → 
+Runtime Validation → Type Guard → Safe Template Execution
+```
+
+### System Invariants and Guarantees
+
+The system maintains several critical invariants:
+
+#### 1. Fragment Uniqueness
+- Each fragment ID must be unique in the registry
+- Later registrations override earlier ones (should not happen in practice)
+
+#### 2. Priority Ordering
+- Fragments always appear in priority order in final prompt
+- Equal priorities maintain insertion order
+
+#### 3. Non-Throwing Template Execution
+- Template errors are caught and re-thrown with context
+- Empty returns are valid and filtered out
+
+#### 4. Type Safety at Boundaries
+- Arguments validated before template execution
+- Type guards ensure type safety within templates
+
+### System Guarantees
+
+#### 1. Prompt Generation Always Succeeds
+- Missing fragments result in errors with helpful messages
+- Template errors include debugging information
+- Empty fragments don't break generation
+
+#### 2. Deterministic Output
+- Same inputs produce same prompt
+- Priority system ensures consistent ordering
+- No random elements in fragment selection
+
+#### 3. Context Isolation
+- Fragments can't modify shared state
+- Each fragment execution is independent
+- No side effects beyond registration
+
+## Memory and Performance Characteristics
+
+### Memory Usage Patterns
+
+#### 1. Fragment Storage
+- **Static Memory**: ~25-30 fragment definitions stored in registry
+- **Per Fragment**: ~200-500 bytes (ID, priority, function references)
+- **Total Registry**: ~10-15 KB
+
+#### 2. Prompt Building
+- **Transient Memory**: PromptBuilder instances are short-lived
+- **Fragment Arguments**: Typically reference existing objects (no deep copies)
+- **String Concatenation**: Uses array join (efficient for multiple strings)
+
+#### 3. Generated Prompts
+- **Size Range**: 5-50 KB depending on context
+- **Lifetime**: Garbage collected after LLM call
+- **No Caching**: Prompts regenerated for each execution
+
+### Performance Characteristics
+
+#### 1. Fragment Registration (Startup)
+- **Time**: ~1-2ms total for all fragments
+- **Operation**: O(n) where n = number of fragments
+- **Frequency**: Once at application start
+
+#### 2. Prompt Building (Runtime)
+- **Time**: ~5-10ms typical
+- **Operations**:
+  - Fragment lookup: O(1) hash map access
+  - Validation: O(n) where n = added fragments
+  - Sorting: O(n log n) where n = added fragments
+  - Concatenation: O(m) where m = total content length
+
+#### 3. Scalability Factors
+- **Fragment Count**: Linear impact on build time
+- **Content Size**: Linear impact on concatenation
+- **Condition Complexity**: Minimal impact (simple boolean checks)
+
+### Optimization Opportunities
+
+#### 1. Static Fragment Caching
+```typescript
+// Potential optimization for static fragments
+const cachedContent = new Map<string, string>();
+template: (args) => {
+    const key = JSON.stringify(args);
+    if (!cachedContent.has(key)) {
+        cachedContent.set(key, generateContent(args));
+    }
+    return cachedContent.get(key)!;
+}
+```
+
+#### 2. Prompt Template Precompilation
+```typescript
+// Could pre-process static portions
+const staticParts = fragments
+    .filter(f => !f.isDynamic)
+    .map(f => f.template({}))
+    .join("\n\n");
+```
+
+### Performance Considerations
+
+#### Optimization Strategies
+
+1. **Lazy Evaluation**:
+   - Fragments only execute if conditions pass
+   - Empty fragments filtered before concatenation
+   - Minimal string operations until final build
+
+2. **Caching Opportunities**:
+   - Fragment registry maintains single instances
+   - Static fragments could cache results
+   - Project context could be memoized
+
+3. **Memory Efficiency**:
+   - Fragments generate strings on-demand
+   - No persistent prompt storage
+   - Garbage collection friendly design
+
+## Integration Patterns
+
+### System Boundaries
+
+The prompt system maintains clear boundaries with other subsystems:
+
+#### 1. Agent System Boundary
+```typescript
+// Agent system provides
+interface Agent {
+    name: string;
+    role: string;
+    instructions: string;
+    tools: Tool[];
+    isOrchestrator: boolean;
+}
+
+// Prompt system consumes
+buildSystemPrompt({ agent, ... })
+```
+
+#### 2. Conversation System Boundary
+```typescript
+// Conversation system provides
+interface Conversation {
+    id: string;
+    messages: Message[];
+    metadata: ConversationMetadata;
+    phase: Phase;
+}
+
+// Prompt system uses for context
+systemPromptBuilder.add("phase-context", { conversation })
+```
+
+#### 3. Tool System Boundary
+```typescript
+// Tool system provides
+interface Tool {
+    name: string;
+    description: string;
+    inputSchema: JsonSchema;
+}
+
+// Prompt system formats for LLM
+systemPromptBuilder.add("mcp-tools", { tools: mcpTools })
 ```
 
 ### Integration Points
@@ -292,26 +895,131 @@ Tool availability flows through the prompt system:
 - Tool instructions adapted to available capabilities
 - Tool result handling instructions included
 
-### Performance Considerations
+#### 4. File System Integration
+Several fragments read from the file system:
 
-#### Optimization Strategies
+```typescript
+// PROJECT.md fragment
+const projectMdPath = path.join(projectPath, "PROJECT.md");
+if (fs.existsSync(projectMdPath)) {
+    content = fs.readFileSync(projectMdPath, "utf-8");
+}
+```
 
-1. **Lazy Evaluation**:
-   - Fragments only execute if conditions pass
-   - Empty fragments filtered before concatenation
-   - Minimal string operations until final build
+**Characteristics:**
+- Synchronous reads (blocking)
+- Silent failure on missing files
+- No file watching or caching
 
-2. **Caching Opportunities**:
-   - Fragment registry maintains single instances
-   - Static fragments could cache results
-   - Project context could be memoized
+#### 5. Event System Integration
+Voice mode detection from Nostr events:
 
-3. **Memory Efficiency**:
-   - Fragments generate strings on-demand
-   - No persistent prompt storage
-   - Garbage collection friendly design
+```typescript
+export function isVoiceMode(event?: NDKEvent): boolean {
+    if (!event) return false;
+    const voiceTag = event.tags.find(tag => tag[0] === "voice");
+    return voiceTag?.[1] === "true";
+}
+```
 
-### Testing Architecture
+#### 6. MCP Service Integration
+Dynamic tool loading:
+
+```typescript
+const mcpTools = mcpService.getCachedTools();
+// Tools are cached at MCP service level, not prompt level
+```
+
+## Advanced Fragment Patterns
+
+### 1. Multi-Section Fragment Pattern
+```typescript
+const fragment: PromptFragment<Args> = {
+    id: "multi-section",
+    template: (args) => {
+        const sections: string[] = [];
+        
+        // Header section
+        sections.push(`## ${args.title}`);
+        
+        // Conditional sections
+        if (args.includeDetails) {
+            sections.push(generateDetails(args));
+        }
+        
+        // Dynamic list section
+        if (args.items?.length > 0) {
+            sections.push(args.items.map(formatItem).join("\n"));
+        }
+        
+        return sections.filter(Boolean).join("\n\n");
+    }
+};
+```
+
+### 2. Delegating Fragment Pattern
+```typescript
+const fragment: PromptFragment<Args> = {
+    id: "delegating",
+    template: (args) => {
+        if (args.agent.isOrchestrator) {
+            return orchestratorFragment.template(args);
+        } else if (args.agent.isSpecialist) {
+            return specialistFragment.template(args);
+        } else {
+            return defaultFragment.template(args);
+        }
+    }
+};
+```
+
+### 3. Aggregating Fragment Pattern
+```typescript
+const fragment: PromptFragment<ToolArgs> = {
+    id: "tool-aggregator",
+    template: ({ tools }) => {
+        // Group tools by category
+        const grouped = tools.reduce((acc, tool) => {
+            const category = tool.category || "general";
+            acc[category] = acc[category] || [];
+            acc[category].push(tool);
+            return acc;
+        }, {} as Record<string, Tool[]>);
+        
+        // Generate sections for each category
+        return Object.entries(grouped)
+            .map(([category, tools]) => 
+                `### ${category}\n${tools.map(formatTool).join("\n")}`
+            )
+            .join("\n\n");
+    }
+};
+```
+
+### 4. Fallback Fragment Pattern
+```typescript
+const fragment: PromptFragment<DataArgs> = {
+    id: "with-fallback",
+    template: (args) => {
+        try {
+            // Try primary data source
+            const data = loadPrimaryData(args);
+            return formatData(data);
+        } catch {
+            try {
+                // Try secondary data source
+                const fallbackData = loadFallbackData(args);
+                return formatData(fallbackData);
+            } catch {
+                // Return default content
+                return "## Default Instructions\n...";
+            }
+        }
+    }
+};
+```
+
+## Testing Architecture
 
 The prompt system includes comprehensive testing:
 
@@ -330,54 +1038,64 @@ The prompt system includes comprehensive testing:
    - Assertion helpers for prompt content
    - Fragment validation testing
 
-## Architectural Decisions
+## Best Practices
 
-### Why Fragment-Based Architecture?
+### Error Handling and Validation
 
-1. **Composability**: Fragments can be mixed and matched for different agent types
-2. **Testability**: Each fragment can be tested in isolation
-3. **Maintainability**: Changes to specific behaviors are localized
-4. **Extensibility**: New fragments can be added without modifying core logic
-5. **Reusability**: Fragments can be shared across different prompt contexts
+#### Validation Layers
 
-### Why Priority-Based Ordering?
+1. **Fragment Existence**:
+   - Builder throws if fragment ID not found
+   - Lists available fragments in error message
 
-1. **Consistency**: Ensures predictable prompt structure across agents
-2. **Flexibility**: Allows fragments to position themselves appropriately
-3. **Clarity**: Makes prompt structure explicit and debuggable
-4. **Override Capability**: Higher priority fragments can override earlier ones
+2. **Argument Validation**:
+   - Optional type guard validates arguments
+   - Detailed error messages with expected vs received
+   - Falls back to template execution for dynamic validation
 
-### Why Self-Registration?
+3. **Template Execution**:
+   - Catches template errors and provides context
+   - Shows fragment ID and provided arguments
+   - Helps identify data structure mismatches
 
-1. **Simplicity**: No complex initialization sequences
-2. **Modularity**: Fragments are self-contained units
-3. **Type Safety**: Registration happens at compile time
-4. **Discoverability**: All fragments visible in registry
+#### Error Message Quality
 
-## System Nuances and Behaviors
+The system prioritizes developer experience with detailed errors:
 
-### Fragment Interaction Patterns
+```typescript
+throw new Error(
+    `Fragment "${fragmentId}" received invalid arguments.\n` +
+    `Expected: ${expectedDesc}\n` +
+    `Received: ${receivedArgs}`
+);
+```
 
-1. **Information Flow**: Earlier fragments establish context for later ones
-2. **Override Patterns**: Higher priority fragments can contradict earlier ones
-3. **Dependency Handling**: Fragments check for required context availability
-4. **Graceful Degradation**: Missing optional context doesn't break generation
+### Implementation Best Practices
 
-### Edge Cases and Special Handling
+#### 1. Context Creation
 
-1. **Empty Fragments**: Automatically filtered from final output
-2. **Circular Dependencies**: Prevented by unidirectional data flow
-3. **Missing Fragments**: Clear error messages with available alternatives
-4. **Invalid Arguments**: Detailed validation errors with examples
+Always create contexts at system boundaries:
+```typescript
+// Good: Create at conversation start
+const context = createTracingContext(conversationId);
 
-### Phase Transition Effects
+// Good: Create child context for new scope
+const agentContext = createAgentExecutionContext(parentContext, agentName);
+```
 
-The prompt system adapts based on phase transitions:
+#### 2. Fragment Design
 
-1. **Transition Context**: Previous phase message included in prompt
-2. **Constraint Changes**: Different behavioral rules per phase
-3. **Tool Availability**: Some tools only available in specific phases
-4. **Agent Selection**: Orchestrator routing influenced by phase
+- **Single Responsibility**: Each fragment does one thing well
+- **Clear Documentation**: Document expected arguments and behavior
+- **Error Context**: Include relevant context in error messages
+- **Graceful Degradation**: Return empty string rather than throwing
+
+#### 3. Performance Optimization
+
+- **Fail Fast**: Validate early to avoid wasted work
+- **Lazy Evaluation**: Only compute when needed
+- **Efficient String Operations**: Use array join for concatenation
+- **Cache Wisely**: Consider caching for expensive static content
 
 ## Questions and Uncertainties
 
@@ -389,6 +1107,12 @@ The prompt system adapts based on phase transitions:
 
 3. **Dynamic Priority**: Should fragment priority be dynamic based on context? For example, should voice-mode fragments have higher priority when in voice mode?
 
+4. **Fragment Versioning**: As fragments evolve, how do we handle backward compatibility?
+
+5. **Fragment Marketplace**: Could external fragments be loaded dynamically?
+
+6. **Prompt Size Limits**: How does the system handle LLM token limits? Should fragments be aware of their token cost?
+
 ### Implementation Questions
 
 1. **Fragment Validation Timing**: Why do some fragments have validators while others rely on TypeScript types alone? Is there a consistent strategy?
@@ -396,6 +1120,10 @@ The prompt system adapts based on phase transitions:
 2. **Registry Clearing**: The FragmentRegistry has a `clear()` method but it's only used in tests. Could this cause issues if called in production?
 
 3. **Fragment ID Uniqueness**: There's no enforcement preventing duplicate fragment IDs. Later registrations would override earlier ones. Is this intentional?
+
+4. **Generate Inventory Special Case**: Why does `generate_inventory` bypass validation? Is this a design decision or technical debt?
+
+5. **Fragment Side Effects**: While the design discourages side effects, there's no enforcement. Should there be?
 
 ### Performance Questions
 
@@ -405,6 +1133,8 @@ The prompt system adapts based on phase transitions:
 
 3. **Fragment Count Scaling**: How does performance scale with the number of fragments? Is there a practical upper limit?
 
+4. **Memory Pressure Under Load**: How does the system behave under memory pressure with many concurrent prompt generations?
+
 ### Integration Questions
 
 1. **Fragment Discovery**: How do developers discover available fragments? The error messages help, but is there a better discovery mechanism?
@@ -413,14 +1143,38 @@ The prompt system adapts based on phase transitions:
 
 3. **Testing Coverage**: Are all fragment combinations tested? How do we ensure fragments compose correctly?
 
+4. **External Integration**: Is OpenTelemetry integration planned for fragment execution tracking?
+
 ### Future Considerations
 
-1. **Fragment Versioning**: As fragments evolve, how do we handle backward compatibility?
+1. **A/B Testing**: Could the fragment system support prompt experimentation?
 
-2. **Fragment Marketplace**: Could external fragments be loaded dynamically?
+2. **Observability**: Should fragment execution be traced for debugging and optimization?
 
-3. **Prompt Size Limits**: How does the system handle LLM token limits? Should fragments be aware of their token cost?
+3. **Multi-Model Adaptation**: How could prompts adapt to different LLM models?
 
-4. **A/B Testing**: Could the fragment system support prompt experimentation?
+4. **Declarative Configuration**: Should fragment inclusion be configurable via YAML/JSON?
 
-5. **Observability**: Should fragment execution be traced for debugging and optimization?
+5. **Smart Fragment Selection**: Could ML-based fragment selection improve agent performance?
+
+### Deep Technical Questions
+
+1. **Memory Pressure Under Load**: How does the system behave under memory pressure with many concurrent prompt generations?
+
+2. **Fragment Template Performance**: What is the performance impact of complex template functions?
+
+3. **Registry Thread Safety**: Is the FragmentRegistry thread-safe in a Node.js context?
+
+4. **Fragment Interdependencies**: How should fragments that logically depend on each other be handled?
+
+5. **Dynamic Fragment Loading**: Could fragments be loaded dynamically based on configuration?
+
+6. **Error Recovery Patterns**: Should template execution errors be recoverable?
+
+7. **Fragment Composition Strategies**: Could fragments be composed more sophisticatedly (hierarchical, slot-based, pipeline)?
+
+8. **Caching Strategies**: Which fragments would benefit from caching?
+
+9. **LLM Token Limit Handling**: How should the system handle prompts exceeding model token limits?
+
+10. **Prompt Debugging and Observability**: How can developers debug prompt generation issues?

@@ -56,7 +56,6 @@ mock.module("@/services", () => ({
 
 describe("StatusPublisher", () => {
     let publisher: StatusPublisher;
-    let intervalSpy: NodeJS.Timeout | undefined;
 
     beforeEach(() => {
         publisher = new StatusPublisher();
@@ -69,9 +68,6 @@ describe("StatusPublisher", () => {
     afterEach(() => {
         // Clean up any intervals
         publisher.stopPublishing();
-        if (intervalSpy) {
-            clearInterval(intervalSpy);
-        }
     });
 
     describe("startPublishing", () => {
@@ -85,35 +81,89 @@ describe("StatusPublisher", () => {
         });
 
         it("should set up interval for periodic publishing", async () => {
-            await publisher.startPublishing("/test/project");
+            // Use fake timers for deterministic testing
+            const originalSetInterval = globalThis.setInterval;
+            const originalClearInterval = globalThis.clearInterval;
+            let intervalCallback: Function | null = null;
+            let intervalId = 123;
+            
+            globalThis.setInterval = ((callback: Function, _ms: number) => {
+                intervalCallback = callback;
+                return intervalId;
+            }) as any;
+            
+            globalThis.clearInterval = ((id: number) => {
+                if (id === intervalId) {
+                    intervalCallback = null;
+                }
+            }) as any;
 
-            // Initial call
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+            try {
+                await publisher.startPublishing("/test/project");
 
-            // Wait for one interval
-            await new Promise(resolve => setTimeout(resolve, STATUS_INTERVAL_MS + 100));
+                // Initial call
+                expect(mockPublish).toHaveBeenCalledTimes(1);
 
-            // Should have published again
-            expect(mockPublish.mock.calls.length).toBeGreaterThan(1);
+                // Verify interval was set up
+                expect(intervalCallback).toBeTruthy();
 
-            publisher.stopPublishing();
+                // Manually trigger the interval callback
+                if (intervalCallback) {
+                    await intervalCallback();
+                    expect(mockPublish).toHaveBeenCalledTimes(2);
+                }
+
+                publisher.stopPublishing();
+                
+                // Verify interval was cleared
+                expect(intervalCallback).toBeNull();
+            } finally {
+                // Restore original timer functions
+                globalThis.setInterval = originalSetInterval;
+                globalThis.clearInterval = originalClearInterval;
+            }
         });
     });
 
     describe("stopPublishing", () => {
         it("should clear the interval when called", async () => {
-            await publisher.startPublishing("/test/project");
+            // Use fake timers for deterministic testing
+            const originalSetInterval = globalThis.setInterval;
+            const originalClearInterval = globalThis.clearInterval;
+            let intervalCallback: Function | null = null;
+            let intervalId = 456;
             
-            // Initial call
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+            globalThis.setInterval = ((callback: Function, _ms: number) => {
+                intervalCallback = callback;
+                return intervalId;
+            }) as any;
+            
+            globalThis.clearInterval = ((id: number) => {
+                if (id === intervalId) {
+                    intervalCallback = null;
+                }
+            }) as any;
 
-            publisher.stopPublishing();
+            try {
+                await publisher.startPublishing("/test/project");
+                
+                // Initial call
+                expect(mockPublish).toHaveBeenCalledTimes(1);
+                expect(intervalCallback).toBeTruthy();
 
-            // Wait for what would be an interval
-            await new Promise(resolve => setTimeout(resolve, STATUS_INTERVAL_MS + 100));
+                publisher.stopPublishing();
 
-            // Should still only have the initial call
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+                // Verify interval was cleared
+                expect(intervalCallback).toBeNull();
+                
+                // Even if we tried to call it, nothing should happen
+                // since the interval was cleared
+                expect(mockPublish).toHaveBeenCalledTimes(1);
+            } finally {
+                // Restore original timer functions
+                globalThis.setInterval = originalSetInterval;
+                globalThis.clearInterval = originalClearInterval;
+            }
         });
 
         it("should handle being called multiple times", () => {
@@ -162,8 +212,11 @@ describe("StatusPublisher", () => {
                 throw new Error("Publishing failed");
             });
 
-            // Should not throw
-            await expect(publisher.startPublishing("/test/project")).resolves.not.toThrow();
+            // Should not throw - startPublishing doesn't throw, it logs errors
+            await publisher.startPublishing("/test/project");
+            
+            // Verify it tried to publish but handled the error
+            expect(mockPublish).toHaveBeenCalled();
         });
     });
 
@@ -171,7 +224,8 @@ describe("StatusPublisher", () => {
         it("should continue publishing even if project context is not initialized", async () => {
             mockIsProjectContextInitialized.mockReturnValueOnce(false);
 
-            await expect(publisher.startPublishing("/test/project")).resolves.not.toThrow();
+            // Should not throw - just logs warning
+            await publisher.startPublishing("/test/project");
             expect(mockPublish).toHaveBeenCalledTimes(1);
         });
 
@@ -179,7 +233,8 @@ describe("StatusPublisher", () => {
             const { configService } = await import("@/services");
             configService.loadConfig = mock(async () => ({ llms: undefined }));
 
-            await expect(publisher.startPublishing("/test/project")).resolves.not.toThrow();
+            // Should not throw - handles undefined config gracefully
+            await publisher.startPublishing("/test/project");
             expect(mockPublish).toHaveBeenCalledTimes(1);
         });
     });
