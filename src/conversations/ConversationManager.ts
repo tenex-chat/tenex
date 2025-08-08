@@ -20,7 +20,6 @@ import { getNDK } from "@/nostr";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { Agent } from "@/agents/types";
 import { Message } from "multi-llm-ts";
-import type { NostrEvent } from "@nostr-dev-kit/ndk";
 
 export class ConversationManager {
     private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
@@ -360,7 +359,6 @@ export class ConversationManager {
         
         // Build the conversation in proper order
         // We need to interleave messages to maintain the conversation flow
-        let conversationIndex = 0;
         const conversationHistory: { event: NDKEvent; isOwn: boolean }[] = [];
         
         for (const event of allPreviousMessages) {

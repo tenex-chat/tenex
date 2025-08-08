@@ -152,19 +152,18 @@ describe("MCP add command", () => {
                 enabled: true,
             });
 
-            await expect(
-                program.parseAsync([
-                    "node",
-                    "test",
-                    "mcp",
-                    "add",
-                    "invalid-name!",
-                    "node",
-                    "test.js",
-                ])
-            ).rejects.toThrow();
+            await program.parseAsync([
+                "node",
+                "test",
+                "mcp",
+                "add",
+                "invalid-name!",
+                "node",
+                "test.js",
+            ]);
 
-            expect(mockConsoleError).toHaveBeenCalledWith(
+            expect(mockProcessExit).toHaveBeenCalledWith(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(
                 expect.stringContaining(
                     "Name can only contain letters, numbers, hyphens, and underscores"
                 )
@@ -185,19 +184,18 @@ describe("MCP add command", () => {
                 enabled: true,
             });
 
-            await expect(
-                program.parseAsync([
-                    "node",
-                    "test",
-                    "mcp",
-                    "add",
-                    "existing-server",
-                    "node",
-                    "new.js",
-                ])
-            ).rejects.toThrow();
+            await program.parseAsync([
+                "node",
+                "test",
+                "mcp",
+                "add",
+                "existing-server",
+                "node",
+                "new.js",
+            ]);
 
-            expect(mockConsoleError).toHaveBeenCalledWith(
+            expect(mockProcessExit).toHaveBeenCalledWith(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(
                 expect.stringContaining("MCP server 'existing-server' already exists")
             );
         });
@@ -205,25 +203,24 @@ describe("MCP add command", () => {
         it("should validate command exists", async () => {
             mockWhich.mockResolvedValue(null);
 
-            await expect(
-                program.parseAsync([
-                    "node",
-                    "test",
-                    "mcp",
-                    "add",
-                    "test-server",
-                    "nonexistent-command",
-                ])
-            ).rejects.toThrow();
+            await program.parseAsync([
+                "node",
+                "test",
+                "mcp",
+                "add",
+                "test-server",
+                "nonexistent-command",
+            ]);
 
-            expect(mockConsoleError).toHaveBeenCalledWith(
+            expect(mockProcessExit).toHaveBeenCalledWith(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(
                 expect.stringContaining("Command not found: nonexistent-command")
             );
         });
 
         it("should skip validation for special commands", async () => {
             const { configService } = await import("@/services/ConfigService");
-            const specialCommands = ["npx", "npm", "bun", "deno", "yarn", "pnpm"];
+            const specialCommands = ["npx", "npm", "node", "python", "python3", "ruby", "sh", "bash"];
 
             for (const cmd of specialCommands) {
                 // Reset mocks
@@ -425,11 +422,10 @@ describe("MCP add command", () => {
                 enabled: true,
             });
 
-            await expect(
-                program.parseAsync(["node", "test", "mcp", "add", "existing", "node", "new.js"])
-            ).rejects.toThrow();
+            await program.parseAsync(["node", "test", "mcp", "add", "existing", "node", "new.js"]);
 
-            expect(mockConsoleError).toHaveBeenCalledWith(
+            expect(mockProcessExit).toHaveBeenCalledWith(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(
                 expect.stringContaining("MCP server 'existing' already exists")
             );
         });
@@ -437,9 +433,9 @@ describe("MCP add command", () => {
         it("should reject invalid commands", async () => {
             mockWhich.mockResolvedValue(null);
 
-            await expect(
-                program.parseAsync(["node", "test", "mcp", "add", "nonexistent-command"])
-            ).rejects.toThrow();
+            await program.parseAsync(["node", "test", "mcp", "add", "nonexistent-command"]);
+
+            expect(mockProcessExit).toHaveBeenCalledWith(1);
 
             expect(mockConsoleError).toHaveBeenCalledWith(
                 expect.stringContaining("Command not found: nonexistent-command")

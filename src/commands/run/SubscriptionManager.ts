@@ -70,7 +70,6 @@ export class SubscriptionManager {
     private async subscribeToAgentLessons(): Promise<void> {
         const ndk = getNDK();
         const projectCtx = getProjectContext();
-        const project = projectCtx.project;
 
         // Get all agent pubkeys
         const agentPubkeys = Array.from(projectCtx.agents.values()).map((agent) => agent.pubkey);

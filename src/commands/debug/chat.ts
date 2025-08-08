@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import * as readline from "node:readline";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";

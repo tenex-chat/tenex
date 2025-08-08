@@ -106,7 +106,7 @@ export class LLMTester {
     /**
      * Get test message for specific provider (could be customized per provider)
      */
-    getTestMessage(provider: LLMProvider): Message {
+    getTestMessage(_provider: LLMProvider): Message {
         // For now, use the same test message for all providers
         // This could be customized per provider in the future
         return new Message(

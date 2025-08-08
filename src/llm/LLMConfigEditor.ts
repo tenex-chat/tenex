@@ -68,7 +68,7 @@ export class LLMConfigEditor {
                 const config = await configService.loadConfig(this.configPath);
                 return config.llms;
             }
-        } catch (error) {
+        } catch {
             // Return empty config on error
             return {
                 configurations: {},
@@ -269,21 +269,29 @@ export class LLMConfigEditor {
             return;
         }
 
+        // Create LLMConfigWithName from the base config
+        const configWithName: LLMConfigWithName = {
+            name: configName,
+            ...config,
+            apiKey: llmsConfig.credentials?.[config.provider]?.apiKey,
+            baseUrl: llmsConfig.credentials?.[config.provider]?.baseUrl,
+        };
+
         this.ui.displayMessages.editingConfiguration(configName);
         const field = await this.ui.promptFieldToEdit();
 
         switch (field) {
             case "model":
-                await this.editModel(config, llmsConfig);
+                await this.editModel(configWithName, llmsConfig);
                 break;
             case "apiKey":
-                await this.editApiKey(config, llmsConfig);
+                await this.editApiKey(configWithName, llmsConfig);
                 break;
             case "enableCaching":
-                await this.editCaching(config);
+                await this.editCaching(configWithName, llmsConfig);
                 break;
             case "name":
-                await this.editConfigName(config, configName, llmsConfig);
+                await this.editConfigName(configWithName, configName, llmsConfig);
                 break;
         }
 
@@ -291,7 +299,7 @@ export class LLMConfigEditor {
         this.ui.displayMessages.configurationUpdated();
     }
 
-    private async editModel(config: any, llmsConfig: TenexLLMs): Promise<void> {
+    private async editModel(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
         try {
             const apiKey = llmsConfig.credentials?.[config.provider]?.apiKey;
             const modelSelection = await this.modelSelector.fetchAndSelectModel(
@@ -304,13 +312,17 @@ export class LLMConfigEditor {
                 return;
             }
             
-            config.model = modelSelection.model;
+            // Update the original config in llmsConfig
+            const originalConfig = llmsConfig.configurations[config.name];
+            if (originalConfig) {
+                originalConfig.model = modelSelection.model;
+            }
         } catch (error) {
             this.ui.displayMessages.fetchModelsFailed2(error);
         }
     }
 
-    private async editApiKey(config: any, llmsConfig: TenexLLMs): Promise<void> {
+    private async editApiKey(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
         if (config.provider === "ollama") {
             this.ui.displayMessages.ollamaNoApiKey();
             return;
@@ -325,20 +337,31 @@ export class LLMConfigEditor {
         if (!llmsConfig.credentials[config.provider]) {
             llmsConfig.credentials[config.provider] = {};
         }
-        llmsConfig.credentials[config.provider]!.apiKey = newKey;
+        const providerCredentials = llmsConfig.credentials[config.provider];
+        if (providerCredentials) {
+            providerCredentials.apiKey = newKey;
+        }
     }
 
-    private async editCaching(config: any): Promise<void> {
+    private async editCaching(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
         const enableCaching = await this.ui.promptEnableCaching(config.enableCaching ?? false);
-        config.enableCaching = enableCaching;
+        // Update the original config in llmsConfig
+        const originalConfig = llmsConfig.configurations[config.name];
+        if (originalConfig) {
+            originalConfig.enableCaching = enableCaching;
+        }
     }
 
-    private async editConfigName(config: any, oldName: string, llmsConfig: TenexLLMs): Promise<void> {
+    private async editConfigName(config: LLMConfigWithName, oldName: string, llmsConfig: TenexLLMs): Promise<void> {
         const newName = await this.ui.promptNewConfigName(oldName, llmsConfig.configurations);
 
         if (newName !== oldName) {
-            llmsConfig.configurations[newName] = config;
-            delete llmsConfig.configurations[oldName];
+            // Copy the original config to the new name
+            const originalConfig = llmsConfig.configurations[oldName];
+            if (originalConfig) {
+                llmsConfig.configurations[newName] = originalConfig;
+                delete llmsConfig.configurations[oldName];
+            }
 
             // Update defaults if needed
             if (llmsConfig.defaults) {
@@ -428,7 +451,7 @@ export class LLMConfigEditor {
             } else {
                 this.ui.displayMessages.testFailed();
             }
-        } catch (error) {
+        } catch {
             this.ui.displayMessages.testFailed();
         }
     }

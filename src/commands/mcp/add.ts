@@ -3,6 +3,7 @@ import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { handleCliError } from "@/utils/cli-error";
+import { determineConfigScope } from "@/utils/project-detection";
 import { Command } from "commander";
 
 interface AddOptions {
@@ -96,29 +97,15 @@ export const addCommand = new Command("add")
 
             // Determine where to save
             const projectPath = process.cwd();
-            const isProject = await configService.projectConfigExists(projectPath, "config.json");
-
-            let useProject = false;
-            if (options.global && options.project) {
-                handleCliError("Cannot use both --global and --project flags");
-            } else if (options.global) {
-                useProject = false;
-            } else if (options.project) {
-                if (!isProject) {
-                    handleCliError(
-                        "Not in a TENEX project directory. Use --global flag or run from a project."
-                    );
-                }
-                useProject = true;
-            } else {
-                // Default: use project if in one, otherwise global
-                useProject = isProject;
+            let scopeInfo;
+            try {
+                scopeInfo = await determineConfigScope(options, projectPath);
+            } catch (error) {
+                handleCliError(error);
             }
+            const { useProject, configPath: basePath } = scopeInfo;
 
             // Load existing MCP config
-            const basePath = useProject
-                ? configService.getProjectPath(projectPath)
-                : configService.getGlobalPath();
             const existingMCP = await configService.loadTenexMCP(basePath);
 
             // Check if server name already exists

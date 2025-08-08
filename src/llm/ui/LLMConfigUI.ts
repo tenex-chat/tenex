@@ -3,7 +3,6 @@ import type {
     ConfigurationPrompts,
     LLMConfigWithName,
     LLMProvider,
-    ModelSelectionResult,
 } from "@/llm/types";
 import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
@@ -54,15 +53,15 @@ export class LLMConfigUI {
                               { name: "Edit existing configuration", value: "edit" },
                               { name: "Remove configuration", value: "remove" },
                               {
-                                  name: `Set agent\'s default [${currentAgentDefault}]`,
+                                  name: `Set agent's default [${currentAgentDefault}]`,
                                   value: "default-agents",
                               },
                               {
-                                  name: `Set analyze tool\'s default [${currentAnalyzeDefault}]`,
+                                  name: `Set analyze tool's default [${currentAnalyzeDefault}]`,
                                   value: "default-analyze",
                               },
                               {
-                                  name: `Set orchestrator\'s default [${currentOrchestratorDefault}]`,
+                                  name: `Set orchestrator's default [${currentOrchestratorDefault}]`,
                                   value: "default-orchestrator",
                               },
                           ]
@@ -90,15 +89,15 @@ export class LLMConfigUI {
                       { name: "Edit existing configuration", value: "edit" },
                       { name: "Remove configuration", value: "remove" },
                       {
-                          name: `Agent\'s default: [${currentAgentDefault}]`,
+                          name: `Agent's default: [${currentAgentDefault}]`,
                           value: "default-agents",
                       },
                       {
-                          name: `Analyze tool\'s default: [${currentAnalyzeDefault}]`,
+                          name: `Analyze tool's default: [${currentAnalyzeDefault}]`,
                           value: "default-analyze",
                       },
                       {
-                          name: `Orchestrator\'s default: [${currentOrchestratorDefault}]`,
+                          name: `Orchestrator's default: [${currentOrchestratorDefault}]`,
                           value: "default-orchestrator",
                       },
                   ]
@@ -397,7 +396,7 @@ export class LLMConfigUI {
         testFailed: () =>
             logger.error(chalk.red("❌ LLM configuration test failed")),
         retryPrompt: () =>
-            logger.info(chalk.yellow("\n🔄 Let\'s try again...")),
+            logger.info(chalk.yellow("\n🔄 Let's try again...")),
         testFailureNotSaved: () =>
             logger.info(chalk.red("\n❌ Configuration not saved due to test failure.")),
         configurationAdded: (configName: string) =>
@@ -409,7 +408,7 @@ export class LLMConfigUI {
         fetchModelsFailed2: (error: unknown) =>
             logger.error(chalk.red(`Failed to fetch models: ${error}`)),
         ollamaNoApiKey: () =>
-            logger.info(chalk.yellow("Ollama doesn\'t require an API key")),
+            logger.info(chalk.yellow("Ollama doesn't require an API key")),
         configurationUpdated: () =>
             logger.info(chalk.green("\n✅ Configuration updated successfully!")),
         configurationRemoved: (configName: string) =>

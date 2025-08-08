@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { ClaudeCodeExecutor, type ClaudeCodeResult } from "@/claude/executor";
 import type { SDKMessage } from "@anthropic-ai/claude-code";
 import type { TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";

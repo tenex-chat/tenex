@@ -8,6 +8,7 @@ import "@/prompts/fragments/phase-definitions";
 import "@/prompts/fragments/referenced-article";
 import "@/prompts/fragments/domain-expert-guidelines";
 import "@/prompts/fragments/voice-mode";
+import "@/prompts/fragments/agent-completion-guidance";
 import { isVoiceMode } from "@/prompts/fragments/voice-mode";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -138,7 +139,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         // Add domain expert guidelines for all non-orchestrator agents
         systemPromptBuilder
             .add("domain-expert-guidelines", {})
-            .add("expert-reasoning", {}); // Add expert-specific reasoning
+            .add("expert-reasoning", {}) // Add expert-specific reasoning
+            .add("agent-completion-guidance", {
+                phase,
+                isOrchestrator: false,
+            });
     }
 
     return systemPromptBuilder.build();
