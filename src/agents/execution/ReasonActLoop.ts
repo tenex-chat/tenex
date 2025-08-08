@@ -22,6 +22,8 @@ import { ExecutionConfig } from "./constants";
  */
 export class ReasonActLoop implements ExecutionBackend {
     private executionLogger?: ExecutionLogger;
+    private streamingBuffer: Map<string, string> = new Map();
+    private lastLoggedChunk: Map<string, string> = new Map();
 
     constructor(
         private llmService: LLMService,
@@ -145,12 +147,17 @@ export class ReasonActLoop implements ExecutionBackend {
         tracingLogger: TracingLogger,
         context: ExecutionContext
     ): AsyncGenerator<StreamEvent> {
+        // Initialize streaming buffer for this agent
+        const agentKey = `${context.agent.name}`;
+        this.streamingBuffer.set(agentKey, "");
+        
         for await (const event of stream) {
             yield event;
 
             switch (event.type) {
                 case "content":
                     this.handleContentEvent(event, stateManager, streamPublisher, context);
+                    this.updateStreamingLog(agentKey, event.content);
                     break;
 
                 case "tool_start":
@@ -184,10 +191,14 @@ export class ReasonActLoop implements ExecutionBackend {
                     if (event.response) {
                         stateManager.setFinalResponse(event.response);
                     }
+                    // Clear the streaming line for this agent
+                    this.clearStreamingLog(agentKey);
                     break;
 
                 case "error":
                     this.handleErrorEvent(event, stateManager, streamPublisher, tracingLogger, context);
+                    // Clear the streaming line for this agent
+                    this.clearStreamingLog(agentKey);
                     break;
             }
         }
@@ -367,5 +378,28 @@ export class ReasonActLoop implements ExecutionBackend {
             // agentThinking removed - not in new event system
             // Previously parsed reasoning data here but no longer needed
         });
+    }
+
+    private updateStreamingLog(agentKey: string, content: string): void {
+        // Only log the new chunk, not the entire buffer
+        if (content.trim()) {
+            // Simple approach: just log each chunk as it arrives
+            // This avoids the complexity of trying to update in place
+            process.stdout.write(content);
+        }
+        
+        // Still track the full buffer for debugging if needed
+        const currentBuffer = this.streamingBuffer.get(agentKey) || "";
+        this.streamingBuffer.set(agentKey, currentBuffer + content);
+    }
+    
+    private clearStreamingLog(agentKey: string): void {
+        // Just clean up and add a newline
+        if (this.streamingBuffer.has(agentKey)) {
+            // Add a newline to separate from next output
+            process.stdout.write('\n');
+            this.streamingBuffer.delete(agentKey);
+            this.lastLoggedChunk.delete(agentKey);
+        }
     }
 }

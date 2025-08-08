@@ -47,6 +47,7 @@
         "chalk": "^5.4.1",
         "commander": "^13.1.0",
         "inquirer": "^12.6.3",
+        "log-update": "^6.1.0",
         "multi-llm-ts": "^4.0.3",
         "nostr-tools": "^2.15.0",
         "repomix": "^1.1.0",
