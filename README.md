@@ -107,11 +107,8 @@ TENEX: [Orchestrator routes to Planner]
 - [Tool System](./documentation/tool-system-architecture.md) - Capability implementation
 - [Learning System](./documentation/learning-system-internals.md) - Continuous improvement mechanics
 
-### For Developers
-- [Creating Custom Agents](./docs/custom-agents.md)
-- [Adding New Tools](./docs/adding-tools.md)
-- [MCP Server Integration](./docs/mcp-integration.md)
-- [Testing Guide](./docs/testing.md)
+### Developer Documentation
+For detailed technical documentation, see the [documentation](./documentation/) directory.
 
 ## 🏗️ Project Structure
 

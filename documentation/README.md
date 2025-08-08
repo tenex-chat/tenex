@@ -28,42 +28,45 @@ Deep technical analysis of how agents maintain and utilize context across conver
 #### 6. [Orchestrator Routing Architecture](./orchestrator-routing-architecture.md)
 The intelligent routing system that coordinates multi-agent collaboration. Implements the invisible orchestrator pattern with dynamic agent selection, phase-aware routing, and error recovery.
 
+#### 7. [Routing System Design](./routing-system-redesign.md)
+Complete routing system design and implementation plan. Details the core principles of orchestrator as silent router, phase outputs, automatic quality control, and organic user communication.
+
 ### Execution Infrastructure
 
-#### 7. [Execution Backend Architecture](./execution-backend-architecture.md)
+#### 8. [Execution Backend Architecture](./execution-backend-architecture.md)
 The pluggable backend system that provides different execution strategies (ReasonActLoop, RoutingBackend, ClaudeBackend). Handles LLM interactions, streaming, and tool execution with backend-specific optimizations.
 
-#### 8. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
+#### 9. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
 Critical component handling real-time LLM response streaming, tool execution coordination, and state consistency during agent interactions. Ensures reliable, low-latency communication.
 
 ### Tool and Integration Systems
 
-#### 9. [Tool System Architecture](./tool-system-architecture.md)
+#### 10. [Tool System Architecture](./tool-system-architecture.md)
 Type-safe, composable infrastructure for agent capabilities. Bridges agent intentions with concrete actions through built-in tools and MCP integration with comprehensive validation and error handling.
 
-#### 10. [MCP Integration Architecture](./mcp-integration-architecture.md)
+#### 11. [MCP Integration Architecture](./mcp-integration-architecture.md)
 Model Context Protocol integration enabling dynamic tool loading from external servers. Provides seamless adapter layer between MCP tools and TENEX's internal tool system.
 
 ### Infrastructure Components
 
-#### 11. [Event-Driven Architecture](./event-driven-architecture.md)
+#### 12. [Event-Driven Architecture](./event-driven-architecture.md)
 The Nostr-based event system that forms the communication backbone. Handles event routing, subscription management, and distributed state synchronization across the system.
 
-#### 12. [Daemon Process Management Architecture](./daemon-process-management-architecture.md)
+#### 13. [Daemon Process Management Architecture](./daemon-process-management-architecture.md)
 Process lifecycle management for long-running services. Handles daemon spawning, monitoring, graceful shutdown, and crash recovery for system stability.
 
-#### 13. [LLM Routing Architecture](./llm-routing-architecture.md)
+#### 14. [LLM Routing Architecture](./llm-routing-architecture.md)
 Intelligent model selection and request routing system. Manages multiple LLM providers, handles failover, rate limiting, and optimizes model selection based on task requirements.
 
 ### Support Systems
 
-#### 14. [Prompt System Architecture](./prompt-system-architecture.md)
+#### 15. [Prompt System Architecture](./prompt-system-architecture.md)
 Sophisticated compositional engine for constructing context-aware system prompts. Uses fragment-based approach with priority ordering, conditional inclusion, and runtime composition for consistent agent behavior.
 
-#### 15. [Learning System Internals](./learning-system-internals.md)
+#### 16. [Learning System Internals](./learning-system-internals.md)
 Comprehensive analysis of the distributed learning infrastructure. Enables agents to capture, store, retrieve, and apply lessons learned across conversations for continuous improvement.
 
-#### 16. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
+#### 17. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
 Comprehensive execution flow tracking, debugging capabilities, and structured logging. Implements hierarchical context propagation for detailed insight into system behavior and performance.
 
 ## Architecture Principles
