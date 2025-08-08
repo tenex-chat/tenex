@@ -12,15 +12,23 @@ function getStorePath(projectPath: string): string {
     return join(projectPath, ".tenex", "processed-events.json");
 }
 
+async function ensureTenexDirectory(storePath: string): Promise<void> {
+    const tenexDir = join(storePath, "..");
+    if (!existsSync(tenexDir)) {
+        await mkdir(tenexDir, { recursive: true });
+    }
+}
+
+/**
+ * Load processed event IDs from disk storage
+ * @param projectPath - The path to the project directory
+ */
 export async function loadProcessedEvents(projectPath: string): Promise<void> {
     const storePath = getStorePath(projectPath);
 
     try {
         // Ensure .tenex directory exists
-        const tenexDir = join(storePath, "..");
-        if (!existsSync(tenexDir)) {
-            await mkdir(tenexDir, { recursive: true });
-        }
+        await ensureTenexDirectory(storePath);
 
         // Load existing processed event IDs if file exists
         if (existsSync(storePath)) {
@@ -44,10 +52,20 @@ export async function loadProcessedEvents(projectPath: string): Promise<void> {
     }
 }
 
+/**
+ * Check if an event has already been processed
+ * @param eventId - The ID of the event to check
+ * @returns True if the event has been processed, false otherwise
+ */
 export function hasProcessedEvent(eventId: string): boolean {
     return processedEventIds.has(eventId);
 }
 
+/**
+ * Add an event ID to the processed set and schedule a save
+ * @param projectPath - The path to the project directory
+ * @param eventId - The ID of the event to mark as processed
+ */
 export function addProcessedEvent(projectPath: string, eventId: string): void {
     processedEventIds.add(eventId);
     debouncedSave(projectPath);
@@ -72,10 +90,7 @@ async function saveProcessedEvents(projectPath: string): Promise<void> {
 
     try {
         // Ensure directory exists before saving
-        const tenexDir = join(storePath, "..");
-        if (!existsSync(tenexDir)) {
-            await mkdir(tenexDir, { recursive: true });
-        }
+        await ensureTenexDirectory(storePath);
 
         // Convert Set to Array for JSON serialization
         const eventIds = Array.from(processedEventIds);
@@ -93,6 +108,10 @@ async function saveProcessedEvents(projectPath: string): Promise<void> {
     }
 }
 
+/**
+ * Immediately save all processed events to disk, canceling any pending saves
+ * @param projectPath - The path to the project directory
+ */
 export async function flushProcessedEvents(projectPath: string): Promise<void> {
     // Cancel any pending saves and save immediately
     if (saveDebounceTimeout) {
@@ -102,6 +121,9 @@ export async function flushProcessedEvents(projectPath: string): Promise<void> {
     await saveProcessedEvents(projectPath);
 }
 
+/**
+ * Clear all processed event IDs from memory and cancel any pending saves
+ */
 export function clearProcessedEvents(): void {
     processedEventIds.clear();
     if (saveDebounceTimeout) {
@@ -110,6 +132,10 @@ export function clearProcessedEvents(): void {
     }
 }
 
+/**
+ * Get the total number of processed events
+ * @returns The count of processed event IDs
+ */
 export function getProcessedEventCount(): number {
     return processedEventIds.size;
 }

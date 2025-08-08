@@ -1,5 +1,4 @@
 import { logger } from "./logger";
-import chalk from "chalk";
 
 /**
  * Centralized CLI error handler that ensures consistent error logging and exit behavior
@@ -24,7 +23,7 @@ export function handleCliError(
 
     // Log stack trace in debug mode
     if (errorStack && process.env.DEBUG) {
-        console.error(chalk.gray(errorStack));
+        logger.debug(errorStack);
     }
 
     // Exit with specified code
