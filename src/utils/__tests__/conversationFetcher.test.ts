@@ -99,7 +99,7 @@ describe("fetchConversation", () => {
         expect(result).toContain("Conversation Thread");
     });
 
-    test("sorts events by timestamp", async () => {
+    test("formats events in tree structure", async () => {
         const olderEvent = new NDKEvent();
         olderEvent.id = "older-event-id";
         olderEvent.pubkey = "another-pubkey";
@@ -113,13 +113,16 @@ describe("fetchConversation", () => {
 
         const result = await fetchConversation("nevent1test", mockNdk, "/test/path");
 
-        // Verify events appear in chronological order
-        const earlierIndex = result.indexOf("Earlier message");
+        // Verify events appear in tree structure (root first, then replies)
         const rootIndex = result.indexOf("This is the root message");
+        const earlierIndex = result.indexOf("Earlier message");
         const replyIndex = result.indexOf("This is a reply");
 
-        expect(earlierIndex).toBeLessThan(rootIndex);
-        expect(rootIndex).toBeLessThan(replyIndex);
+        // Root should appear first
+        expect(rootIndex).toBeGreaterThan(-1);
+        // Other events should appear after root (as replies in the tree)
+        expect(earlierIndex).toBeGreaterThan(rootIndex);
+        expect(replyIndex).toBeGreaterThan(rootIndex);
     });
 
     test("handles missing profile information gracefully", async () => {

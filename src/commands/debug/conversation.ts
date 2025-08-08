@@ -3,7 +3,7 @@ import { fetchConversation } from "@/utils/conversationFetcher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import chalk from "chalk";
+import { debugLog, debugError } from "./utils";
 
 export async function runDebugConversation(nevent: string): Promise<void> {
     try {
@@ -21,13 +21,13 @@ export async function runDebugConversation(nevent: string): Promise<void> {
         const conversationMarkdown = await fetchConversation(nevent, ndk, projectPath);
 
         // Display the conversation
-        console.log(`\n${conversationMarkdown}`);
+        debugLog(`\n${conversationMarkdown}`);
 
         logInfo("Conversation displayed successfully");
     } catch (err) {
         const errorMessage = formatAnyError(err);
         logError(`Failed to fetch conversation: ${errorMessage}`);
-        console.error(chalk.red(`\nError: ${errorMessage}`));
+        debugError("\nError:", err);
         process.exit(1);
     }
 }

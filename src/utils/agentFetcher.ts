@@ -33,7 +33,7 @@ export async function fetchAgentDefinition(
         });
 
         if (!event) {
-            logger.warn("Agent event not found", { eventId });
+            logger.warning(`Agent event not found: ${eventId}`);
             return null;
         }
 
@@ -49,7 +49,7 @@ export async function fetchAgentDefinition(
             pubkey: event.pubkey,
         };
     } catch (error) {
-        logger.error("Failed to fetch agent event", { error, eventId });
+        logger.error(`Failed to fetch agent event: ${eventId}`, error);
         return null;
     }
 }

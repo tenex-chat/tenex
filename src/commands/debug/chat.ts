@@ -17,6 +17,7 @@ import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { v4 as uuidv4 } from "uuid";
+import { debugLog, debugError, debugInfo, debugSection } from "./utils";
 
 interface DebugChatOptions {
     systemPrompt?: boolean;
@@ -124,9 +125,7 @@ export async function runDebugChat(
 
             const systemPrompt = systemPromptBuilder.build();
 
-            console.log(chalk.cyan("\n=== System Prompt ==="));
-            console.log(systemPrompt);
-            console.log(chalk.cyan("===================\n"));
+            debugSection("System Prompt", systemPrompt);
         }
 
         // Handle single message mode
@@ -207,11 +206,11 @@ export async function runDebugChat(
             }
 
             if (input.toLowerCase() === "history") {
-                console.log(chalk.cyan("\n=== Conversation History ==="));
+                debugSection("Conversation History");
                 messages.forEach((msg, idx) => {
-                    console.log(chalk.gray(`[${idx}] ${msg.role}:`), msg.content);
+                    debugLog(chalk.gray(`[${idx}] ${msg.role}:`), msg.content);
                 });
-                console.log(chalk.cyan("========================\n"));
+                debugLog("");
                 rl.prompt();
                 return;
             }
@@ -226,9 +225,7 @@ export async function runDebugChat(
 
                 const systemPrompt = systemPromptBuilder.build();
 
-                console.log(chalk.cyan("\n=== System Prompt ==="));
-                console.log(systemPrompt);
-                console.log(chalk.cyan("===================\n"));
+                debugSection("System Prompt", systemPrompt);
                 rl.prompt();
                 return;
             }
@@ -284,27 +281,24 @@ export async function runDebugChat(
                     messages.push({ role: "assistant", content: "Task completed successfully" });
 
                     // Display response
-                    console.log(chalk.green("Agent: Task completed successfully"));
+                    debugInfo("Agent: Task completed successfully");
                 } catch (error) {
                     // Clear thinking indicator
                     process.stdout.write(`\r${" ".repeat(20)}\r`);
 
-                    console.error(
-                        chalk.red("\nError:"),
-                        error instanceof Error ? error.message : String(error)
-                    );
+                    debugError("\nError:", error);
                 }
 
-                console.log(); // Empty line for readability
+                debugLog(""); // Empty line for readability
             } catch (error) {
-                console.error(chalk.red("\nError:"), formatAnyError(error));
+                debugError("\nError:", error);
             }
 
             rl.prompt();
         });
 
         rl.on("close", () => {
-            console.log(chalk.yellow("\nDebug chat ended."));
+            debugInfo("\nDebug chat ended.");
             process.exit(0);
         });
     } catch (err) {
