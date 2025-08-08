@@ -2,6 +2,7 @@ import { which } from "@/lib/shell";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import { handleCliError } from "@/utils/cli-error";
 import { Command } from "commander";
 
 interface AddOptions {
@@ -27,10 +28,9 @@ export const addCommand = new Command("add")
         try {
             // Parse command and args from the array
             if (commandArgs.length === 0) {
-                logger.error("No command provided");
                 logger.info("Usage: tenex mcp add <name> <command> [args...]");
                 logger.info("Example: tenex mcp add nostrbook npx -y xjsr @nostrbook/mcp");
-                process.exit(1);
+                handleCliError("No command provided");
             }
 
             const command = commandArgs[0] as string; // Safe because we checked length above
@@ -38,8 +38,7 @@ export const addCommand = new Command("add")
 
             // Validate name
             if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
-                logger.error("Name can only contain letters, numbers, hyphens, and underscores");
-                process.exit(1);
+                handleCliError("Name can only contain letters, numbers, hyphens, and underscores");
             }
 
             // Validate command exists (skip for npx, npm, etc.)
@@ -57,14 +56,12 @@ export const addCommand = new Command("add")
                 try {
                     const commandPath = await which(command);
                     if (!commandPath) {
-                        logger.error(`Command not found: ${command}`);
                         logger.info("Make sure the command is installed and in your PATH");
-                        process.exit(1);
+                        handleCliError(`Command not found: ${command}`);
                     }
                 } catch {
-                    logger.error(`Command not found: ${command}`);
                     logger.info("Make sure the command is installed and in your PATH");
-                    process.exit(1);
+                    handleCliError(`Command not found: ${command}`);
                 }
             }
 
@@ -82,9 +79,8 @@ export const addCommand = new Command("add")
                 for (const envVar of options.env) {
                     const [key, ...valueParts] = envVar.split("=");
                     if (!key || valueParts.length === 0) {
-                        logger.error(`Invalid environment variable format: ${envVar}`);
                         logger.info("Environment variables must be in KEY=VALUE format");
-                        process.exit(1);
+                        handleCliError(`Invalid environment variable format: ${envVar}`);
                     }
                     envVars[key] = valueParts.join("=");
                 }
@@ -104,16 +100,14 @@ export const addCommand = new Command("add")
 
             let useProject = false;
             if (options.global && options.project) {
-                logger.error("Cannot use both --global and --project flags");
-                process.exit(1);
+                handleCliError("Cannot use both --global and --project flags");
             } else if (options.global) {
                 useProject = false;
             } else if (options.project) {
                 if (!isProject) {
-                    logger.error(
+                    handleCliError(
                         "Not in a TENEX project directory. Use --global flag or run from a project."
                     );
-                    process.exit(1);
                 }
                 useProject = true;
             } else {
@@ -129,8 +123,7 @@ export const addCommand = new Command("add")
 
             // Check if server name already exists
             if (existingMCP.servers[name]) {
-                logger.error(`MCP server '${name}' already exists`);
-                process.exit(1);
+                handleCliError(`MCP server '${name}' already exists`);
             }
 
             // Add new server
@@ -156,7 +149,6 @@ export const addCommand = new Command("add")
             // Exit successfully
             process.exit(0);
         } catch (error) {
-            logger.error("Failed to add MCP server:", error);
-            process.exit(1);
+            handleCliError(error, "Failed to add MCP server");
         }
     });

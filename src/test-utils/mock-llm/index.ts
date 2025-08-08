@@ -4,6 +4,7 @@ export * from "./scenarios";
 
 import { MockLLMService } from "./MockLLMService";
 import type { MockLLMConfig, MockLLMScenario } from "./types";
+import type { ToolCall } from "@/llm/types";
 import { allScenarios } from "./scenarios";
 
 /**
@@ -45,7 +46,7 @@ export function createMockLLMService(
  */
 export function createSimpleMock(
     content: string,
-    toolCalls?: any[]
+    toolCalls?: ToolCall[]
 ): MockLLMService {
     return new MockLLMService({
         defaultResponse: { content, toolCalls }

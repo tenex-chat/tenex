@@ -85,10 +85,13 @@ describe("Example E2E Test with Mock LLM", () => {
         
         // Simulate multiple continues
         for (let i = 0; i < 5; i++) {
-            await loopMock.chat([
-                { role: "system", content: "You are the Orchestrator agent" },
-                { role: "user", content: "continue" }
-            ], "mock-model");
+            await loopMock.complete({
+                messages: [
+                    { role: "system", content: "You are the Orchestrator agent" },
+                    { role: "user", content: "continue" }
+                ],
+                options: { configName: "mock-model" }
+            });
         }
         
         const history = (loopMock as any).getRequestHistory();
