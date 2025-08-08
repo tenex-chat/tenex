@@ -1,6 +1,7 @@
 import type { LLMProvider } from "@/llm/types";
 import search from "@inquirer/search";
 import { getModelsForProvider } from "../models";
+import type { ModelsList } from "multi-llm-ts";
 
 export interface ModelSelectionResult {
     model: string;
@@ -80,7 +81,7 @@ export class ModelSelector {
         }
     }
 
-    getAvailableModelCount(modelsList: any): number {
+    getAvailableModelCount(modelsList: ModelsList | null): number {
         if (!modelsList || !modelsList.chat) return 0;
         return modelsList.chat.length;
     }

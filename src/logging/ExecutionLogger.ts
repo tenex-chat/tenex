@@ -14,8 +14,8 @@ export type LogEvent = {
     conversationId: string;
     agent: string;
 } & (
-    | { type: "tool_call"; tool: string; args?: any; }
-    | { type: "tool_result"; tool: string; status: "success" | "error"; result?: any; error?: string; duration: number; }
+    | { type: "tool_call"; tool: string; args?: Record<string, unknown>; }
+    | { type: "tool_result"; tool: string; status: "success" | "error"; result?: unknown; error?: string; duration: number; }
     | { type: "phase_transition"; from: Phase; to: Phase; reason: string; }
     | { type: "routing"; targetAgents: string[]; targetPhase?: Phase; reason: string; }
     | { type: "conversation_start"; userMessage: string; eventId?: string; }
@@ -249,14 +249,6 @@ export class ExecutionLogger {
         });
     }
 
-    // Legacy method stubs for compatibility (no-op)
-    agentThinking(): void {
-        // No-op - removed in simplification
-    }
-
-    agentDecision(): void {
-        // No-op - removed in simplification
-    }
 }
 
 /**

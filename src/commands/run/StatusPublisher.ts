@@ -5,6 +5,27 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
+/**
+ * StatusPublisher handles periodic publishing of status events to Nostr.
+ * 
+ * This class manages the lifecycle of status event publishing, including:
+ * - Starting and stopping the periodic publishing interval
+ * - Creating and publishing status events with agent and model information
+ * - Handling errors gracefully to ensure the main process continues
+ * 
+ * Status events are published at regular intervals (STATUS_INTERVAL_MS) and include:
+ * - Project reference tags
+ * - Agent pubkeys and slugs
+ * - Model configurations
+ * 
+ * @example
+ * ```typescript
+ * const publisher = new StatusPublisher();
+ * await publisher.startPublishing('/path/to/project');
+ * // ... later
+ * publisher.stopPublishing();
+ * ```
+ */
 export class StatusPublisher {
     private statusInterval?: NodeJS.Timeout;
 
@@ -57,8 +78,8 @@ export class StatusPublisher {
             } else {
                 logWarning("ProjectContext not initialized for status event");
             }
-        } catch {
-            logWarning("Could not load agent information for status event");
+        } catch (err) {
+            logWarning(`Could not load agent information for status event: ${formatAnyError(err)}`);
         }
     }
 
@@ -86,8 +107,8 @@ export class StatusPublisher {
                     }
                 }
             }
-        } catch {
-            logWarning("Could not load LLM information for status event model tags");
+        } catch (err) {
+            logWarning(`Could not load LLM information for status event model tags: ${formatAnyError(err)}`);
         }
     }
 }
