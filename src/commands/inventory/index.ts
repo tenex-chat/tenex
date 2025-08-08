@@ -50,9 +50,9 @@ inventoryCommand
 
             await updateInventory(projectPath, files);
 
-            console.log("\n✅ Inventory update completed successfully!");
-            console.log(`📝 Updated inventory for ${files.length} file(s)`);
-            console.log("📋 Updated inventory saved to context/INVENTORY.md");
+            logger.info(chalk.green("\n✅ Inventory update completed successfully!"));
+            logger.info(chalk.blue(`📝 Updated inventory for ${files.length} file(s)`));
+            logger.info(chalk.blue("📋 Updated inventory saved to context/INVENTORY.md"));
         } catch (error) {
             handleCliError(error, "Failed to update inventory");
         }

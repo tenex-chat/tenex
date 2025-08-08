@@ -1,5 +1,4 @@
 import type { MockLLMScenario, MockLLMResponse } from "../types";
-import type { ToolCall } from "@/llm/types";
 import { PHASES } from "@/conversations/phases";
 
 const concurrencyResponses: MockLLMResponse[] = [

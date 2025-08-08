@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { logger } from "@/utils/logger";
+import { logger, logError } from "@/utils/logger";
 // CLI entry point for TENEX
 import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
@@ -65,7 +65,7 @@ debug
     .option("-t, --timeout <ms>", "Timeout in milliseconds", parseInt)
     .action((tool, prompt, options) => {
         if (tool !== "claude_code") {
-            console.error("Error: Only 'claude_code' tool is supported for debugging");
+            logError("Only 'claude_code' tool is supported for debugging");
             process.exit(1);
         }
         import("./commands/debug/claudeCode").then(({ runDebugClaudeCode }) =>

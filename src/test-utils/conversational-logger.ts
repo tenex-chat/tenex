@@ -87,7 +87,7 @@ export class ConversationalLogger {
                         console.log(this.formatLogLine(agentName, '🎯', timeStamp, message));
                         return;
                     }
-                } catch (_e) {
+                } catch {
                     // Not a JSON routing response, handle normally
                 }
             }
@@ -128,7 +128,7 @@ export class ConversationalLogger {
                         const message = `${formattedAgent}: "Continuing with next phase - ${args.summary || args.reason || 'proceeding'}"`;
                         console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                     }
-                } catch (_e) {
+                } catch {
                     const message = `${formattedAgent}: "Continuing workflow..."`;
                     console.log(this.formatLogLine(agentName, '🔄', timeStamp, message));
                 }
@@ -141,7 +141,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Task completed - ${args.finalResponse || args.summary || 'done'}"`;
                     console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
-                } catch (_e) {
+                } catch {
                     const message = `${formattedAgent}: "Task completed successfully"`;
                     console.log(this.formatLogLine(agentName, '✅', timeStamp, message));
                 }
@@ -154,7 +154,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Executing: ${args.command}"`;
                     console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
-                } catch (_e) {
+                } catch {
                     const message = `${formattedAgent}: "Executing shell command..."`;
                     console.log(this.formatLogLine(agentName, '⚡', timeStamp, message));
                 }
@@ -167,7 +167,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Analyzing project structure in ${args.paths?.join(', ') || 'current directory'}"`;
                     console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
-                } catch (_e) {
+                } catch {
                     const message = `${formattedAgent}: "Generating project inventory..."`;
                     console.log(this.formatLogLine(agentName, '📋', timeStamp, message));
                 }
@@ -181,7 +181,7 @@ export class ConversationalLogger {
                         : JSON.parse(toolCall.function?.arguments || '{}');
                     const message = `${formattedAgent}: "Writing to ${args.path || args.filename || 'file'}"`;
                     console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
-                } catch (_e) {
+                } catch {
                     const message = `${formattedAgent}: "Writing file..."`;
                     console.log(this.formatLogLine(agentName, '📝', timeStamp, message));
                 }

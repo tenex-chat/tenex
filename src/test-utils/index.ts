@@ -34,7 +34,7 @@ export async function createTempDir(prefix = "tenex-test-"): Promise<string> {
 export async function cleanupTempDir(dirPath: string): Promise<void> {
     try {
         await fs.rm(dirPath, { recursive: true, force: true });
-    } catch (error) {
+    } catch {
         // Ignore errors during cleanup
     }
 }
