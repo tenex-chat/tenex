@@ -3,7 +3,7 @@ import { mock } from "bun:test";
 /**
  * Common mock setup for services module used across many tests
  */
-export function setupServicesMock(projectPath = "/test/project") {
+export function setupServicesMock(projectPath = "/test/project"): void {
     mock.module("@/services", () => ({
         getProjectContext: () => ({
             projectPath,
@@ -23,7 +23,7 @@ export function setupServicesMock(projectPath = "/test/project") {
 /**
  * Common mock setup for execution time tracking
  */
-export function setupExecutionTimeMock() {
+export function setupExecutionTimeMock(): void {
     mock.module("@/conversations/executionTime", () => ({
         startExecutionTime: mock(() => {}),
         stopExecutionTime: mock(() => {})
@@ -33,7 +33,7 @@ export function setupExecutionTimeMock() {
 /**
  * Common mock setup for execution logger
  */
-export function setupExecutionLoggerMock() {
+export function setupExecutionLoggerMock(): void {
     mock.module("@/logging/ExecutionLogger", () => ({
         createExecutionLogger: () => ({
             logToolCall: () => {},
@@ -51,7 +51,7 @@ export function setupExecutionLoggerMock() {
 /**
  * Common mock setup for tracing
  */
-export function setupTracingMock() {
+export function setupTracingMock(): void {
     mock.module("@/tracing", () => ({
         createTracingContext: () => ({ id: "trace-id" }),
         createAgentExecutionContext: (parent: any, agentName: string) => ({ 
@@ -64,7 +64,7 @@ export function setupTracingMock() {
 /**
  * Common mock setup for agent utils
  */
-export function setupAgentUtilsMock(tools: any[] = []) {
+export function setupAgentUtilsMock(tools: any[] = []): void {
     mock.module("@/agents/utils", () => ({
         getAvailableTools: () => tools,
         createAgentPrompt: () => "Test agent prompt"
@@ -74,7 +74,7 @@ export function setupAgentUtilsMock(tools: any[] = []) {
 /**
  * Common mock setup for tool registry
  */
-export function setupToolRegistryMock() {
+export function setupToolRegistryMock(): void {
     mock.module("@/tools/registry", () => ({
         toolRegistry: {
             getTool: (name: string) => ({
@@ -89,7 +89,7 @@ export function setupToolRegistryMock() {
 /**
  * Setup all common mocks at once
  */
-export function setupCommonTestMocks(projectPath = "/test/project") {
+export function setupCommonTestMocks(projectPath = "/test/project"): void {
     setupServicesMock(projectPath);
     setupExecutionTimeMock();
     setupExecutionLoggerMock();

@@ -7,7 +7,7 @@ import * as services from "@/services";
 import { logger } from "@/utils/logger";
 
 // Create a factory for mock tasks
-const createMockTask = () => {
+const createMockTask = (): any => {
     const task = {
         title: "",
         content: "",

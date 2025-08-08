@@ -91,7 +91,7 @@ export async function waitFor(
 /**
  * Mock file system operations
  */
-export function mockFileSystem(files: Map<string, string>) {
+export function mockFileSystem(files: Map<string, string>): Map<string, string> {
     mock.module("@/lib/fs", () => ({
         fileExists: mock((path: string) => files.has(path)),
         readFile: mock((path: string) => {
