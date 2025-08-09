@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { ConversationManager } from "../ConversationManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 
 // Mock the persistence module
@@ -32,7 +32,7 @@ mock.module("@/nostr", () => ({
 }));
 
 // Mock project context and utils
-const mockAgents = new Map<string, Agent>([
+const mockAgents = new Map<string, AgentInstance>([
     ["project-manager", {
         slug: "project-manager",
         name: "Project Manager",

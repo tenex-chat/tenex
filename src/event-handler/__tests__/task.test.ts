@@ -3,14 +3,14 @@ import { NDKTask } from "@nostr-dev-kit/ndk";
 import { handleTask } from "../task";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ConversationManager } from "@/conversations";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { createMockAgent } from "@/test-utils";
 
 describe("handleTask", () => {
     let mockConversationManager: ConversationManager;
     let mockAgentExecutor: AgentExecutor;
-    let mockAgent: Agent;
-    let mockOrchestratorAgent: Agent;
+    let mockAgent: AgentInstance;
+    let mockOrchestratorAgent: AgentInstance;
     let mockProjectContext: any;
     let mockEvent: NDKTask;
     let mockPublisher: any;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt } from "../systemPromptBuilder";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { PHASES } from "@/conversations/phases";
 // Import all required fragments
 import "@/prompts/fragments/agentFragments";

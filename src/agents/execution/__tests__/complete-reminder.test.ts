@@ -1,7 +1,7 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import { ReasonActLoop } from "../ReasonActLoop";
 import type { LLMService, StreamEvent } from "@/llm/types";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { PHASES } from "@/conversations/phases";
 

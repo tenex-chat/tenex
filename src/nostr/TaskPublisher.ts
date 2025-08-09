@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -28,7 +28,7 @@ export class TaskPublisher {
 
     constructor(
         private ndk: NDK,
-        private agent: Agent
+        private agent: AgentInstance
     ) {}
 
     async createTask(options: TaskCreationOptions): Promise<NDKTask> {

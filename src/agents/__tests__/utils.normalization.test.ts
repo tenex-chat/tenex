@@ -1,8 +1,8 @@
 import { findAgentByName } from "../utils";
-import type { Agent } from "../types";
+import type { AgentInstance } from "../types";
 
 describe("findAgentByName normalization", () => {
-    let agents: Map<string, Agent>;
+    let agents: Map<string, AgentInstance>;
 
     beforeEach(() => {
         // Set up test agents

@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
@@ -12,7 +12,7 @@ import { agentCompletionGuidanceFragment } from "./agent-completion-guidance";
 
 // Complete agent system prompt for execution
 interface AgentSystemPromptArgs {
-    agent: Agent;
+    agent: AgentInstance;
     phase: Phase;
     projectTitle: string;
 }

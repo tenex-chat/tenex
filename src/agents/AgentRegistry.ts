@@ -2,7 +2,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { AgentPublisher } from "@/agents/AgentPublisher";
-import type { Agent, AgentConfig, AgentConfigOptionalNsec, StoredAgentData } from "@/agents/types";
+import type { AgentInstance, AgentConfig, AgentConfigOptionalNsec, StoredAgentData } from "@/agents/types";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
@@ -17,8 +17,8 @@ import { getDefaultToolsForAgent } from "./constants";
 import { isToollessBackend } from "./utils";
 
 export class AgentRegistry {
-    private agents: Map<string, Agent> = new Map();
-    private agentsByPubkey: Map<string, Agent> = new Map();
+    private agents: Map<string, AgentInstance> = new Map();
+    private agentsByPubkey: Map<string, AgentInstance> = new Map();
     private registryPath: string;
     private agentsDir: string;
     private registry: TenexAgents = {};
@@ -108,7 +108,7 @@ export class AgentRegistry {
         name: string,
         config: AgentConfigOptionalNsec,
         ndkProject?: NDKProject
-    ): Promise<Agent> {
+    ): Promise<AgentInstance> {
         // Check if agent already exists
         const existingAgent = this.agents.get(name);
         if (existingAgent) {
@@ -279,7 +279,7 @@ export class AgentRegistry {
         const isBuiltIn = getBuiltInAgents().some((builtIn) => builtIn.slug === name);
 
         // Create Agent instance with all properties set
-        const agent: Agent = {
+        const agent: AgentInstance = {
             name: agentName,
             pubkey,
             signer,
@@ -320,23 +320,23 @@ export class AgentRegistry {
         return agent;
     }
 
-    getAgent(name: string): Agent | undefined {
+    getAgent(name: string): AgentInstance | undefined {
         return this.agents.get(name);
     }
 
-    getAgentByPubkey(pubkey: string): Agent | undefined {
+    getAgentByPubkey(pubkey: string): AgentInstance | undefined {
         return this.agentsByPubkey.get(pubkey);
     }
 
-    getAllAgents(): Agent[] {
+    getAllAgents(): AgentInstance[] {
         return Array.from(this.agents.values());
     }
 
-    getAllAgentsMap(): Map<string, Agent> {
+    getAllAgentsMap(): Map<string, AgentInstance> {
         return new Map(this.agents);
     }
 
-    getAgentByName(name: string): Agent | undefined {
+    getAgentByName(name: string): AgentInstance | undefined {
         return Array.from(this.agents.values()).find((agent) => agent.name === name);
     }
 
@@ -355,7 +355,7 @@ export class AgentRegistry {
     async removeAgentByEventId(eventId: string): Promise<boolean> {
         // Find the agent with this event ID
         let agentSlugToRemove: string | undefined;
-        let agentToRemove: Agent | undefined;
+        let agentToRemove: AgentInstance | undefined;
 
         for (const [slug, agent] of this.agents) {
             if (agent.eventId === eventId) {
@@ -517,7 +517,7 @@ export class AgentRegistry {
     /**
      * Get the orchestrator agent if one exists
      */
-    getOrchestratorAgent(): Agent | undefined {
+    getOrchestratorAgent(): AgentInstance | undefined {
         // Look for the orchestrator by slug first (for built-in orchestrator)
         const orchestrator = this.agents.get("orchestrator");
         if (orchestrator) return orchestrator;
@@ -579,7 +579,7 @@ export class AgentRegistry {
         }
     }
 
-    async loadAgentBySlug(slug: string, fromGlobal = false): Promise<Agent | null> {
+    async loadAgentBySlug(slug: string, fromGlobal = false): Promise<AgentInstance | null> {
         const registryToUse = fromGlobal ? this.globalRegistry : this.registry;
         const registryEntry = registryToUse[slug];
         if (!registryEntry) {

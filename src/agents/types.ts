@@ -16,7 +16,7 @@ export interface AgentSummary {
 /**
  * Complete agent configuration and identity
  */
-export interface Agent {
+export interface AgentInstance {
     /** Display name of the agent */
     name: string;
     /** Nostr public key for agent identity */
@@ -25,7 +25,7 @@ export interface Agent {
     signer: NDKPrivateKeySigner;
     /** Primary role/function of the agent */
     role: string;
-    /** Agent description from NDKAgent event */
+    /** Agent description from NDKAgentDefinition event */
     description?: string;
     /** System instructions that guide agent behavior */
     instructions?: string;
@@ -37,7 +37,7 @@ export interface Agent {
     tools: Tool[];
     /** Whether this agent has access to MCP tools (defaults to true except for orchestrator) */
     mcp?: boolean;
-    /** NDKAgent event ID for persisted configuration */
+    /** NDKAgentDefinition event ID for persisted configuration */
     eventId?: string;
     /** Agent slug/key from agents.json configuration */
     slug: string;
@@ -105,7 +105,7 @@ export interface StoredAgentData {
  */
 export interface AgentConfig extends StoredAgentData {
     nsec: string; // Private key from agents.json registry
-    eventId?: string; // NDKAgent event ID if created from Nostr event
+    eventId?: string; // NDKAgentDefinition event ID if created from Nostr event
     pubkey?: string; // Public key derived from nsec
 }
 

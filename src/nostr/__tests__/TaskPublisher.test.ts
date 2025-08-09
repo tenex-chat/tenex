@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:te
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKTask } from "@nostr-dev-kit/ndk";
 import { TaskPublisher } from "../TaskPublisher";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import * as services from "@/services";
 import { logger } from "@/utils/logger";
 
@@ -50,7 +50,7 @@ mock.module("@nostr-dev-kit/ndk", () => {
 describe("TaskPublisher", () => {
     let taskPublisher: TaskPublisher;
     let mockNDK: NDK;
-    let mockAgent: Agent;
+    let mockAgent: AgentInstance;
     let mockProjectContext: any;
     let loggerDebugSpy: any;
 

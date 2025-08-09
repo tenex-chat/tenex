@@ -13,7 +13,7 @@ import {
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
 import { ClaudeBackend } from "./ClaudeBackend";
@@ -38,7 +38,7 @@ export class AgentExecutor {
     /**
      * Get the appropriate execution backend based on agent configuration
      */
-    private getBackend(agent: Agent): ExecutionBackend {
+    private getBackend(agent: AgentInstance): ExecutionBackend {
         const backendType = agent.backend || "reason-act-loop";
 
         switch (backendType) {

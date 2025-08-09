@@ -1,4 +1,4 @@
-import type { Agent } from "./types";
+import type { AgentInstance } from "./types";
 import { analyze } from "../tools/implementations/analyze";
 import { generateInventoryTool } from "../tools/implementations/generateInventory";
 import { learnTool } from "../tools/implementations/learn";
@@ -14,7 +14,7 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * Get all available tools for an agent based on their role
  * All agents now have access to all tools except orchestrator-only tools
  */
-export function getDefaultToolsForAgent(agent: Agent): string[] {
+export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     let tools = [readPathTool.name, learnTool.name, analyze.name];
 
     // Built-in agents

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, mock, Mock } from "bun:test";
 import type { ExecutionContext } from "../types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { ConversationManager } from "@/conversations/ConversationManager";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Tool } from "@/tools/types";
 import type { Message } from "multi-llm-ts";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -61,7 +61,7 @@ describe("ClaudeBackend", () => {
     let mockConversationManager: ConversationManager;
     let mockOrchestrator: ClaudeTaskOrchestrator;
     let mockTaskPublisher: TaskPublisher;
-    let mockAgent: Agent;
+    let mockAgent: AgentInstance;
     let mockTriggeringEvent: NDKEvent;
 
     beforeEach(() => {

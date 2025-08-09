@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -14,13 +14,13 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface BuildSystemPromptOptions {
     // Required data
-    agent: Agent;
+    agent: AgentInstance;
     phase: Phase;
     projectTitle: string;
     projectRepository?: string;
 
     // Optional runtime data
-    availableAgents?: Agent[];
+    availableAgents?: AgentInstance[];
     conversation?: Conversation;
     agentLessons?: Map<string, NDKAgentLesson[]>;
     mcpTools?: Tool[];

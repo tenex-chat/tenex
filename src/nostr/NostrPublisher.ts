@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { getTotalExecutionTimeSeconds } from "@/conversations/executionTime";
 import type { Conversation } from "@/conversations/types";
 import type { ConversationManager } from "@/conversations/ConversationManager";
@@ -17,7 +17,7 @@ import { TypingIndicatorManager } from "./TypingIndicatorManager";
 // Context passed to publisher on creation
 export interface NostrPublisherContext {
     conversationId: string;
-    agent: Agent;
+    agent: AgentInstance;
     triggeringEvent: NDKEvent;
     conversationManager: ConversationManager;
 }

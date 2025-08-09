@@ -1,9 +1,9 @@
 import { PromptBuilder } from "../../core/PromptBuilder";
 import "../available-agents"; // Ensure fragment is registered
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 
 describe("Available Agents Fragment", () => {
-    const mockAgents: Agent[] = [
+    const mockAgents: AgentInstance[] = [
         {
             name: "Project Manager",
             pubkey: "pm123",

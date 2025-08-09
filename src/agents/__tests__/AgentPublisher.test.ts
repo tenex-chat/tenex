@@ -145,7 +145,7 @@ describe("AgentPublisher", () => {
     });
 
     describe("publishAgentRequest", () => {
-        it("should publish agent request without NDKAgent event", async () => {
+        it("should publish agent request without NDKAgentDefinition event", async () => {
             const agentConfig: Omit<AgentConfig, "nsec"> = {
                 name: "TestAgent",
                 role: "Executor",
@@ -174,7 +174,7 @@ describe("AgentPublisher", () => {
             expect(result).toBe(mockNDKEvent);
         });
 
-        it("should publish agent request with NDKAgent event reference", async () => {
+        it("should publish agent request with NDKAgentDefinition event reference", async () => {
             const agentConfig: Omit<AgentConfig, "nsec"> = {
                 name: "TestAgent",
                 role: "Executor",
@@ -190,7 +190,7 @@ describe("AgentPublisher", () => {
                 ndkAgentEventId
             );
 
-            // Verify e-tag was added for NDKAgent event
+            // Verify e-tag was added for NDKAgentDefinition event
             expect(mockNDKEventConstructor).toHaveBeenCalledWith(mockNDK, {
                 kind: EVENT_KINDS.AGENT_REQUEST,
                 content: "",
@@ -259,7 +259,7 @@ describe("AgentPublisher", () => {
             expect(mockNDKEvent.publish).toHaveBeenCalledTimes(2);
         });
 
-        it("should propagate NDKAgent event ID to request", async () => {
+        it("should propagate NDKAgentDefinition event ID to request", async () => {
             const agentConfig: Omit<AgentConfig, "nsec"> = {
                 name: "TestAgent",
                 role: "Executor",

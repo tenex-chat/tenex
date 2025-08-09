@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
@@ -32,9 +32,9 @@ export class ProjectContext {
     /**
      * The orchestrator agent for this project
      */
-    public orchestrator: Agent;
+    public orchestrator: AgentInstance;
 
-    public agents: Map<string, Agent>;
+    public agents: Map<string, AgentInstance>;
 
     /**
      * Lessons learned by agents in this project
@@ -42,7 +42,7 @@ export class ProjectContext {
      */
     public readonly agentLessons: Map<string, NDKAgentLesson[]>;
 
-    constructor(project: NDKProject, agents: Map<string, Agent>) {
+    constructor(project: NDKProject, agents: Map<string, AgentInstance>) {
         this.project = project;
 
         // Debug logging
@@ -60,7 +60,7 @@ export class ProjectContext {
         });
 
         // Find the orchestrator agent dynamically
-        let orchestratorAgent: Agent | undefined;
+        let orchestratorAgent: AgentInstance | undefined;
         for (const agent of agents.values()) {
             if (agent.isOrchestrator) {
                 orchestratorAgent = agent;
@@ -86,11 +86,11 @@ export class ProjectContext {
     // AGENT ACCESS HELPERS
     // =====================================================================================
 
-    getAgent(slug: string): Agent | undefined {
+    getAgent(slug: string): AgentInstance | undefined {
         return this.agents.get(slug);
     }
 
-    getAgentByPubkey(pubkey: Hexpubkey): Agent | undefined {
+    getAgentByPubkey(pubkey: Hexpubkey): AgentInstance | undefined {
         // Find the agent dynamically
         for (const agent of this.agents.values()) {
             if (agent.pubkey === pubkey) {
@@ -101,7 +101,7 @@ export class ProjectContext {
         return undefined;
     }
 
-    getProjectAgent(): Agent {
+    getProjectAgent(): AgentInstance {
         return this.orchestrator;
     }
 
@@ -150,7 +150,7 @@ export class ProjectContext {
      * Safely update project data without creating a new instance.
      * This ensures all parts of the system work with consistent state.
      */
-    updateProjectData(newProject: NDKProject, newAgents: Map<string, Agent>): void {
+    updateProjectData(newProject: NDKProject, newAgents: Map<string, AgentInstance>): void {
         this.project = newProject;
         this.agents = new Map(newAgents);
 
@@ -177,7 +177,7 @@ let projectContext: ProjectContext | undefined = undefined;
 /**
  * Initialize the project context. Should be called once during project startup.
  */
-export function setProjectContext(project: NDKProject, agents: Map<string, Agent>): void {
+export function setProjectContext(project: NDKProject, agents: Map<string, AgentInstance>): void {
     projectContext = new ProjectContext(project, agents);
 }
 

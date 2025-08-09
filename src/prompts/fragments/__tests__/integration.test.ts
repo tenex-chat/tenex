@@ -2,12 +2,12 @@ import { PromptBuilder } from "../../core/PromptBuilder";
 import "../available-agents";
 import "../orchestrator-routing";
 import "../agentFragments";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import { describe, expect, it } from "bun:test";
 
 describe("Agent Routing Integration", () => {
-    const mockAgents: Agent[] = [
+    const mockAgents: AgentInstance[] = [
         {
             name: "Project Manager",
             pubkey: "pm123",

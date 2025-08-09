@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { ConversationManager } from "../ConversationManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import * as services from "@/services";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { PHASES } from "../phases";
 import os from "os";
 import path from "path";

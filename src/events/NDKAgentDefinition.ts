@@ -1,7 +1,7 @@
 import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 
-export class NDKAgent extends NDKEvent {
+export class NDKAgentDefinition extends NDKEvent {
     static kind = 4199;
     static kinds = [4199];
 
@@ -10,8 +10,8 @@ export class NDKAgent extends NDKEvent {
         this.kind ??= 4199;
     }
 
-    static from(event: NDKEvent): NDKAgent {
-        return new NDKAgent(event.ndk, event);
+    static from(event: NDKEvent): NDKAgentDefinition {
+        return new NDKAgentDefinition(event.ndk, event);
     }
 
     get name(): string | undefined {

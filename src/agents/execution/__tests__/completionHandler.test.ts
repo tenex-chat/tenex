@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { handleAgentCompletion } from "../completionHandler";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 describe("completionHandler", () => {
     let mockPublisher: NostrPublisher;
-    let mockAgent: Agent;
-    let mockOrchestratorAgent: Agent;
+    let mockAgent: AgentInstance;
+    let mockOrchestratorAgent: AgentInstance;
     let mockGetProjectContext: any;
 
     beforeEach(() => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { learnTool } from "../learn";
 import type { ExecutionContext } from "../../types";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations/types";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -50,7 +50,7 @@ import { getTotalExecutionTimeSeconds } from "@/conversations/executionTime";
 
 describe("Learn Tool", () => {
     let mockContext: ExecutionContext;
-    let mockAgent: Agent;
+    let mockAgent: AgentInstance;
     let mockConversation: Conversation;
     let mockNDK: NDK;
     let mockLesson: any;

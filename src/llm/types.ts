@@ -20,7 +20,7 @@ export interface ApiKeyResult {
  * No agent or orchestration concerns
  */
 
-import { NDKAgent } from "@/events";
+import { NDKAgentDefinition } from "@/events";
 import { NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
 import type {
     LlmCompletionOpts,
@@ -130,7 +130,7 @@ export const EVENT_KINDS = {
     NEW_CONVERSATION: 11,
     GENERIC_REPLY: NDKKind.GenericReply,
     PROJECT: NDKProject.kind,
-    AGENT_CONFIG: NDKAgent.kind,
+    AGENT_CONFIG: NDKAgentDefinition.kind,
     TASK: NDKTask.kind,
     PROJECT_STATUS: 24010,
     AGENT_REQUEST: 4133,

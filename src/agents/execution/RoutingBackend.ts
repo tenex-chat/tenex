@@ -93,9 +93,28 @@ export class RoutingBackend implements ExecutionBackend {
             for (const agentSlug of routingDecision.agents) {
                 // Handle special END agent to cleanly terminate conversation
                 if (agentSlug === "END") {
-                    tracingLogger.info("🛑 END agent detected - terminating conversation", {
+                    tracingLogger.info("🛑 END agent detected - marking conversation as complete", {
                         reason: routingDecision.reason
                     });
+                    
+                    // Mark the END in orchestrator turns so the orchestrator knows
+                    // the conversation has reached END state
+                    const endTurnId = await this.conversationManager.startOrchestratorTurn(
+                        context.conversationId,
+                        context.phase,
+                        ["END"],
+                        routingDecision.reason || "Workflow complete"
+                    );
+                    
+                    // Mark the END turn as completed immediately since there's no actual agent
+                    const conversation = await this.conversationManager.getConversation(context.conversationId);
+                    if (conversation) {
+                        const endTurn = conversation.orchestratorTurns.find(turn => turn.turnId === endTurnId);
+                        if (endTurn) {
+                            endTurn.isCompleted = true;
+                        }
+                    }
+                    
                     // Log the end of conversation
                     executionLogger.logEvent({
                         type: "execution_complete",

@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 const logInfo = logger.info.bind(logger);
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { getProjectContext } from "@/services";
 import chalk from "chalk";
 
@@ -81,7 +81,7 @@ export class ProjectDisplay {
         }
     }
 
-    private displayAgent(eventId: string, agents: Map<string, Agent>): void {
+    private displayAgent(eventId: string, agents: Map<string, AgentInstance>): void {
         // Find agent by eventId
         const agentEntry = Array.from(agents.entries()).find(
             ([, agent]) => agent.eventId === eventId

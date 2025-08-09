@@ -65,7 +65,7 @@ export class AgentPublisher {
         try {
             const tags: string[][] = [["p", projectPubkey]];
 
-            // Only add e-tag if this agent was created from an NDKAgent event
+            // Only add e-tag if this agent was created from an NDKAgentDefinition event
             if (ndkAgentEventId) {
                 tags.push(["e", ndkAgentEventId, "", "agent-definition"]);
             }
@@ -85,7 +85,7 @@ export class AgentPublisher {
             logger.info("Published agent request", {
                 agentName: agentConfig.name,
                 pubkey: signer.pubkey,
-                hasNDKAgentEvent: !!ndkAgentEventId,
+                hasNDKAgentDefinitionEvent: !!ndkAgentEventId,
             });
 
             return requestEvent;

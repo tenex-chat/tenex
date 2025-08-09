@@ -163,6 +163,13 @@ This ensures:
 - Documentation is updated
 - Lessons are captured for improvement
 
+**Conversation Restart**:
+After reaching END, the orchestrator can restart conversations when new user messages arrive:
+- Detects END in routing history
+- Compares new user request with original
+- Routes to CHAT phase for new requests
+- Maintains full conversation history
+
 ### 4. ConversationManager
 **Location**: `src/conversations/ConversationManager.ts`
 
@@ -329,7 +336,9 @@ RoutingBackend processes the decision:
 for (const agentSlug of routingDecision.agents) {
     // Handle termination
     if (agentSlug === "END") {
-        break; // Conversation complete
+        // Mark conversation as complete in orchestrator turns
+        // This allows restart when new messages arrive
+        break;
     }
     
     // Find agent

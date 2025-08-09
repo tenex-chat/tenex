@@ -1,7 +1,7 @@
 import { getProjectContext } from "@/services/ProjectContext";
 import type { Complete } from "@/tools/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 
@@ -13,7 +13,7 @@ import type { ConversationManager } from "@/conversations/ConversationManager";
 export interface CompletionOptions {
     response: string;
     summary?: string;
-    agent: Agent;
+    agent: AgentInstance;
     conversationId: string;
     publisher: NostrPublisher;
     triggeringEvent?: NDKEvent;

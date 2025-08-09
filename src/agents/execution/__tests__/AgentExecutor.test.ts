@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { AgentExecutor } from "../AgentExecutor";
 import { createMockLLMService, MockFactory } from "@/test-utils";
 import type { ExecutionContext } from "../types";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import { NDK } from "@nostr-dev-kit/ndk";
 
 describe("AgentExecutor", () => {
     let mockLLM: ReturnType<typeof createMockLLMService>;
-    let mockAgent: Agent;
+    let mockAgent: AgentInstance;
     let mockContext: ExecutionContext;
     let mockNDK: NDK;
     let mockConversationManager: ConversationManager;

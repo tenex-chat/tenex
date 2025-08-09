@@ -56,7 +56,7 @@ export class NDKAgentLesson extends NDKEvent {
 
     /**
      * Set the agent that this lesson belongs to.
-     * @param agentEvent The NDKAgent event to reference
+     * @param agentEvent The NDKAgentDefinition event to reference
      */
     set agent(agentEvent: NDKEvent) {
         this.removeTag("e");

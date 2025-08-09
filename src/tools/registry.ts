@@ -7,6 +7,8 @@ import { readPathTool } from "./implementations/readPath";
 import { writeContextFileTool } from "./implementations/writeContextFile";
 import { completeTool } from "./implementations/complete";
 import { shellTool } from "./implementations/shell";
+import { agentsDiscover } from "./implementations/agents-discover";
+import { agentsHire } from "./implementations/agents-hire";
 import type { Tool } from "./types";
 
 // Registry of all available tools
@@ -20,6 +22,8 @@ const toolsMap = new Map<string, Tool<any, any>>([
     ["learn", learnTool],
     ["create_milestone_task", createMilestoneTaskTool],
     ["shell", shellTool],
+    ["agents_discover", agentsDiscover],
+    ["agents_hire", agentsHire],
 ]);
 
 export function getTool(name: string): Tool<any, any> | undefined {

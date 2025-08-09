@@ -1,5 +1,5 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
@@ -87,8 +87,8 @@ export const agentListCommand = new Command("list")
                     await projectRegistry.loadFromProject();
 
                     const projectAgents = projectRegistry.getAllAgents();
-                    const projectOnlyAgents: Agent[] = [];
-                    const overriddenAgents: Agent[] = [];
+                    const projectOnlyAgents: AgentInstance[] = [];
+                    const overriddenAgents: AgentInstance[] = [];
 
                     // Categorize agents
                     for (const agent of projectAgents) {

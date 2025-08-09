@@ -24,7 +24,7 @@ export async function fetchAgentDefinition(
     try {
         const filter = {
             ids: [eventId],
-            kinds: [4199], // NDKAgent kind
+            kinds: [4199], // NDKAgentDefinition kind
         };
 
         const event = await ndk.fetchEvent(filter, {

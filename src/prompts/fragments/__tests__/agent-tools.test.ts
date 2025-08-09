@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { agentToolsFragment } from "../agent-tools";
 import { learnTool } from "@/tools/implementations/learn";
 

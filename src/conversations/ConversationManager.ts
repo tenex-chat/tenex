@@ -18,7 +18,7 @@ import type { ConversationPersistenceAdapter } from "./persistence/types";
 import type { Conversation, ConversationMetadata } from "./types";
 import { getNDK } from "@/nostr";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 
 export class ConversationManager {
@@ -498,7 +498,18 @@ export class ConversationManager {
         }
 
         // Get original user request from first event
-        const user_request = conversation.history[0]?.content || "";
+        const original_request = conversation.history[0]?.content || "";
+        
+        // Get the most recent user message (might be different if conversation restarted)
+        let user_request = original_request;
+        for (let i = conversation.history.length - 1; i >= 0; i--) {
+            const event = conversation.history[i];
+            // Check for user messages (kind 14)
+            if (event.kind === 14 && event.tags?.some(tag => tag[0] === "t" && tag[1] === "user")) {
+                user_request = event.content || "";
+                break;
+            }
+        }
         
         // Build routing history from orchestrator turns
         const routing_history: import("./types").RoutingEntry[] = [];

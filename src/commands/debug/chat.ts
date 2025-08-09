@@ -3,7 +3,7 @@ import * as readline from "node:readline";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { ConversationManager } from "@/conversations/ConversationManager";
 import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
@@ -55,7 +55,7 @@ export async function runDebugChat(
         const agentRegistry = new AgentRegistry(projectPath, false);
         await agentRegistry.loadFromProject();
 
-        let agent: Agent;
+        let agent: AgentInstance;
 
         if (initialAgentName) {
             const existingAgent = agentRegistry.getAgent(initialAgentName);

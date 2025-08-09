@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { isClaudeBackend, isRoutingBackend, isToollessBackend } from "../utils";
-import type { Agent } from "../types";
+import type { AgentInstance } from "../types";
 
 describe("Agent Utils", () => {
     describe("isClaudeBackend", () => {

@@ -25,6 +25,11 @@ After VERIFICATION → Route to CHORES phase
 After CHORES → Route to REFLECTION phase
 After REFLECTION → Route to: {"agents": ["END"], "reason": "Workflow complete"}
 
+RESTART HANDLING:
+If routing_history contains an END agent entry AND there's a new user_request different from the original:
+→ Route to CHAT phase to handle the new request
+→ Include reason: "New user request after completion"
+
 You receive JSON with user_request, routing_history, and current_routing.
 Follow the phase sequence for quality unless user explicitly requests otherwise.
 You are invisible - users never see your output.`,

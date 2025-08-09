@@ -5,7 +5,7 @@ import type { ConversationManager } from "../conversations";
 import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
-import { Agent } from "@/agents";
+import { AgentInstance } from "@/agents";
 import { createNostrPublisher } from "../nostr/factory";
 
 const logInfo = logger.info.bind(logger);
@@ -47,7 +47,7 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
         const projectCtx = getProjectContext();
         const orchestratorAgent = projectCtx.getProjectAgent();
 
-        let targetAgent: Agent | undefined;
+        let targetAgent: AgentInstance | undefined;
 
         // If there are p-tags, check if any match system agents
         if (mentionedPubkeys.length > 0) {

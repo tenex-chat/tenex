@@ -1,11 +1,11 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 // Available agents fragment - shows all agents available in the project
 interface AvailableAgentsArgs {
-    agents: Agent[];
-    currentAgent?: Agent;
+    agents: AgentInstance[];
+    currentAgent?: AgentInstance;
     currentAgentPubkey?: string;
 }
 

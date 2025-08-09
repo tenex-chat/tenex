@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentRegistry } from "../agents/AgentRegistry";
-import type { Agent } from "../agents/types";
+import type { AgentInstance } from "../agents/types";
 import { getNDK } from "../nostr";
 import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
 import { fetchAgentDefinition } from "../utils/agentFetcher";
@@ -144,7 +144,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         await agentRegistry.loadFromProject();
 
         // Update the project context with new agents
-        const updatedAgents = new Map<string, Agent>();
+        const updatedAgents = new Map<string, AgentInstance>();
         for (const agent of agentRegistry.getAllAgents()) {
             updatedAgents.set(agent.slug, agent);
         }

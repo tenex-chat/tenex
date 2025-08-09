@@ -1,6 +1,6 @@
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { fragmentRegistry } from "@/prompts/core/FragmentRegistry";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

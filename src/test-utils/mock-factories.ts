@@ -1,6 +1,6 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { Conversation } from "@/conversations/types";
 import type { Phase } from "@/conversations/phases";
@@ -62,7 +62,7 @@ export function createMockNDKEvent(overrides?: Partial<NDKEvent>): NDKEvent {
     return new MockNostrEvent(overrides) as NDKEvent;
 }
 
-export function createMockAgent(overrides?: Partial<Agent>): Agent {
+export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstance {
     const mockSigner = {
         privateKey: "mock-private-key",
         sign: async () => "mock-signature"
@@ -85,7 +85,7 @@ export function createMockAgent(overrides?: Partial<Agent>): Agent {
         isBuiltIn: false,
         backend: "reason-act-loop",
         ...overrides
-    } as Agent;
+    } as AgentInstance;
 }
 
 export function createMockConversation(overrides?: Partial<Conversation>): Conversation {
@@ -207,7 +207,7 @@ export class MockBuilder<T> {
 }
 
 // Usage example:
-// const agent = new MockBuilder<Agent>()
+// const agent = new MockBuilder<AgentInstance>()
 //     .with('name', 'TestAgent')
 //     .with('allowedTools', ['test-tool'])
 //     .build(createMockAgent());

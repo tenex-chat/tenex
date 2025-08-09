@@ -3,7 +3,7 @@ import { ConversationManager } from "../ConversationManager";
 import { FileSystemAdapter } from "../persistence";
 import { getNDK } from "@/nostr";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { PHASES } from "@/conversations/phases";
 import { getProjectContext } from "@/services";
 
@@ -40,7 +40,7 @@ describe("ConversationManager - Nostr Entity Processing", () => {
 
         // Setup mock project context
         mockProjectContext = {
-            agents: new Map<string, Agent>([
+            agents: new Map<string, AgentInstance>([
                 ["test-agent", {
                     pubkey: "test-agent-pubkey",
                     slug: "test-agent",

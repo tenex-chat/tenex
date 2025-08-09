@@ -1,9 +1,9 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "@/prompts/core/FragmentRegistry";
 import type { PromptFragment } from "@/prompts/core/types";
 
 interface AgentToolsArgs {
-    agent: Agent;
+    agent: AgentInstance;
 }
 
 export const agentToolsFragment: PromptFragment<AgentToolsArgs> = {

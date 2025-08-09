@@ -1,4 +1,4 @@
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import { NostrPublisher } from "./NostrPublisher";
@@ -8,7 +8,7 @@ import { NostrPublisher } from "./NostrPublisher";
  */
 export async function createNostrPublisher(params: {
     conversationId: string;
-    agent: Agent;
+    agent: AgentInstance;
     triggeringEvent: NDKEvent;
     conversationManager: ConversationManager;
 }): Promise<NostrPublisher> {

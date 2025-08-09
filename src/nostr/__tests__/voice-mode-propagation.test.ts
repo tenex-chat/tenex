@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { NostrPublisher } from "../NostrPublisher";
 import type { NostrPublisherContext } from "../NostrPublisher";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
