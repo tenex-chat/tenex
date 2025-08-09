@@ -337,6 +337,16 @@ export class ProjectManager implements IProjectManager {
             await fs.access(projectPath);
             const tenexPath = path.join(projectPath, ".tenex");
             await fs.access(tenexPath);
+            
+            // Also verify that config.json exists and has projectNaddr
+            const { config } = await configService.loadConfig(projectPath);
+            if (!config.projectNaddr) {
+                logger.warn("Project directory exists but config is incomplete (missing projectNaddr)", {
+                    projectPath,
+                });
+                return false;
+            }
+            
             return true;
         } catch {
             return false;
