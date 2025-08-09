@@ -73,7 +73,12 @@ export class StatusPublisher {
             if (isProjectContextInitialized()) {
                 const projectCtx = getProjectContext();
                 for (const [agentSlug, agent] of projectCtx.agents) {
-                    event.tags.push(["agent", agent.pubkey, agentSlug]);
+                    // Add "global" as fourth element for global agents
+                    if (agent.isGlobal) {
+                        event.tags.push(["agent", agent.pubkey, agentSlug, "global"]);
+                    } else {
+                        event.tags.push(["agent", agent.pubkey, agentSlug]);
+                    }
                 }
             } else {
                 logWarning("ProjectContext not initialized for status event");

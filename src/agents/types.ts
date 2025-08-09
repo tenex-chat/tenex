@@ -47,6 +47,8 @@ export interface AgentInstance {
     isBuiltIn?: boolean;
     /** Execution backend to use (defaults to 'reason-act-loop') */
     backend?: "reason-act-loop" | "claude" | "routing";
+    /** Whether this agent is from the global configuration */
+    isGlobal?: boolean;
 }
 
 /**

@@ -125,7 +125,8 @@ export class AgentRegistry {
     async ensureAgent(
         name: string,
         config: AgentConfigOptionalNsec,
-        ndkProject?: NDKProject
+        ndkProject?: NDKProject,
+        fromGlobal = false
     ): Promise<AgentInstance> {
         // Check if agent already exists in memory
         const existingAgent = this.agents.get(name);
@@ -353,6 +354,7 @@ export class AgentRegistry {
             isOrchestrator: registryEntry.orchestratorAgent,
             isBuiltIn: isBuiltIn, // Set the isBuiltIn property here
             backend: agentDefinition.backend, // Propagate backend configuration
+            isGlobal: fromGlobal, // Track if agent is from global configuration
         };
 
         // Set tools - use explicit tools if configured, otherwise use defaults
@@ -715,7 +717,7 @@ export class AgentRegistry {
             return this.createAgentInstance(slug, config, registryEntry);
         }
 
-        return this.ensureAgent(slug, config);
+        return this.ensureAgent(slug, config, undefined, fromGlobal);
     }
 
     /**
@@ -769,6 +771,7 @@ export class AgentRegistry {
             isOrchestrator: registryEntry.orchestratorAgent,
             isBuiltIn: isBuiltIn,
             backend: config.backend,
+            isGlobal: true, // createAgentInstance is only called for global agents
         };
 
         // Set tools
