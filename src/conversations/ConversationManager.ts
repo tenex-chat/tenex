@@ -753,8 +753,9 @@ export class ConversationManager {
         // Process each entity
         for (const entity of entities) {
             try {
-                // fetchEvent accepts bech32 directly
-                const event = await ndk.fetchEvent(entity);
+                // Strip the nostr: prefix before passing to fetchEvent
+                const bech32Id = entity.replace('nostr:', '');
+                const event = await ndk.fetchEvent(bech32Id);
                 
                 if (event) {
                     // Inline the event content

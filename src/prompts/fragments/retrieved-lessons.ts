@@ -41,8 +41,8 @@ export const retrievedLessonsFragment: PromptFragment<RetrievedLessonsArgs> = {
         // Use the formatter to create formatted lessons
         const formattedLessons = formatLessonsForAgent(myLessons);
 
-        // Add the learn tool reminder if lessons exist
-        return formattedLessons + "\n\nRemember to use the `learn` tool when you discover new insights or patterns.";
+        // Add the lesson_learn tool reminder if lessons exist
+        return formattedLessons + "\n\nRemember to use the `lesson_learn` tool when you discover new insights or patterns.";
     },
 };
 

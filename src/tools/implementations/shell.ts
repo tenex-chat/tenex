@@ -15,7 +15,7 @@ const shellSchema = z.object({
         .string()
         .optional()
         .describe("Working directory for the command (defaults to project root)"),
-    timeout: z.number().optional().describe(`Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`), 
+    timeout: z.coerce.number().optional().describe(`Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`), 
 });
 
 /**

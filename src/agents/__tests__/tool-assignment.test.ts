@@ -17,7 +17,7 @@ describe("Tool assignment", () => {
             expect(tools).not.toContain("analyze");
             expect(tools).not.toContain("end_conversation");
             expect(tools).not.toContain("continue");
-            expect(tools).not.toContain("learn");
+            expect(tools).not.toContain("lesson_learn");
         });
 
         it("planner and executor agents get default tools (but AgentRegistry removes them for claude backend)", () => {
@@ -38,7 +38,7 @@ describe("Tool assignment", () => {
             // Both agents get default tools from constants.ts
             expect(executorTools).toContain("complete");
             expect(executorTools).toContain("read_path");
-            expect(executorTools).toContain("learn");
+            expect(executorTools).toContain("lesson_learn");
             expect(executorTools).toContain("analyze");
             expect(executorTools).not.toContain("end_conversation");
             expect(executorTools).not.toContain("continue");
@@ -46,7 +46,7 @@ describe("Tool assignment", () => {
             // Planner gets the same default tools
             expect(plannerTools).toContain("complete");
             expect(plannerTools).toContain("read_path");
-            expect(plannerTools).toContain("learn");
+            expect(plannerTools).toContain("lesson_learn");
             expect(plannerTools).toContain("analyze");
             expect(plannerTools).not.toContain("end_conversation");
             expect(plannerTools).not.toContain("continue");

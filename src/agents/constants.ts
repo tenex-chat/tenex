@@ -1,11 +1,9 @@
 import type { AgentInstance } from "./types";
 import { analyze } from "../tools/implementations/analyze";
-import { generateInventoryTool } from "../tools/implementations/generateInventory";
-import { learnTool } from "../tools/implementations/learn";
+import { lessonLearnTool } from "../tools/implementations/learn";
 import { readPathTool } from "../tools/implementations/readPath";
-import { writeContextFileTool } from "@/tools/implementations/writeContextFile";
 import { completeTool } from "../tools/implementations/complete";
-import { shellTool } from "../tools/implementations/shell";
+import { PROJECT_MANAGER_AGENT_DEFINITION } from "./built-in/project-manager";
 
 // Agent slug constants
 export const PROJECT_MANAGER_AGENT = "project-manager" as const;
@@ -15,7 +13,7 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * All agents now have access to all tools except orchestrator-only tools
  */
 export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
-    let tools = [readPathTool.name, learnTool.name, analyze.name];
+    let tools = [readPathTool.name, lessonLearnTool.name, analyze.name];
 
     // Built-in agents
     if (agent.isBuiltIn) {
@@ -28,9 +26,13 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
             tools.push(completeTool.name);
 
             if (agent.slug === PROJECT_MANAGER_AGENT) {
-                tools.push(generateInventoryTool.name);
-                tools.push(writeContextFileTool.name);
-                tools.push(shellTool.name);
+                // Use the tools defined in the PROJECT_MANAGER_AGENT_DEFINITION
+                // This ensures consistency between the definition and runtime
+                if (PROJECT_MANAGER_AGENT_DEFINITION.tools) {
+                    // Replace the default tools with the ones from the definition
+                    // but keep the complete tool since it's added for all non-orchestrator agents
+                    tools = [completeTool.name, ...PROJECT_MANAGER_AGENT_DEFINITION.tools];
+                }
             }
         }
     } else {

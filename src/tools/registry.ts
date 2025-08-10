@@ -2,28 +2,32 @@ import { analyze } from "./implementations/analyze";
 import { createMilestoneTaskTool } from "./implementations/createMilestoneTask";
 import { endConversationTool } from "./implementations/endConversation";
 import { generateInventoryTool } from "./implementations/generateInventory";
-import { learnTool } from "./implementations/learn";
+import { lessonLearnTool } from "./implementations/learn";
+import { lessonGetTool } from "./implementations/lessonGet";
 import { readPathTool } from "./implementations/readPath";
 import { writeContextFileTool } from "./implementations/writeContextFile";
 import { completeTool } from "./implementations/complete";
 import { shellTool } from "./implementations/shell";
 import { agentsDiscover } from "./implementations/agents-discover";
 import { agentsHire } from "./implementations/agents-hire";
+import { mcpDiscover } from "./implementations/mcp-discover";
 import type { Tool } from "./types";
 
 // Registry of all available tools
 const toolsMap = new Map<string, Tool<any, any>>([
-    ["read_path", readPathTool],
-    ["write_context_file", writeContextFileTool],
-    ["complete", completeTool],
-    ["end_conversation", endConversationTool],
-    ["analyze", analyze],
-    ["generate_inventory", generateInventoryTool],
-    ["learn", learnTool],
-    ["create_milestone_task", createMilestoneTaskTool],
-    ["shell", shellTool],
-    ["agents_discover", agentsDiscover],
-    ["agents_hire", agentsHire],
+  ["read_path", readPathTool],
+  ["write_context_file", writeContextFileTool],
+  ["complete", completeTool],
+  ["end_conversation", endConversationTool],
+  ["analyze", analyze],
+  ["generate_inventory", generateInventoryTool],
+  ["lesson_learn", lessonLearnTool],
+  ["lesson_get", lessonGetTool],
+  ["create_milestone_task", createMilestoneTaskTool],
+  ["shell", shellTool],
+  ["agents_discover", agentsDiscover],
+  ["agents_hire", agentsHire],
+  ["discover_capabilities", mcpDiscover],
 ]);
 
 export function getTool(name: string): Tool<any, any> | undefined {

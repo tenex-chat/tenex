@@ -74,10 +74,13 @@ export class ProjectManager implements IProjectManager {
             const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
             const agentRegistry = new AgentRegistry(projectPath, false);
 
-            // Fetch and save agent and MCP definitions
-            await this.fetchAndSaveCapabilities(projectPath, projectData, ndk, project);
+            // Load the registry first to get global agents loaded
+            await agentRegistry.loadFromProject(project);
 
-            // Load all agents including built-ins, passing project
+            // Fetch and save agent and MCP definitions
+            await this.fetchAndSaveCapabilities(projectPath, projectData, ndk, project, agentRegistry);
+
+            // Reload to pick up any new agents that were added
             await agentRegistry.loadFromProject(project);
             const agentMap = agentRegistry.getAllAgentsMap();
             const loadedAgents = new Map();
@@ -279,15 +282,11 @@ export class ProjectManager implements IProjectManager {
         projectPath: string,
         project: ProjectData,
         ndk: NDK,
-        ndkProject?: NDKProject
+        ndkProject: NDKProject | undefined,
+        agentRegistry: any
     ): Promise<void> {
         const agentsDir = path.join(projectPath, ".tenex", "agents");
         await fs.mkdir(agentsDir, { recursive: true });
-
-        // Load the existing agents registry (which should contain the PM agent)
-        const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
-        const agentRegistry = new AgentRegistry(projectPath, false);
-        await agentRegistry.loadFromProject(ndkProject);
 
         // Process agent tags
         for (const eventId of project.agentEventIds) {

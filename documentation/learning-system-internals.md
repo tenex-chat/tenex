@@ -70,9 +70,9 @@ class NDKAgentLesson extends NDKEvent {
 The primary interface for lesson creation:
 
 ```typescript
-const learnTool: Tool<LearnInput, LearnOutput> = {
-    name: "learn",
-    description: "Record an important lesson learned during execution",
+const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
+    name: "lesson_learn",
+    description: "Record an important lesson learned during execution, with optional detailed version",
     
     // Extensive prompt fragment with metacognition checks
     promptFragment: `...metacognition guidelines...`,

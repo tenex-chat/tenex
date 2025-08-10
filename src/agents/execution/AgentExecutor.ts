@@ -237,6 +237,34 @@ export class AgentExecutor {
 
         messages.push(new Message("system", systemPrompt));
 
+        // Check for #debug flag in triggering event content
+        const hasDebugFlag = context.triggeringEvent?.content?.includes("#debug");
+        if (hasDebugFlag) {
+            const debugMetaCognitionPrompt = `
+=== DEBUG MODE: META-COGNITIVE ANALYSIS REQUESTED ===
+
+The user has included "#debug" in their message. They are asking you to explain your decision-making process.
+
+Provide a transparent, honest analysis of:
+
+1. **System Prompt Influence**: Which specific parts of your system prompt or instructions guided this decision
+2. **Reasoning Chain**: The step-by-step thought process that led to your choice
+3. **Alternatives Considered**: Other approaches you evaluated but didn't choose, and why
+4. **Assumptions Made**: Any implicit assumptions about the project, user needs, or context
+5. **Constraints Applied**: Technical, architectural, or guideline constraints that limited options
+6. **Confidence Level**: How certain you were about this decision and any doubts you had
+7. **Pattern Matching**: If you followed a common pattern or best practice, explain why it seemed applicable
+
+Be completely transparent about your internal process. If you made a mistake or could have done better, acknowledge it. The goal is to help the user understand exactly how you arrived at your decision.
+=== END DEBUG MODE ===`;
+            
+            messages.push(new Message("system", debugMetaCognitionPrompt));
+            logger.info(`[AgentExecutor] Debug mode activated for agent ${context.agent.name}`, {
+                conversationId: context.conversationId,
+                agentSlug: context.agent.slug
+            });
+        }
+
         // Orchestrator gets structured routing context, others get conversation transcript
         if (context.agent.isOrchestrator) {
             const routingContext = await context.conversationManager.buildOrchestratorRoutingContext(

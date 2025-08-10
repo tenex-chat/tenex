@@ -26,9 +26,18 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
         const content = lesson.lesson || lesson.content || "";
         const phase = lesson.tags.find((tag) => tag[0] === "phase")?.[1];
         const quality = lesson.quality || "unknown";
+        const category = lesson.category;
+        const hashtags = lesson.hashtags;
+        const hasDetailed = !!lesson.detailed;
+
+        // Build metadata line
+        let metadata = `[${quality}]`;
+        if (category) metadata += ` [${category}]`;
+        if (hasDetailed) metadata += ` [detailed available]`;
+        if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(' #')}`;
 
         // Create a concise format for each lesson
-        return `#${index + 1}: ${title}${phase ? ` (${phase})` : ""} [${quality}]\n${content}`;
+        return `#${index + 1}: ${title}${phase ? ` (${phase})` : ""} ${metadata}\n${content}${hasDetailed ? '\n↳ Use lesson_get("' + title + '") for detailed version' : ''}`;
     }).join("\n\n");
 
     // Add header for context

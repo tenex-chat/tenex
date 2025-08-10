@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { learnTool } from "../learn";
+import { lessonLearnTool } from "../learn";
 import type { ExecutionContext } from "../../types";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations/types";
@@ -120,7 +120,7 @@ describe("Learn Tool", () => {
 
     describe("Parameter Validation", () => {
         it("should validate required fields", () => {
-            const validation = learnTool.parameters.validate({});
+            const validation = lessonLearnTool.parameters.validate({});
             expect(validation.ok).toBe(false);
             if (!validation.ok) {
                 expect(validation.error.kind).toBe("validation");
@@ -128,7 +128,7 @@ describe("Learn Tool", () => {
         });
 
         it("should require title field", () => {
-            const validation = learnTool.parameters.validate({
+            const validation = lessonLearnTool.parameters.validate({
                 lesson: "Test lesson content",
             });
             expect(validation.ok).toBe(false);
@@ -140,7 +140,7 @@ describe("Learn Tool", () => {
         });
 
         it("should require lesson field", () => {
-            const validation = learnTool.parameters.validate({
+            const validation = lessonLearnTool.parameters.validate({
                 title: "Test Title",
             });
             expect(validation.ok).toBe(false);
@@ -157,11 +157,11 @@ describe("Learn Tool", () => {
                 lesson: "Always use async/await instead of callbacks for better error handling",
             };
 
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             expect(validation.ok).toBe(true);
             
             if (validation.ok) {
-                const result = await learnTool.execute(validation.value, mockContext);
+                const result = await lessonLearnTool.execute(validation.value, mockContext);
                 expect(result.ok).toBe(true);
                 if (result.ok) {
                     expect(result.value).toMatchObject({
@@ -181,12 +181,12 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             expect(validation.ok).toBe(true);
             
             if (validation.ok) {
                 mockContext.agent.signer = undefined as any;
-                const result = await learnTool.execute(validation.value, mockContext);
+                const result = await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(result.ok).toBe(false);
                 if (!result.ok) {
@@ -203,12 +203,12 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             expect(validation.ok).toBe(true);
             
             if (validation.ok) {
                 (getNDK as any).mockReturnValue(null);
-                const result = await learnTool.execute(validation.value, mockContext);
+                const result = await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(result.ok).toBe(false);
                 if (!result.ok) {
@@ -225,12 +225,12 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             expect(validation.ok).toBe(true);
             
             if (validation.ok) {
                 mockLesson.publish.mockRejectedValue(new Error("Network error"));
-                const result = await learnTool.execute(validation.value, mockContext);
+                const result = await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(result.ok).toBe(false);
                 if (!result.ok) {
@@ -247,11 +247,11 @@ describe("Learn Tool", () => {
                 lesson: "Use React.memo for expensive component renders",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             expect(validation.ok).toBe(true);
             
             if (validation.ok) {
-                const result = await learnTool.execute(validation.value, mockContext);
+                const result = await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(result.ok).toBe(true);
                 if (result.ok) {
@@ -271,9 +271,9 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson content",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(NDKAgentLesson).toHaveBeenCalledWith(mockNDK);
                 expect(mockLesson.title).toBe(params.title);
@@ -287,9 +287,9 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(mockLesson.tag).toHaveBeenCalledWith({ id: "mock-project-id" });
             }
@@ -301,9 +301,9 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(mockNDK.fetchEvent).toHaveBeenCalledWith("mock-agent-event-id");
                 expect(mockLesson.agent).toEqual({
@@ -321,9 +321,9 @@ describe("Learn Tool", () => {
             
             mockContext.agent.eventId = undefined;
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(mockNDK.fetchEvent).not.toHaveBeenCalled();
                 expect(mockLesson.agent).toBeUndefined();
@@ -338,9 +338,9 @@ describe("Learn Tool", () => {
             
             mockNDK.fetchEvent.mockResolvedValue(null);
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(logger.warn).toHaveBeenCalledWith(
                     "Could not fetch agent event for lesson",
@@ -357,9 +357,9 @@ describe("Learn Tool", () => {
                 lesson: "Use event sourcing for audit trail requirements",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(logger.info).toHaveBeenCalledWith(
                     "🎓 Agent recording new lesson",
@@ -381,12 +381,12 @@ describe("Learn Tool", () => {
                 lesson: "Test lesson",
             };
             
-            const validation = learnTool.parameters.validate(params);
+            const validation = lessonLearnTool.parameters.validate(params);
             if (validation.ok) {
                 const testError = new Error("Test error");
                 mockLesson.publish.mockRejectedValue(testError);
                 
-                await learnTool.execute(validation.value, mockContext);
+                await lessonLearnTool.execute(validation.value, mockContext);
                 
                 expect(logger.error).toHaveBeenCalledWith(
                     "❌ Learn tool failed",

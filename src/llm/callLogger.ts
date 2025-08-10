@@ -67,13 +67,6 @@ export interface LLMCallLogEntry {
     // Status
     status: "success" | "error";
 
-    // Performance metrics
-    performance: {
-        startTime: number;
-        endTime?: number;
-        durationMs?: number;
-        tokensPerSecond?: number;
-    };
 }
 
 export class LLMCallLogger {
@@ -167,10 +160,14 @@ export class LLMCallLogger {
                 },
 
                 request: {
-                    messages: request.messages.map((msg) => {
-                        // Parse JSON content for orchestrator to make logs more readable
+                    messages: request.messages.map((msg, index) => {
                         let content = msg.content;
-                        if (request.options?.agentName === "Orchestrator" && msg.role === "user") {
+                        
+                        // Trim system prompt if it's the first message and longer than 1000 chars
+                        if (index === 0 && msg.role === "system" && msg.content.length > 1000) {
+                            content = msg.content.substring(0, 100) + "<REST-OF-SYSTEM-PROMPT-TRIMMED>";
+                        } else if (request.options?.agentName === "Orchestrator" && msg.role === "user") {
+                            // Parse JSON content for orchestrator to make logs more readable
                             try {
                                 const parsed = JSON.parse(msg.content);
                                 content = parsed; // Store as object, not string
@@ -191,24 +188,23 @@ export class LLMCallLogger {
                 },
 
                 status: result.error ? "error" : "success",
-
-                performance: {
-                    startTime: performance.startTime,
-                    endTime: performance.endTime,
-                    durationMs,
-                    tokensPerSecond: this.calculateTokensPerSecond(
-                        result.response?.usage
-                            ? { completionTokens: result.response.usage.completion_tokens }
-                            : undefined,
-                        durationMs
-                    ),
-                },
             };
 
             // Add response data if successful
             if (result.response) {
+                // Try to parse response content as JSON if possible
+                let responseContent: any = result.response.content;
+                if (result.response.content) {
+                    try {
+                        const parsed = JSON.parse(result.response.content);
+                        responseContent = parsed; // Store as object, not string
+                    } catch {
+                        // Not JSON or parsing failed, keep as-is
+                    }
+                }
+                
                 logEntry.response = {
-                    content: result.response.content,
+                    content: responseContent,
                     contentLength: result.response.content?.length || 0,
                     toolCalls: result.response.toolCalls?.map((tc) => ({
                         name: tc.name,

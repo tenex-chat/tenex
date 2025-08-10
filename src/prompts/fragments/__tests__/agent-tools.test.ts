@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import { agentToolsFragment } from "../agent-tools";
-import { learnTool } from "@/tools/implementations/learn";
+import { lessonLearnTool } from "@/tools/implementations/learn";
 
 describe("agentToolsFragment", () => {
     it("should generate tool documentation including promptFragment", () => {
@@ -11,7 +11,7 @@ describe("agentToolsFragment", () => {
             slug: "test-agent",
             role: "Test Role",
             description: "Test Description",
-            tools: [learnTool],
+            tools: [lessonLearnTool],
             isOrchestrator: false,
         } as Agent;
 
@@ -19,7 +19,7 @@ describe("agentToolsFragment", () => {
 
         // Check that the result contains the tool name and description
         expect(result).toContain("## Available Agent Tools");
-        expect(result).toContain("### learn");
+        expect(result).toContain("### lesson_learn");
         expect(result).toContain("Record an important lesson learned during execution");
 
         // Check that the promptFragment is included

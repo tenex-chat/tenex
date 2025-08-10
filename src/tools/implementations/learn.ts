@@ -7,28 +7,35 @@ import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema } from "../types";
 
-const learnSchema = z.object({
+const lessonLearnSchema = z.object({
     title: z.string().describe("Brief title/description of what this lesson is about"),
     lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
+    detailed: z.string().optional().describe("Detailed version with richer explanation when deeper context is needed"),
+    category: z.string().optional().describe("Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"),
+    hashtags: z.array(z.string()).optional().describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 
-interface LearnInput {
+interface LessonLearnInput {
     title: string;
     lesson: string;
+    detailed?: string;
+    category?: string;
+    hashtags?: string[];
 }
 
-interface LearnOutput {
+interface LessonLearnOutput {
     message: string;
     eventId: string;
     title: string;
+    hasDetailed: boolean;
 }
 
-export const learnTool: Tool<LearnInput, LearnOutput> = {
-    name: "learn",
+export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
+    name: "lesson_learn",
     description:
-        "Record an important lesson learned during execution that should be carried forward",
+        "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
 
-    promptFragment: `When you encounter important insights or lessons during your work, use the learn tool to record them. These lessons will be available in future conversations to help avoid similar issues.
+    promptFragment: `When you encounter important insights or lessons during your work, use the lesson_learn tool to record them. These lessons will be available in future conversations to help improve your performance.
 
 ## Metacognition Check - Ask Yourself:
 Before recording a lesson, engage in metacognition:
@@ -50,16 +57,46 @@ Before recording a lesson, engage in metacognition:
 - Hidden dependencies or coupling that caused real issues
 - Counter-intuitive behaviors that waste significant time
 - Project-specific gotchas that violate normal expectations
-- Patterns that repeatedly cause problems in THIS codebase
+- Patterns that repeatedly cause problems in THIS project
+- Things that are within your domain of expertise.
 
 Domain Boundaries: Only record lessons within your role's sphere of control and expertise. You have access to the list of agents working with you in this project; while pondering whether to record a lesson, think: "is this specific lesson better suited for the domain expertise of another agent?"
 
-In <thinking> tags, perform the metacognition check and explain why this lesson passes the quality bar and is worth preserving permanently.`,
+In <thinking> tags, perform the metacognition check and explain why this lesson passes the quality bar and is worth preserving permanently.
 
-    parameters: createZodSchema(learnSchema),
+## Detailed Version Guidelines:
+Only include a detailed version when:
+- The lesson genuinely NEEDS deeper explanation that can't be captured in 3-4 paragraphs
+- There are complex technical details or edge cases to document
+- Multiple examples or scenarios need to be explained
+- The context is critical for understanding why this matters
+
+### Special Instructions for Human-Replica Agents:
+When modeling the user, ALWAYS be especially keen to capture rich details in the detailed version about:
+- User preferences and habits (work style, tool preferences, coding patterns)
+- Communication styles and language patterns
+- Personal context and background that affects their work
+- Emotional patterns and triggers
+- Decision-making patterns and priorities
+- Specific examples of their behavior and choices
+- Nuanced preferences that go beyond simple likes/dislikes
+
+The detailed version is CRITICAL for human-replica agents to accurately model the user's personality and behavior.
+
+## Categories:
+Use one of these standard categories or create a specific one if needed:
+- architecture: System design and structure decisions
+- debugging: Problem-solving patterns and techniques  
+- user-preferences: User-specific patterns and preferences
+- performance: Optimization insights
+- security: Security considerations
+- workflow: Process and methodology insights
+- domain-specific: Domain expertise insights`,
+
+    parameters: createZodSchema(lessonLearnSchema),
 
     execute: async (input, context) => {
-        const { title, lesson } = input.value;
+        const { title, lesson, detailed, category, hashtags } = input.value;
 
         logger.info("🎓 Agent recording new lesson", {
             agent: context.agent.name,
@@ -85,7 +122,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
                 ok: false,
                 error: {
                     kind: "execution" as const,
-                    tool: "learn",
+                    tool: "lesson_learn",
                     message: error,
                 },
             };
@@ -106,7 +143,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
                 ok: false,
                 error: {
                     kind: "execution" as const,
-                    tool: "learn",
+                    tool: "lesson_learn",
                     message: error,
                 },
             };
@@ -119,6 +156,17 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
             const lessonEvent = new NDKAgentLesson(ndk);
             lessonEvent.title = title;
             lessonEvent.lesson = lesson;
+            
+            // Add optional fields if provided
+            if (detailed) {
+                lessonEvent.detailed = detailed;
+            }
+            if (category) {
+                lessonEvent.category = category;
+            }
+            if (hashtags && hashtags.length > 0) {
+                lessonEvent.hashtags = hashtags;
+            }
 
             // Add reference to the agent event if available
             const agentEventId = context.agent.eventId;
@@ -141,7 +189,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
             await lessonEvent.sign(agentSigner);
             await lessonEvent.publish();
 
-            const message = `✅ Lesson recorded: "${title}"\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
+            const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 
             return {
                 ok: true,
@@ -149,6 +197,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
                     message,
                     eventId: lessonEvent.encode(),
                     title,
+                    hasDetailed: !!detailed,
                 },
             };
         } catch (error) {
@@ -165,7 +214,7 @@ In <thinking> tags, perform the metacognition check and explain why this lesson 
                 ok: false,
                 error: {
                     kind: "execution" as const,
-                    tool: "learn",
+                    tool: "lesson_learn",
                     message: formatAnyError(error),
                 },
             };

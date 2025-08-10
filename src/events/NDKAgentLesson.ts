@@ -94,4 +94,44 @@ export class NDKAgentLesson extends NDKEvent {
         this.removeTag("metacognition");
         if (value) this.tags.push(["metacognition", value]);
     }
+
+    /**
+     * Detailed version of the lesson with richer explanation
+     */
+    get detailed(): string | undefined {
+        return this.tagValue("detailed");
+    }
+
+    set detailed(value: string | undefined) {
+        this.removeTag("detailed");
+        if (value) this.tags.push(["detailed", value]);
+    }
+
+    /**
+     * Category for filing this lesson
+     */
+    get category(): string | undefined {
+        return this.tagValue("category");
+    }
+
+    set category(value: string | undefined) {
+        this.removeTag("category");
+        if (value) this.tags.push(["category", value]);
+    }
+
+    /**
+     * Hashtags for easier sorting and discovery
+     */
+    get hashtags(): string[] {
+        return this.tags
+            .filter((tag) => tag[0] === "t")
+            .map((tag) => tag[1]);
+    }
+
+    set hashtags(values: string[]) {
+        this.tags = this.tags.filter((tag) => tag[0] !== "t");
+        values.forEach((hashtag) => {
+            this.tags.push(["t", hashtag]);
+        });
+    }
 }

@@ -77,15 +77,33 @@ export class AgentRegistry {
             );
 
             // Load global agents first (if in project context)
+            const loadedGlobalEventIds = new Set<string>();
+            const loadedGlobalSlugs = new Set<string>();
             if (!this.isGlobal) {
                 for (const [slug, registryEntry] of Object.entries(this.globalRegistry)) {
                     logger.debug(`Loading global agent: ${slug}`, { registryEntry });
                     await this.loadAgentBySlug(slug, true);
+                    // Track global agent event IDs and slugs
+                    if (registryEntry.eventId) {
+                        loadedGlobalEventIds.add(registryEntry.eventId);
+                    }
+                    loadedGlobalSlugs.add(slug);
                 }
             }
 
-            // Load project/local agents (these can override global ones)
+            // Load project/local agents (skip if they match a global agent's event ID or slug)
             for (const [slug, registryEntry] of Object.entries(this.registry)) {
+                // Check if this project agent matches a global agent (same event ID or same slug)
+                if (registryEntry.eventId && loadedGlobalEventIds.has(registryEntry.eventId)) {
+                    logger.info(`Skipping project agent "${slug}" - using global agent with same event ID`, {
+                        eventId: registryEntry.eventId,
+                    });
+                    continue;
+                }
+                if (loadedGlobalSlugs.has(slug)) {
+                    logger.info(`Skipping project agent "${slug}" - using global agent with same slug`);
+                    continue;
+                }
                 logger.debug(`Loading agent from registry: ${slug}`, { registryEntry });
                 await this.loadAgentBySlug(slug, false);
             }
@@ -109,13 +127,53 @@ export class AgentRegistry {
         config: AgentConfigOptionalNsec,
         ndkProject?: NDKProject
     ): Promise<AgentInstance> {
-        // Check if agent already exists
+        // Check if agent already exists in memory
         const existingAgent = this.agents.get(name);
         if (existingAgent) {
             return existingAgent;
         }
 
-        // Check if we have it in registry
+        // Check if we're in a project context and this agent exists globally
+        if (!this.isGlobal) {
+            // Check by slug first (exact match)
+            if (this.globalRegistry[name]) {
+                logger.info(`Agent "${name}" already exists globally, using global agent`);
+                // Load the global agent if not already loaded
+                const globalAgent = this.agents.get(name);
+                if (globalAgent) {
+                    return globalAgent;
+                }
+                // Load the global agent - use internal method to avoid recursion
+                const loadedAgent = await this.loadAgentBySlugInternal(name, true);
+                if (loadedAgent) {
+                    return loadedAgent;
+                }
+            }
+            
+            // Check by eventId if provided
+            if (config.eventId) {
+                for (const [globalSlug, globalEntry] of Object.entries(this.globalRegistry)) {
+                    if (globalEntry.eventId === config.eventId) {
+                        logger.info(`Agent with eventId ${config.eventId} already exists globally as "${globalSlug}", using global agent`, {
+                            localSlug: name,
+                            globalSlug,
+                        });
+                        // Load the global agent if not already loaded
+                        const globalAgent = this.agents.get(globalSlug);
+                        if (globalAgent) {
+                            return globalAgent;
+                        }
+                        // Load the global agent - use internal method to avoid recursion
+                        const loadedAgent = await this.loadAgentBySlugInternal(globalSlug, true);
+                        if (loadedAgent) {
+                            return loadedAgent;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if we have it in local registry
         let registryEntry = this.registry[name];
         let agentDefinition: StoredAgentData;
 
@@ -580,6 +638,10 @@ export class AgentRegistry {
     }
 
     async loadAgentBySlug(slug: string, fromGlobal = false): Promise<AgentInstance | null> {
+        return this.loadAgentBySlugInternal(slug, fromGlobal);
+    }
+
+    private async loadAgentBySlugInternal(slug: string, fromGlobal = false): Promise<AgentInstance | null> {
         const registryToUse = fromGlobal ? this.globalRegistry : this.registry;
         const registryEntry = registryToUse[slug];
         if (!registryEntry) {
@@ -648,7 +710,86 @@ export class AgentRegistry {
             backend: agentDefinition.backend,
         };
 
+        // If loading from global registry, create agent directly without recursive ensureAgent call
+        if (fromGlobal) {
+            return this.createAgentInstance(slug, config, registryEntry);
+        }
+
         return this.ensureAgent(slug, config);
+    }
+
+    /**
+     * Create an agent instance directly without going through ensureAgent
+     * Used to avoid infinite recursion when loading global agents
+     */
+    private async createAgentInstance(
+        slug: string,
+        config: AgentConfig,
+        registryEntry: TenexAgents[string]
+    ): Promise<AgentInstance> {
+        // Create NDKPrivateKeySigner
+        const signer = new NDKPrivateKeySigner(registryEntry.nsec);
+        const pubkey = signer.pubkey;
+
+        // Determine agent name
+        let agentName = config.name;
+        const isProjectManager = slug === "project-manager";
+        
+        if (isProjectManager) {
+            try {
+                const { getProjectContext } = await import("@/services");
+                const projectCtx = getProjectContext();
+                const projectTitle = projectCtx.project.tagValue("title");
+                if (projectTitle) {
+                    agentName = projectTitle;
+                }
+            } catch {
+                // If project context not available, use default name
+                agentName = config.name;
+            }
+        }
+
+        // Determine if this is a built-in agent
+        const isBuiltIn = getBuiltInAgents().some((builtIn) => builtIn.slug === slug);
+
+        // Create Agent instance
+        const agent: AgentInstance = {
+            name: agentName,
+            pubkey,
+            signer,
+            role: config.role,
+            description: config.description,
+            instructions: config.instructions || "",
+            useCriteria: config.useCriteria,
+            llmConfig: config.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+            tools: [], // Will be set next
+            mcp: config.mcp ?? !registryEntry.orchestratorAgent,
+            eventId: registryEntry.eventId,
+            slug: slug,
+            isOrchestrator: registryEntry.orchestratorAgent,
+            isBuiltIn: isBuiltIn,
+            backend: config.backend,
+        };
+
+        // Set tools
+        let toolNames: string[];
+        if (isToollessBackend(agent)) {
+            toolNames = [];
+        } else {
+            toolNames = config.tools !== undefined
+                ? config.tools
+                : getDefaultToolsForAgent(agent);
+        }
+
+        // Convert tool names to Tool instances
+        const { getTools } = await import("@/tools/registry");
+        agent.tools = getTools(toolNames);
+
+        // Store in both maps
+        this.agents.set(slug, agent);
+        this.agentsByPubkey.set(pubkey, agent);
+
+        return agent;
     }
 
     /**

@@ -21,8 +21,8 @@ When asked about the project, provide comprehensive answers that demonstrate you
 
 ## Tool Usage Guidelines
 
-### When to use the 'learn' tool:
-Use the learn tool to record insights about YOUR OWN BEHAVIOR and performance as the project manager:
+### When to use the 'lesson_learn' tool:
+Use the lesson_learn tool to record insights about YOUR OWN BEHAVIOR and performance as the project manager:
 - When you discover better ways to organize or present project information
 - When you learn how to better collaborate with other agents
 - When you identify patterns in how you should respond to certain types of requests
@@ -38,7 +38,7 @@ Use write_context_file to record information about THE PROJECT ITSELF:
 - Transcriptions of documents (with formatting improvements for readability)
 Example: Recording a feature specification or architectural decision document
 
-Remember: 'learn' is for improving yourself, 'write_context_file' is for documenting the project.
+Remember: 'lesson_learn' is for improving yourself, 'write_context_file' is for documenting the project.
 
 When asked to save a document transcription, use the write_context_file tool.
 Format the document to improve the readibility of the transcript, fix phonetics based on your knowledge of the project.
@@ -49,5 +49,5 @@ Remember, you are intelligently transcribing a document, not adding your own fla
   useCriteria:
     "ALWAYS during REFLECTION phase to analyze and learn from implementations. Also when users or other agents need to understand overall goals of the project.\nALWAYS during VERIFICATION phase.",
   llmConfig: "agents",
-  tools: ["read_path", "write_context_file", "analyze", "learn", "shell"],
+  tools: ["read_path", "write_context_file", "analyze", "lesson_learn", "shell", "discover_capabilities"],
 };
