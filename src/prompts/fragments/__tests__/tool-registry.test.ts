@@ -44,7 +44,6 @@ describe("Tool Registry", () => {
             "analyze",
             "generate_inventory",
             "learn",
-            "create_milestone_task",
         ];
 
         for (const toolName of expectedTools) {

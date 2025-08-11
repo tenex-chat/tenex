@@ -1,6 +1,4 @@
 import { analyze } from "./implementations/analyze";
-import { createMilestoneTaskTool } from "./implementations/createMilestoneTask";
-import { endConversationTool } from "./implementations/endConversation";
 import { generateInventoryTool } from "./implementations/generateInventory";
 import { lessonLearnTool } from "./implementations/learn";
 import { lessonGetTool } from "./implementations/lessonGet";
@@ -18,12 +16,10 @@ const toolsMap = new Map<string, Tool<any, any>>([
   ["read_path", readPathTool],
   ["write_context_file", writeContextFileTool],
   ["complete", completeTool],
-  ["end_conversation", endConversationTool],
   ["analyze", analyze],
   ["generate_inventory", generateInventoryTool],
   ["lesson_learn", lessonLearnTool],
   ["lesson_get", lessonGetTool],
-  ["create_milestone_task", createMilestoneTaskTool],
   ["shell", shellTool],
   ["agents_discover", agentsDiscover],
   ["agents_hire", agentsHire],
