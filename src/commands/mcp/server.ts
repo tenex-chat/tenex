@@ -275,11 +275,11 @@ export const serverCommand = new Command("server")
                                     },
                                     agentSlug: {
                                         type: "string",
-                                        description: "The slug identifier of the agent recording this lesson (required when in project context)",
+                                        description: "The slug identifier of the agent recording this lesson (required when in project context, mutually exclusive with nsec)",
                                     },
                                     nsec: {
                                         type: "string",
-                                        description: "The Nostr private key (nsec format) for signing the lesson (required when not in project context)",
+                                        description: "The Nostr private key (nsec format) for signing the lesson (required when NOT in project context, mutually exclusive with agentSlug)",
                                     },
                                     detailed: {
                                         type: "string",
@@ -308,11 +308,11 @@ export const serverCommand = new Command("server")
                                 properties: {
                                     agentSlug: {
                                         type: "string",
-                                        description: "The slug identifier of the agent whose lessons to retrieve (when in project context)",
+                                        description: "The slug identifier of the agent whose lessons to retrieve (required when in project context, mutually exclusive with pubkey)",
                                     },
                                     pubkey: {
                                         type: "string",
-                                        description: "The public key (hex format) to retrieve lessons for (when not in project context)",
+                                        description: "The public key (hex format) to retrieve lessons for (required when NOT in project context, mutually exclusive with agentSlug)",
                                     },
                                 },
                                 required: [],
@@ -364,9 +364,17 @@ export const serverCommand = new Command("server")
                     let signer: NDKSigner;
                     let agentEventId: string = "";
                     
+                    // Ensure XOR logic - either agentSlug OR nsec, not both
+                    if (agentSlug && nsec) {
+                        throw new Error("Cannot provide both agentSlug and nsec - use agentSlug when in project context, nsec when standalone");
+                    }
+                    
                     // Determine how to get the signer based on what's provided
-                    if (agentSlug && agents.size > 0) {
+                    if (agentSlug) {
                         // Project context mode - use agent slug
+                        if (agents.size === 0) {
+                            throw new Error("agentSlug provided but no project context available - use nsec instead");
+                        }
                         agent = agents.get(agentSlug) || null;
                         if (!agent) {
                             throw new Error(`Agent '${agentSlug}' not found in project`);
@@ -378,9 +386,17 @@ export const serverCommand = new Command("server")
                         agentEventId = agent.eventId || "";
                     } else if (nsec) {
                         // Standalone mode - use nsec
+                        if (agents.size > 0) {
+                            throw new Error("nsec provided but project context is available - use agentSlug instead");
+                        }
                         signer = new NDKPrivateKeySigner(nsec);
                     } else {
-                        throw new Error("Either agentSlug (with project context) or nsec is required");
+                        // Provide context-aware error message
+                        if (agents.size > 0) {
+                            throw new Error("agentSlug is required when running with project context");
+                        } else {
+                            throw new Error("nsec is required when running without project context");
+                        }
                     }
 
                     logger.info("🎓 MCP Server: Recording new lesson", {
@@ -429,9 +445,17 @@ export const serverCommand = new Command("server")
                     let agentPubkey: string;
                     let agent: AgentInstance | null = null;
                     
+                    // Ensure XOR logic - either agentSlug OR pubkey, not both
+                    if (agentSlug && pubkey) {
+                        throw new Error("Cannot provide both agentSlug and pubkey - use agentSlug when in project context, pubkey when standalone");
+                    }
+                    
                     // Determine how to get the pubkey
-                    if (agentSlug && agents.size > 0) {
+                    if (agentSlug) {
                         // Project context mode - use agent slug
+                        if (agents.size === 0) {
+                            throw new Error("agentSlug provided but no project context available - use pubkey instead");
+                        }
                         agent = agents.get(agentSlug) || null;
                         if (!agent) {
                             throw new Error(`Agent '${agentSlug}' not found in project`);
@@ -439,9 +463,17 @@ export const serverCommand = new Command("server")
                         agentPubkey = agent.pubkey;
                     } else if (pubkey) {
                         // Standalone mode - use provided pubkey
+                        if (agents.size > 0) {
+                            throw new Error("pubkey provided but project context is available - use agentSlug instead");
+                        }
                         agentPubkey = pubkey;
                     } else {
-                        throw new Error("Either agentSlug (with project context) or pubkey is required");
+                        // Provide context-aware error message
+                        if (agents.size > 0) {
+                            throw new Error("agentSlug is required when running with project context");
+                        } else {
+                            throw new Error("pubkey is required when running without project context");
+                        }
                     }
                     
                     try {
