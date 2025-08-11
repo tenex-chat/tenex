@@ -42,12 +42,6 @@ export interface CompletionOptions extends LlmCompletionOpts {
     agentName?: string;
 }
 
-// Model information that can be passed along with responses
-export interface ModelInfo {
-    contextWindow?: number;
-    maxCompletionTokens?: number;
-}
-
 // Import and re-export tool types
 import type { Tool, ExecutionContext } from "@/tools/types";
 export type { Tool, ExecutionContext };
@@ -140,22 +134,6 @@ export const EVENT_KINDS = {
     TENEX_LOG: 24015,
     LLM_CONFIG_CHANGE: 24020,
 } as const;
-
-/**
- * LLM configurations collection - resolved configs with credentials
- */
-export type LLMConfigs = Record<string, ResolvedLLMConfig>;
-
-/**
- * LLM Preset configuration
- */
-export interface LLMPreset {
-    provider: LLMProvider;
-    model: string;
-    enableCaching?: boolean;
-    temperature?: number;
-    maxTokens?: number;
-}
 
 /**
  * Provider authentication

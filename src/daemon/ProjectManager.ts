@@ -198,8 +198,12 @@ export class ProjectManager implements IProjectManager {
 
             // Initialize tool logger for tracing tool executions
             initializeToolLogger(projectPath);
-        } catch (error) {
-            logger.error("Failed to initialize ProjectContext", { error, projectPath });
+        } catch (error: any) {
+            // Only log if it's not a missing project configuration error
+            // The MCP server command will handle this specific error with a friendlier message
+            if (!error?.message?.includes("Project configuration missing projectNaddr")) {
+                logger.error("Failed to initialize ProjectContext", { error, projectPath });
+            }
             throw error;
         }
     }

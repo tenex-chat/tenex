@@ -2,7 +2,8 @@
 
 import { build } from 'esbuild';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import alias from 'esbuild-plugin-alias';
 
 const packageJson = JSON.parse(
   readFileSync(join(process.cwd(), 'package.json'), 'utf8')
@@ -14,40 +15,74 @@ const external = [
   ...Object.keys(packageJson.peerDependencies || {}),
 ];
 
+const aliasPlugin = alias({
+  '@': resolve(process.cwd(), 'src'),
+});
+
 const sharedConfig = {
   entryPoints: [],
-  bundle: true,
   minify: false,
   sourcemap: true,
   target: 'es2022',
   format: 'esm',
   platform: 'node',
-  external,
   outdir: 'dist',
   tsconfig: 'tsconfig.build.json',
   logLevel: 'info',
+  // Resolve TypeScript paths
+  resolveExtensions: ['.ts', '.js', '.json'],
+  plugins: [aliasPlugin],
 };
 
 async function buildAll() {
   try {
     console.log('🏗️  Building TENEX CLI...');
     
-    // Build main entry point
+    // Build all TypeScript files without bundling
     await build({
       ...sharedConfig,
-      entryPoints: ['src/index.ts'],
+      entryPoints: ['src/**/*.ts'],
       outdir: 'dist',
     });
 
-
-    // Build CLI executable
+    // Build CLI executable with bundling
     await build({
-      ...sharedConfig,
-      entryPoints: ['src/tenex.ts'],
-      outdir: 'dist',
+      entryPoints: ['src/cli.ts'],
+      bundle: true,
+      minify: false,
+      sourcemap: true,
+      target: 'node18',
+      format: 'esm',
+      platform: 'node',
+      outfile: 'dist/cli.js',
+      tsconfig: 'tsconfig.build.json',
+      logLevel: 'info',
+      plugins: [aliasPlugin],
       banner: {
         js: '#!/usr/bin/env node',
       },
+      // Mark all Node built-ins as external
+      external: [
+        ...external,
+        'node:*',
+        'fs',
+        'path',
+        'http',
+        'https',
+        'stream',
+        'util',
+        'url',
+        'child_process',
+        'crypto',
+        'os',
+        'tty',
+        'net',
+        'events',
+        'buffer',
+        'querystring',
+        'zlib',
+        'assert',
+      ],
     });
 
     console.log('✅ Build completed successfully!');

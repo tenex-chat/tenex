@@ -74,3 +74,4 @@ agents.json
 test-*.json
 test-*.txt
 __snapshots__/.repomix-output.txt
+.repomix-output.txt

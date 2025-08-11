@@ -152,43 +152,6 @@ export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
     };
 }
 
-export function createMockPhaseTransition(
-    from: Phase,
-    to: Phase,
-    reason?: string
-) {
-    return {
-        from,
-        to,
-        timestamp: new Date(),
-        reason: reason || `Transition from ${from} to ${to}`,
-        transitionMessage: `Moving from ${from} phase to ${to} phase`
-    };
-}
-
-/**
- * Create a mock file system structure for testing
- */
-export function createMockFileSystem(): Map<string, string> {
-    const files = new Map<string, string>();
-    
-    // Add common project files
-    files.set("/mock/project/package.json", JSON.stringify({
-        name: "mock-project",
-        version: "1.0.0",
-        dependencies: {}
-    }, null, 2));
-    
-    files.set("/mock/project/README.md", "# Mock Project\n\nThis is a mock project for testing.");
-    
-    files.set("/mock/project/src/index.ts", `
-export function main() {
-    console.log("Hello from mock project");
-}
-`);
-    
-    return files;
-}
 
 /**
  * Create a builder for complex mock objects

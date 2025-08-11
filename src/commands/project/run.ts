@@ -31,9 +31,13 @@ export const projectRunCommand = new Command("run")
 
             // Start the project listener
             await runProjectListener(projectPath, ndk);
-        } catch (err) {
-            const errorMessage = formatAnyError(err);
-            logger.error(`Failed to start project: ${errorMessage}`);
+        } catch (err: any) {
+            // Don't double-log project configuration errors
+            // as they're already handled in ensureProjectInitialized
+            if (!err?.message?.includes("Project configuration missing projectNaddr")) {
+                const errorMessage = formatAnyError(err);
+                logger.error(`Failed to start project: ${errorMessage}`);
+            }
             process.exit(1);
         }
     });

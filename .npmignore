@@ -1,9 +1,22 @@
-# Source files
-src/
-bin/tenex.ts
+# Source maps (these add a lot of weight)
+*.map
+**/*.map
 
-# Configuration files
-tsconfig.json
+# Keep source files (needed for Bun runtime)
+# src/ is NOT ignored
+
+# Exclude test files from src and dist
+**/test-utils
+**/__tests__
+*.test.ts
+*.test.js
+*.spec.ts  
+*.spec.js
+src/test-utils/
+dist/test-utils/
+
+# Configuration files  
+# Keep tsconfig.json (needed for Bun runtime)
 tsconfig.build.json
 .eslintrc*
 .prettierrc*
@@ -12,9 +25,8 @@ biome.json
 # Development files
 scripts/
 tests/
-**/*.test.ts
-**/*.spec.ts
-**/__tests__/
+
+# Exclude all test files (remove from both sections for clarity)
 
 # Build artifacts
 *.tsbuildinfo

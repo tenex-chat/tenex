@@ -47,24 +47,7 @@ function formatToolsAsMarkdown(tools: Array<{
 
   tools.forEach((tool, index) => {
     lines.push(`## ${index + 1}. ${tool.name}`);
-    lines.push(``);
-    
-    if (tool.description) {
-      lines.push(`**Description:** ${tool.description}`);
-      lines.push(``);
-    }
-    
-    if (tool.command) {
-      lines.push(`**Command:** \`${tool.command}\``);
-      lines.push(``);
-    }
-    
-    if (tool.image) {
-      lines.push(`**Image:** \`${tool.image}\``);
-      lines.push(``);
-    }
-    
-    lines.push(`**ID:** nostr:${tool.id}`);
+    lines.push(`nostr:${tool.id}`);
     lines.push(``);
     
     lines.push(`---`);
