@@ -8,6 +8,7 @@ import { ProjectManager } from "@/daemon/ProjectManager";
 import { getProjectContext } from "@/services/ProjectContext";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * Format discovered MCP tools as markdown
@@ -76,7 +77,7 @@ function formatMCPToolsAsMarkdown(tools: Array<{
 }
 import type { NDKSigner } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
-import type { Agent } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Schema definitions for MCP handlers
@@ -98,8 +99,8 @@ const ToolsCallRequestSchema = z.object({
 class LessonService {
     constructor(
         private ndk: NDK,
-        private agent: Agent,
-        private project: NDKEvent
+        private agent: AgentInstance | null,
+        private project: NDKEvent | null
     ) {}
 
     async createLesson(
@@ -138,8 +139,10 @@ class LessonService {
             }
         }
         
-        // Add project tag for scoping
-        lessonEvent.tag(this.project);
+        // Add project tag for scoping if available
+        if (this.project) {
+            lessonEvent.tag(this.project);
+        }
         
         await lessonEvent.sign(signer);
         await lessonEvent.publish();
@@ -186,9 +189,7 @@ class LessonService {
 
 export const serverCommand = new Command("server")
     .description("Run MCP server for agent tools")
-    .requiredOption("--agent <slug>", "Agent slug to run the server for")
-    .action(async (options) => {
-        const { agent: agentSlug } = options;
+    .action(async () => {
 
         try {
             const projectPath = process.cwd();
@@ -207,22 +208,25 @@ export const serverCommand = new Command("server")
                 hasFetchEvent: !!(ndk && ndk.fetchEvent)
             });
             
-            // Use ProjectManager to properly load and initialize the project
-            const projectManager = new ProjectManager();
-            await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
+            // Try to load project context if available, but don't fail if not
+            let projectContext: any = null;
+            let agents: Map<string, AgentInstance> = new Map();
+            let project: NDKEvent | null = null;
             
-            // Get the project context which now has all agents loaded
-            const projectContext = getProjectContext();
-            const { agents } = projectContext;
-            
-            // Find the specific agent
-            const agent = agents.get(agentSlug);
-            if (!agent) {
-                throw new Error(`Agent '${agentSlug}' not found in project`);
-            }
-            
-            if (!agent.signer) {
-                throw new Error(`Agent '${agentSlug}' does not have a signer`);
+            try {
+                const projectManager = new ProjectManager();
+                await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
+                projectContext = getProjectContext();
+                agents = projectContext.agents;
+                project = projectContext.project;
+                logger.info("Running MCP server with project context");
+            } catch (error: any) {
+                if (error?.message?.includes("Project configuration missing projectNaddr")) {
+                    logger.info("Running MCP server without project context (standalone mode)");
+                } else {
+                    // Re-throw if it's a different error
+                    throw error;
+                }
             }
             
             // NDK is already available from above, no need to redeclare
@@ -238,13 +242,10 @@ export const serverCommand = new Command("server")
             
             logger.info(`Connected to ${connectedRelays.length} relays:`, connectedRelays);
             
-            // Create LessonService instance
-            const lessonService = new LessonService(ndk, agent, projectContext.project);
-
             // Create MCP server
             const server = new Server(
                 {
-                    name: `tenex-${agentSlug}`,
+                    name: `tenex-mcp`,
                     version: "1.0.0",
                 },
                 {
@@ -272,6 +273,14 @@ export const serverCommand = new Command("server")
                                         type: "string",
                                         description: "The key insight or lesson learned - be concise and actionable",
                                     },
+                                    agentSlug: {
+                                        type: "string",
+                                        description: "The slug identifier of the agent recording this lesson (required when in project context)",
+                                    },
+                                    nsec: {
+                                        type: "string",
+                                        description: "The Nostr private key (nsec format) for signing the lesson (required when not in project context)",
+                                    },
                                     detailed: {
                                         type: "string",
                                         description: "Detailed version with richer explanation when deeper context is needed",
@@ -296,7 +305,17 @@ export const serverCommand = new Command("server")
                             description: "Retrieve all lessons learned by this agent",
                             inputSchema: {
                                 type: "object",
-                                properties: {},
+                                properties: {
+                                    agentSlug: {
+                                        type: "string",
+                                        description: "The slug identifier of the agent whose lessons to retrieve (when in project context)",
+                                    },
+                                    pubkey: {
+                                        type: "string",
+                                        description: "The public key (hex format) to retrieve lessons for (when not in project context)",
+                                    },
+                                },
+                                required: [],
                             },
                         },
                         {
@@ -339,11 +358,34 @@ export const serverCommand = new Command("server")
                 const toolName = request.params.name;
                 
                 if (toolName === "lesson_learn") {
-                    const { title, lesson, detailed, category, hashtags } = request.params.arguments;
+                    const { title, lesson, detailed, category, hashtags, agentSlug, nsec } = request.params.arguments;
 
-                    logger.info("🎓 MCP Server: Agent recording new lesson", {
-                        agent: agent.name,
-                        agentPubkey: agent.pubkey,
+                    let agent: AgentInstance | null = null;
+                    let signer: NDKSigner;
+                    let agentEventId: string = "";
+                    
+                    // Determine how to get the signer based on what's provided
+                    if (agentSlug && agents.size > 0) {
+                        // Project context mode - use agent slug
+                        agent = agents.get(agentSlug) || null;
+                        if (!agent) {
+                            throw new Error(`Agent '${agentSlug}' not found in project`);
+                        }
+                        if (!agent.signer) {
+                            throw new Error(`Agent '${agentSlug}' does not have a signer`);
+                        }
+                        signer = agent.signer;
+                        agentEventId = agent.eventId || "";
+                    } else if (nsec) {
+                        // Standalone mode - use nsec
+                        signer = new NDKPrivateKeySigner(nsec);
+                    } else {
+                        throw new Error("Either agentSlug (with project context) or nsec is required");
+                    }
+
+                    logger.info("🎓 MCP Server: Recording new lesson", {
+                        agent: agent?.name || "standalone",
+                        agentPubkey: agent?.pubkey || signer.pubkey,
                         title,
                         lessonLength: lesson.length,
                         hasDetailed: !!detailed,
@@ -352,11 +394,14 @@ export const serverCommand = new Command("server")
                     });
 
                     try {
+                        // Create LessonService instance
+                        const lessonService = new LessonService(ndk, agent, project);
+                        
                         // Use LessonService to create the lesson
                         const result = await lessonService.createLesson(
                             { title, lesson, detailed, category, hashtags },
-                            agent.eventId,
-                            agent.signer
+                            agentEventId,
+                            signer
                         );
 
                         const message = `✅ Lesson recorded: "${result.title}"${result.hasDetailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
@@ -372,22 +417,45 @@ export const serverCommand = new Command("server")
                     } catch (error) {
                         logger.error("❌ MCP Server: Learn tool failed", {
                             error,
-                            agent: agent.name,
-                            agentPubkey: agent.pubkey,
+                            agent: agent?.name || "standalone",
+                            agentPubkey: agent?.pubkey || signer.pubkey,
                             title,
                         });
                         throw error;
                     }
                 } else if (toolName === "get_lessons") {
+                    const { agentSlug, pubkey } = request.params.arguments;
+                    
+                    let agentPubkey: string;
+                    let agent: AgentInstance | null = null;
+                    
+                    // Determine how to get the pubkey
+                    if (agentSlug && agents.size > 0) {
+                        // Project context mode - use agent slug
+                        agent = agents.get(agentSlug) || null;
+                        if (!agent) {
+                            throw new Error(`Agent '${agentSlug}' not found in project`);
+                        }
+                        agentPubkey = agent.pubkey;
+                    } else if (pubkey) {
+                        // Standalone mode - use provided pubkey
+                        agentPubkey = pubkey;
+                    } else {
+                        throw new Error("Either agentSlug (with project context) or pubkey is required");
+                    }
+                    
                     try {
-                        logger.info("📚 MCP Server: Fetching lessons for agent", {
-                            agent: agent.name,
-                            agentPubkey: agent.pubkey,
+                        logger.info("📚 MCP Server: Fetching lessons", {
+                            agent: agent?.name || "standalone",
+                            agentPubkey,
                         });
 
+                        // Create LessonService instance
+                        const lessonService = new LessonService(ndk, agent, project);
+                        
                         // Use LessonService to fetch lessons
                         const lessons = await lessonService.getLessons({
-                            agentPubkey: agent.pubkey,
+                            agentPubkey,
                         });
 
                         return {
@@ -401,8 +469,8 @@ export const serverCommand = new Command("server")
                     } catch (error) {
                         logger.error("❌ MCP Server: Get lessons failed", {
                             error,
-                            agent: agent.name,
-                            agentPubkey: agent.pubkey,
+                            agent: agent?.name || "standalone",
+                            agentPubkey,
                         });
                         throw error;
                     }
@@ -412,7 +480,6 @@ export const serverCommand = new Command("server")
                     logger.info("🔍 MCP Server: Discovering MCP tools", {
                         searchText,
                         limit,
-                        agent: agent.name,
                     });
 
                     try {
@@ -483,7 +550,6 @@ export const serverCommand = new Command("server")
                     
                     logger.info("🔍 MCP Server: Fetching projects for pubkey", {
                         pubkey,
-                        agent: agent.name,
                     });
 
                     try {
@@ -598,14 +664,14 @@ export const serverCommand = new Command("server")
             const transport = new StdioServerTransport();
             await server.connect(transport);
 
-            logger.info(`MCP server started for agent '${agentSlug}'`);
+            logger.info(`MCP server started`);
 
             // Keep the process alive
             process.on("SIGINT", async () => {
                 await server.close();
                 process.exit(0);
             });
-        } catch (error) {
+        } catch (error: any) {
             logger.error("Failed to start MCP server:", error);
             process.exit(1);
         }
