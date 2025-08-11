@@ -1,4 +1,4 @@
-import type { ToolExecutionResult, Complete, EndConversation } from "@/tools/types";
+import type { ToolExecutionResult, Complete } from "@/tools/types";
 import type { CompletionResponse } from "@/llm/types";
 import type { StreamPublisher } from "@/nostr/NostrPublisher";
 
@@ -7,7 +7,7 @@ import type { StreamPublisher } from "@/nostr/NostrPublisher";
  */
 export interface StreamingState {
     allToolResults: ToolExecutionResult[];
-    termination: Complete | EndConversation | undefined;
+    termination: Complete | undefined;
     finalResponse: CompletionResponse | undefined;
     fullContent: string;
     streamPublisher: StreamPublisher | undefined;
@@ -87,16 +87,16 @@ export class StreamStateManager {
 
 
     /**
-     * Set the termination (complete or end_conversation)
+     * Set the termination (complete)
      */
-    setTermination(termination: Complete | EndConversation): void {
+    setTermination(termination: Complete): void {
         this.state.termination = termination;
     }
 
     /**
      * Get the termination
      */
-    getTermination(): Complete | EndConversation | undefined {
+    getTermination(): Complete | undefined {
         return this.state.termination;
     }
 

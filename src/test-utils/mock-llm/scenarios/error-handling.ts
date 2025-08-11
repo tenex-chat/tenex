@@ -154,13 +154,14 @@ export const errorHandlingScenario: MockLLMScenario = {
                 previousToolCalls: ["continue", "continue", "continue", "continue", "continue"]
             },
             response: {
-                content: "I notice we're stuck in a loop. Let me break out of this pattern.",
+                content: "I notice we're stuck in a loop. Let me complete this task.",
                 toolCalls: [{
                     id: "loop1",
                     message: null,
-                    function: "endConversation",
+                    function: "complete",
                     args: JSON.stringify({
-                        reason: "Detected potential infinite loop"
+                        summary: "Detected potential infinite loop",
+                        response: "Breaking out of loop pattern"
                     })
                 }]
             },

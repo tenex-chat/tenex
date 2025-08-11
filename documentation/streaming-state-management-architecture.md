@@ -25,7 +25,7 @@ The `StreamStateManager` acts as the single source of truth for all mutable stat
 
 #### Core State Management
 - **Tool Results Accumulation**: Maintains an ordered list of all tool execution results
-- **Termination Tracking**: Records terminal tool calls (complete/end_conversation)
+- **Termination Tracking**: Records terminal tool call (complete)
 - **Content Buffer**: Accumulates the full LLM response content incrementally
 - **Stream Publisher Reference**: Maintains the active stream publisher instance
 - **Tool Start Tracking**: Records which tools have sent start events (for detecting missing starts)

@@ -28,11 +28,6 @@ describe("Tool Registry", () => {
         expect(completeTool).toBeDefined();
         expect(completeTool?.description).toBeDefined();
         expect(completeTool?.parameters).toBeDefined();
-
-        const endConversationTool = getTool("end_conversation");
-        expect(endConversationTool).toBeDefined();
-        expect(endConversationTool?.description).toBeDefined();
-        expect(endConversationTool?.parameters).toBeDefined();
     });
 
     test("tool registry should have all expected tools with proper structure", () => {
@@ -40,7 +35,6 @@ describe("Tool Registry", () => {
             "read_path",
             "write_context_file",
             "complete",
-            "end_conversation",
             "analyze",
             "generate_inventory",
             "learn",

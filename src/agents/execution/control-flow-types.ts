@@ -1,4 +1,4 @@
-import type { Complete, EndConversation, CompletionSummary, ConversationResult } from "@/tools/core";
+import type { Complete, CompletionSummary, ConversationResult } from "@/tools/core";
 
 // Type guards for tool outputs
 
@@ -23,17 +23,6 @@ export function isCompletionSummary(completion: unknown): completion is Completi
         typeof completion.summary === "string" &&
         "nextAgent" in completion &&
         typeof completion.nextAgent === "string"
-    );
-}
-
-export function isEndConversation(output: unknown): output is EndConversation {
-    return (
-        typeof output === "object" &&
-        output !== null &&
-        "type" in output &&
-        output.type === "end_conversation" &&
-        "result" in output &&
-        isConversationResult(output.result)
     );
 }
 

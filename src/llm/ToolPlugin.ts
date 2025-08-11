@@ -143,15 +143,6 @@ export class ToolPlugin extends Plugin {
                         typeof output.completion.response === "string"
                     ) {
                         outputMessage = output.completion.response;
-                    } else if (
-                        output.type === "end_conversation" &&
-                        "result" in output &&
-                        typeof output.result === "object" &&
-                        output.result !== null &&
-                        "response" in output.result &&
-                        typeof output.result.response === "string"
-                    ) {
-                        outputMessage = output.result.response;
                     }
                 }
                 // Regular tool output

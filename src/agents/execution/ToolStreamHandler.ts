@@ -7,7 +7,7 @@ import { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
-import { isComplete, isEndConversation } from "./control-flow-types";
+import { isComplete } from "./control-flow-types";
 
 /**
  * Handles tool-related events in the LLM stream.
@@ -59,7 +59,7 @@ export class ToolStreamHandler {
 
     /**
      * Handle a tool_complete event
-     * @returns true if this was a terminal tool (continue, complete, end_conversation)
+     * @returns true if this was a terminal tool (continue, complete)
      */
     async handleToolCompleteEvent(
         event: { tool: string; result: unknown },
@@ -249,15 +249,11 @@ export class ToolStreamHandler {
             this.stateManager.setTermination(output);
             
             // agentDecision removed - not in new event system
-        } else if (isEndConversation(output)) {
-            this.stateManager.setTermination(output);
-            
-            // agentDecision removed - not in new event system
         }
     }
 
     /**
-     * Check if tool result is terminal (complete or end_conversation)
+     * Check if tool result is terminal (complete)
      */
     private isTerminalResult(result: ToolExecutionResult): boolean {
         if (!result.success || !result.output) {
@@ -265,10 +261,7 @@ export class ToolStreamHandler {
         }
 
         const output = result.output as Record<string, unknown>;
-        return (
-            output.type === "complete" ||
-            output.type === "end_conversation"
-        );
+        return output.type === "complete";
     }
 
     /**

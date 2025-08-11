@@ -90,7 +90,7 @@ The executor handles the actual tool invocation with several responsibilities:
 
 Special handling exists for certain tools:
 - `generate_inventory`: Bypasses validation for dynamic schema generation
-- Terminal tools (`complete`, `end_conversation`): Trigger control flow changes
+- Terminal tool (`complete`): Triggers control flow changes
 
 ### 4. Tool Registry (`src/tools/registry.ts`)
 
@@ -119,7 +119,6 @@ The registry provides:
 
 #### Control Flow Tools
 - **complete**: Signals task completion, returns to orchestrator
-- **end_conversation**: Terminates the conversation
 
 #### Analysis Tools
 - **analyze**: Code analysis with custom prompts

@@ -7,7 +7,7 @@ import { getNDK } from "@/nostr";
 import { EXECUTION_TAGS } from "@/nostr/tags";
 import type { LLMMetadata } from "@/nostr/types";
 import { getProjectContext } from "@/services";
-import type { Complete, EndConversation } from "@/tools/types";
+import type { Complete } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -26,7 +26,7 @@ export interface NostrPublisherContext {
 export interface ResponseOptions {
     content: string;
     llmMetadata?: LLMMetadata;
-    completeMetadata?: Complete | EndConversation;
+    completeMetadata?: Complete;
     additionalTags?: string[][];
     destinationPubkeys?: string[];
 }
@@ -42,7 +42,7 @@ interface TenexLogData {
 // Metadata for finalizing stream
 interface FinalizeMetadata {
     llmMetadata?: LLMMetadata;
-    completeMetadata?: Complete | EndConversation;
+    completeMetadata?: Complete;
 }
 
 export class NostrPublisher {

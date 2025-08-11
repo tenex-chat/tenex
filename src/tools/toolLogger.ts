@@ -166,16 +166,6 @@ export class ToolCallLogger {
             ) {
                 return output.completion.response;
             }
-            if (
-                output.type === "end_conversation" &&
-                "result" in output &&
-                typeof output.result === "object" &&
-                output.result !== null &&
-                "response" in output.result &&
-                typeof output.result.response === "string"
-            ) {
-                return output.result.response;
-            }
         }
 
         // Regular tool output
@@ -198,10 +188,7 @@ export class ToolCallLogger {
             if (output.type === "continue" && "routing" in output) {
                 return { flow: output };
             }
-            if (
-                (output.type === "complete" && "completion" in output) ||
-                (output.type === "end_conversation" && "result" in output)
-            ) {
+            if (output.type === "complete" && "completion" in output) {
                 return { termination: output };
             }
         }

@@ -50,18 +50,13 @@ export interface Tool<Input = unknown, Output = unknown> {
 // ============================================================================
 
 /**
- * Termination types that end execution
+ * Termination type that ends execution
  */
-export type Termination = Complete | EndConversation;
+export type Termination = Complete;
 
 export interface Complete {
     readonly type: "complete";
     readonly completion: CompletionSummary;
-}
-
-export interface EndConversation {
-    readonly type: "end_conversation";
-    readonly result: ConversationResult;
 }
 
 export interface CompletionSummary {

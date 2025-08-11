@@ -324,14 +324,7 @@ The authentication system has been successfully implemented and verified.`,
             },
             response: {
                 content: "Task completed successfully! The authentication system has been implemented, tested, and verified.",
-                toolCalls: [{
-                    id: "13",
-                    message: null,
-                    function: "endConversation",
-                    args: JSON.stringify({
-                        reason: "Task completed successfully"
-                    })
-                }]
+                toolCalls: []
             },
             priority: 9
         }

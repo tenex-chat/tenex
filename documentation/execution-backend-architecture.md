@@ -92,7 +92,7 @@ The `ReasonActLoop` (src/agents/execution/ReasonActLoop.ts) is the default backe
 **Termination Loop:**
 The ReasonActLoop implements a sophisticated termination enforcement mechanism:
 1. Executes the main stream processing
-2. Checks if the agent properly terminated (called complete/end_conversation)
+2. Checks if the agent properly terminated (called complete)
 3. If not terminated and not in chat/brainstorm phase, sends a reminder
 4. Retries up to MAX_TERMINATION_ATTEMPTS (2) times
 5. Auto-completes if agent still fails to terminate
@@ -172,7 +172,7 @@ The `ToolStreamHandler` (src/agents/execution/ToolStreamHandler.ts) manages tool
 2. **Tool completion processing**: Result validation and error handling
 3. **Missing start detection**: Handles tools that skip tool_start events
 4. **Tool descriptions**: Human-readable descriptions for UI feedback
-5. **Termination detection**: Identifies terminal tools (complete, end_conversation)
+5. **Termination detection**: Identifies terminal tool (complete)
 
 **Tool Description System:**
 The handler maintains a mapping of tool names to descriptive message generators:

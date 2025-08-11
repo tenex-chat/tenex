@@ -134,7 +134,7 @@ documentation-agent complete(): "Updated: API docs, README, and changelog"
 ```
 Orchestrator → lessons-learned-agent: [full context]
 lessons-learned-agent complete(): "Published 3 lessons about performance optimization patterns"
-→ Conversation naturally ends (no explicit end_conversation needed)
+→ Conversation naturally ends
 ```
 
 ## Orchestrator Decision Logic
@@ -189,10 +189,10 @@ function onAgentComplete(agent, completion, phase) {
 
 ### Phase 1: Core Orchestrator Changes
 
-#### 1.1 Remove end_conversation from orchestrator
+#### 1.1 Update orchestrator instructions
 **Files to modify:**
-- `/src/agents/constants.ts` - Remove end_conversation from orchestrator tools
-- `/src/prompts/fragments/orchestrator-routing.ts` - Remove end_conversation references
+- `/src/agents/constants.ts` - Ensure proper tool configuration
+- `/src/prompts/fragments/orchestrator-routing.ts` - Update routing instructions
 
 #### 1.2 Update orchestrator instructions
 **File:** `/src/agents/built-in/orchestrator.ts`

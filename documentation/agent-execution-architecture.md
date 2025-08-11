@@ -254,7 +254,7 @@ Enforces proper task completion:
 
 Different phases have different requirements:
 - **CHAT/BRAINSTORM**: No termination required (conversational)
-- **Other Phases**: Must call complete() or end_conversation()
+- **Other Phases**: Must call complete()
 - **Orchestrator**: Must always provide routing (never auto-completes)
 
 **Retry Logic**:
@@ -355,7 +355,7 @@ Dual-format results:
 
 Special processing for termination tools:
 - Extracts response from complete() results
-- Formats end_conversation messages
+- Formats completion messages
 - Preserves metadata for system use
 
 ## Execution Flow

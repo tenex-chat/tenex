@@ -15,7 +15,6 @@ describe("Tool assignment", () => {
             expect(tools).toHaveLength(0);
             expect(tools).not.toContain("complete");
             expect(tools).not.toContain("analyze");
-            expect(tools).not.toContain("end_conversation");
             expect(tools).not.toContain("continue");
             expect(tools).not.toContain("lesson_learn");
         });
@@ -40,7 +39,6 @@ describe("Tool assignment", () => {
             expect(executorTools).toContain("read_path");
             expect(executorTools).toContain("lesson_learn");
             expect(executorTools).toContain("analyze");
-            expect(executorTools).not.toContain("end_conversation");
             expect(executorTools).not.toContain("continue");
 
             // Planner gets the same default tools
@@ -48,7 +46,6 @@ describe("Tool assignment", () => {
             expect(plannerTools).toContain("read_path");
             expect(plannerTools).toContain("lesson_learn");
             expect(plannerTools).toContain("analyze");
-            expect(plannerTools).not.toContain("end_conversation");
             expect(plannerTools).not.toContain("continue");
 
             // Note: AgentRegistry.ts will remove all tools from these agents
@@ -65,7 +62,6 @@ describe("Tool assignment", () => {
             const tools = getDefaultToolsForAgent(mockCustomAgent);
 
             expect(tools).toContain("complete");
-            expect(tools).not.toContain("end_conversation");
             expect(tools).not.toContain("continue");
         });
 
@@ -80,7 +76,6 @@ describe("Tool assignment", () => {
             expect(tools).toContain("complete");
             expect(tools).toContain("generate_inventory");
             expect(tools).toContain("write_context_file");
-            expect(tools).not.toContain("end_conversation");
             expect(tools).not.toContain("continue");
         });
     });
