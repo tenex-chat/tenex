@@ -120,8 +120,7 @@ export async function runDebugChat(
             const systemPromptBuilder = new PromptBuilder().add("agent-system-prompt", {
                 agent,
                 phase: PHASES.CHAT,
-                projectTitle: project.tagValue("title") || "Untitled Project",
-                projectRepository: project.tagValue("repo") || undefined,
+                project
             });
 
             const systemPrompt = systemPromptBuilder.build();
@@ -222,6 +221,7 @@ export async function runDebugChat(
                     phase: PHASES.CHAT,
                     projectTitle: project.tagValue("title") || "Untitled Project",
                     projectRepository: project.tagValue("repo") || undefined,
+                    projectOwnerPubkey: project.pubkey
                 });
 
                 const systemPrompt = systemPromptBuilder.build();

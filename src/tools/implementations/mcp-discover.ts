@@ -61,6 +61,7 @@ export const mcpDiscover: Tool<McpDiscoverInput, McpDiscoverOutput> = {
   name: "discover_capabilities",
   description:
     "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
+  promptFragment: `When showing the tools to the user, just use their nostr:id, the frontend will display them properly. You cannot install MCP tools directly, you can only suggest them to the user.`,
   parameters: createZodSchema(mcpDiscoverSchema),
   execute: async (
     input: Validated<McpDiscoverInput>,

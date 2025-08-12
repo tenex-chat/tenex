@@ -171,15 +171,7 @@ Use one of these standard categories or create a specific one if needed:
             // Add reference to the agent event if available
             const agentEventId = context.agent.eventId;
             if (agentEventId) {
-                const agentEvent = await ndk.fetchEvent(agentEventId);
-
-                if (agentEvent) {
-                    lessonEvent.agent = agentEvent;
-                } else {
-                    logger.warn("Could not fetch agent event for lesson", {
-                        agentEventId,
-                    });
-                }
+                lessonEvent.agentDefinitionId = agentEventId;
             }
 
             // Add project tag for scoping
@@ -187,7 +179,7 @@ Use one of these standard categories or create a specific one if needed:
 
             // Sign and publish the event
             await lessonEvent.sign(agentSigner);
-            await lessonEvent.publish();
+            lessonEvent.publish();
 
             const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 

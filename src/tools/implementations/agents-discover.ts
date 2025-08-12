@@ -8,40 +8,64 @@ import { z } from "zod";
 // Define the input schema
 const agentsDiscoverSchema = z.object({
     searchText: z.string().optional().describe("Text to search for in agent name/description/role"),
-    criteriaKeywords: z.array(z.string()).optional().describe("Keywords to match in use criteria"),
+    limit: z.coerce.number().optional().default(50).describe("Maximum number of agents to return"),
 });
 
 type AgentsDiscoverInput = z.infer<typeof agentsDiscoverSchema>;
 
-// Define the output type
+// Define the output type - returns markdown formatted string
 interface AgentsDiscoverOutput {
-    success: boolean;
+    markdown: string;
     agentsFound: number;
-    agents: Array<{
-        eventId: string;
-        name: string;
-        role: string;
-        description: string;
-        useCriteria: string[];
-        authorPubkey: string;
-        createdAt: number;
-    }>;
 }
 
 /**
  * Tool: agents_discover
  * Discover AgentDefinition events from the Nostr network
  */
+/**
+ * Format discovered agents as markdown
+ */
+function formatAgentsAsMarkdown(agents: Array<{
+  id: string;
+  name: string;
+  role: string;
+  description?: string;
+  useCriteria?: string;
+  authorPubkey: string;
+  createdAt?: number;
+}>): string {
+  if (agents.length === 0) {
+    return "## No agents found\n\nNo agents match your search criteria. Try broadening your search or check back later.";
+  }
+
+  const lines: string[] = [];
+  lines.push(`# Agent Discovery Results`);
+  lines.push(`\nFound **${agents.length}** available agent${agents.length === 1 ? '' : 's'}:\n`);
+
+  agents.forEach((agent, index) => {
+    lines.push(`## ${index + 1}. ${agent.name}`);
+    lines.push(`nostr:${agent.id}`);
+    lines.push(``);
+    
+    lines.push(`---`);
+    lines.push(``);
+  });
+
+  return lines.join('\n');
+}
+
 export const agentsDiscover: Tool<AgentsDiscoverInput, AgentsDiscoverOutput> = {
     name: "agents_discover",
     description: "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
+    promptFragment: `When showing the agents to the user, just use their nostr:id, the frontend will display them properly. You cannot use agents directly, you can only suggest them to the user.`,
     parameters: createZodSchema(agentsDiscoverSchema),
     execute: async (
         input: Validated<AgentsDiscoverInput>,
         context: ExecutionContext
     ): Promise<Result<ToolError, AgentsDiscoverOutput>> => {
         try {
-            const { searchText, criteriaKeywords } = input.value;
+            const { searchText, limit } = input.value;
 
             const ndk = getNDK();
             const discovery = new NDKAgentDiscovery(ndk);
@@ -49,26 +73,37 @@ export const agentsDiscover: Tool<AgentsDiscoverInput, AgentsDiscoverOutput> = {
             // Discover agents with specified filters
             const agents = await discovery.discoverAgents({
                 searchText,
-                criteriaKeywords,
             });
 
-            // Format results
-            const results = agents.map(agent => ({
-                eventId: agent.id,
-                name: agent.name,
-                role: agent.role,
-                description: agent.description,
-                useCriteria: agent.useCriteria,
-                authorPubkey: agent.authorPubkey,
-                createdAt: agent.createdAt,
-            }));
+            // Format results with bech32 encoded IDs
+            let results = agents.map(agent => {
+                // Get bech32 encoded ID from the NDKAgentDefinition event
+                const bech32Id = agent.event.encode();
+                
+                return {
+                    id: bech32Id,
+                    name: agent.name,
+                    role: agent.role,
+                    description: agent.description,
+                    useCriteria: agent.useCriteria,
+                    authorPubkey: agent.authorPubkey,
+                    createdAt: agent.createdAt,
+                };
+            });
 
-            logger.info(`Discovered ${results.length} AgentDefinition events`);
+            // Apply limit if specified
+            if (limit && results.length > limit) {
+                results = results.slice(0, limit);
+            }
+
+            logger.info(`Returning ${results.length} AgentDefinition events after limiting`);
+
+            // Format as markdown
+            const markdown = formatAgentsAsMarkdown(results);
 
             return success({
-                success: true,
+                markdown,
                 agentsFound: results.length,
-                agents: results,
             });
         } catch (error) {
             logger.error("Failed to discover agents", { error });

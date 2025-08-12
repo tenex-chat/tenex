@@ -22,12 +22,7 @@ export async function fetchAgentDefinition(
     pubkey: string;
 } | null> {
     try {
-        const filter = {
-            ids: [eventId],
-            kinds: [4199], // NDKAgentDefinition kind
-        };
-
-        const event = await ndk.fetchEvent(filter, {
+        const event = await ndk.fetchEvent(eventId, {
             closeOnEose: true,
             groupable: false,
         });

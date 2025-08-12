@@ -81,9 +81,11 @@ export class ReasonActLoop implements ExecutionBackend {
             // Main termination loop
             while (attempt < ExecutionConfig.MAX_TERMINATION_ATTEMPTS) {
                 attempt++;
-
+                console.log(`Agent termination attempt ${attempt}.`)
+                
                 // Reset state for retry (but keep stream publisher)
                 if (attempt > 1) {
+                    console.log(`Reset retry counter`)
                     stateManager.resetForRetry();
                 }
 
@@ -123,6 +125,7 @@ export class ReasonActLoop implements ExecutionBackend {
                 }
 
                 // Prepare for retry with reminder
+                console.log('will give retry instruction')
                 currentMessages = terminationHandler.prepareRetryMessages(
                     currentMessages,
                     context,
@@ -152,6 +155,7 @@ export class ReasonActLoop implements ExecutionBackend {
         this.streamingBuffer.set(agentKey, "");
         
         for await (const event of stream) {
+            console.log(`[processStream] ${event.type}`)
             yield event;
 
             switch (event.type) {

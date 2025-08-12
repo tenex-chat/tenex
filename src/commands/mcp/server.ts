@@ -337,7 +337,7 @@ export const serverCommand = new Command("server")
                         },
                         {
                             name: "nostr_projects",
-                            description: "Retrieve NDKProject (31933) events and online project status (24010) events for a given pubkey",
+                            description: "Retrieve NDKProject (31933) events, online project status (24010) events, and spec documents (30023 NDKArticles) that tag the projects for a given pubkey",
                             inputSchema: {
                                 type: "object",
                                 properties: {
@@ -585,6 +585,9 @@ export const serverCommand = new Command("server")
                     });
 
                     try {
+                        // Import NDKArticle if not already imported
+                        const { NDKArticle } = await import("@nostr-dev-kit/ndk");
+                        
                         // Fetch both kinds of events in parallel
                         const [projectEvents, statusEvents] = await Promise.all([
                             // Fetch 31933 events (NDKProject)
@@ -625,6 +628,56 @@ export const serverCommand = new Command("server")
                             }
                         });
 
+                        // Once we have the list of projects, fetch spec documents that tag them
+                        let specArticles: any[] = [];
+                        if (projectEvents.size > 0) {
+                            // Create array of project tag IDs for fetching articles
+                            const projectTagIds = Array.from(projectEvents).map(projectEvent => {
+                                return projectEvent.tagId();
+                            });
+                            
+                            logger.info("📄 MCP Server: Fetching spec documents for projects", {
+                                projectCount: projectTagIds.length,
+                            });
+                            
+                            // Fetch NDKArticles (kind 30023) that tag these projects
+                            const articleEvents = await ndk.fetchEvents({
+                                kinds: [30023],
+                                "#a": projectTagIds,
+                            }, { subId: "spec-articles" });
+                            
+                            // Process articles
+                            specArticles = Array.from(articleEvents).map(event => {
+                                const article = NDKArticle.from(event);
+                                
+                                // Get project references from the article's tags (for internal filtering only)
+                                const projectRefs = event.tags
+                                    .filter(tag => tag[0] === "a" && projectTagIds.includes(tag[1]))
+                                    .map(tag => tag[1]);
+                                
+                                // Get summary or first 300 bytes of content
+                                let summary = article.summary;
+                                if (!summary && article.content) {
+                                    summary = article.content.substring(0, 300);
+                                    if (article.content.length > 300) {
+                                        summary += "...";
+                                    }
+                                }
+                                
+                                return {
+                                    title: article.title,
+                                    summary: summary,
+                                    id: `nostr:${article.encode()}`,
+                                    date: article.created_at,
+                                    _projectRefs: projectRefs, // Keep for internal filtering but prefix with underscore
+                                };
+                            });
+                            
+                            logger.info("✅ MCP Server: Spec documents fetched", {
+                                articleCount: specArticles.length,
+                            });
+                        }
+
                         // Process project events (31933)
                         const projects = Array.from(projectEvents).map(projectEvent => {
                             const title = projectEvent.tagValue("title") || projectEvent.tagValue("name");
@@ -637,8 +690,14 @@ export const serverCommand = new Command("server")
                             const isOnline = onlineAgentsByProject.has(projectEvent.pubkey);
                             const onlineAgents = isOnline ? onlineAgentsByProject.get(projectEvent.pubkey) : undefined;
                             
-                            // Get the encoded project ID
-                            const projectId = projectEvent.encode();
+                            // Get the encoded project ID with nostr: prefix
+                            const projectId = `nostr:${projectEvent.encode()}`;
+                            
+                            // Find spec articles for this project
+                            const projectTagId = projectEvent.tagId();
+                            const projectSpecs = specArticles
+                                .filter(article => article._projectRefs.includes(projectTagId))
+                                .map(({ _projectRefs, ...article }) => article); // Remove internal _projectRefs field
                             
                             return {
                                 id: projectId,
@@ -650,12 +709,13 @@ export const serverCommand = new Command("server")
                                 online: isOnline,
                                 agents: onlineAgents,
                                 pubkey: projectEvent.pubkey,
-                                createdAt: projectEvent.created_at,
+                                date: projectEvent.created_at,
+                                specs: projectSpecs,
                             };
                         });
 
                         // Sort projects by creation time (newest first)
-                        projects.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                        projects.sort((a, b) => (b.date || 0) - (a.date || 0));
 
                         const result = {
                             projects,
@@ -663,6 +723,7 @@ export const serverCommand = new Command("server")
                                 totalProjects: projects.length,
                                 onlineProjects: projects.filter(p => p.online).length,
                                 offlineProjects: projects.filter(p => !p.online).length,
+                                totalSpecDocuments: specArticles.length,
                             },
                         };
 
@@ -670,6 +731,7 @@ export const serverCommand = new Command("server")
                             pubkey,
                             projectCount: projects.length,
                             onlineCount: result.summary.onlineProjects,
+                            specDocumentCount: specArticles.length,
                         });
 
                         return {

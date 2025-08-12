@@ -345,6 +345,25 @@ export class MCPService {
     getRunningServers(): string[] {
         return Array.from(this.clients.keys()).filter((name) => this.isServerRunning(name));
     }
+
+    /**
+     * Reload MCP service configuration and restart servers
+     * This is called when MCP tools are added/removed dynamically
+     */
+    async reload(projectPath?: string): Promise<void> {
+        logger.info("Reloading MCP service configuration");
+        
+        // Shutdown existing servers
+        await this.shutdown();
+        
+        // Re-initialize with the new configuration
+        await this.initialize(projectPath || this.projectPath);
+        
+        logger.info("MCP service reloaded successfully", {
+            runningServers: this.getRunningServers(),
+            availableTools: this.cachedTools.length
+        });
+    }
 }
 
 export const mcpService = MCPService.getInstance();

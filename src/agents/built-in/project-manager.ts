@@ -49,5 +49,14 @@ Remember, you are intelligently transcribing a document, not adding your own fla
   useCriteria:
     "ALWAYS during REFLECTION phase to analyze and learn from implementations. Also when users or other agents need to understand overall goals of the project.\nALWAYS during VERIFICATION phase.",
   llmConfig: "agents",
-  tools: ["read_path", "write_context_file", "analyze", "lesson_learn", "shell", "discover_capabilities"],
+  tools: [
+    "read_path",
+    "write_context_file",
+    "analyze",
+    "lesson_learn",
+    "shell",
+    "discover_capabilities",
+    "agents_hire",
+    "agents_discover",
+  ],
 };

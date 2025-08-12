@@ -1,137 +1,116 @@
 import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 
-export enum LessonQuality {
-    TRIVIAL = "trivial",
-    VALUABLE = "valuable",
-    CRITICAL = "critical"
-}
-
 export class NDKAgentLesson extends NDKEvent {
-    static kind = 4129;
-    static kinds = [4129];
+  static kind = 4129;
+  static kinds = [4129];
 
-    constructor(ndk?: NDK, event?: NDKEvent | NDKRawEvent) {
-        super(ndk, event);
-        this.kind ??= 4129;
-    }
+  constructor(ndk?: NDK, event?: NDKEvent | NDKRawEvent) {
+    super(ndk, event);
+    this.kind ??= 4129;
+  }
 
-    static from(event: NDKEvent): NDKAgentLesson {
-        return new NDKAgentLesson(event.ndk, event);
-    }
+  static from(event: NDKEvent): NDKAgentLesson {
+    return new NDKAgentLesson(event.ndk, event);
+  }
 
-    get title(): string | undefined {
-        return this.tagValue("title");
-    }
+  get title(): string | undefined {
+    return this.tagValue("title");
+  }
 
-    /**
-     * Title/description of what this lesson is about.
-     */
-    set title(value: string | undefined) {
-        this.removeTag("title");
-        if (value) this.tags.push(["title", value]);
-    }
+  /**
+   * Title/description of what this lesson is about.
+   */
+  set title(value: string | undefined) {
+    this.removeTag("title");
+    if (value) this.tags.push(["title", value]);
+  }
 
-    // Alias for title
-    get description(): string | undefined {
-        return this.tagValue("title");
-    }
+  // Alias for title
+  get description(): string | undefined {
+    return this.tagValue("title");
+  }
 
-    set description(value: string | undefined) {
-        this.removeTag("description");
-        if (value) this.tags.push(["description", value]);
-    }
+  set description(value: string | undefined) {
+    this.removeTag("description");
+    if (value) this.tags.push(["description", value]);
+  }
 
-    /**
-     * The lesson content - what the agent learned.
-     * This is stored in the event content.
-     */
-    get lesson(): string {
-        return this.content;
-    }
+  /**
+   * The lesson content - what the agent learned.
+   * This is stored in the event content.
+   */
+  get lesson(): string {
+    return this.content;
+  }
 
-    set lesson(value: string) {
-        this.content = value;
-    }
+  set lesson(value: string) {
+    this.content = value;
+  }
 
-    /**
-     * Set the agent that this lesson belongs to.
-     * @param agentEvent The NDKAgentDefinition event to reference
-     */
-    set agent(agentEvent: NDKEvent) {
-        this.removeTag("e");
-        this.tags.push(["e", agentEvent.id]);
-    }
+  /**
+   * Set the agent that this lesson belongs to.
+   * @param agentEvent The NDKAgentDefinition event to reference
+   */
+  set agentDefinitionId(agentDefinitionId: string) {
+    this.removeTag("e");
+    this.tags.push(["e", agentDefinitionId]);
+  }
 
-    /**
-     * Get the agent event ID this lesson belongs to.
-     */
-    get agentId(): string | undefined {
-        return this.tags.find((tag) => tag[0] === "e")?.[1];
-    }
+  /**
+   * Get the agent event ID this lesson belongs to.
+   */
+  get agentDefinitionId(): string | undefined {
+    return this.tags.find((tag) => tag[0] === "e")?.[1];
+  }
 
-    /**
-     * Quality assessment of the lesson
-     */
-    get quality(): LessonQuality | undefined {
-        const qualityTag = this.tagValue("quality");
-        return qualityTag as LessonQuality | undefined;
-    }
+  /**
+   * Metacognition reasoning - why this lesson is worth learning
+   */
+  get metacognition(): string | undefined {
+    return this.tagValue("metacognition");
+  }
 
-    set quality(value: LessonQuality | undefined) {
-        this.removeTag("quality");
-        if (value) this.tags.push(["quality", value]);
-    }
+  set metacognition(value: string | undefined) {
+    this.removeTag("metacognition");
+    if (value) this.tags.push(["metacognition", value]);
+  }
 
-    /**
-     * Metacognition reasoning - why this lesson is worth learning
-     */
-    get metacognition(): string | undefined {
-        return this.tagValue("metacognition");
-    }
+  /**
+   * Detailed version of the lesson with richer explanation
+   */
+  get detailed(): string | undefined {
+    return this.tagValue("detailed");
+  }
 
-    set metacognition(value: string | undefined) {
-        this.removeTag("metacognition");
-        if (value) this.tags.push(["metacognition", value]);
-    }
+  set detailed(value: string | undefined) {
+    this.removeTag("detailed");
+    if (value) this.tags.push(["detailed", value]);
+  }
 
-    /**
-     * Detailed version of the lesson with richer explanation
-     */
-    get detailed(): string | undefined {
-        return this.tagValue("detailed");
-    }
+  /**
+   * Category for filing this lesson
+   */
+  get category(): string | undefined {
+    return this.tagValue("category");
+  }
 
-    set detailed(value: string | undefined) {
-        this.removeTag("detailed");
-        if (value) this.tags.push(["detailed", value]);
-    }
+  set category(value: string | undefined) {
+    this.removeTag("category");
+    if (value) this.tags.push(["category", value]);
+  }
 
-    /**
-     * Category for filing this lesson
-     */
-    get category(): string | undefined {
-        return this.tagValue("category");
-    }
+  /**
+   * Hashtags for easier sorting and discovery
+   */
+  get hashtags(): string[] {
+    return this.tags.filter((tag) => tag[0] === "t").map((tag) => tag[1]);
+  }
 
-    set category(value: string | undefined) {
-        this.removeTag("category");
-        if (value) this.tags.push(["category", value]);
-    }
-
-    /**
-     * Hashtags for easier sorting and discovery
-     */
-    get hashtags(): string[] {
-        return this.tags
-            .filter((tag) => tag[0] === "t")
-            .map((tag) => tag[1]);
-    }
-
-    set hashtags(values: string[]) {
-        this.tags = this.tags.filter((tag) => tag[0] !== "t");
-        values.forEach((hashtag) => {
-            this.tags.push(["t", hashtag]);
-        });
-    }
+  set hashtags(values: string[]) {
+    this.tags = this.tags.filter((tag) => tag[0] !== "t");
+    values.forEach((hashtag) => {
+      this.tags.push(["t", hashtag]);
+    });
+  }
 }

@@ -226,8 +226,7 @@ export class AgentExecutor {
         const systemPrompt = buildSystemPrompt({
             agent: context.agent,
             phase: context.phase,
-            projectTitle: tagMap.get("title") || "Untitled Project",
-            projectRepository: tagMap.get("repo"),
+            project,
             availableAgents,
             conversation,
             agentLessons: agentLessonsMap,

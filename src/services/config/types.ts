@@ -107,6 +107,7 @@ export interface MCPServerConfig {
     env?: Record<string, string>;
     description?: string;
     allowedPaths?: string[];
+    eventId?: string; // Nostr event ID this server was installed from
 }
 
 export interface TenexMCP {
@@ -120,6 +121,7 @@ export const MCPServerConfigSchema = z.object({
     env: z.record(z.string()).optional(),
     description: z.string().optional(),
     allowedPaths: z.array(z.string()).optional(),
+    eventId: z.string().optional(),
 });
 
 export const TenexMCPSchema = z.object({

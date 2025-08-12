@@ -112,8 +112,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
             const systemPrompt = buildSystemPrompt({
                 agent,
                 phase,
-                projectTitle: titleTag?.[1] || "Untitled Project",
-                projectRepository: repoTag?.[1],
+                project: projectCtx.project,
                 availableAgents,
                 conversation: undefined, // No conversation in debug mode
                 agentLessons: agentLessonsMap,
