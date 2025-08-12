@@ -10,14 +10,13 @@ import "@/prompts/fragments/domain-expert-guidelines";
 import "@/prompts/fragments/voice-mode";
 import "@/prompts/fragments/agent-completion-guidance";
 import { isVoiceMode } from "@/prompts/fragments/voice-mode";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 
 export interface BuildSystemPromptOptions {
     // Required data
     agent: AgentInstance;
     phase: Phase;
-    projectTitle: string;
-    projectRepository?: string;
+    project: NDKProject;
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
@@ -35,8 +34,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     const {
         agent,
         phase,
-        projectTitle,
-        projectRepository = "No repository",
+        project,
         availableAgents = [],
         conversation,
         agentLessons,
@@ -45,13 +43,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     } = options;
 
     // Build system prompt with all agent and phase context
-    const systemPromptBuilder = new PromptBuilder()
-        .add("agent-system-prompt", {
-            agent,
-            phase,
-            projectTitle,
-            projectRepository,
-        });
+    const systemPromptBuilder = new PromptBuilder().add("agent-system-prompt", {
+        agent,
+        phase,
+        projectTitle: project.title,
+        projectOwnerPubkey: project.pubkey,
+    });
     
     // Only add conversation-history instructions for non-orchestrator agents
     // Orchestrator receives structured JSON, not conversation history

@@ -9,6 +9,7 @@ import { type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 const mockNDKEvent = {
     sign: mock(() => Promise.resolve()),
     publish: mock(() => Promise.resolve()),
+    tag: mock((event: any) => {}),
     kind: 0,
     pubkey: "",
     content: "",
@@ -43,23 +44,39 @@ describe("AgentPublisher", () => {
     let agentPublisher: AgentPublisher;
     let mockNDK: NDK;
     let mockSigner: NDKPrivateKeySigner;
+    let mockProjectEvent: any;
 
     beforeEach(() => {
         // Clear all mocks
         mockNDKEventConstructor.mockClear();
         mockNDKEvent.sign.mockClear();
         mockNDKEvent.publish.mockClear();
+        mockNDKEvent.tag.mockClear();
         (logger.info as any).mockClear();
         (logger.error as any).mockClear();
 
         // Reset mock event
         mockNDKEvent.sign.mockResolvedValue(undefined);
         mockNDKEvent.publish.mockResolvedValue(undefined);
+        mockNDKEvent.tags = [];
 
         mockNDK = {} as NDK;
         mockSigner = {
             pubkey: "test-pubkey-123",
         } as NDKPrivateKeySigner;
+
+        // Mock project event (kind:31933)
+        mockProjectEvent = {
+            kind: 31933,
+            pubkey: "project-author-pubkey",
+            tagValue: mock((tag: string) => {
+                if (tag === "title") return "TestProject";
+                if (tag === "d") return "test-project-d-tag";
+                return null;
+            }),
+            id: "project-event-id-123",
+            encode: mock(() => "31933:project-author-pubkey:test-project-d-tag"),
+        };
 
         agentPublisher = new AgentPublisher(mockNDK);
     });
@@ -68,15 +85,14 @@ describe("AgentPublisher", () => {
         it("should publish agent profile with correct data", async () => {
             const agentName = "TestAgent";
             const agentRole = "Executor";
-            const projectName = "TestProject";
-            const projectPubkey = "project-pubkey-456";
+            const projectTitle = "TestProject";
 
             await agentPublisher.publishAgentProfile(
                 mockSigner,
                 agentName,
                 agentRole,
-                projectName,
-                projectPubkey
+                projectTitle,
+                mockProjectEvent
             );
 
             // Verify NDKEvent was created with correct data
@@ -84,8 +100,11 @@ describe("AgentPublisher", () => {
                 kind: 0,
                 pubkey: mockSigner.pubkey,
                 content: expect.stringContaining(agentName),
-                tags: [["p", projectPubkey, "", "project"]],
+                tags: [],
             });
+
+            // Verify project was tagged properly
+            expect(mockNDKEvent.tag).toHaveBeenCalledWith(mockProjectEvent);
 
             // Verify profile content includes all required fields
             const callArgs = mockNDKEventConstructor.mock.calls[0];
@@ -93,10 +112,10 @@ describe("AgentPublisher", () => {
             expect(profileContent).toMatchObject({
                 name: agentName,
                 role: agentRole,
-                description: `${agentRole} agent for ${projectName}`,
+                description: `${agentRole} agent for ${projectTitle}`,
                 capabilities: [agentRole.toLowerCase()],
                 picture: expect.stringContaining("dicebear.com"),
-                project: projectName,
+                project: projectTitle,
             });
 
             // Verify event was signed and published
@@ -110,7 +129,7 @@ describe("AgentPublisher", () => {
                 "TestAgent",
                 "Executor",
                 "TestProject",
-                "project-pubkey"
+                mockProjectEvent
             );
 
             const callArgs = mockNDKEventConstructor.mock.calls[0];
@@ -130,7 +149,7 @@ describe("AgentPublisher", () => {
                     "TestAgent",
                     "Executor",
                     "TestProject",
-                    "project-pubkey"
+                    mockProjectEvent
                 )
             ).rejects.toThrow("Network error");
 
@@ -142,6 +161,35 @@ describe("AgentPublisher", () => {
                 })
             );
         });
+
+        it("should include e-tag for agent definition event when provided", async () => {
+            const agentName = "TestAgent";
+            const agentRole = "Executor";
+            const projectTitle = "TestProject";
+            const agentDefinitionEventId = "def-event-id-789";
+
+            // Set up mock to track tags being added
+            mockNDKEvent.tags = [];
+
+            await agentPublisher.publishAgentProfile(
+                mockSigner,
+                agentName,
+                agentRole,
+                projectTitle,
+                mockProjectEvent,
+                agentDefinitionEventId
+            );
+
+            // Verify project was tagged
+            expect(mockNDKEvent.tag).toHaveBeenCalledWith(mockProjectEvent);
+
+            // Verify e-tag was added
+            expect(mockNDKEvent.tags).toContainEqual(["e", agentDefinitionEventId, "", "agent-definition"]);
+
+            // Verify event was signed and published
+            expect(mockNDKEvent.sign).toHaveBeenCalledWith(mockSigner);
+            expect(mockNDKEvent.publish).toHaveBeenCalled();
+        });
     });
 
     describe("publishAgentRequest", () => {
@@ -151,20 +199,25 @@ describe("AgentPublisher", () => {
                 role: "Executor",
                 systemPrompt: "Test prompt",
             };
-            const projectPubkey = "project-pubkey-456";
 
             const result = await agentPublisher.publishAgentRequest(
                 mockSigner,
                 agentConfig,
-                projectPubkey
+                mockProjectEvent
             );
 
-            // Verify NDKEvent was created with correct data
-            expect(mockNDKEventConstructor).toHaveBeenCalledWith(mockNDK, {
-                kind: EVENT_KINDS.AGENT_REQUEST,
-                content: "",
-                tags: [["p", projectPubkey], ["name", agentConfig.name]],
-            });
+            // Verify NDKEvent was created
+            expect(mockNDKEventConstructor).toHaveBeenCalled();
+            const callArgs = mockNDKEventConstructor.mock.calls[0];
+            expect(callArgs[0]).toBe(mockNDK);
+            expect(callArgs[1].kind).toBe(EVENT_KINDS.AGENT_REQUEST);
+            expect(callArgs[1].content).toBe("");
+
+            // Verify project was tagged
+            expect(mockNDKEvent.tag).toHaveBeenCalledWith(mockProjectEvent);
+
+            // Verify name tag was added
+            expect(mockNDKEvent.tags).toContainEqual(["name", "TestAgent"]);
 
             // Verify event was signed and published
             expect(mockNDKEvent.sign).toHaveBeenCalledWith(mockSigner);
@@ -180,26 +233,24 @@ describe("AgentPublisher", () => {
                 role: "Executor",
                 systemPrompt: "Test prompt",
             };
-            const projectPubkey = "project-pubkey-456";
             const ndkAgentEventId = "ndk-agent-event-789";
+
+            // Set up mock to track tags being added
+            mockNDKEvent.tags = [["e", ndkAgentEventId, "", "agent-definition"], ["name", "TestAgent"]];
 
             await agentPublisher.publishAgentRequest(
                 mockSigner,
                 agentConfig,
-                projectPubkey,
+                mockProjectEvent,
                 ndkAgentEventId
             );
 
+            // Verify project was tagged
+            expect(mockNDKEvent.tag).toHaveBeenCalledWith(mockProjectEvent);
+
             // Verify e-tag was added for NDKAgentDefinition event
-            expect(mockNDKEventConstructor).toHaveBeenCalledWith(mockNDK, {
-                kind: EVENT_KINDS.AGENT_REQUEST,
-                content: "",
-                tags: [
-                    ["p", projectPubkey],
-                    ["e", ndkAgentEventId, "", "agent-definition"],
-                    ["name", agentConfig.name],
-                ],
-            });
+            expect(mockNDKEvent.tags).toContainEqual(["e", ndkAgentEventId, "", "agent-definition"]);
+            expect(mockNDKEvent.tags).toContainEqual(["name", agentConfig.name]);
         });
 
         it("should throw error when publishing fails", async () => {
@@ -213,7 +264,7 @@ describe("AgentPublisher", () => {
             };
 
             await expect(
-                agentPublisher.publishAgentRequest(mockSigner, agentConfig, "project-pubkey")
+                agentPublisher.publishAgentRequest(mockSigner, agentConfig, mockProjectEvent)
             ).rejects.toThrow("Publishing failed");
 
             expect(logger.error).toHaveBeenCalledWith(
@@ -233,14 +284,13 @@ describe("AgentPublisher", () => {
                 role: "Executor",
                 systemPrompt: "Test prompt",
             };
-            const projectName = "TestProject";
-            const projectPubkey = "project-pubkey-456";
+            const projectTitle = "TestProject";
 
             await agentPublisher.publishAgentCreation(
                 mockSigner,
                 agentConfig,
-                projectName,
-                projectPubkey
+                projectTitle,
+                mockProjectEvent
             );
 
             // Verify both events were created
@@ -267,22 +317,23 @@ describe("AgentPublisher", () => {
             };
             const ndkAgentEventId = "ndk-agent-event-789";
 
+            // Set up mock to track tags
+            mockNDKEvent.tags = [];
+
             await agentPublisher.publishAgentCreation(
                 mockSigner,
                 agentConfig,
                 "TestProject",
-                "project-pubkey",
+                mockProjectEvent,
                 ndkAgentEventId
             );
 
-            // Verify second event (request) has e-tag
-            const requestEventCall = mockNDKEventConstructor.mock.calls[1][1];
-            expect(requestEventCall.tags).toContainEqual([
-                "e",
-                ndkAgentEventId,
-                "",
-                "agent-definition",
-            ]);
+            // Both events should have been created
+            expect(mockNDKEventConstructor).toHaveBeenCalledTimes(2);
+
+            // Both events should tag the project
+            expect(mockNDKEvent.tag).toHaveBeenCalledWith(mockProjectEvent);
+            expect(mockNDKEvent.tag).toHaveBeenCalledTimes(2);
         });
 
         it("should handle profile publishing failure", async () => {
@@ -300,7 +351,7 @@ describe("AgentPublisher", () => {
                     mockSigner,
                     agentConfig,
                     "TestProject",
-                    "project-pubkey"
+                    mockProjectEvent
                 )
             ).rejects.toThrow("Profile publishing failed");
 
@@ -326,7 +377,7 @@ describe("AgentPublisher", () => {
                     mockSigner,
                     agentConfig,
                     "TestProject",
-                    "project-pubkey"
+                    mockProjectEvent
                 )
             ).rejects.toThrow("Request publishing failed");
 

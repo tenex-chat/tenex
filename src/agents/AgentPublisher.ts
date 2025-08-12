@@ -2,7 +2,7 @@ import type { AgentConfig } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent, type NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
 
 /**
  * Service for publishing agent-related Nostr events
@@ -17,8 +17,9 @@ export class AgentPublisher {
         signer: NDKPrivateKeySigner,
         agentName: string,
         agentRole: string,
-        projectName: string,
-        projectPubkey: string
+        projectTitle: string,
+        projectEvent: NDKProject,
+        agentDefinitionEventId?: string
     ): Promise<void> {
         try {
             // Generate random dicebear avatar
@@ -29,18 +30,26 @@ export class AgentPublisher {
             const profile = {
                 name: agentName,
                 role: agentRole,
-                description: `${agentRole} agent for ${projectName}`,
+                description: `${agentRole} agent for ${projectTitle}`,
                 capabilities: [agentRole.toLowerCase()],
                 picture: avatarUrl,
-                project: projectName,
+                project: projectTitle,
             };
 
             const profileEvent = new NDKEvent(this.ndk, {
                 kind: 0,
                 pubkey: signer.pubkey,
                 content: JSON.stringify(profile),
-                tags: [["p", projectPubkey, "", "project"]],
+                tags: [],
             });
+
+            // Properly tag the project event (creates an "a" tag for kind:31933)
+            profileEvent.tag(projectEvent);
+            
+            // Add e-tag for the agent definition event if it exists
+            if (agentDefinitionEventId) {
+                profileEvent.tags.push(["e", agentDefinitionEventId, "", "agent-definition"]);
+            }
 
             await profileEvent.sign(signer);
             await profileEvent.publish();
@@ -59,11 +68,20 @@ export class AgentPublisher {
     async publishAgentRequest(
         signer: NDKPrivateKeySigner,
         agentConfig: Omit<AgentConfig, "nsec">,
-        projectPubkey: string,
+        projectEvent: NDKProject,
         ndkAgentEventId?: string
     ): Promise<NDKEvent> {
         try {
-            const tags: string[][] = [["p", projectPubkey]];
+            const requestEvent = new NDKEvent(this.ndk, {
+                kind: EVENT_KINDS.AGENT_REQUEST,
+                content: "",
+                tags: [],
+            });
+
+            // Properly tag the project event
+            requestEvent.tag(projectEvent);
+
+            const tags: string[][] = [];
 
             // Only add e-tag if this agent was created from an NDKAgentDefinition event
             if (ndkAgentEventId) {
@@ -73,11 +91,8 @@ export class AgentPublisher {
             // Add agent metadata tags
             tags.push(["name", agentConfig.name]);
 
-            const requestEvent = new NDKEvent(this.ndk, {
-                kind: EVENT_KINDS.AGENT_REQUEST,
-                content: "",
-                tags,
-            });
+            // Add the other tags
+            requestEvent.tags.push(...tags);
 
             await requestEvent.sign(signer);
             await requestEvent.publish();
@@ -104,8 +119,8 @@ export class AgentPublisher {
     async publishAgentCreation(
         signer: NDKPrivateKeySigner,
         agentConfig: Omit<AgentConfig, "nsec">,
-        projectName: string,
-        projectPubkey: string,
+        projectTitle: string,
+        projectEvent: NDKProject,
         ndkAgentEventId?: string
     ): Promise<void> {
         // Publish profile event
@@ -113,11 +128,12 @@ export class AgentPublisher {
             signer,
             agentConfig.name,
             agentConfig.role,
-            projectName,
-            projectPubkey
+            projectTitle,
+            projectEvent,
+            ndkAgentEventId
         );
 
         // Publish request event
-        await this.publishAgentRequest(signer, agentConfig, projectPubkey, ndkAgentEventId);
+        await this.publishAgentRequest(signer, agentConfig, projectEvent, ndkAgentEventId);
     }
 }

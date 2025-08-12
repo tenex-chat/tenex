@@ -245,14 +245,14 @@ export function logDebug(
 
 // Agent Logger class for contextual logging
 export class AgentLogger {
-    private projectName?: string;
+    private projectTitle?: string;
     private agentName: string;
     private color: typeof chalk.red;
     private module: LogModule = "agent";
 
-    constructor(agentName: string, projectName?: string) {
+    constructor(agentName: string, projectTitle?: string) {
         this.agentName = agentName;
-        this.projectName = projectName;
+        this.projectTitle = projectTitle;
         this.color = getAgentColor(agentName);
     }
 
@@ -267,7 +267,7 @@ export class AgentLogger {
         verbosity: VerbosityLevel
     ): string {
         if (!shouldLog("info", this.module, verbosity)) return "";
-        const projectPrefix = this.projectName ? `${chalk.gray(`[${this.projectName}]`)} ` : "";
+        const projectPrefix = this.projectTitle ? `${chalk.gray(`[${this.projectTitle}]`)} ` : "";
         const agentPrefix = `${this.color(`[${this.agentName}]`)} `;
         const emojiPrefix = globalConfig.useEmoji ? `${emoji} ` : "";
         const modulePrefix = formatModulePrefix(this.module);
@@ -307,8 +307,8 @@ export class AgentLogger {
 }
 
 // Factory function for creating agent loggers
-export function createAgentLogger(agentName: string, projectName?: string): AgentLogger {
-    return new AgentLogger(agentName, projectName);
+export function createAgentLogger(agentName: string, projectTitle?: string): AgentLogger {
+    return new AgentLogger(agentName, projectTitle);
 }
 
 // Scoped logger for easier module-specific logging

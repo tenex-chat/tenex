@@ -34,7 +34,7 @@ describe("Agent Execution Prompt Fragments", () => {
             expect(prompt).toContain("Your role: Developer");
             expect(prompt).toContain("Test instructions");
             expect(prompt).toContain("Project Context");
-            expect(prompt).toContain('Project Name: "Test Project"');
+            expect(prompt).toContain('Project Title: "Test Project"');
         });
     });
 

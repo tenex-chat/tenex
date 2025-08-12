@@ -598,13 +598,13 @@ export class AgentRegistry {
         ndkProject?: NDKProject
     ): Promise<void> {
         try {
-            let projectName: string;
-            let projectPubkey: string;
+            let projectTitle: string;
+            let projectEvent: NDKProject;
 
             // Use passed NDKProject if available, otherwise fall back to ProjectContext
             if (ndkProject) {
-                projectName = ndkProject.tagValue("title") || "Unknown Project";
-                projectPubkey = ndkProject.pubkey;
+                projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+                projectEvent = ndkProject;
             } else {
                 // Check if project context is initialized
                 if (!isProjectContextInitialized()) {
@@ -614,10 +614,10 @@ export class AgentRegistry {
                     return;
                 }
 
-                // Get project context for project pubkey and name
+                // Get project context for project event and name
                 const projectCtx = getProjectContext();
-                projectName = projectCtx.project.tagValue("title") || "Unknown Project";
-                projectPubkey = projectCtx.project.pubkey;
+                projectTitle = projectCtx.project.tagValue("title") || "Unknown Project";
+                projectEvent = projectCtx.project;
             }
 
             const ndk = getNDK();
@@ -629,8 +629,8 @@ export class AgentRegistry {
             await publisher.publishAgentCreation(
                 signer,
                 config,
-                projectName,
-                projectPubkey,
+                projectTitle,
+                projectEvent,
                 ndkAgentEventId
             );
         } catch (error) {
@@ -905,13 +905,13 @@ export class AgentRegistry {
             agentCount: this.agents.size,
         });
 
-        let projectName: string;
-        let projectPubkey: string;
+        let projectTitle: string;
+        let projectEvent: NDKProject;
 
         // Use passed NDKProject if available, otherwise fall back to ProjectContext
         if (ndkProject) {
-            projectName = ndkProject.tagValue("title") || "Unknown Project";
-            projectPubkey = ndkProject.pubkey;
+            projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+            projectEvent = ndkProject;
         } else {
             // Check if project context is initialized
             if (!isProjectContextInitialized()) {
@@ -921,10 +921,10 @@ export class AgentRegistry {
                 return;
             }
 
-            // Get project context for project pubkey and name
+            // Get project context for project event and name
             const projectCtx = getProjectContext();
-            projectName = projectCtx.project.tagValue("title") || "Unknown Project";
-            projectPubkey = projectCtx.project.pubkey;
+            projectTitle = projectCtx.project.tagValue("title") || "Unknown Project";
+            projectEvent = projectCtx.project;
         }
 
         const ndk = getNDK();
@@ -937,8 +937,9 @@ export class AgentRegistry {
                     agent.signer,
                     agent.name,
                     agent.role,
-                    projectName,
-                    projectPubkey
+                    projectTitle,
+                    projectEvent,
+                    agent.eventId
                 );
             } catch (error) {
                 logger.error(`Failed to republish kind:0 for agent: ${slug}`, {

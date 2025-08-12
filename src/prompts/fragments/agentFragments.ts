@@ -5,6 +5,7 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { buildAgentPrompt } from "./agent-common";
 import { agentCompletionGuidanceFragment } from "./agent-completion-guidance";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
 
 // ========================================================================
 // EXECUTION & SYSTEM PROMPT FRAGMENTS
@@ -12,15 +13,16 @@ import { agentCompletionGuidanceFragment } from "./agent-completion-guidance";
 
 // Complete agent system prompt for execution
 interface AgentSystemPromptArgs {
-    agent: AgentInstance;
-    phase: Phase;
-    projectTitle: string;
+  agent: AgentInstance;
+  phase: Phase;
+  projectTitle: string;
+  projectOwnerPubkey: string;
 }
 
 export const agentSystemPromptFragment: PromptFragment<AgentSystemPromptArgs> = {
     id: "agent-system-prompt",
     priority: 1,
-    template: ({ agent, phase, projectTitle }) => {
+    template: ({ agent, phase, projectTitle, projectOwnerPubkey }) => {
         const parts: string[] = [];
 
         // Orchestrator should not have identity section - it's invisible
@@ -31,8 +33,13 @@ export const agentSystemPromptFragment: PromptFragment<AgentSystemPromptArgs> = 
             }
             
             // Add project context
+            const projectContextParts = [];
             if (projectTitle) {
-                parts.push(`## Project Context\n- Project Name: "${projectTitle}"`);
+                projectContextParts.push(`- Project Title: "${projectTitle}"`);
+            }
+            projectContextParts.push(`- Project Owner Pubkey: ${projectOwnerPubkey}`);
+            if (projectContextParts.length > 0) {
+                parts.push(`## Project Context\n${projectContextParts.join('\n')}`);
             }
         } else {
             // Use shared agent prompt builder for non-orchestrator agents
@@ -41,7 +48,8 @@ export const agentSystemPromptFragment: PromptFragment<AgentSystemPromptArgs> = 
                     name: agent.name,
                     role: agent.role,
                     instructions: agent.instructions || "",
-                    projectName: projectTitle,
+                    projectTitle,
+                    projectOwnerPubkey,
                 })
             );
         }
