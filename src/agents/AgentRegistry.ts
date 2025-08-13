@@ -56,9 +56,6 @@ export class AgentRegistry {
                     this.globalRegistry = await configService.loadTenexAgents(
                         configService.getGlobalPath()
                     );
-                    logger.info(`Loaded ${Object.keys(this.globalRegistry).length} global agents`, {
-                        globalAgents: Object.keys(this.globalRegistry),
-                    });
                 } catch (error) {
                     logger.debug("No global agents found or failed to load", { error });
                     this.globalRegistry = {};
@@ -67,14 +64,6 @@ export class AgentRegistry {
 
             // Load project/local agents
             this.registry = await configService.loadTenexAgents(tenexDir);
-            logger.info(
-                `Loaded agent registry with ${Object.keys(this.registry).length} agents via ConfigService`,
-                {
-                    registryKeys: Object.keys(this.registry),
-                    basePath: this.basePath,
-                    isGlobal: this.isGlobal,
-                }
-            );
 
             // Load global agents first (if in project context)
             const loadedGlobalEventIds = new Set<string>();
@@ -109,13 +98,7 @@ export class AgentRegistry {
             }
 
             // Load built-in agents
-            logger.debug("Loading built-in agents");
             await this.ensureBuiltInAgents(ndkProject);
-
-            logger.info(`Loaded ${this.agents.size} agents into runtime`, {
-                agentSlugs: Array.from(this.agents.keys()),
-                agentsByPubkey: this.agentsByPubkey.size,
-            });
         } catch (error) {
             logger.error("Failed to load agent registry", { error });
             this.registry = {};
@@ -900,17 +883,13 @@ export class AgentRegistry {
      * Republish kind:0 events for all agents
      * This is called when the project boots to ensure agents are discoverable
      */
-    async republishAllAgentProfiles(ndkProject?: NDKProject): Promise<void> {
-        logger.info("Republishing kind:0 events for all agents", {
-            agentCount: this.agents.size,
-        });
-
+    async republishAllAgentProfiles(ndkProject: NDKProject): Promise<void> {
         let projectTitle: string;
         let projectEvent: NDKProject;
 
         // Use passed NDKProject if available, otherwise fall back to ProjectContext
         if (ndkProject) {
-            projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+            projectTitle = ndkProject.title;
             projectEvent = ndkProject;
         } else {
             // Check if project context is initialized
@@ -931,7 +910,7 @@ export class AgentRegistry {
         const publisher = new AgentPublisher(ndk);
 
         // Republish kind:0 for each agent
-        for (const [slug, agent] of this.agents) {
+        for (const [slug, agent] of Array.from(this.agents.entries())) {
             try {
                 await publisher.publishAgentProfile(
                     agent.signer,

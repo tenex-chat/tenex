@@ -11,7 +11,6 @@ import "@/prompts/fragments/01-specialist-identity";
 import "@/prompts/fragments/01-orchestrator-identity";
 import "@/prompts/fragments/25-specialist-tools";
 import "@/prompts/fragments/85-specialist-reasoning";
-import "@/prompts/fragments/85-orchestrator-reasoning";
 import "@/prompts/fragments/25-orchestrator-routing";
 
 describe("systemPromptBuilder", () => {

@@ -24,8 +24,8 @@ export class TerminationHandler {
         tracingLogger: TracingLogger
     ): boolean {
         // Check if this agent requires termination enforcement
-        const isChat = context.phase.toLowerCase() === PHASES.CHAT;
-        const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
+        const isChat = context.phase === PHASES.CHAT;
+        const isBrainstormPhase = context.phase === PHASES.BRAINSTORM;
         const requiresTerminationEnforcement = !isChat && !isBrainstormPhase;
 
         // If terminated properly or termination not required, we're done
@@ -139,8 +139,8 @@ export class TerminationHandler {
      * Check if the current phase/agent combination requires termination enforcement
      */
     requiresTerminationEnforcement(context: ExecutionContext): boolean {
-        const isChat = context.phase.toLowerCase() === PHASES.CHAT;
-        const isBrainstormPhase = context.phase.toLowerCase() === PHASES.BRAINSTORM;
+        const isChat = context.phase === PHASES.CHAT;
+        const isBrainstormPhase = context.phase === PHASES.BRAINSTORM;
         return !isChat && !isBrainstormPhase;
     }
 }

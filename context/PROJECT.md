@@ -19,10 +19,13 @@ The fundamental shift is from traditional coding in a text editor to managing an
     5.  **VERIFICATION:** Functional testing from an end-user perspective.
     6.  **CHORES:** Cleanup, documentation, and maintenance.
     7.  **REFLECTION:** Agents learn from the completed task to improve future performance.
-*   **Conversation Restart:** When a conversation reaches its natural conclusion (the `END` phase), it is not permanently closed. If the user provides a new message, the conversation is automatically restarted from the `CHAT` phase, preserving the full history and context. This ensures a seamless and continuous user experience.
+*   **Conversation Restart:** When a conversation reaches its natural conclusion (the `END` phase), it is not permanently closed. If the user provides a new message, a new conversation is automatically started from the `CHAT` phase, preserving the full history and context. This ensures a seamless and continuous user experience.
 *   **Continuous Learning:** Agents are designed to learn from every interaction, building a persistent knowledge base that improves their effectiveness over time.
 *   **Nostr-Native:** Built on the Nostr protocol, ensuring communication is decentralized, secure, and censorship-resistant.
 *   **LLM Agnostic:** Supports multiple Large Language Model providers, including OpenAI, Anthropic, and Google.
+*   **Agent Presence & Identification (User-defined requirement):**
+    *   **Online Status:** Agent online status must be determined by querying for `kind:24010` status events with a `since` filter of one minute ago. The `a` tag of the status event must be compared with the project's tag ID to ensure the status applies to the correct project.
+    *   **Agent ID Format:** When returning agent information, the agent's `npub` must be used instead of their public key.
 
 ## 3. Guiding Principles
 

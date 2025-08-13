@@ -43,6 +43,9 @@ export class SubscriptionManager {
 
         // 3. Subscribe to all project-related events
         await this.subscribeToProjectEvents();
+
+        // 4. Subscribe to spec replies (kind 1111 with #K:30023)
+        await this.subscribeToSpecReplies();
     }
 
     private async subscribeToProjectUpdates(): Promise<void> {
@@ -51,10 +54,24 @@ export class SubscriptionManager {
         const project = projectCtx.project;
         const { filter: projectFilter } = filterAndRelaySetFromBech32(project.encode(), ndk);
 
+        // Get all agent pubkeys
+        const agentPubkeys = Array.from(projectCtx.agents.values()).map((agent) => agent.pubkey);
+
         logger.info(chalk.blue("  • Setting up project update subscription..."));
         logger.debug("Project update filter:", projectFilter);
 
-        const projectSubscription = ndk.subscribe(projectFilter, {
+        // Create filters array
+        const filters: NDKFilter[] = [projectFilter];
+        
+        // Add filter for agent pubkeys if any exist
+        if (agentPubkeys.length > 0) {
+            filters.push({
+                "#p": agentPubkeys
+            });
+            logger.debug(`Added #p filter for ${agentPubkeys.length} agent pubkeys`);
+        }
+
+        const projectSubscription = ndk.subscribe(filters, {
             closeOnEose: false,
             groupable: false,
         });
@@ -150,6 +167,42 @@ export class SubscriptionManager {
 
         this.subscriptions.push(projectEventSubscription);
         logger.info(chalk.green("    ✓ Project event subscription active"));
+    }
+
+    private async subscribeToSpecReplies(): Promise<void> {
+        const ndk = getNDK();
+        
+        // Subscribe to spec replies (kind 1111 with #K:30023)
+        const specReplyFilter: NDKFilter = {
+            kinds: [1111],
+            "#K": ["30023"],
+        };
+
+        logger.info(chalk.blue("  • Setting up spec reply subscription..."));
+        logger.debug("Spec reply filter:", specReplyFilter);
+
+        const specReplySubscription = ndk.subscribe(
+            specReplyFilter,
+            {
+                closeOnEose: false,
+                groupable: false,
+            },
+            {
+                onEvent: (event: NDKEvent) => {
+                    // Use the A tag value as conversationId for routing
+                    const conversationId = event.tagValue("A");
+                    if (conversationId) {
+                        // Route as a normal conversation event
+                        this.handleIncomingEvent(event, "spec reply");
+                    } else {
+                        logger.warn("Spec reply event missing A tag:", event.id);
+                    }
+                },
+            }
+        );
+
+        this.subscriptions.push(specReplySubscription);
+        logger.info(chalk.green("    ✓ Spec reply subscription active"));
     }
 
     private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {

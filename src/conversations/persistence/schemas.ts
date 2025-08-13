@@ -3,7 +3,7 @@ import { ALL_PHASES } from "@/conversations/phases";
 
 const PhaseSchema = z
     .string()
-    .transform((val) => val.toLowerCase())
+    .transform((val) => val.toUpperCase())
     .pipe(
         z.enum(ALL_PHASES as [string, ...string[]])
     );

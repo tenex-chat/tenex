@@ -49,8 +49,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     try {
         const projectPath = process.cwd();
 
-        logInfo(`🔍 Debug: Loading system prompt for agent '${options.agent}'`);
-
         // Initialize project context if needed
         await ensureProjectInitialized(projectPath);
 

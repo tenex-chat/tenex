@@ -19,8 +19,6 @@ export async function ensureProjectInitialized(projectPath: string): Promise<voi
         return;
     }
 
-    logger.info("🔄 Initializing project context...");
-
     try {
         // Step 1: Initialize NDK connection
         await initNDK();
@@ -29,8 +27,6 @@ export async function ensureProjectInitialized(projectPath: string): Promise<voi
         // Step 2: Initialize ProjectContext using ProjectManager
         const projectManager = new ProjectManager();
         await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
-
-        logger.info("✅ Project context initialized");
     } catch (error: any) {
         // Check if this is a missing project configuration error
         if (error?.message?.includes("Project configuration missing projectNaddr")) {

@@ -35,34 +35,25 @@ export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
     description:
         "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
 
-    promptFragment: `When you encounter important insights or lessons during your work, use the lesson_learn tool to record them. These lessons will be available in future conversations to help improve your performance.
+    promptFragment: `Record important lessons that will improve future performance.
 
-## Metacognition Check - Ask Yourself:
-Before recording a lesson, engage in metacognition:
-1. "Is this actually trivial or obvious?"
-2. "Will my behavior genuinely improve if I remember this forever?"
-3. "Is this specific to this codebase/context, or just general programming knowledge?"
-4. "Would a competent developer already know this?"
-5. "Does this represent a real insight that prevents future mistakes?"
+## Quick Decision Checklist
+| ✅ RECORD if... | ❌ SKIP if... |
+|-----------------|---------------|
+| Project-specific insight | Generic programming knowledge |
+| Prevents future mistakes | Obvious/trivial fact |
+| Non-obvious behavior | Standard convention |
+| Hidden dependency/gotcha | Temporary workaround |
+| Within your expertise domain | Better suited for another agent |
 
-## What NOT to learn:
-- Generic programming practices (e.g., "always validate input")
-- Obvious facts (e.g., "config files contain configuration")
-- Basic tool usage (e.g., "grep searches for patterns")
-- Standard conventions everyone follows
-- Temporary workarounds that will be obsolete
+## Metacognition Questions (answer 2+ YES to record):
+□ Will remembering this permanently improve my behavior?
+□ Is this specific to THIS project/codebase?
+□ Does it violate normal expectations?
+□ Did it waste significant time to discover?
+□ Is it within my role's expertise?
 
-## What TO learn:
-- Non-obvious architectural decisions specific to this project
-- Hidden dependencies or coupling that caused real issues
-- Counter-intuitive behaviors that waste significant time
-- Project-specific gotchas that violate normal expectations
-- Patterns that repeatedly cause problems in THIS project
-- Things that are within your domain of expertise.
-
-Domain Boundaries: Only record lessons within your role's sphere of control and expertise. You have access to the list of agents working with you in this project; while pondering whether to record a lesson, think: "is this specific lesson better suited for the domain expertise of another agent?"
-
-In <thinking> tags, perform the metacognition check and explain why this lesson passes the quality bar and is worth preserving permanently.
+Use <thinking> tags to justify why this lesson meets the quality bar.
 
 ## Detailed Version Guidelines:
 Only include a detailed version when:

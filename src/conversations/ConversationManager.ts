@@ -436,8 +436,13 @@ export class ConversationManager {
         let context = this.agentContexts.get(key);
         
         if (!context) {
+            logger.debug(`[CONV_MGR] Creating new context for key: ${key}`);
             context = new AgentConversationContext(conversationId, agentSlug, this.messageBuilder);
             this.agentContexts.set(key, context);
+        } else {
+            logger.debug(`[CONV_MGR] Reusing existing context for key: ${key}`, {
+                existingMessages: context.getMessages().length
+            });
         }
         
         return context;
@@ -472,19 +477,44 @@ export class ConversationManager {
             logger.info(`[CONV_MGR] Initialized new agent state for ${targetAgent.slug}`);
         }
 
-        // Process new events since last time
-        const lastIndex = context.getLastProcessedIndex();
-        const newEvents = conversation.history.slice(lastIndex);
-        
-        // Add all new events (excluding the triggering event which will be added separately)
-        await context.addEvents(newEvents, triggeringEvent?.id);
-
-        // Handle phase transitions
+        // Check if we need to show phase instructions
         const projectCtx = getProjectContext();
         const agentInstance = projectCtx.agents.get(targetAgent.slug);
         const isOrchestrator = agentInstance?.isOrchestrator || false;
         
-        if (!isOrchestrator && agentState.lastSeenPhase !== conversation.phase) {
+        // Sync the context's current phase with what we know the agent has seen
+        // If the agent already has a lastSeenPhase, they've already been shown phase instructions
+        const agentHasSeenPhase = agentState.lastSeenPhase !== undefined;
+        if (agentHasSeenPhase) {
+            context.setCurrentPhase(agentState.lastSeenPhase);
+        }
+        
+        // Only show phase instructions if:
+        // 1. Not an orchestrator AND
+        // 2. Agent hasn't seen this phase before OR phase has changed
+        const needsPhaseInstructions = !isOrchestrator && 
+            (!agentHasSeenPhase || context.getCurrentPhase() !== conversation.phase);
+        
+        // Clear messages and rebuild fresh each time
+        // The context tracks state but we rebuild messages for each call
+        context.clearMessages();
+        
+        // Build complete history fresh
+        const historyToProcess: NDKEvent[] = [];
+        for (const event of conversation.history) {
+            if (triggeringEvent?.id && event.id === triggeringEvent.id) {
+                break; // Stop before the triggering event
+            }
+            historyToProcess.push(event);
+        }
+        
+        // Add all historical events
+        if (historyToProcess.length > 0) {
+            await context.addEvents(historyToProcess);
+        }
+
+        // Handle phase transitions AFTER building history but BEFORE triggering event
+        if (needsPhaseInstructions) {
             const phaseInstructions = buildPhaseInstructions(
                 conversation.phase,
                 conversation,

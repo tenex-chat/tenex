@@ -50,6 +50,8 @@ export class AgentConversationContext {
      * Handle phase transition if needed
      */
     handlePhaseTransition(newPhase: Phase, phaseInstructions?: string): boolean {
+        // Only add phase instructions if we're actually transitioning
+        // or if this is the first time seeing a phase
         if (this.currentPhase === newPhase) {
             return false; // No transition needed
         }
@@ -205,11 +207,12 @@ export class AgentConversationContext {
 
     /**
      * Clear all messages (useful for phase resets if needed)
+     * WARNING: This should rarely be used as it breaks conversation continuity
      */
     clearMessages(): void {
         this.messages = [];
         this.lastProcessedIndex = 0;
-        logger.debug(`[AGENT_CONTEXT] Cleared messages for ${this.agentSlug}`);
+        logger.warn(`[AGENT_CONTEXT] Cleared all messages for ${this.agentSlug} - conversation reset`);
     }
 
     /**

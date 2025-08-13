@@ -43,6 +43,8 @@ export const handleChatMessage = async (
         const isDirectedToSystem = mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
 
         if (!isDirectedToSystem) return;
+    } else {
+        console.log({ pTags })
     }
 
     // This is a reply within an existing conversation
@@ -59,7 +61,11 @@ async function handleReplyLogic(
     mentionedPubkeys: string[]
 ): Promise<void> {
     // Find the conversation this reply belongs to
-    let conversation = conversationManager.getConversationByEvent(event.tagValue("E") || "");
+    const convRoot = event.tagValue("E") || event.tagValue("A");
+    
+    let conversation = conversationManager.getConversationByEvent(convRoot);
+
+    console.log("handleReplyLogic", event.inspect);
 
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
     if (!conversation && event.tagValue("K") === "1934") {
@@ -77,10 +83,38 @@ async function handleReplyLogic(
         }
     }
 
+    // If no conversation found and this is a kTag 11 reply that p-tags an agent
+    if (!conversation && event.tagValue("K") === "11" && mentionedPubkeys.length > 0) {
+        const projectCtx = getProjectContext();
+        const isDirectedToAgent = mentionedPubkeys.some((pubkey) => 
+            Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+        );
+        
+        if (isDirectedToAgent) {
+            // Create a new conversation for this orphaned reply
+            logInfo(chalk.yellow(`Creating new conversation for orphaned kTag 11 reply to conversation root: ${convRoot}`));
+            
+            // Create a synthetic root event based on the reply
+            const syntheticRootEvent: NDKEvent = {
+                ...event,
+                id: convRoot || event.id, // Use conversation root if available, otherwise use the reply's ID
+                content: `[Orphaned conversation - original root not found]\n\n${event.content}`,
+                tags: event.tags.filter(tag => tag[0] !== "E" && tag[0] !== "e"), // Remove reply tags
+            } as NDKEvent;
+            
+            conversation = await conversationManager.createConversation(syntheticRootEvent);
+            
+            // Add the actual reply event to the conversation history
+            if (conversation && event.id !== conversation.id) {
+                await conversationManager.addEvent(conversation.id, event);
+            }
+        }
+    }
+
     if (!conversation) {
         logger.error("No conversation found for reply", { 
             eventId: event.id,
-            eTag: event.tagValue("E"),
+            convRoot,
             kTag: event.tagValue("K")
         });
         return;

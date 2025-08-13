@@ -52,7 +52,7 @@ export class AgentPublisher {
             }
 
             await profileEvent.sign(signer);
-            await profileEvent.publish();
+            profileEvent.publish();
         } catch (error) {
             logger.error("Failed to publish agent profile", {
                 error,

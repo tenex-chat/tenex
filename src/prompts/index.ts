@@ -35,9 +35,8 @@ import "./fragments/30-project-md";            // Conditional (project-manager)
 // Priority 35 - Completion guidance
 import "./fragments/35-specialist-completion-guidance"; // Specialist only
 
-// Priority 85 - Reasoning (either specialist OR orchestrator)
+// Priority 85 - Reasoning (specialist only - orchestrator outputs JSON only)
 import "./fragments/85-specialist-reasoning";
-import "./fragments/85-orchestrator-reasoning";
 
 // Priority 90+ - Special purpose
 import "./fragments/90-inventory-generation";  // Internal LLM prompts

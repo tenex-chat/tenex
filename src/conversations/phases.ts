@@ -1,20 +1,20 @@
 export type Phase =
-    | "chat"
-    | "brainstorm"
-    | "plan"
-    | "execute"
-    | "verification"
-    | "chores"
-    | "reflection";
+    | "CHAT"
+    | "BRAINSTORM"
+    | "PLAN"
+    | "EXECUTE"
+    | "VERIFICATION"
+    | "CHORES"
+    | "REFLECTION";
 
 export const PHASES = {
-    CHAT: "chat" as const,
-    BRAINSTORM: "brainstorm" as const,
-    PLAN: "plan" as const,
-    EXECUTE: "execute" as const,
-    VERIFICATION: "verification" as const,
-    CHORES: "chores" as const,
-    REFLECTION: "reflection" as const,
+    CHAT: "CHAT" as const,
+    BRAINSTORM: "BRAINSTORM" as const,
+    PLAN: "PLAN" as const,
+    EXECUTE: "EXECUTE" as const,
+    VERIFICATION: "VERIFICATION" as const,
+    CHORES: "CHORES" as const,
+    REFLECTION: "REFLECTION" as const,
 } as const;
 
 export const ALL_PHASES: readonly Phase[] = [

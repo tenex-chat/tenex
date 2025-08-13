@@ -1,7 +1,9 @@
 import { PromptBuilder } from "../../core/PromptBuilder";
-import "../available-agents";
-import "../orchestrator-routing";
-import "../agentFragments";
+import "../15-orchestrator-available-agents";
+import "../15-specialist-available-agents";
+import "../25-orchestrator-routing";
+import "../01-orchestrator-identity";
+import "../01-specialist-identity";
 import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import { describe, expect, it } from "bun:test";

@@ -10,7 +10,6 @@ The PROJECT.md maintains your living understanding of:
 - What the project is.
 - What assumptions you've made to fill in gaps.
 - How the project has evolved based on user feedback.
-- Technical decisions and architectural patterns the user prefers
 - Features the user has confirmed vs features you've inferred
 
 During REFLECTION phase, update context/PROJECT.md with everything new you learned 
@@ -23,7 +22,7 @@ safe assumption, but still an assumption.
 
 CRTICIAL: The correct way to think about PROJECT.md is: "If I had to recreate the entire project from a single product spec, a spec that defines every nuance, every corner of what I know for certain the project is supposed to be: what would that spec be?"
 
-PROJECT.md is NOT the place for code, for architectural choices or modules, its the place to detail, in as great level of detail and accuracy as possible, what it is we are working on.
+PROJECT.md is NOT the place for code, tech stack, architectural choices or modules, its the place to detail, in as great level of detail and accuracy as possible, what it is we are working on.
 `;
 
 interface ProjectMdArgs {

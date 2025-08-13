@@ -585,8 +585,11 @@ export const serverCommand = new Command("server")
                     });
 
                     try {
-                        // Import NDKArticle if not already imported
-                        const { NDKArticle } = await import("@nostr-dev-kit/ndk");
+                        // Import NDK types needed for this handler
+                        const { NDKArticle, NDKUser } = await import("@nostr-dev-kit/ndk");
+                        
+                        // Calculate 1 minute ago timestamp for online status check
+                        const oneMinuteAgo = Math.floor(Date.now() / 1000) - 60;
                         
                         // Fetch both kinds of events in parallel
                         const [projectEvents, statusEvents] = await Promise.all([
@@ -596,19 +599,22 @@ export const serverCommand = new Command("server")
                                 authors: [pubkey],
                             }),
                             // Fetch 24010 events (project status - online agents)
+                            // Only get status events from the last minute to determine if online
                             ndk.fetchEvents({
                                 kinds: [24010],
                                 "#p": [pubkey],
+                                since: oneMinuteAgo,
                             }),
                         ]);
 
-                        // Build a map of online agents by project
+                        // Build a map of online agents by project (keyed by project tagId)
                         const onlineAgentsByProject = new Map<string, Record<string, string>>();
                         
                         // Process status events to find online agents
                         Array.from(statusEvents).forEach(event => {
-                            const projectPubkey = event.tagValue("p");
-                            if (projectPubkey === pubkey) {
+                            // Get the project reference from the "a" tag (this identifies which project the status is for)
+                            const projectTagId = event.tagValue("a");
+                            if (projectTagId) {
                                 // Get agent tags from the 24010 event
                                 const agentTags = event.tags.filter(tag => tag[0] === "agent");
                                 const agents: Record<string, string> = {};
@@ -617,13 +623,15 @@ export const serverCommand = new Command("server")
                                     // agent tag format: ["agent", "<pubkey>", "<slug>"]
                                     if (tag.length >= 3) {
                                         const [, agentPubkey, agentSlug] = tag;
-                                        agents[agentSlug] = agentPubkey;
+                                        // Convert pubkey to npub format
+                                        const agentUser = new NDKUser({ pubkey: agentPubkey });
+                                        agents[agentSlug] = agentUser.npub;
                                     }
                                 });
                                 
-                                // Store agents for this project
+                                // Store agents for this specific project using its tagId as the key
                                 if (Object.keys(agents).length > 0) {
-                                    onlineAgentsByProject.set(projectPubkey, agents);
+                                    onlineAgentsByProject.set(projectTagId, agents);
                                 }
                             }
                         });
@@ -686,15 +694,17 @@ export const serverCommand = new Command("server")
                             const repository = projectEvent.tagValue("repository");
                             const image = projectEvent.tagValue("image");
                             
-                            // Check if this project has online agents
-                            const isOnline = onlineAgentsByProject.has(projectEvent.pubkey);
-                            const onlineAgents = isOnline ? onlineAgentsByProject.get(projectEvent.pubkey) : undefined;
+                            // Get the project's tagId for matching with status events and articles
+                            const projectTagId = projectEvent.tagId();
+                            
+                            // Check if this project has online agents using its tagId
+                            const isOnline = onlineAgentsByProject.has(projectTagId);
+                            const onlineAgents = isOnline ? onlineAgentsByProject.get(projectTagId) : undefined;
                             
                             // Get the encoded project ID with nostr: prefix
                             const projectId = `nostr:${projectEvent.encode()}`;
                             
                             // Find spec articles for this project
-                            const projectTagId = projectEvent.tagId();
                             const projectSpecs = specArticles
                                 .filter(article => article._projectRefs.includes(projectTagId))
                                 .map(({ _projectRefs, ...article }) => article); // Remove internal _projectRefs field

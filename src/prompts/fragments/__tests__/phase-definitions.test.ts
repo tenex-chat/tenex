@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { phaseDefinitionsFragment } from "../phase-definitions";
+import { phaseDefinitionsFragment } from "../10-phase-definitions";
 
 describe("phaseDefinitionsFragment", () => {
     it("should render phase definitions correctly", () => {

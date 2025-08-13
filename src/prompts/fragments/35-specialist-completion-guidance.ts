@@ -15,49 +15,27 @@ export const specialistCompletionGuidanceFragment: PromptFragment<SpecialistComp
     id: "specialist-completion-guidance",
     priority: 2,
     template: ({ phase }) => {
+        // CHAT and BRAINSTORM phases don't require termination
+        if (phase === "CHAT" || phase === "BRAINSTORM") {
+            return `## Phase Completion
+**${phase}**: No explicit termination required. Simply respond naturally to the user.`;
+        }
+
         const phaseGuidance: Record<Phase, string> = {
-            chat: `During CHAT phase:
-- Respond conversationally to gather information and clarify requirements
-- DO NOT use complete() for back-and-forth conversation
-- USE complete() when:
-  * Requirements are clear and ready for implementation
-  * User has provided all necessary details
-  * You need to escalate to the next phase
-- Example: After clarifying that user wants OAuth, use: complete("User wants to implement OAuth authentication with Google and GitHub providers")`,
-            
-            brainstorm: `During BRAINSTORM phase:
-- Engage in creative exploration without using complete()
-- USE complete() only when brainstorming session concludes with clear direction`,
-            
-            plan: `During PLAN phase:
-- USE complete() after providing the full architectural plan or design`,
-            
-            execute: `During EXECUTE phase:
-- USE complete() after implementing the requested functionality
-- Include what was built and any important decisions made`,
-            
-            verification: `During VERIFICATION phase:
-- USE complete() after testing the implementation
-- Report whether it works correctly or needs fixes`,
-            
-            chores: `During CHORES phase:
-- USE complete() after finishing documentation or cleanup tasks`,
-            
-            reflection: `During REFLECTION phase:
-- USE complete() after recording lessons learned`
+            CHAT: "", // Handled above
+            BRAINSTORM: "", // Handled above
+            PLAN: `**PLAN**: Use complete() after delivering full architectural plan`,
+            EXECUTE: `**EXECUTE**: Use complete() after implementation with summary of what was built`,
+            VERIFICATION: `**VERIFICATION**: Use complete() after testing with pass/fail status`,
+            CHORES: `**CHORES**: Use complete() after finishing documentation/cleanup`,
+            REFLECTION: `**REFLECTION**: Use complete() after recording lessons`
         };
 
-        return `## Response Guidelines
+        return `## Complete() Tool Usage
+${phaseGuidance[phase] || "USE complete() when task is finished"}
 
-### When to use complete() tool:
-${phaseGuidance[phase] || "USE complete() when your assigned task is finished"}
-
-### When NOT to use complete():
-- For conversational exchanges (just respond normally)
-- When providing intermediate updates
-- When asking clarifying questions
-
-Remember: The complete() tool ALWAYS routes to the orchestrator for phase control and next steps.`;
+**Never use complete() for**: conversations, updates, questions
+**Always routes to**: orchestrator for phase control`;
     }
 };
 

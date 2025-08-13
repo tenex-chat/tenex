@@ -82,19 +82,25 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
                 sections.push("");
             }
             
-            sections.push("To use an MCP tool, call it with the full namespaced name (e.g., 'server-name/tool-name').\n");
+            sections.push(`
+#### MCP Tool Examples by Phase:
+- **PLAN**: \`git-server/diff\` to review changes before architecting
+- **EXECUTE**: \`filesystem/write_file\` for code generation
+- **VERIFICATION**: \`git-server/status\` to check modified files
+- **CHORES**: \`filesystem/create_directory\` for project structure
+
+Call MCP tools with full namespace: \`server-name/tool-name\`
+`);
         }
 
-        // Add general tool usage guidelines
-        sections.push(`### Tool Usage Guidelines
-
-1. **Sequential Execution**: Execute tools one at a time. Each tool use should be informed by the result of the previous one.
-
-2. **No Assumptions**: Never assume the outcome of a tool use. Wait for the actual result before proceeding.
-
-3. **Separate from Text**: Tools are used through function calls, not by writing their syntax in your message.
-
-4. **Complete When Done**: Always use the \`complete()\` tool when you've finished your analysis or recommendations to return control to the orchestrator.`);
+        // Add concise tool usage table
+        sections.push(`### Tool Usage Rules
+| Rule | Action |
+|------|--------|
+| Execution | One tool at a time, sequential only |
+| Results | Wait for actual output, no assumptions |
+| Syntax | Use function calls, not text descriptions |
+| Completion | Use \`complete()\` when done (except CHAT/BRAINSTORM phases) |`);
 
         return sections.join("\n");
     }

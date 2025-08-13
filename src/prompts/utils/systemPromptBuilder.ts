@@ -12,10 +12,13 @@ import "@/prompts/fragments/30-project-md";
 import "@/prompts/fragments/01-specialist-identity";
 import "@/prompts/fragments/01-orchestrator-identity";
 import "@/prompts/fragments/25-specialist-tools";
+import "@/prompts/fragments/26-mcp-phase-examples";
 import "@/prompts/fragments/85-specialist-reasoning";
-import "@/prompts/fragments/85-orchestrator-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import "@/prompts/fragments/15-orchestrator-available-agents";
+import "@/prompts/fragments/24-retrieved-lessons";
+import "@/prompts/fragments/30-project-inventory";
+import "@/prompts/fragments/25-orchestrator-routing";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
@@ -115,13 +118,13 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     if (agent.isOrchestrator) {
         systemPromptBuilder.add("orchestrator-identity", {
             agent,
-            projectTitle: project.title,
+            projectTitle: project.tagValue("title") || "Unknown Project",
             projectOwnerPubkey: project.pubkey,
         });
     } else {
         systemPromptBuilder.add("specialist-identity", {
             agent,
-            projectTitle: project.title,
+            projectTitle: project.tagValue("title") || "Unknown Project",
             projectOwnerPubkey: project.pubkey,
         });
     }
@@ -168,15 +171,23 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
             agent,
             mcpTools,
         });
+        
+        // Add MCP phase examples if MCP tools are available
+        if (mcpTools.length > 0) {
+            systemPromptBuilder.add("mcp-phase-examples", {
+                phase,
+                hasMcpTools: true,
+            });
+        }
     }
     // .add("tool-use", {});
 
-    // Add appropriate reasoning fragment based on agent type
+    // Add appropriate fragments based on agent type
     if (agent.isOrchestrator) {
-        systemPromptBuilder
-            .add("orchestrator-reasoning", {})
-            .add("orchestrator-routing-instructions", {});
+        // Orchestrator only needs routing instructions, no reasoning tags
+        systemPromptBuilder.add("orchestrator-routing-instructions", {});
     } else {
+        // Specialists use reasoning tags
         systemPromptBuilder.add("specialist-reasoning", {});
     }
 

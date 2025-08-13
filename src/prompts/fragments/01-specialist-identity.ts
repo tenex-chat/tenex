@@ -35,7 +35,7 @@ export const specialistIdentityFragment: PromptFragment<SpecialistIdentityArgs> 
         parts.push([
             "## Project Context",
             `- Title: "${projectTitle}"`,
-            `- Owner pubkey: "${projectOwnerPubkey}"`
+            `- User pubkey: "${projectOwnerPubkey}"`
         ].join('\n'));
 
         // Specialist guidelines (what used to be in expertise-boundaries and domain-expert-guidelines)

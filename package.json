@@ -61,6 +61,7 @@
         "commander": "^13.1.0",
         "date-fns": "^4.1.0",
         "inquirer": "^12.9.1",
+        "inquirer-shortcuts": "^1.1.0",
         "log-update": "^6.1.0",
         "multi-llm-ts": "^4.0.3",
         "nostr-tools": "^2.15.0",

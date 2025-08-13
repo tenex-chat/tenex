@@ -12,26 +12,26 @@ export const phaseDefinitionsFragment: PromptFragment = {
     template: () => {
         return `## Phase Definitions
 
-- **${PHASES.CHAT.toUpperCase()}**: ${PHASE_DEFINITIONS.chat.description}
-  - Goal: ${PHASE_DEFINITIONS.chat.goal}
+- **${PHASES.CHAT}**: ${PHASE_DEFINITIONS[PHASES.CHAT].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.CHAT].goal}
   
-- **${PHASES.BRAINSTORM.toUpperCase()}**: ${PHASE_DEFINITIONS.brainstorm.description}
-  - Goal: ${PHASE_DEFINITIONS.brainstorm.goal}
+- **${PHASES.BRAINSTORM}**: ${PHASE_DEFINITIONS[PHASES.BRAINSTORM].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.BRAINSTORM].goal}
   
-- **${PHASES.PLAN.toUpperCase()}**: ${PHASE_DEFINITIONS.plan.description}
-  - Goal: ${PHASE_DEFINITIONS.plan.goal}
+- **${PHASES.PLAN}**: ${PHASE_DEFINITIONS[PHASES.PLAN].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.PLAN].goal}
   
-- **${PHASES.EXECUTE.toUpperCase()}**: ${PHASE_DEFINITIONS.execute.description}
-  - Goal: ${PHASE_DEFINITIONS.execute.goal}
+- **${PHASES.EXECUTE}**: ${PHASE_DEFINITIONS[PHASES.EXECUTE].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.EXECUTE].goal}
   
-- **${PHASES.VERIFICATION.toUpperCase()}**: ${PHASE_DEFINITIONS.verification.description}
-  - Goal: ${PHASE_DEFINITIONS.verification.goal}
+- **${PHASES.VERIFICATION}**: ${PHASE_DEFINITIONS[PHASES.VERIFICATION].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.VERIFICATION].goal}
   
-- **${PHASES.CHORES.toUpperCase()}**: ${PHASE_DEFINITIONS.chores.description}
-  - Goal: ${PHASE_DEFINITIONS.chores.goal}
+- **${PHASES.CHORES}**: ${PHASE_DEFINITIONS[PHASES.CHORES].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.CHORES].goal}
   
-- **${PHASES.REFLECTION.toUpperCase()}**: ${PHASE_DEFINITIONS.reflection.description}
-  - Goal: ${PHASE_DEFINITIONS.reflection.goal}`;
+- **${PHASES.REFLECTION}**: ${PHASE_DEFINITIONS[PHASES.REFLECTION].description}
+  - Goal: ${PHASE_DEFINITIONS[PHASES.REFLECTION].goal}`;
     },
 };
 
