@@ -1,4 +1,5 @@
 import type { LogModule } from "@/utils/logger";
+import { logInfo } from "@/utils/logger";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger } from "@/tracing";
 import { formatDuration } from "@/utils/formatting";
@@ -88,94 +89,125 @@ export class ExecutionLogger {
         const key = `${event.agent}-${event.tool}`;
         this.startTimes.set(key, Date.now());
 
-        console.log();
-        console.log(chalk.yellow(`🔧 TOOL CALL [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)}`));
+        const message = [
+            '',
+            chalk.yellow(`🔧 TOOL CALL [${chalk.bold(event.agent)}]`),
+            chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)}`),
+            ...(event.args && Object.keys(event.args).length > 0 
+                ? [chalk.gray(`    └─ Arguments: ${this.formatParams(event.args)}`)]
+                : [])
+        ].join('\n');
         
-        if (event.args && Object.keys(event.args).length > 0) {
-            console.log(chalk.gray(`    └─ Arguments: ${this.formatParams(event.args)}`));
-        }
+        logInfo(message, this.module, "verbose");
     }
 
     private logToolResult(event: LogEvent & { type: "tool_result" }): void {
         const statusColor = event.status === "success" ? chalk.green : chalk.red;
         const statusIcon = event.status === "success" ? "✅" : "❌";
 
-        console.log();
-        console.log(statusColor(`${statusIcon} TOOL RESULT [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)} → ${statusColor(event.status.toUpperCase())}`));
-        console.log(chalk.dim(`    ├─ Duration: ${(event.duration / 1000).toFixed(2)}s`));
+        const messageLines = [
+            '',
+            statusColor(`${statusIcon} TOOL RESULT [${chalk.bold(event.agent)}]`),
+            chalk.white(`    ├─ Tool: ${chalk.bold(event.tool)} → ${statusColor(event.status.toUpperCase())}`),
+            chalk.dim(`    ├─ Duration: ${(event.duration / 1000).toFixed(2)}s`)
+        ];
         
         if (event.result) {
             const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-            console.log(chalk.gray(`    ├─ Result: ${this.truncate(resultStr, 80)}`));
+            messageLines.push(chalk.gray(`    ├─ Result: ${this.truncate(resultStr, 80)}`));
         }
         
         if (event.error) {
-            console.log(chalk.red(`    └─ Error: ${event.error}`));
+            messageLines.push(chalk.red(`    └─ Error: ${event.error}`));
         }
+        
+        logInfo(messageLines.join('\n'), this.module, "verbose");
     }
 
     // Phase Transition
     private logPhaseTransition(event: LogEvent & { type: "phase_transition" }): void {
-        console.log();
-        console.log(chalk.cyan(`🔄 PHASE TRANSITION [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ├─ ${chalk.red(event.from)} → ${chalk.green(event.to)}`));
-        console.log(chalk.white(`    ├─ Agent: ${chalk.bold(event.agent)}`));
-        console.log(chalk.gray(`    └─ Reason: ${event.reason}`));
+        const message = [
+            '',
+            chalk.cyan(`🔄 PHASE TRANSITION [${this.shortId(event.conversationId)}]`),
+            chalk.white(`    ├─ ${chalk.red(event.from)} → ${chalk.green(event.to)}`),
+            chalk.white(`    ├─ Agent: ${chalk.bold(event.agent)}`),
+            chalk.gray(`    └─ Reason: ${event.reason}`)
+        ].join('\n');
+        
+        logInfo(message, this.module, "normal");
     }
 
     // Routing
     private logRouting(event: LogEvent & { type: "routing" }): void {
-        console.log();
-        console.log(chalk.green(`📍 ROUTING [${chalk.bold(event.agent)}]`));
-        console.log(chalk.white(`    ├─ Target agents: ${chalk.bold(event.targetAgents.join(", "))}`));
+        const messageLines = [
+            '',
+            chalk.green(`📍 ROUTING [${chalk.bold(event.agent)}]`),
+            chalk.white(`    ├─ Target agents: ${chalk.bold(event.targetAgents.join(", "))}`)
+        ];
         
         if (event.targetPhase) {
-            console.log(chalk.white(`    ├─ Target phase: ${chalk.bold(event.targetPhase)}`));
+            messageLines.push(chalk.white(`    ├─ Target phase: ${chalk.bold(event.targetPhase)}`));
         }
         
-        console.log(chalk.gray(`    └─ Reason: ${event.reason}`));
+        messageLines.push(chalk.gray(`    └─ Reason: ${event.reason}`));
+        
+        logInfo(messageLines.join('\n'), this.module, "verbose");
     }
 
     // Conversation Events
     private logConversationStart(event: LogEvent & { type: "conversation_start" }): void {
-        console.log();
-        console.log(chalk.bold.cyan(`🗣️  NEW CONVERSATION [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    User: ${chalk.italic(this.truncate(event.userMessage, 80))}`));
+        const messageLines = [
+            '',
+            chalk.bold.cyan(`🗣️  NEW CONVERSATION [${this.shortId(event.conversationId)}]`),
+            chalk.white(`    User: ${chalk.italic(this.truncate(event.userMessage, 80))}`)
+        ];
         
         if (event.eventId) {
-            console.log(chalk.dim(`    Event: ${this.shortId(event.eventId)}`));
+            messageLines.push(chalk.dim(`    Event: ${this.shortId(event.eventId)}`));
         }
-        console.log();
+        messageLines.push('');
+        
+        logInfo(messageLines.join('\n'), this.module, "normal");
     }
 
     private logConversationComplete(event: LogEvent & { type: "conversation_complete" }): void {
         const statusColor = event.success ? chalk.green : chalk.red;
         const statusIcon = event.success ? "✅" : "❌";
 
-        console.log();
-        console.log(statusColor(`${statusIcon} CONVERSATION COMPLETE [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ├─ Final phase: ${chalk.bold(event.finalPhase)}`));
-        console.log(chalk.white(`    ├─ Duration: ${formatDuration(event.duration)}`));
-        console.log(statusColor(`    └─ Success: ${event.success}`));
-        console.log();
+        const message = [
+            '',
+            statusColor(`${statusIcon} CONVERSATION COMPLETE [${this.shortId(event.conversationId)}]`),
+            chalk.white(`    ├─ Final phase: ${chalk.bold(event.finalPhase)}`),
+            chalk.white(`    ├─ Duration: ${formatDuration(event.duration)}`),
+            statusColor(`    └─ Success: ${event.success}`),
+            ''
+        ].join('\n');
+        
+        logInfo(message, this.module, "normal");
     }
 
     // Execution Flow Events
     private logExecutionStart(event: LogEvent & { type: "execution_start" }): void {
-        console.log();
-        console.log(chalk.cyan(`▶️  EXECUTION START [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ${event.narrative}`));
+        const message = [
+            '',
+            chalk.cyan(`▶️  EXECUTION START [${this.shortId(event.conversationId)}]`),
+            chalk.white(`    ${event.narrative}`)
+        ].join('\n');
+        
+        logInfo(message, this.module, "verbose");
     }
 
     private logExecutionComplete(event: LogEvent & { type: "execution_complete" }): void {
         const statusColor = event.success ? chalk.green : chalk.red;
         const statusIcon = event.success ? "✅" : "❌";
 
-        console.log();
-        console.log(statusColor(`${statusIcon} EXECUTION COMPLETE [${this.shortId(event.conversationId)}]`));
-        console.log(chalk.white(`    ${event.narrative}`));
+        const message = [
+            '',
+            statusColor(`${statusIcon} EXECUTION COMPLETE [${this.shortId(event.conversationId)}]`),
+            chalk.white(`    ${event.narrative}`)
+        ].join('\n');
+        
+        logInfo(message, this.module, "verbose");
     }
 
     // Helper methods
