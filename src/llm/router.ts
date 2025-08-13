@@ -158,8 +158,12 @@ export class LLMRouter implements LLMService {
                 caching: true,
             });
 
-            // Model metadata is available in the model object if needed for future use
-            // Not mutating the response object to maintain clean types
+            // Add model information to the response
+            // The response from multi-llm-ts doesn't include the model, so we add it
+            response = {
+                ...response,
+                model: config.model
+            } as CompletionResponse & { model: string };
 
             const endTime = Date.now();
 
@@ -301,13 +305,14 @@ export class LLMRouter implements LLMService {
                         };
                     }
                 } else if (chunk.type === "usage") {
-                    // Build the final response
+                    // Build the final response with model information
                     lastResponse = {
                         type: "text",
                         content: fullContent,
                         usage: chunk.usage,
                         toolCalls: [],
-                    } as CompletionResponse;
+                        model: config.model
+                    } as CompletionResponse & { model: string };
                 }
             }
 

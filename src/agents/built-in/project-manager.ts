@@ -1,4 +1,6 @@
+import { writeContextFileTool } from "@/tools/implementations/writeContextFile";
 import type { StoredAgentData } from "../types";
+import { readPathTool } from "@/tools/implementations/readPath";
 
 /**
  * Default project manager agent definition
@@ -50,8 +52,8 @@ Remember, you are intelligently transcribing a document, not adding your own fla
     "ALWAYS during REFLECTION phase to analyze and learn from implementations. Also when users or other agents need to understand overall goals of the project.\nALWAYS during VERIFICATION phase.",
   llmConfig: "agents",
   tools: [
-    "read_path",
-    "write_context_file",
+    readPathTool.name,
+    writeContextFileTool.name,
     "analyze",
     "lesson_learn",
     "shell",

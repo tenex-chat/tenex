@@ -80,7 +80,6 @@ As the Planner:
 
 As a Specialist/Expert:
 - You provide domain expertise and recommendations ONLY
-- You CANNOT modify files or system state
 - Your advice will be implemented by the Executor agent
 - Focus on your area of expertise
 - Use the complete tool when you finish providing feedback`;

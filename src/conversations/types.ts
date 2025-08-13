@@ -5,6 +5,7 @@ import type { Phase } from "./phases";
 export interface AgentState {
     lastProcessedMessageIndex: number; // Index into Conversation.history
     claudeSessionId?: string; // Claude Code session ID (if per-agent per-conversation)
+    lastSeenPhase?: Phase; // Track the last phase this agent operated in
 }
 
 export interface Conversation {
@@ -40,6 +41,12 @@ export interface ConversationMetadata {
         content: string;
         dTag: string;
     }; // NDKArticle referenced by kind:11 event (30023)
+    queueStatus?: {
+        isQueued: boolean;
+        position: number;
+        estimatedWait: number;
+        message: string;
+    }; // Execution queue status when waiting for EXECUTE phase
 }
 
 export interface PhaseTransition {

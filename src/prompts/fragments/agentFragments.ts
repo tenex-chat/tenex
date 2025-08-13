@@ -4,8 +4,6 @@ import type { Conversation } from "@/conversations/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { buildAgentPrompt } from "./agent-common";
-import { agentCompletionGuidanceFragment } from "./agent-completion-guidance";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
 
 // ========================================================================
 // EXECUTION & SYSTEM PROMPT FRAGMENTS
@@ -54,16 +52,8 @@ export const agentSystemPromptFragment: PromptFragment<AgentSystemPromptArgs> = 
             );
         }
 
-        // Add completion guidance for non-orchestrator agents
-        if (!agent.isOrchestrator) {
-            const completionGuidance = agentCompletionGuidanceFragment.template({
-                phase,
-                isOrchestrator: false
-            });
-            if (completionGuidance) {
-                parts.push(completionGuidance);
-            }
-        }
+        // Completion guidance is now injected dynamically with phase transitions
+        // so it's not included in the base system prompt
 
         return parts.join("\n\n");
     },
@@ -85,15 +75,15 @@ export const conversationHistoryInstructionsFragment: PromptFragment<Conversatio
         if (isOrchestrator) {
             return `## Understanding Conversation Context
 
-When you see messages wrapped in <conversation-history> tags, these are HISTORICAL messages provided for context only. These messages have already been processed and acted upon. Do NOT route or act on these messages again - they are only there to help you understand the conversation flow.
+When you see a "=== MESSAGES WHILE YOU WERE AWAY ===" section, these are HISTORICAL messages provided for context only. These messages have already been processed and acted upon. Do NOT route or act on these messages again - they are only there to help you understand the conversation flow.
 
-CRITICAL ROUTING RULE: Your ONLY responsibility is to process and route the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not reference historical context for routing decisions or new tasks. If no "=== NEW INTERACTION ===" marker is present, only route based on the most recent user message outside of any <conversation-history> tags.`;
+CRITICAL ROUTING RULE: Your ONLY responsibility is to process and route the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not reference historical context for routing decisions or new tasks. If no "=== NEW INTERACTION ===" marker is present, only route based on the most recent user message outside of any historical message sections.`;
         } else {
             return `## Understanding Conversation Context
 
-When you see messages wrapped in <conversation-history> tags, these are HISTORICAL messages provided for your awareness only. These messages have already been handled by other agents or yourself in the past. Do NOT act on these messages - they are only there to help you understand what has happened so far.
+When you see a "=== MESSAGES WHILE YOU WERE AWAY ===" section, these are HISTORICAL messages provided for your awareness only. These messages have already been handled by other agents or yourself in the past. Do NOT act on these messages - they are only there to help you understand what has happened so far.
 
-CRITICAL EXECUTION RULE: Your ONLY responsibility is to respond to and act on the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not execute tasks or take actions based on historical context. If no "=== NEW INTERACTION ===" marker is present, only act on the most recent message outside of any <conversation-history> tags. Historical context is provided solely to inform your understanding, not to prompt new actions.`;
+CRITICAL EXECUTION RULE: Your ONLY responsibility is to respond to and act on the message that appears AFTER the "=== NEW INTERACTION ===" marker. Do not execute tasks or take actions based on historical context. If no "=== NEW INTERACTION ===" marker is present, only act on the most recent message outside of any historical message sections. Historical context is provided solely to inform your understanding, not to prompt new actions.`;
         }
     },
 };

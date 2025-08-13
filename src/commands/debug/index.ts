@@ -1,6 +1,6 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ALL_PHASES, type Phase } from "@/conversations/phases";
-import { buildSystemPrompt } from "@/prompts/utils/systemPromptBuilder";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import type { Tool } from "@/tools/types";
@@ -109,7 +109,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                 agentLessonsMap.set(agent.pubkey, currentAgentLessons);
             }
 
-            const systemPrompt = buildSystemPrompt({
+            const systemMessages = buildSystemPromptMessages({
                 agent,
                 phase,
                 project: projectCtx.project,
@@ -119,9 +119,34 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                 mcpTools,
             });
 
-            // Format and display the system prompt with enhancements
-            const formattedPrompt = formatContentWithEnhancements(systemPrompt, true);
-            console.log(formattedPrompt);
+            // Display each system message separately with metadata
+            console.log(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+            console.log(chalk.bold.cyan("                    SYSTEM PROMPT MESSAGES"));
+            console.log(chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+            
+            for (let i = 0; i < systemMessages.length; i++) {
+                const msg = systemMessages[i];
+                
+                // Display message metadata
+                console.log(chalk.bold.yellow(`\n─── Message ${i + 1} ───`));
+                if (msg.metadata?.description) {
+                    console.log(chalk.dim(`Description: ${msg.metadata.description}`));
+                }
+                if (msg.metadata?.cacheable) {
+                    console.log(chalk.green(`✓ Cacheable (key: ${msg.metadata.cacheKey})`));
+                }
+                console.log();
+                
+                // Format and display message content
+                const formattedContent = formatContentWithEnhancements(msg.message.content, true);
+                console.log(formattedContent);
+                
+                if (i < systemMessages.length - 1) {
+                    console.log(chalk.dim("\n" + "─".repeat(60) + "\n"));
+                }
+            }
+            
+            console.log(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
         } else {
             console.log(chalk.yellow(`Agent '${options.agent}' not found in registry`));
         }

@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { ConversationManager } from "@/conversations/ConversationManager";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -41,6 +42,11 @@ export class ProjectContext {
      * Key: agent pubkey, Value: array of lessons (limited to most recent 50 per agent)
      */
     public readonly agentLessons: Map<string, NDKAgentLesson[]>;
+
+    /**
+     * Conversation manager for the project (optional, initialized when needed)
+     */
+    public conversationManager?: ConversationManager;
 
     constructor(project: NDKProject, agents: Map<string, AgentInstance>) {
         this.project = project;

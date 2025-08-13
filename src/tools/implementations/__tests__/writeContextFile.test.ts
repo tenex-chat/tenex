@@ -27,10 +27,18 @@ mock.module("@/services", () => ({
 }));
 
 // Mock NDKArticle
+const mockReply = {
+    sign: mock(async () => {}),
+    publish: mock(async () => {}),
+    content: undefined as string | undefined,
+    created_at: undefined as number | undefined
+};
+
 const mockNDKArticle = {
     sign: mock(async () => {}),
     publish: mock(async () => {}),
     tag: mock(() => {}),
+    reply: mock(async () => mockReply),
     dTag: undefined as string | undefined,
     title: undefined as string | undefined,
     content: undefined as string | undefined,
@@ -47,6 +55,7 @@ mock.module("@nostr-dev-kit/ndk", () => {
         this.sign = mockNDKArticle.sign;
         this.publish = mockNDKArticle.publish;
         this.tag = mockNDKArticle.tag;
+        this.reply = mockNDKArticle.reply;
         
         // Override property definitions to capture values
         Object.defineProperty(this, 'dTag', {
@@ -84,14 +93,24 @@ describe("writeContextFile tool", () => {
         mockNDKArticle.sign.mockClear();
         mockNDKArticle.publish.mockClear();
         mockNDKArticle.tag.mockClear();
+        mockNDKArticle.reply.mockClear();
         mockNDKArticle.dTag = undefined;
         mockNDKArticle.title = undefined;
         mockNDKArticle.content = undefined;
         mockNDKArticle.published_at = undefined;
         
+        // Reset reply mock
+        mockReply.sign.mockClear();
+        mockReply.publish.mockClear();
+        mockReply.content = undefined;
+        mockReply.created_at = undefined;
+        
         // Reset publish and sign implementations
         mockNDKArticle.publish = mock(async () => {});
         mockNDKArticle.sign = mock(async () => {});
+        mockNDKArticle.reply = mock(async () => mockReply);
+        mockReply.publish = mock(async () => {});
+        mockReply.sign = mock(async () => {});
         
         // Create mock conversation manager
         mockConversationManager = {
@@ -346,6 +365,78 @@ describe("writeContextFile tool", () => {
             expect(mockNDKArticle.tag).toHaveBeenCalledWith({ id: "test-project" });
             expect(mockNDKArticle.sign).toHaveBeenCalledWith(context.agent.signer);
             expect(mockNDKArticle.publish).toHaveBeenCalled();
+        });
+
+        it("should publish changelog reply when changelog is provided", async () => {
+            const result = await writeContextFileTool.execute({
+                value: {
+                    filename: "test-doc.md",
+                    content: "# Updated Documentation\n\nUpdated content",
+                    title: "Updated Documentation",
+                    changelog: "Updated documentation structure for clarity"
+                }
+            }, context);
+
+            expect(result.ok).toBe(true);
+            
+            // Verify article was published
+            expect(mockNDKArticle.publish).toHaveBeenCalled();
+            
+            // Verify reply was created
+            expect(mockNDKArticle.reply).toHaveBeenCalled();
+            
+            // Verify reply content and timestamp were set
+            expect(mockReply.content).toBe("Updated documentation structure for clarity");
+            expect(mockReply.created_at).toBeGreaterThan(0);
+            
+            // Verify reply was signed and published
+            expect(mockReply.sign).toHaveBeenCalledWith(context.agent.signer);
+            expect(mockReply.publish).toHaveBeenCalled();
+        });
+
+        it("should not create reply when changelog is not provided", async () => {
+            const result = await writeContextFileTool.execute({
+                value: {
+                    filename: "test-doc.md",
+                    content: "# Documentation\n\nContent",
+                    title: "Documentation"
+                }
+            }, context);
+
+            expect(result.ok).toBe(true);
+            
+            // Verify article was published
+            expect(mockNDKArticle.publish).toHaveBeenCalled();
+            
+            // Verify reply was NOT created
+            expect(mockNDKArticle.reply).not.toHaveBeenCalled();
+            expect(mockReply.publish).not.toHaveBeenCalled();
+        });
+
+        it("should continue execution even if changelog reply fails", async () => {
+            // Make reply.publish throw an error
+            mockReply.publish = mock(async () => {
+                throw new Error("Reply publish failed");
+            });
+
+            const result = await writeContextFileTool.execute({
+                value: {
+                    filename: "test-doc.md",
+                    content: "# Documentation\n\nContent",
+                    title: "Documentation",
+                    changelog: "Added new section"
+                }
+            }, context);
+
+            // File write should still succeed
+            expect(result.ok).toBe(true);
+            
+            // Verify article was published
+            expect(mockNDKArticle.publish).toHaveBeenCalled();
+            
+            // Verify reply was attempted
+            expect(mockNDKArticle.reply).toHaveBeenCalled();
+            expect(mockReply.publish).toHaveBeenCalled();
         });
 
         it("should continue execution even if NDKArticle publishing fails", async () => {

@@ -193,6 +193,27 @@ export class ProjectManager implements IProjectManager {
             // Initialize ProjectContext
             setProjectContext(project, loadedAgents);
 
+            // Initialize ConversationManager with ExecutionQueueManager for CLI commands
+            const projectCtx = (await import("@/services")).getProjectContext();
+            const ConversationManager = (await import("@/conversations/ConversationManager")).ConversationManager;
+            const ExecutionQueueManager = (await import("@/conversations/executionQueue")).ExecutionQueueManager;
+            
+            const conversationManager = new ConversationManager(projectPath);
+            await conversationManager.initialize();
+            
+            // Create and attach ExecutionQueueManager
+            const projectPubkey = projectCtx.pubkey;
+            const projectIdentifier = project.tagValue("d") || project.id;
+            const queueManager = new ExecutionQueueManager(
+                projectPath,
+                projectPubkey,
+                projectIdentifier
+            );
+            await queueManager.initialize();
+            
+            conversationManager.setExecutionQueueManager(queueManager);
+            projectCtx.conversationManager = conversationManager;
+
             // Republish kind:0 events for all agents on project load
             await agentRegistry.republishAllAgentProfiles(project);
 

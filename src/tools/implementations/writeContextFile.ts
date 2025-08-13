@@ -13,12 +13,14 @@ const WriteContextFileArgsSchema = z.object({
     filename: z.string().min(1, "filename must be a non-empty string"),
     content: z.string().min(1, "content must be a non-empty string"),
     title: z.string().min(1, "title must be a non-empty string"),
+    changelog: z.string().optional(),
 });
 
 interface WriteContextFileInput {
     filename: string;
     content: string;
     title: string;
+    changelog?: string;
 }
 
 interface WriteContextFileOutput {
@@ -49,7 +51,7 @@ Example workflow:
     execute: async (input, context) => {
         logger.debug("write_context_file called", { input });
 
-        const { filename: rawFilename, content, title } = input.value;
+        const { filename: rawFilename, content, title, changelog } = input.value;
 
         // Agent role check: Only project-manager should use this tool
         // This is enforced at the agent configuration level
@@ -133,6 +135,26 @@ Example workflow:
                 await article.publish();
 
                 logger.debug("Published NDKArticle for context file", { filename, dTag });
+
+                // If changelog is provided, create a NIP-22 reply
+                if (changelog) {
+                    try {
+                        // Create a reply to the spec article event
+                        const reply = await article.reply();
+                        reply.content = changelog;
+                        reply.created_at = Math.floor(Date.now() / 1000);
+                        
+                        // Sign and publish the reply
+                        await reply.sign(context.agent.signer);
+                        await reply.publish();
+                        
+                        logger.debug("Published changelog reply", { changelog, dTag });
+                    } catch (replyError) {
+                        logger.error("Failed to publish changelog reply", {
+                            error: formatAnyError(replyError),
+                        });
+                    }
+                }
             } catch (error) {
                 // Log error but don't fail the tool execution
                 logger.error("Failed to publish NDKArticle", {

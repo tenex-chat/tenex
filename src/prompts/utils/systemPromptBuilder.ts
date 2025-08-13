@@ -9,8 +9,10 @@ import "@/prompts/fragments/referenced-article";
 import "@/prompts/fragments/domain-expert-guidelines";
 import "@/prompts/fragments/voice-mode";
 import "@/prompts/fragments/agent-completion-guidance";
+import "@/prompts/fragments/project-md";
 import { isVoiceMode } from "@/prompts/fragments/voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import { Message } from "multi-llm-ts";
 
 export interface BuildSystemPromptOptions {
     // Required data
@@ -26,11 +28,69 @@ export interface BuildSystemPromptOptions {
     triggeringEvent?: NDKEvent;
 }
 
+export interface SystemMessage {
+    message: Message;
+    metadata?: {
+        cacheable?: boolean;
+        cacheKey?: string;
+        description?: string;
+    };
+}
+
 /**
- * Builds the system prompt for an agent using the exact same logic as production.
+ * Builds the system prompt messages for an agent, returning an array of messages
+ * with optional caching metadata.
  * This is the single source of truth for system prompt generation.
  */
-export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+export function buildSystemPromptMessages(options: BuildSystemPromptOptions): SystemMessage[] {
+    const messages: SystemMessage[] = [];
+    
+    // Build the main system prompt
+    const mainPrompt = buildMainSystemPrompt(options);
+    messages.push({
+        message: new Message("system", mainPrompt),
+        metadata: {
+            description: "Main system prompt"
+        }
+    });
+    
+    // Add PROJECT.md as separate cacheable message for project-manager
+    if (!options.agent.isOrchestrator && options.agent.slug === "project-manager") {
+        const projectMdContent = buildProjectMdContent(options);
+        if (projectMdContent) {
+            messages.push({
+                message: new Message("system", projectMdContent),
+                metadata: {
+                    cacheable: true,
+                    cacheKey: `project-md-${options.project.id}`,
+                    description: "PROJECT.md content"
+                }
+            });
+        }
+    }
+    
+    // Add project inventory as separate cacheable message for non-orchestrator agents
+    if (!options.agent.isOrchestrator) {
+        const inventoryContent = buildProjectInventoryContent(options);
+        if (inventoryContent) {
+            messages.push({
+                message: new Message("system", inventoryContent),
+                metadata: {
+                    cacheable: true,
+                    cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
+                    description: "Project inventory"
+                }
+            });
+        }
+    }
+    
+    return messages;
+}
+
+/**
+ * Builds the main system prompt content (without PROJECT.md and inventory)
+ */
+function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     const {
         agent,
         phase,
@@ -76,31 +136,10 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
     }
 
-    // Add project inventory context only for non-orchestrator agents
-    if (!agent.isOrchestrator) {
-        systemPromptBuilder.add("project-inventory-context", {
-            phase,
-        });
-
-        // Add PROJECT.md fragment only for project-manager
-        if (agent.slug === "project-manager") {
-            systemPromptBuilder.add("project-md", {
-                projectPath: process.cwd(),
-                currentAgent: agent,
-            });
-        }
-    }
-
+    // Keep phase-definitions as it's foundational knowledge
+    // Remove phase-context and phase-constraints as they'll be injected dynamically
     systemPromptBuilder
         .add("phase-definitions", {})
-        .add("phase-context", {
-            phase,
-            phaseMetadata: conversation?.metadata,
-            conversation,
-        })
-        .add("phase-constraints", {
-            phase,
-        })
         .add("retrieved-lessons", {
             agent,
             phase,
@@ -134,14 +173,45 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         });
         
         // Add domain expert guidelines for all non-orchestrator agents
+        // Remove agent-completion-guidance as it will be injected dynamically with phase context
         systemPromptBuilder
             .add("domain-expert-guidelines", {})
-            .add("expert-reasoning", {}) // Add expert-specific reasoning
-            .add("agent-completion-guidance", {
-                phase,
-                isOrchestrator: false,
-            });
+            .add("expert-reasoning", {}); // Add expert-specific reasoning
     }
 
     return systemPromptBuilder.build();
+}
+
+/**
+ * Builds PROJECT.md content as a separate message
+ */
+function buildProjectMdContent(options: BuildSystemPromptOptions): string | null {
+    const builder = new PromptBuilder();
+    builder.add("project-md", {
+        projectPath: process.cwd(),
+        currentAgent: options.agent,
+    });
+    const content = builder.build();
+    return content.trim() ? content : null;
+}
+
+/**
+ * Builds project inventory content as a separate message
+ */
+function buildProjectInventoryContent(options: BuildSystemPromptOptions): string | null {
+    const builder = new PromptBuilder();
+    builder.add("project-inventory-context", {
+        phase: options.phase,
+    });
+    const content = builder.build();
+    return content.trim() ? content : null;
+}
+
+/**
+ * Legacy function that returns a single concatenated system prompt string.
+ * @deprecated Use buildSystemPromptMessages instead for better caching support
+ */
+export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+    const messages = buildSystemPromptMessages(options);
+    return messages.map(m => m.message.content).join("\n\n");
 }

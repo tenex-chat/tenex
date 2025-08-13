@@ -20,6 +20,9 @@ import { getNDK } from "@/nostr";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
+import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/phaseInstructionsBuilder";
+import { ExecutionQueueManager } from "./executionQueue";
+import { NostrEventService } from "@/nostr/NostrEventService";
 
 export class ConversationManager {
     private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
@@ -27,17 +30,32 @@ export class ConversationManager {
     private conversationContexts: Map<string, TracingContext> = new Map();
     private conversationsDir: string;
     private persistence: ConversationPersistenceAdapter;
+    private executionQueueManager?: ExecutionQueueManager;
 
     constructor(
         private projectPath: string, 
-        persistence?: ConversationPersistenceAdapter
+        persistence?: ConversationPersistenceAdapter,
+        executionQueueManager?: ExecutionQueueManager
     ) {
         this.conversationsDir = path.join(projectPath, ".tenex", "conversations");
         this.persistence = persistence || new FileSystemAdapter(projectPath);
+        this.executionQueueManager = executionQueueManager;
     }
 
     getProjectPath(): string {
         return this.projectPath;
+    }
+
+    getExecutionQueueManager(): ExecutionQueueManager | undefined {
+        return this.executionQueueManager;
+    }
+
+    setExecutionQueueManager(manager: ExecutionQueueManager): void {
+        this.executionQueueManager = manager;
+        // Set up event listeners if not already done
+        if (this.executionQueueManager) {
+            this.setupQueueEventListeners();
+        }
     }
 
     async initialize(): Promise<void> {
@@ -46,6 +64,79 @@ export class ConversationManager {
 
         // Load existing conversations
         await this.loadConversations();
+
+        // Set up execution queue event listeners if available
+        if (this.executionQueueManager) {
+            this.setupQueueEventListeners();
+        }
+    }
+
+    private setupQueueEventListeners(): void {
+        if (!this.executionQueueManager) return;
+
+        // Listen for lock acquisition events
+        this.executionQueueManager.on('lock-acquired', async (conversationId, agentPubkey) => {
+            const conversation = this.conversations.get(conversationId);
+            if (conversation && conversation.metadata.queueStatus) {
+                // Clear queue status and notify
+                delete conversation.metadata.queueStatus;
+                await this.persistence.save(conversation);
+                
+                // Log execution start
+                const tracingContext = this.conversationContexts.get(conversationId);
+                if (tracingContext) {
+                    const executionLogger = createExecutionLogger(tracingContext, "conversation");
+                    executionLogger.logEvent({
+                        type: "execution_started",
+                        timestamp: new Date(),
+                        conversationId,
+                        agent: agentPubkey,
+                        message: "Execution lock acquired - starting EXECUTE phase"
+                    });
+                }
+            }
+        });
+
+        // Listen for timeout warnings
+        this.executionQueueManager.on('timeout-warning', async (conversationId, remainingMs) => {
+            const conversation = this.conversations.get(conversationId);
+            if (conversation) {
+                const minutes = Math.floor(remainingMs / 60000);
+                const warningMessage = `⚠️ Execution Timeout Warning\n\n` +
+                    `Your conversation has been executing for an extended period.\n` +
+                    `Time remaining: ${minutes} minutes\n\n` +
+                    `The execution will be automatically terminated if not completed soon.`;
+                
+                // Log warning
+                const tracingContext = this.conversationContexts.get(conversationId);
+                if (tracingContext) {
+                    const executionLogger = createExecutionLogger(tracingContext, "conversation");
+                    executionLogger.logEvent({
+                        type: "timeout_warning",
+                        timestamp: new Date(),
+                        conversationId,
+                        remainingMs,
+                        message: warningMessage
+                    });
+                }
+            }
+        });
+
+        // Listen for timeout events
+        this.executionQueueManager.on('timeout', async (conversationId) => {
+            const conversation = this.conversations.get(conversationId);
+            if (conversation && conversation.phase === PHASES.EXECUTE) {
+                // Force transition back to CHAT phase
+                await this.updatePhase(
+                    conversationId,
+                    PHASES.CHAT,
+                    "Execution timeout reached. The execution lock has been automatically released.",
+                    "system",
+                    "system",
+                    "timeout"
+                );
+            }
+        });
     }
 
     async createConversation(event: NDKEvent): Promise<Conversation> {
@@ -149,7 +240,7 @@ export class ConversationManager {
         agentName: string,
         reason?: string,
         summary?: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         const conversation = this.conversations.get(id);
         if (!conversation) {
             throw new Error(`Conversation ${id} not found`);
@@ -167,6 +258,56 @@ export class ConversationManager {
         const executionLogger = createExecutionLogger(phaseContext, "conversation");
 
         const previousPhase = conversation.phase;
+
+        // Handle EXECUTE phase entry with queue management
+        if (phase === PHASES.EXECUTE && previousPhase !== PHASES.EXECUTE && this.executionQueueManager) {
+            const permission = await this.executionQueueManager.requestExecution(id, agentPubkey);
+            
+            if (!permission.granted) {
+                // Add system message about queue status
+                const queueMessage = `🚦 Execution Queue Status\n\n` +
+                    `Your conversation has been added to the execution queue.\n\n` +
+                    `Queue Position: ${permission.queuePosition}\n` +
+                    `Estimated Wait Time: ${this.formatWaitTime(permission.waitTime || 0)}\n\n` +
+                    `You will be automatically notified when execution begins.`;
+                
+                // Log queue event instead of phase transition
+                executionLogger.logEvent({
+                    type: "queue_joined",
+                    timestamp: new Date(),
+                    conversationId: id,
+                    agent: agentName,
+                    queuePosition: permission.queuePosition,
+                    estimatedWait: permission.waitTime
+                });
+
+                // Add queue status message to conversation metadata
+                if (!conversation.metadata.queueStatus) {
+                    conversation.metadata.queueStatus = {
+                        isQueued: true,
+                        position: permission.queuePosition!,
+                        estimatedWait: permission.waitTime!,
+                        message: queueMessage
+                    };
+                }
+
+                // Save the queue status but don't transition
+                await this.persistence.save(conversation);
+                
+                // Return false to indicate phase transition was not completed
+                return false;
+            }
+        }
+
+        // Handle EXECUTE phase exit with queue management
+        if (previousPhase === PHASES.EXECUTE && phase !== PHASES.EXECUTE && this.executionQueueManager) {
+            await this.executionQueueManager.releaseExecution(id, reason || 'phase_transition');
+            
+            // Clear queue status from metadata
+            if (conversation.metadata.queueStatus) {
+                delete conversation.metadata.queueStatus;
+            }
+        }
         
         // Log phase transition
         executionLogger.logEvent({
@@ -207,6 +348,19 @@ export class ConversationManager {
 
         // Save after phase update
         await this.persistence.save(conversation);
+        
+        // Return true to indicate phase transition was completed
+        return true;
+    }
+
+    private formatWaitTime(seconds: number): string {
+        if (seconds < 60) {
+            return `~${Math.floor(seconds)} seconds`;
+        } else if (seconds < 3600) {
+            return `~${Math.floor(seconds / 60)} minutes`;
+        } else {
+            return `~${Math.floor(seconds / 3600)} hours`;
+        }
     }
 
 
@@ -277,7 +431,7 @@ export class ConversationManager {
      */
     async buildAgentMessages(
         conversationId: string,
-        targetAgent: Agent,
+        targetAgent: AgentInstance,
         triggeringEvent?: NDKEvent,
         handoff?: PhaseTransition
     ): Promise<{ messages: Message[]; claudeSessionId?: string }> {
@@ -320,7 +474,10 @@ export class ConversationManager {
                 }
             }
             
-            agentState = { lastProcessedMessageIndex: initialIndex };
+            agentState = { 
+                lastProcessedMessageIndex: initialIndex,
+                lastSeenPhase: undefined // Will be set when phase instructions are injected
+            };
             conversation.agentStates.set(targetAgent.slug, agentState);
             logger.info(`[CONV_MGR] Initialized new agent state for ${targetAgent.slug} at index ${initialIndex}`);
         }
@@ -445,7 +602,49 @@ export class ConversationManager {
             messagesForLLM.push(new Message("system", "=== NEW INTERACTION ==="));
         }
 
-        // === 3. Add the current triggering event as the primary message ===
+        // === 3. Check for phase transitions and inject phase instructions ===
+        // Only check for non-orchestrator agents (orchestrator handles phases differently)
+        const projectCtx = getProjectContext();
+        const agentInstance = projectCtx.agents.get(targetAgent.slug);
+        const isOrchestrator = agentInstance?.isOrchestrator || false;
+        
+        if (!isOrchestrator) {
+            // Check if agent is entering a new phase
+            const needsPhaseUpdate = !agentState.lastSeenPhase || 
+                                    agentState.lastSeenPhase !== conversation.phase;
+            
+            if (needsPhaseUpdate) {
+                const phaseInstructions = buildPhaseInstructions(
+                    conversation.phase,
+                    conversation,
+                    false // not orchestrator
+                );
+                
+                // Format the phase transition message
+                let phaseMessage: string;
+                if (agentState.lastSeenPhase) {
+                    // Agent has seen a previous phase - show transition
+                    phaseMessage = formatPhaseTransitionMessage(
+                        agentState.lastSeenPhase,
+                        conversation.phase,
+                        phaseInstructions
+                    );
+                    logger.info(`[CONV_MGR] Agent ${targetAgent.slug} transitioning from ${agentState.lastSeenPhase} to ${conversation.phase}`);
+                } else {
+                    // Agent is seeing phase for first time
+                    phaseMessage = `=== CURRENT PHASE: ${conversation.phase.toUpperCase()} ===\n\n${phaseInstructions}`;
+                    logger.info(`[CONV_MGR] Agent ${targetAgent.slug} entering phase ${conversation.phase} for first time`);
+                }
+                
+                // Inject as a system message after history but before the triggering event
+                messagesForLLM.push(new Message("system", phaseMessage));
+                
+                // Update the agent's last seen phase
+                agentState.lastSeenPhase = conversation.phase;
+            }
+        }
+
+        // === 4. Add the current triggering event as the primary message ===
         if (triggeringEvent?.content) {
             // Process nostr entities in the content
             const processedContent = await this.processNostrEntities(triggeringEvent.content);
@@ -455,9 +654,9 @@ export class ConversationManager {
             } else {
                 // If from another agent, attribute it as a system message
                 const eventAgentSlug = getAgentSlugFromEvent(triggeringEvent);
-                const projectCtx = getProjectContext();
+                const projectCtx2 = getProjectContext();
                 const sendingAgentName = eventAgentSlug ? 
-                    (projectCtx.agents.get(eventAgentSlug)?.name || "Another agent") : 
+                    (projectCtx2.agents.get(eventAgentSlug)?.name || "Another agent") : 
                     "Another agent";
                 messagesForLLM.push(new Message("system", `[${sendingAgentName}]: ${processedContent}`));
             }
@@ -467,7 +666,7 @@ export class ConversationManager {
             messagesForLLM.push(new Message("user", processedHandoffMessage));
         }
 
-        // === 4. Update agent's state for next turn ===
+        // === 5. Update agent's state for next turn ===
         agentState.lastProcessedMessageIndex = currentHistoryLength;
         
         // Update Claude session ID from the triggering event if available
@@ -607,7 +806,10 @@ export class ConversationManager {
         let agentState = conversation.agentStates.get(agentSlug);
         if (!agentState) {
             logger.warn(`[CONV_MGR] Agent state not found for ${agentSlug}, creating new one for update.`);
-            agentState = { lastProcessedMessageIndex: 0 };
+            agentState = { 
+                lastProcessedMessageIndex: 0,
+                lastSeenPhase: undefined
+            };
             conversation.agentStates.set(agentSlug, agentState);
         }
         

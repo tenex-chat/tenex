@@ -30,8 +30,7 @@ export async function buildLLMMetadata(
             completionTokens: response.usage.completion_tokens,
             totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens,
         },
-        model:
-            "model" in response && typeof response.model === "string" ? response.model : undefined,
+        model: response.model,
         experimental_providerMetadata:
             "experimental_providerMetadata" in response
                 ? (response.experimental_providerMetadata as ResponseWithUsage["experimental_providerMetadata"])

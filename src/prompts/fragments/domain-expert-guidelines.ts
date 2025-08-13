@@ -10,8 +10,6 @@ export const domainExpertGuidelinesFragment: PromptFragment<Record<string, never
     template: () => `## Domain Expert Guidelines
 
 CRITICAL: As a specialist/expert agent, you are an ADVISOR ONLY. You CANNOT:
-- Modify any files or code
-- Execute shell commands
 - Make any system changes
 - Implement features or fixes
 

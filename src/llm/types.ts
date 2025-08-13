@@ -32,7 +32,8 @@ import type {
 
 // Re-export multi-llm-ts types directly
 export type Message = LlmMessage;
-export type CompletionResponse = LlmResponse;
+// Extend LlmResponse to include model information
+export type CompletionResponse = LlmResponse & { model?: string };
 export type ToolDefinition = LlmTool;
 export type ToolCall = LlmToolCall;
 
@@ -132,6 +133,7 @@ export const EVENT_KINDS = {
     TYPING_INDICATOR_STOP: 24112,
     STREAMING_RESPONSE: 21111,
     TENEX_LOG: 24015,
+    FORCE_RELEASE: 24019,
     LLM_CONFIG_CHANGE: 24020,
 } as const;
 

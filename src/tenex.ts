@@ -9,6 +9,7 @@ import { runDebugSystemPrompt } from "./commands/debug/index";
 import { inventoryCommand } from "./commands/inventory/index";
 import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
+import { queueCommand } from "./commands/queue/index";
 import { setupCommand } from "./commands/setup/index";
 import { initNDK } from "./nostr/ndkClient";
 import { PHASES } from "./conversations/phases";
@@ -24,6 +25,7 @@ program.addCommand(projectCommand);
 program.addCommand(setupCommand);
 program.addCommand(inventoryCommand);
 program.addCommand(mcpCommand);
+program.addCommand(queueCommand);
 
 // Add debug command
 const debug = program.command("debug").description("Debug commands");

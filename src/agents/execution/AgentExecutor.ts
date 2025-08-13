@@ -2,7 +2,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { LLMService } from "@/llm/types";
 import { NostrPublisher } from "@/nostr";
-import { buildSystemPrompt } from "@/prompts/utils/systemPromptBuilder";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import {
@@ -222,8 +222,8 @@ export class AgentExecutor {
             agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
         }
 
-        // Build system prompt for all agents (including orchestrator)
-        const systemPrompt = buildSystemPrompt({
+        // Build system prompt messages for all agents (including orchestrator)
+        const systemMessages = buildSystemPromptMessages({
             agent: context.agent,
             phase: context.phase,
             project,
@@ -234,7 +234,10 @@ export class AgentExecutor {
             triggeringEvent: context.triggeringEvent,
         });
 
-        messages.push(new Message("system", systemPrompt));
+        // Add all system messages
+        for (const systemMsg of systemMessages) {
+            messages.push(systemMsg.message);
+        }
 
         // Check for #debug flag in triggering event content
         const hasDebugFlag = context.triggeringEvent?.content?.includes("#debug");
