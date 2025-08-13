@@ -1,6 +1,6 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import fs from "node:fs/promises";
-import path from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { AgentPublisher } from "@/agents/AgentPublisher";
 import type { AgentInstance, AgentConfig, AgentConfigOptionalNsec, StoredAgentData } from "@/agents/types";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";

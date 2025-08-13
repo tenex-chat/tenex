@@ -517,8 +517,16 @@ describe('Orchestrator Routing Test', () => {
     it('should handle ${this.state.phase} phase routing', () => {
         const context: OrchestratorRoutingContext = ${JSON.stringify(this.buildOrchestratorContext(), null, 8)};
         
-        // TODO: Add orchestrator execution and assertions
+        // Verify context structure
         expect(context).toBeDefined();
+        expect(context.phase).toBe('${this.state.phase}');
+        expect(context.availableAgents).toBeInstanceOf(Array);
+        expect(context.availableAgents.length).toBeGreaterThan(0);
+        
+        // Verify phase-specific routing logic
+        const orchestratorResponse = routeToAgent(context);
+        expect(orchestratorResponse).toBeDefined();
+        expect(orchestratorResponse.agent).toMatch(/^(${this.state.selectedAgents.join('|')})$/);
     });
 });`;
     }

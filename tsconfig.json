@@ -1,16 +1,30 @@
 {
-    "extends": "../tsconfig.base.json",
     "compilerOptions": {
+        "target": "ES2020",
+        "module": "ES2020",
+        "lib": ["ES2020"],
+        "moduleResolution": "node",
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "downlevelIteration": true,
+        "strict": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
         "noEmit": true,
-        "rootDir": "..",
+        "rootDir": "./src",
         "outDir": "./dist",
         "baseUrl": ".",
         "paths": {
             "@/*": ["./src/*"]
         },
         "noUnusedLocals": false,
-        "noUnusedParameters": false
+        "noUnusedParameters": false,
+        "resolveJsonModule": true,
+        "isolatedModules": true
     },
-    "include": ["src/**/*", "bin/**/*"],
-    "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "src/test-utils/**/*"]
 }

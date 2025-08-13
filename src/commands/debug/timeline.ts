@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import chalk from "chalk";
 import type { CommandModule } from "yargs";
 import { ConversationManager } from "@/conversations/ConversationManager";

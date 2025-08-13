@@ -1,4 +1,4 @@
-import path from "node:path";
+import * as path from "node:path";
 import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { StatusPublisher } from "@/commands/run/StatusPublisher";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";

@@ -1,4 +1,4 @@
-import path from "node:path";
+import * as path from "node:path";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
 import { ProjectManager } from "../../daemon/ProjectManager";

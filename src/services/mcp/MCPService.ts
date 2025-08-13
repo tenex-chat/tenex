@@ -1,5 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import path from "node:path";
+import * as path from "node:path";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import type { Tool } from "@/tools/types";

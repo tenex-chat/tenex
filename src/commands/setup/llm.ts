@@ -1,5 +1,5 @@
-import os from "node:os";
-import path from "node:path";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as fileSystem from "@/lib/fs";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { logger } from "@/utils/logger";

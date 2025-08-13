@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import fs from "node:fs/promises";
-import path from "node:path";
+import * as path from "node:path";
 import { promisify } from "node:util";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";

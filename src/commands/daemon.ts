@@ -1,4 +1,4 @@
-import path from "node:path";
+import * as path from "node:path";
 import { EventMonitor } from "@/daemon/EventMonitor";
 import { ProcessManager } from "@/daemon/ProcessManager";
 import { ProjectManager } from "@/daemon/ProjectManager";

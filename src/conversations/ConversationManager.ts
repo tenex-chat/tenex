@@ -1,4 +1,4 @@
-import path from "node:path";
+import * as path from "node:path";
 import type { Phase } from "@/conversations/phases";
 import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, OrchestratorRoutingContext } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
