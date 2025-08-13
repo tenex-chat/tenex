@@ -1,0 +1,331 @@
+import { Message } from "multi-llm-ts";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { Phase } from "./phases";
+import { PhaseTransition } from "./types";
+import { MessageBuilder } from "./MessageBuilder";
+import { isEventFromUser, getAgentSlugFromEvent } from "@/nostr/utils";
+import { getProjectContext } from "@/services";
+import { logger } from "@/utils/logger";
+
+/**
+ * Manages the complete message stream for a specific agent in a conversation.
+ * Single Responsibility: Build and maintain the message array for an agent<>conversation pair.
+ */
+export class AgentConversationContext {
+    private messages: Message[] = [];
+    private lastProcessedIndex: number = 0;
+    private claudeSessionId?: string;
+    private currentPhase?: Phase;
+    private messageBuilder: MessageBuilder;
+    
+    constructor(
+        private conversationId: string,
+        private agentSlug: string,
+        messageBuilder?: MessageBuilder
+    ) {
+        this.messageBuilder = messageBuilder || new MessageBuilder();
+    }
+
+    /**
+     * Process and add an NDKEvent to the message stream
+     */
+    async addEvent(event: NDKEvent): Promise<void> {
+        if (!event.content) return;
+        
+        const processed = await this.messageBuilder.processNostrEntities(event.content);
+        const message = this.messageBuilder.formatEventAsMessage(
+            event,
+            processed,
+            this.agentSlug
+        );
+        this.messages.push(message);
+        
+        logger.debug(`[AGENT_CONTEXT] Added event to ${this.agentSlug}`, {
+            eventId: event.id,
+            messageType: message.role
+        });
+    }
+
+    /**
+     * Handle phase transition if needed
+     */
+    handlePhaseTransition(newPhase: Phase, phaseInstructions?: string): boolean {
+        if (this.currentPhase === newPhase) {
+            return false; // No transition needed
+        }
+
+        const transitionMessage = phaseInstructions || 
+            this.messageBuilder.buildPhaseTransitionMessage(this.currentPhase, newPhase);
+        
+        this.messages.push(new Message("system", transitionMessage));
+        
+        logger.info(`[AGENT_CONTEXT] Phase transition for ${this.agentSlug}`, {
+            from: this.currentPhase,
+            to: newPhase
+        });
+        
+        this.currentPhase = newPhase;
+        return true; // Transition occurred
+    }
+
+    /**
+     * Add the triggering event (the main event being responded to)
+     */
+    async addTriggeringEvent(event: NDKEvent): Promise<void> {
+        if (!event.content) return;
+        
+        // Process the content
+        const processed = await this.messageBuilder.processNostrEntities(event.content);
+        const message = this.messageBuilder.formatEventAsMessage(
+            event,
+            processed,
+            this.agentSlug
+        );
+        
+        // Update session ID if present
+        const sessionId = event.tagValue?.('claude-session');
+        if (sessionId) {
+            this.claudeSessionId = sessionId;
+            logger.debug(`[AGENT_CONTEXT] Updated Claude session for ${this.agentSlug}`, {
+                sessionId
+            });
+        }
+        
+        this.messages.push(message);
+    }
+
+    /**
+     * Process multiple events at once (for catching up)
+     */
+    async addEvents(events: NDKEvent[], skipEventId?: string): Promise<void> {
+        for (const event of events) {
+            if (event.id === skipEventId) continue;
+            if (!event.content) continue;
+            await this.addEvent(event);
+        }
+    }
+
+    /**
+     * Add a handoff message
+     */
+    addHandoff(handoff: PhaseTransition): void {
+        if (handoff.summary) {
+            this.messages.push(new Message("system", 
+                `**Previous context**: ${handoff.summary}`
+            ));
+        }
+        if (handoff.message) {
+            const processed = handoff.message;
+            this.messages.push(new Message("user", processed));
+        }
+    }
+
+    /**
+     * Add "messages while you were away" block
+     */
+    async addMissedMessages(events: NDKEvent[], handoffSummary?: string): Promise<void> {
+        if (events.length === 0) return;
+        
+        let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
+        
+        if (handoffSummary) {
+            contextBlock += `**Previous context**: ${handoffSummary}\n\n`;
+        }
+
+        for (const event of events) {
+            const sender = this.getEventSender(event);
+            if (sender) {
+                const processed = await this.messageBuilder.processNostrEntities(event.content);
+                contextBlock += `${sender}:\n${processed}\n\n`;
+            }
+        }
+        
+        contextBlock += "=== END OF HISTORY ===\n";
+        contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
+        
+        this.messages.push(new Message("system", contextBlock));
+        
+        logger.debug(`[AGENT_CONTEXT] Added missed messages block for ${this.agentSlug}`, {
+            eventCount: events.length
+        });
+    }
+
+    /**
+     * Handle delegation responses
+     */
+    addDelegationResponses(responses: Map<string, NDKEvent>, originalRequest: string): void {
+        let message = `=== DELEGATE RESPONSES RECEIVED ===\n\n`;
+        message += `You previously delegated the following request to ${responses.size} agent(s):\n`;
+        message += `"${originalRequest}"\n\n`;
+        message += `Here are all the responses:\n\n`;
+        
+        for (const [pubkey, event] of responses) {
+            const agentName = this.getAgentNameByPubkey(pubkey);
+            message += `### Response from ${agentName}:\n`;
+            message += `${event.content}\n\n`;
+        }
+        
+        message += `=== END OF DELEGATE RESPONSES ===\n\n`;
+        message += `Now process these responses and complete your task.`;
+        
+        this.messages.push(new Message("system", message));
+        
+        logger.info(`[AGENT_CONTEXT] Added delegation responses for ${this.agentSlug}`, {
+            responseCount: responses.size
+        });
+    }
+
+    /**
+     * Add a raw message (for special cases)
+     */
+    addMessage(message: Message): void {
+        this.messages.push(message);
+    }
+
+    /**
+     * Add multiple raw messages
+     */
+    addMessages(messages: Message[]): void {
+        this.messages.push(...messages);
+    }
+
+    /**
+     * Get all messages for this agent
+     */
+    getMessages(): Message[] {
+        return [...this.messages];
+    }
+
+    /**
+     * Get the last N messages
+     */
+    getRecentMessages(count: number): Message[] {
+        return this.messages.slice(-count);
+    }
+
+    /**
+     * Clear all messages (useful for phase resets if needed)
+     */
+    clearMessages(): void {
+        this.messages = [];
+        this.lastProcessedIndex = 0;
+        logger.debug(`[AGENT_CONTEXT] Cleared messages for ${this.agentSlug}`);
+    }
+
+    /**
+     * Remove the last message (useful for error recovery)
+     */
+    popMessage(): Message | undefined {
+        return this.messages.pop();
+    }
+
+    /**
+     * Get/set the Claude session ID
+     */
+    getClaudeSessionId(): string | undefined {
+        return this.claudeSessionId;
+    }
+
+    setClaudeSessionId(sessionId: string): void {
+        this.claudeSessionId = sessionId;
+    }
+
+    /**
+     * Get/set the last processed index
+     */
+    getLastProcessedIndex(): number {
+        return this.lastProcessedIndex;
+    }
+
+    setLastProcessedIndex(index: number): void {
+        this.lastProcessedIndex = index;
+    }
+
+    /**
+     * Get the current phase
+     */
+    getCurrentPhase(): Phase | undefined {
+        return this.currentPhase;
+    }
+
+    /**
+     * Set the current phase (without adding a message)
+     */
+    setCurrentPhase(phase: Phase): void {
+        this.currentPhase = phase;
+    }
+
+    /**
+     * Serialize for persistence
+     */
+    toJSON(): object {
+        return {
+            conversationId: this.conversationId,
+            agentSlug: this.agentSlug,
+            messages: this.messages.map(m => ({
+                role: m.role,
+                content: m.content
+            })),
+            lastProcessedIndex: this.lastProcessedIndex,
+            claudeSessionId: this.claudeSessionId,
+            currentPhase: this.currentPhase
+        };
+    }
+
+    /**
+     * Restore from persistence
+     */
+    static fromJSON(data: any, messageBuilder?: MessageBuilder): AgentConversationContext {
+        const context = new AgentConversationContext(
+            data.conversationId,
+            data.agentSlug,
+            messageBuilder
+        );
+        
+        // Restore messages
+        if (data.messages && Array.isArray(data.messages)) {
+            context.messages = data.messages.map((m: any) => 
+                new Message(m.role, m.content)
+            );
+        }
+        
+        context.lastProcessedIndex = data.lastProcessedIndex || 0;
+        context.claudeSessionId = data.claudeSessionId;
+        context.currentPhase = data.currentPhase;
+        
+        return context;
+    }
+
+    /**
+     * Helper to determine event sender
+     */
+    private getEventSender(event: NDKEvent): string | null {
+        const eventAgentSlug = getAgentSlugFromEvent(event);
+        
+        if (isEventFromUser(event)) {
+            return "🟢 USER";
+        } else if (eventAgentSlug) {
+            const projectCtx = getProjectContext();
+            const sendingAgent = projectCtx.agents.get(eventAgentSlug);
+            const agentName = sendingAgent ? sendingAgent.name : "Another agent";
+            
+            // Mark the agent's own previous messages clearly
+            if (eventAgentSlug === this.agentSlug) {
+                return `💬 You (${agentName})`;
+            } else {
+                return `💬 ${agentName}`;
+            }
+        } else {
+            return "💬 Unknown";
+        }
+    }
+
+    /**
+     * Helper to get agent name by pubkey
+     */
+    private getAgentNameByPubkey(pubkey: string): string {
+        const projectCtx = getProjectContext();
+        const agent = projectCtx.getAgentByPubkey(pubkey);
+        return agent?.name || pubkey.substring(0, 8);
+    }
+}

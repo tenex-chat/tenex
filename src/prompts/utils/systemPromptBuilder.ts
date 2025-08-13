@@ -4,13 +4,19 @@ import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { Tool } from "@/tools/types";
-import "@/prompts/fragments/phase-definitions";
-import "@/prompts/fragments/referenced-article";
-import "@/prompts/fragments/domain-expert-guidelines";
-import "@/prompts/fragments/voice-mode";
-import "@/prompts/fragments/agent-completion-guidance";
-import "@/prompts/fragments/project-md";
-import { isVoiceMode } from "@/prompts/fragments/voice-mode";
+import "@/prompts/fragments/10-phase-definitions";
+import "@/prompts/fragments/10-referenced-article";
+import "@/prompts/fragments/20-voice-mode";
+import "@/prompts/fragments/35-specialist-completion-guidance";
+import "@/prompts/fragments/30-project-md";
+import "@/prompts/fragments/01-specialist-identity";
+import "@/prompts/fragments/01-orchestrator-identity";
+import "@/prompts/fragments/25-specialist-tools";
+import "@/prompts/fragments/85-specialist-reasoning";
+import "@/prompts/fragments/85-orchestrator-reasoning";
+import "@/prompts/fragments/15-specialist-available-agents";
+import "@/prompts/fragments/15-orchestrator-available-agents";
+import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 
@@ -103,25 +109,34 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     } = options;
 
     // Build system prompt with all agent and phase context
-    const systemPromptBuilder = new PromptBuilder().add("agent-system-prompt", {
-        agent,
-        phase,
-        projectTitle: project.title,
-        projectOwnerPubkey: project.pubkey,
-    });
+    const systemPromptBuilder = new PromptBuilder();
     
-    // Only add conversation-history instructions for non-orchestrator agents
-    // Orchestrator receives structured JSON, not conversation history
-    if (!agent.isOrchestrator) {
-        systemPromptBuilder.add("conversation-history-instructions", {
-            isOrchestrator: false,
+    // Choose identity fragment based on agent type - NO conditionals in fragments
+    if (agent.isOrchestrator) {
+        systemPromptBuilder.add("orchestrator-identity", {
+            agent,
+            projectTitle: project.title,
+            projectOwnerPubkey: project.pubkey,
+        });
+    } else {
+        systemPromptBuilder.add("specialist-identity", {
+            agent,
+            projectTitle: project.title,
+            projectOwnerPubkey: project.pubkey,
         });
     }
     
-    systemPromptBuilder.add("available-agents", {
-        agents: availableAgents,
-        currentAgent: agent,
-    });
+    // Add available agents - different fragment for orchestrator vs specialist
+    if (agent.isOrchestrator) {
+        systemPromptBuilder.add("orchestrator-available-agents", {
+            agents: availableAgents,
+        });
+    } else {
+        systemPromptBuilder.add("specialist-available-agents", {
+            agents: availableAgents,
+            currentAgent: agent,
+        });
+    }
     
     // Add voice mode instructions if this is a voice mode event
     // But skip for orchestrator since it doesn't speak to users
@@ -145,38 +160,24 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
             phase,
             conversation,
             agentLessons: agentLessons || new Map(),
-        })
-        .add("agent-tools", {
-            agent,
         });
     
-    // Only add MCP tools and reasoning instructions for non-orchestrator agents
+    // Add tools for specialists only
     if (!agent.isOrchestrator) {
-        systemPromptBuilder
-            .add("agent-reasoning", {}) // Add reasoning instructions for non-orchestrator agents
-            .add("mcp-tools", {
-                tools: mcpTools,
-            });
+        systemPromptBuilder.add("specialist-tools", {
+            agent,
+            mcpTools,
+        });
     }
     // .add("tool-use", {});
 
-    // Add orchestrator-specific routing instructions for orchestrator agents using reason-act-loop backend
+    // Add appropriate reasoning fragment based on agent type
     if (agent.isOrchestrator) {
         systemPromptBuilder
-            .add("orchestrator-routing-instructions", {})
-            .add("orchestrator-reasoning", {}); // Add orchestrator-specific reasoning
-    } else if (!agent.isOrchestrator) {
-        // Add expertise boundaries for non-orchestrator agents
-        systemPromptBuilder.add("expertise-boundaries", {
-            agentRole: agent.role,
-            isOrchestrator: false,
-        });
-        
-        // Add domain expert guidelines for all non-orchestrator agents
-        // Remove agent-completion-guidance as it will be injected dynamically with phase context
-        systemPromptBuilder
-            .add("domain-expert-guidelines", {})
-            .add("expert-reasoning", {}); // Add expert-specific reasoning
+            .add("orchestrator-reasoning", {})
+            .add("orchestrator-routing-instructions", {});
+    } else {
+        systemPromptBuilder.add("specialist-reasoning", {});
     }
 
     return systemPromptBuilder.build();

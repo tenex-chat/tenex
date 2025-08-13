@@ -1,9 +1,9 @@
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import "@/prompts/fragments/phase";
-import "@/prompts/fragments/agentFragments";
-import "@/prompts/fragments/agent-completion-guidance";
+import "@/prompts/fragments/20-phase-constraints";
+import "@/prompts/fragments/20-phase-context";
+import "@/prompts/fragments/35-specialist-completion-guidance";
 
 /**
  * Builds phase-specific instructions to be injected as a system message
@@ -34,9 +34,8 @@ export function buildPhaseInstructions(
         .add("phase-constraints", {
             phase,
         })
-        .add("agent-completion-guidance", {
+        .add("specialist-completion-guidance", {
             phase,
-            isOrchestrator: false,
         });
 
     return builder.build();

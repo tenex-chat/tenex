@@ -1,11 +1,21 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Phase } from "./phases";
+import type { AgentConversationContext } from "./AgentConversationContext";
 
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
     lastProcessedMessageIndex: number; // Index into Conversation.history
     claudeSessionId?: string; // Claude Code session ID (if per-agent per-conversation)
     lastSeenPhase?: Phase; // Track the last phase this agent operated in
+    
+    // Delegation tracking - when agent is waiting for responses from other agents
+    pendingDelegation?: {
+        expectedFrom: string[];      // Pubkeys we're waiting for
+        receivedResponses: Map<string, NDKEvent>; // Responses keyed by pubkey (runtime only)
+        receivedFrom?: string[];     // Pubkeys that have responded (for persistence)
+        originalRequest: string;     // What we asked them
+        timestamp: number;           // When delegation started
+    };
 }
 
 export interface Conversation {

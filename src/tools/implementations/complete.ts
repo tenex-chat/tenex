@@ -18,12 +18,12 @@ const completeSchema = z.object({
 });
 
 /**
- * Complete tool - signals task completion and returns control to orchestrator
+ * Complete tool - signals task completion and returns control to whoever invoked you
  * 
- * IMPORTANT: This tool ALWAYS routes to the orchestrator, regardless of who invoked you.
+ * IMPORTANT: This tool responds to whoever p-tagged you (or orchestrator if no p-tag).
  * Use this when:
  * - You've completed your assigned task
- * - You need the orchestrator to decide next steps or phase transitions
+ * - You need to report back with results
  * - You've gathered enough information to move forward (e.g., requirements are clear)
  * 
  * DO NOT use this for conversational responses - just respond normally for those.
@@ -32,7 +32,7 @@ const completeSchema = z.object({
 export const completeTool = createToolDefinition<z.infer<typeof completeSchema>, Termination>({
     name: "complete",
     description:
-        "Signal task completion and return control to the orchestrator for next steps",
+        "Signal task completion and return control to whoever invoked you",
     promptFragment: `CRITICAL USAGE INSTRUCTIONS:
 - When using complete(), put YOUR ENTIRE RESPONSE inside the tool call
 - DO NOT write explanations before/after - everything goes INSIDE complete()

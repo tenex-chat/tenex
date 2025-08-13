@@ -1,23 +1,20 @@
 import type { PromptFragment } from "../core/types";
 import type { Phase } from "@/conversations/phases";
-
-interface CompletionGuidanceArgs {
-    phase: Phase;
-    isOrchestrator: boolean;
-}
+import { fragmentRegistry } from "../core/FragmentRegistry";
 
 /**
- * Provides clear guidance on when and how to use the complete() tool vs normal responses
+ * Completion guidance for SPECIALISTS ONLY.
+ * Orchestrator doesn't use complete() tool.
+ * No conditionals, no isOrchestrator checks.
  */
-export const agentCompletionGuidanceFragment: PromptFragment<CompletionGuidanceArgs> = {
-    id: "agent-completion-guidance",
-    priority: 2,
-    template: ({ phase, isOrchestrator }) => {
-        // Orchestrator doesn't need completion guidance
-        if (isOrchestrator) {
-            return "";
-        }
+interface SpecialistCompletionGuidanceArgs {
+    phase: Phase;
+}
 
+export const specialistCompletionGuidanceFragment: PromptFragment<SpecialistCompletionGuidanceArgs> = {
+    id: "specialist-completion-guidance",
+    priority: 2,
+    template: ({ phase }) => {
         const phaseGuidance: Record<Phase, string> = {
             chat: `During CHAT phase:
 - Respond conversationally to gather information and clarify requirements
@@ -65,5 +62,4 @@ Remember: The complete() tool ALWAYS routes to the orchestrator for phase contro
 };
 
 // Register the fragment
-import { fragmentRegistry } from "../core/FragmentRegistry";
-fragmentRegistry.register(agentCompletionGuidanceFragment);
+fragmentRegistry.register(specialistCompletionGuidanceFragment);

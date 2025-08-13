@@ -21,17 +21,28 @@ export interface CompletionOptions {
 }
 
 /**
- * Handle agent task completion by publishing to orchestrator and logging
+ * Handle agent task completion by publishing to whoever invoked this agent
  * This is the core logic extracted from the complete() tool
  */
 export async function handleAgentCompletion(options: CompletionOptions): Promise<Complete> {
-    const { response, summary, publisher, agent, conversationId, conversationManager } = options;
+    const { response, summary, publisher, agent, conversationId, conversationManager, triggeringEvent } = options;
 
     const projectContext = getProjectContext();
     const orchestratorAgent = projectContext.getProjectAgent();
 
-    // Always route completions to the orchestrator for phase control
-    const respondToPubkey = orchestratorAgent.pubkey;
+    // Respond to whoever p-tagged us (if available), otherwise to orchestrator
+    let respondToPubkey = orchestratorAgent.pubkey;
+    
+    // Check if triggering event has p-tags to determine who invoked us
+    if (triggeringEvent?.tags) {
+        const pTags = triggeringEvent.tags.filter(tag => tag[0] === "p");
+        // Find the first p-tag that matches our pubkey (we were p-tagged)
+        // The sender is who we should respond to
+        if (pTags.some(tag => tag[1] === agent.pubkey)) {
+            // We were p-tagged, respond to the sender
+            respondToPubkey = triggeringEvent.pubkey;
+        }
+    }
 
     // Track completion in orchestrator turn if conversation manager available
     if (conversationManager) {

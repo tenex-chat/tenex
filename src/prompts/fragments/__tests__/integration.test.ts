@@ -59,12 +59,12 @@ describe("Agent Routing Integration", () => {
         expect(prompt).not.toContain("Project Manager (PM)");
 
         // Should have orchestrator routing instructions
-        expect(prompt).toContain("## Silent Orchestrator Routing Instructions");
-        expect(prompt).toContain("You are a MESSAGE ROUTER");
+        expect(prompt).toContain("## Orchestrator Routing Instructions");
+        expect(prompt).toContain("invisible MESSAGE ROUTER");
 
         // Should have routing rules
-        expect(prompt).toContain("ALL new conversations start in CHAT phase");
-        expect(prompt).toContain("**Standard flow:** CHAT → PLAN → EXECUTE → VERIFICATION");
+        expect(prompt).toContain("Initial Phase Selection");
+        expect(prompt).toContain("Standard flow: chat → plan → execute → verification");
     });
 
     it("should not include identity section for orchestrator agent", () => {
@@ -99,7 +99,7 @@ describe("Agent Routing Integration", () => {
         expect(prompt).toContain("## Your Instructions");
         expect(prompt).toContain("You are a message router");
         expect(prompt).toContain("## Project Context");
-        expect(prompt).toContain("Project Name: \"Test Project\"");
+        expect(prompt).toContain("Title: \"Test Project\"");
     });
 
     it("should use project name as identity for project-manager agent", () => {
@@ -133,6 +133,6 @@ describe("Agent Routing Integration", () => {
         expect(prompt).toContain("## Your Instructions");
         expect(prompt).toContain("You are the project knowledge expert");
         expect(prompt).toContain("## Project Context");
-        expect(prompt).toContain("Project Name: \"Test Project\"");
+        expect(prompt).toContain("Title: \"Test Project\"");
     });
 });
