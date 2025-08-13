@@ -10,6 +10,7 @@ import { agentsDiscover } from "./implementations/agents-discover";
 import { agentsHire } from "./implementations/agents-hire";
 import { mcpDiscover } from "./implementations/mcp-discover";
 import { delegateTool } from "./implementations/delegate";
+import { nostrProjectsTool } from "./implementations/nostr-projects";
 import type { Tool } from "./types";
 
 // Registry of all available tools
@@ -26,6 +27,7 @@ const toolsMap = new Map<string, Tool<any, any>>([
   ["agents_hire", agentsHire],
   ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
+  [nostrProjectsTool.name, nostrProjectsTool],
 ]);
 
 export function getTool(name: string): Tool<any, any> | undefined {

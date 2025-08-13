@@ -26,6 +26,7 @@ The fundamental shift is from traditional coding in a text editor to managing an
 *   **Agent Presence & Identification (User-defined requirement):**
     *   **Online Status:** Agent online status must be determined by querying for `kind:24010` status events with a `since` filter of one minute ago. The `a` tag of the status event must be compared with the project's tag ID to ensure the status applies to the correct project.
     *   **Agent ID Format:** When returning agent information, the agent's `npub` must be used instead of their public key.
+    *   **Agent Self-Knowledge:** Agents must be explicitly informed of their own `npub` as part of their core identity prompt.
 
 ## 3. Guiding Principles
 

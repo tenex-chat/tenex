@@ -18,7 +18,11 @@ export const orchestratorIdentityFragment: PromptFragment<OrchestratorIdentityAr
     template: ({ agent, projectTitle, projectOwnerPubkey }) => {
         const parts: string[] = [];
         
-        // Orchestrator has minimal identity - it's invisible to users
+        // Orchestrator identity
+        parts.push(`## Your Identity\n`);
+        parts.push(`Your npub: ${agent.npub}`);
+        parts.push("");
+        
         if (agent.instructions) {
             parts.push(`## Your Instructions\n${agent.instructions}`);
         }

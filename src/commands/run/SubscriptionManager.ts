@@ -65,9 +65,7 @@ export class SubscriptionManager {
         
         // Add filter for agent pubkeys if any exist
         if (agentPubkeys.length > 0) {
-            filters.push({
-                "#p": agentPubkeys
-            });
+            filters.push({ "#p": agentPubkeys, limit: 1 });
             logger.debug(`Added #p filter for ${agentPubkeys.length} agent pubkeys`);
         }
 

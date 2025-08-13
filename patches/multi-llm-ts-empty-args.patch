@@ -1,0 +1,16 @@
+--- a/node_modules/multi-llm-ts/dist/index.js
++++ b/node_modules/multi-llm-ts/dist/index.js
+@@ -1000,7 +1000,11 @@
+         }
+         let args = null;
+         try {
+-          args = JSON.parse(tool_call.function.arguments);
++          // Handle empty string as empty object for tools with no required arguments
++          if (tool_call.function.arguments === "" || tool_call.function.arguments === undefined || tool_call.function.arguments === null) {
++            args = {};
++          } else {
++            args = JSON.parse(tool_call.function.arguments);
++          }
+         } catch (err) {
+           throw new Error(`[openai] tool call ${tool_call.function.name} with invalid JSON args: "${tool_call.function.arguments}"`, { cause: err });
+         }

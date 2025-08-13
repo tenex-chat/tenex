@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
 import { getLLMLogger, initializeLLMLogger } from "./callLogger";
+import { wrapWithSafeArguments } from "./providers/SafeArgumentsWrapper";
 import type {
     CompletionRequest,
     CompletionResponse,
@@ -127,7 +128,7 @@ export class LLMRouter implements LLMService {
                 baseURL: config.baseUrl,
             };
 
-            const llm = igniteEngine(config.provider, llmConfig);
+            const llm = wrapWithSafeArguments(igniteEngine(config.provider, llmConfig));
 
             // Register tools as plugins if provided
             if (request.tools && request.toolContext) {
@@ -243,7 +244,7 @@ export class LLMRouter implements LLMService {
                 baseURL: config.baseUrl,
             };
 
-            const llm = igniteEngine(config.provider, llmConfig);
+            const llm = wrapWithSafeArguments(igniteEngine(config.provider, llmConfig));
 
             // Register tools as plugins if provided
             if (request.tools && request.toolContext) {
@@ -291,11 +292,16 @@ export class LLMRouter implements LLMService {
                     fullContent += chunk.text;
                     yield { type: "content", content: chunk.text };
                 } else if (chunk.type === "tool") {
-                    if (chunk.status === "calling" && chunk.call?.params) {
+                    if (chunk.status === "calling" && chunk.call?.params !== undefined) {
+                        // Normalize empty string to empty object for tools with no arguments
+                        let normalizedParams = chunk.call.params;
+                        if (normalizedParams === "") {
+                            normalizedParams = {};
+                        }
                         yield {
                             type: "tool_start",
                             tool: chunk.name,
-                            args: chunk.call.params,
+                            args: normalizedParams,
                         };
                     } else if (chunk.done && chunk.call?.result !== undefined) {
                         yield {

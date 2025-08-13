@@ -67,6 +67,8 @@ export class OrchestratorDebugUI {
         });
         
         return new Promise((resolve) => {
+            // Ensure stdin is resumed before setting raw mode
+            process.stdin.resume();
             readline.emitKeypressEvents(process.stdin);
             if (process.stdin.isTTY) {
                 process.stdin.setRawMode(true);
@@ -77,6 +79,7 @@ export class OrchestratorDebugUI {
                     process.stdin.setRawMode(false);
                 }
                 process.stdin.removeAllListeners('keypress');
+                process.stdin.pause();
             };
             
             process.stdin.on('keypress', (str, key) => {
@@ -343,12 +346,18 @@ export class OrchestratorDebugUI {
             rl.on('close', () => {
                 // Ctrl+D was pressed
                 const result = lines.join('\n').trim();
+                rl.removeAllListeners();
+                rl.pause();
+                process.stdin.pause();
                 resolve(result || current);
             });
 
             // Handle Ctrl+C
             rl.on('SIGINT', () => {
+                rl.removeAllListeners();
                 rl.close();
+                rl.pause();
+                process.stdin.pause();
                 resolve(current); // Keep existing on cancel
             });
         });
@@ -391,11 +400,16 @@ export class OrchestratorDebugUI {
             rl.on('close', () => {
                 // Ctrl+D was pressed
                 rl.removeAllListeners();
+                rl.pause();
+                process.stdin.pause();
                 resolve(responseLines.join('\n').trim());
             });
 
             rl.on('SIGINT', () => {
+                rl.removeAllListeners();
                 rl.close();
+                rl.pause();
+                process.stdin.pause();
                 resolve(''); // Return empty on cancel
             });
         });
@@ -759,11 +773,17 @@ export class OrchestratorDebugUI {
             rl.on('close', () => {
                 // Ctrl+D was pressed
                 const result = lines.join('\n').trim();
+                rl.removeAllListeners();
+                rl.pause();
+                process.stdin.pause();
                 resolve(result || "Why did you make that routing decision?");
             });
 
             rl.on('SIGINT', () => {
+                rl.removeAllListeners();
                 rl.close();
+                rl.pause();
+                process.stdin.pause();
                 resolve(""); // Return empty on cancel
             });
         });

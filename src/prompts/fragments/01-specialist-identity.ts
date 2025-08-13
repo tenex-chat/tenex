@@ -24,6 +24,7 @@ export const specialistIdentityFragment: PromptFragment<SpecialistIdentityArgs> 
         if (agent.role) {
             parts.push(`Your role: ${agent.role}`);
         }
+        parts.push(`Your npub: ${agent.signer.npub}`);
         parts.push("");
 
         // Instructions

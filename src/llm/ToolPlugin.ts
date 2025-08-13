@@ -110,17 +110,34 @@ export class ToolPlugin extends Plugin {
         const startTime = Date.now();
 
         try {
+            // Normalize parameters to handle edge cases from LLMs
+            let normalizedParameters = parameters;
+            
+            // Some LLMs send empty strings "" for tools with no required parameters
+            // Convert these to empty objects for proper validation
+            if (typeof parameters === "string" && parameters === "") {
+                normalizedParameters = {};
+                logger.debug(`Normalized empty string to empty object for tool: ${this.tool.name}`);
+            }
+            // Also handle null/undefined edge cases
+            else if (parameters === null || parameters === undefined) {
+                normalizedParameters = {};
+                logger.debug(`Normalized null/undefined to empty object for tool: ${this.tool.name}`);
+            }
+            
             logger.debug(`Executing tool: ${this.tool.name}`, {
                 tool: this.tool.name,
-                parameters,
-                parameterKeys: Object.keys(parameters),
+                parameters: normalizedParameters,
+                parameterKeys: typeof normalizedParameters === 'object' && normalizedParameters !== null 
+                    ? Object.keys(normalizedParameters) 
+                    : [],
                 agentId: this.tenexContext.agent.pubkey,
                 conversationId: this.tenexContext.conversationId,
                 phase: this.tenexContext.phase,
             });
 
             // Execute the tool using the type-safe executor
-            const result = await this.executor.execute(this.tool, parameters);
+            const result = await this.executor.execute(this.tool, normalizedParameters);
             const endTime = Date.now();
 
             // Serialize the typed result for transport through LLM layer
