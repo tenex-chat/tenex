@@ -43,8 +43,6 @@ export const handleChatMessage = async (
         const isDirectedToSystem = mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
 
         if (!isDirectedToSystem) return;
-    } else {
-        console.log({ pTags })
     }
 
     // This is a reply within an existing conversation
@@ -65,7 +63,6 @@ async function handleReplyLogic(
     
     let conversation = conversationManager.getConversationByEvent(convRoot);
 
-    console.log("handleReplyLogic", event.inspect);
 
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
     if (!conversation && event.tagValue("K") === "1934") {

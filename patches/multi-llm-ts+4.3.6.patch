@@ -1,10 +1,10 @@
 diff --git a/node_modules/multi-llm-ts/dist/index.js b/node_modules/multi-llm-ts/dist/index.js
-index 1234567..abcdefg 100644
+index f69336c..7a365e6 100644
 --- a/node_modules/multi-llm-ts/dist/index.js
 +++ b/node_modules/multi-llm-ts/dist/index.js
-@@ -1000,7 +1000,12 @@
-         const tool_call = tool_calls[index];
-         let args;
+@@ -776,7 +776,12 @@ var openai_default = class extends LlmEngine {
+         logger_default.log(`[openai] tool call ${tool_call.function.name} with ${tool_call.function.arguments}`);
+         let args = null;
          try {
 -          args = JSON.parse(tool_call.function.arguments);
 +          // Handle empty string as empty object for tools with no required parameters

@@ -169,12 +169,10 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
                 requestLength: fullRequest.length,
             });
             
-            // TODO: Handle delegation timeouts
-            // Problem: If a delegated agent never responds, the delegating agent 
-            // will wait forever. Need a mechanism to:
-            // - Check age of pendingDelegation.timestamp
-            // - Decide when to proceed with partial responses
-            // - Or re-delegate/give up after timeout
+            // Delegation timeout is handled in the AgentExecutor.
+            // The pendingDelegation.timestamp is checked when processing agent state
+            // to determine if the delegation has timed out (default: 5 minutes).
+            // See AgentExecutor.processPendingDelegations for timeout logic.
             
             return success({
                 success: true,
