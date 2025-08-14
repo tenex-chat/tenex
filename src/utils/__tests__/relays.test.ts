@@ -1,17 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { getRelayUrls } from "../relays";
 
 describe("relays", () => {
     const originalEnv = process.env;
+    const originalWarn = console.warn;
 
     beforeEach(() => {
         // Reset env before each test
         process.env = { ...originalEnv };
+        console.warn = mock(() => {});
     });
 
     afterEach(() => {
         // Restore original env after each test
         process.env = originalEnv;
+        console.warn = originalWarn;
     });
 
     describe("getRelayUrls", () => {
@@ -77,6 +80,28 @@ describe("relays", () => {
                 "wss://relay1.example.com",
                 "wss://relay2.example.com"
             ]);
+        });
+
+        it("should filter out invalid URLs and only keep valid WebSocket URLs", () => {
+            process.env.RELAYS = "invalid-url,wss://valid.com,http://not-websocket.com,ws://also-valid.com";
+            const urls = getRelayUrls();
+            expect(urls).toEqual(["wss://valid.com", "ws://also-valid.com"]);
+        });
+
+        it("should accept both ws:// and wss:// protocols", () => {
+            process.env.RELAYS = "ws://relay1.com,wss://relay2.com";
+            const urls = getRelayUrls();
+            expect(urls).toEqual(["ws://relay1.com", "wss://relay2.com"]);
+        });
+
+        it("should return defaults and warn when all URLs are invalid", () => {
+            const mockWarn = mock(() => {});
+            console.warn = mockWarn;
+            
+            process.env.RELAYS = "http://not-valid.com,https://also-not-valid.com,not-even-a-url";
+            const urls = getRelayUrls();
+            expect(urls).toEqual(["wss://tenex.chat"]);
+            expect(mockWarn).toHaveBeenCalledWith("No valid WebSocket URLs found in RELAYS environment variable, using defaults");
         });
     });
 });

@@ -4,6 +4,7 @@ import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, O
 import { ensureDirectory } from "@/lib/fs";
 import type { TracingContext } from "@/tracing";
 import { logger } from "@/utils/logger";
+import { TENEX_DIR, CONVERSATIONS_DIR } from "@/constants";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { FileSystemAdapter } from "./persistence";
 import type { ConversationPersistenceAdapter } from "./persistence/types";
@@ -34,7 +35,7 @@ export class ConversationManager {
         persistence?: ConversationPersistenceAdapter,
         executionQueueManager?: ExecutionQueueManager
     ) {
-        this.conversationsDir = path.join(projectPath, ".tenex", "conversations");
+        this.conversationsDir = path.join(projectPath, TENEX_DIR, CONVERSATIONS_DIR);
         
         // Create services
         const store = new ConversationStore();

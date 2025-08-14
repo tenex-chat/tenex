@@ -16,6 +16,7 @@ import {
     TenexMCPSchema,
 } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import { TENEX_DIR, CONFIG_FILE, MCP_CONFIG_FILE, AGENTS_FILE, LLMS_FILE } from "@/constants";
 import type { z } from "zod";
 
 /**
@@ -43,11 +44,11 @@ export class ConfigService {
     // =====================================================================================
 
     getGlobalPath(): string {
-        return path.join(os.homedir(), ".tenex");
+        return path.join(os.homedir(), TENEX_DIR);
     }
 
     getProjectPath(projectPath: string): string {
-        return path.join(projectPath, ".tenex");
+        return path.join(projectPath, TENEX_DIR);
     }
 
     private getConfigFilePath(basePath: string, configFile: ConfigFile): string {
@@ -117,7 +118,7 @@ export class ConfigService {
 
     async loadTenexConfig(basePath: string): Promise<TenexConfig> {
         return this.loadConfigFile(
-            this.getConfigFilePath(basePath, "config.json"),
+            this.getConfigFilePath(basePath, CONFIG_FILE),
             TenexConfigSchema,
             {}
         );
@@ -125,14 +126,14 @@ export class ConfigService {
 
     async loadTenexAgents(basePath: string): Promise<TenexAgents> {
         return this.loadConfigFile(
-            this.getConfigFilePath(basePath, "agents.json"),
+            this.getConfigFilePath(basePath, AGENTS_FILE),
             TenexAgentsSchema,
             {}
         );
     }
 
     async loadTenexLLMs(basePath: string): Promise<TenexLLMs> {
-        return this.loadConfigFile(this.getConfigFilePath(basePath, "llms.json"), TenexLLMsSchema, {
+        return this.loadConfigFile(this.getConfigFilePath(basePath, LLMS_FILE), TenexLLMsSchema, {
             configurations: {},
             defaults: {},
             credentials: {},
@@ -141,7 +142,7 @@ export class ConfigService {
 
     async loadTenexMCP(basePath: string): Promise<TenexMCP> {
         const result = await this.loadConfigFile(
-            this.getConfigFilePath(basePath, "mcp.json"),
+            this.getConfigFilePath(basePath, MCP_CONFIG_FILE),
             TenexMCPSchema,
             {
                 servers: {},
@@ -161,7 +162,7 @@ export class ConfigService {
 
     async saveTenexConfig(basePath: string, config: TenexConfig): Promise<void> {
         await this.saveConfigFile(
-            this.getConfigFilePath(basePath, "config.json"),
+            this.getConfigFilePath(basePath, CONFIG_FILE),
             config,
             TenexConfigSchema
         );
@@ -169,7 +170,7 @@ export class ConfigService {
 
     async saveTenexAgents(basePath: string, agents: TenexAgents): Promise<void> {
         await this.saveConfigFile(
-            this.getConfigFilePath(basePath, "agents.json"),
+            this.getConfigFilePath(basePath, AGENTS_FILE),
             agents,
             TenexAgentsSchema
         );
@@ -177,7 +178,7 @@ export class ConfigService {
 
     async saveTenexLLMs(basePath: string, llms: TenexLLMs): Promise<void> {
         await this.saveConfigFile(
-            this.getConfigFilePath(basePath, "llms.json"),
+            this.getConfigFilePath(basePath, LLMS_FILE),
             llms,
             TenexLLMsSchema
         );
@@ -185,7 +186,7 @@ export class ConfigService {
 
     async saveTenexMCP(basePath: string, mcp: TenexMCP): Promise<void> {
         await this.saveConfigFile(
-            this.getConfigFilePath(basePath, "mcp.json"),
+            this.getConfigFilePath(basePath, MCP_CONFIG_FILE),
             mcp,
             TenexMCPSchema
         );
