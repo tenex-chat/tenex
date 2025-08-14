@@ -3,7 +3,6 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { resolveConfigScope, formatConfigScope } from "@/utils/cli-config-scope";
-import { handleCliError } from "@/utils/cli-error";
 import { confirm, input } from "@inquirer/prompts";
 import { Command } from "commander";
 

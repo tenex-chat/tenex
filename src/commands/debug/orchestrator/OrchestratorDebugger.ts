@@ -1,14 +1,11 @@
-import { v4 as uuidv4 } from 'uuid';
 import type { Phase } from "@/conversations/phases";
-import { PHASES, isValidPhase, getValidTransitions } from "@/conversations/phases";
+import { PHASES, getValidTransitions } from "@/conversations/phases";
 import type { 
     OrchestratorDebugState, 
-    DebugAction, 
-    SimulatedCompletion 
+    DebugAction 
 } from "./types";
 import type { 
     RoutingEntry, 
-    OrchestratorTurn, 
     Completion 
 } from "@/conversations/types";
 import { OrchestratorDebugUI } from "./OrchestratorDebugUI";
@@ -20,7 +17,6 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";
 import { formatAnyError } from "@/utils/error-formatter";
-import { findAgentByName } from "@/agents/utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ProjectManager } from "@/daemon/ProjectManager";
 
@@ -370,7 +366,7 @@ export class OrchestratorDebugger {
             }
 
             // Create a mock triggering event
-            const mockEvent: Partial<NDKEvent> = {
+            const _mockEvent: Partial<NDKEvent> = {
                 content: this.state.userRequest,
                 kind: 14,
                 tags: [["t", "user"]],
@@ -382,7 +378,11 @@ export class OrchestratorDebugger {
             
             const llmRouter = await loadLLMRouter(process.cwd());
             const { RoutingBackend } = await import("@/agents/execution/RoutingBackend");
-            const routingBackend = new RoutingBackend(llmRouter, this.conversationManager!);
+            if (!this.conversationManager) {
+                logger.error(chalk.red("Conversation manager not initialized"));
+                return;
+            }
+            const routingBackend = new RoutingBackend(llmRouter, this.conversationManager);
             
             // Build messages for orchestrator
             const messages = await this.buildOrchestratorMessages(context);
@@ -430,7 +430,7 @@ export class OrchestratorDebugger {
         }
     }
 
-    private buildOrchestratorContext() {
+    private buildOrchestratorContext(): { user_request: string; routing_history: RoutingEntry[]; current_routing?: RoutingEntry } {
         return {
             user_request: this.state.userRequest,
             routing_history: this.state.routingHistory,
@@ -438,7 +438,7 @@ export class OrchestratorDebugger {
         };
     }
 
-    private async buildOrchestratorMessages(context: any) {
+    private async buildOrchestratorMessages(context: any): Promise<any[]> {
         const { Message } = await import("multi-llm-ts");
         const projectCtx = getProjectContext();
         const orchestrator = Array.from(projectCtx.agents.values()).find(a => a.isOrchestrator);
@@ -452,10 +452,10 @@ export class OrchestratorDebugger {
         const systemMessages = buildSystemPromptMessages({
             agent: orchestrator,
             phase: this.state.phase,
-            project: projectCtx.project!,
+            project: projectCtx.project || { pubkey: '', tags: [], created_at: 0 },
             availableAgents: Array.from(projectCtx.agents.values()),
             conversation: {
-                id: this.state.conversationId!,
+                id: this.state.conversationId || 'debug-session',
                 title: "Debug Session",
                 phase: this.state.phase,
                 history: [],
@@ -607,10 +607,10 @@ describe('Orchestrator Routing Test', () => {
             const systemMessages = buildSystemPromptMessages({
                 agent: orchestrator,
                 phase: this.state.phase,
-                project: projectCtx.project!,
+                project: projectCtx.project || { pubkey: '', tags: [], created_at: 0 },
                 availableAgents: Array.from(projectCtx.agents.values()),
                 conversation: {
-                    id: this.state.conversationId!,
+                    id: this.state.conversationId || 'debug-session',
                     title: "Debug Session",
                     phase: this.state.phase,
                     history: [],

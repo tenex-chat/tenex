@@ -30,13 +30,13 @@ export class OrchestratorDebugUI {
         return this.showMenuWithShortcuts(choices, state);
     }
     
-    private async showMenuWithShortcuts(choices: any[], state?: OrchestratorDebugState): Promise<DebugAction> {
+    private async showMenuWithShortcuts(choices: Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string }>, state?: OrchestratorDebugState): Promise<DebugAction> {
         const readline = await import('readline');
         
         // Create shortcut map
         const shortcutMap = new Map<string, string>();
         let selectedIndex = 0;
-        const selectableChoices: any[] = [];
+        const selectableChoices: Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string }> = [];
         
         // Display the menu
         console.clear();
@@ -74,7 +74,7 @@ export class OrchestratorDebugUI {
                 process.stdin.setRawMode(true);
             }
             
-            const cleanup = () => {
+            const cleanup = (): void => {
                 if (process.stdin.isTTY) {
                     process.stdin.setRawMode(false);
                 }
@@ -160,8 +160,8 @@ export class OrchestratorDebugUI {
         });
     }
     
-    private buildDynamicMenu(state: OrchestratorDebugState, lastAction?: DebugAction): any[] {
-        const choices: any[] = [];
+    private buildDynamicMenu(state: OrchestratorDebugState, lastAction?: DebugAction): Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string; short?: string }> {
+        const choices: Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string; short?: string }> = [];
         const hasUserMessage = !!state.userRequest;
         const hasRouting = state.routingHistory.length > 0 || state.currentRouting !== null;
         const hasActiveRouting = state.currentRouting !== null;
@@ -537,7 +537,7 @@ export class OrchestratorDebugUI {
         const edited = { ...entry };
 
         switch (field) {
-            case "phase":
+            case "phase": {
                 const { newPhase } = await inquirer.prompt([
                     {
                         type: "list",
@@ -549,8 +549,8 @@ export class OrchestratorDebugUI {
                 ]);
                 edited.phase = newPhase;
                 break;
-
-            case "agents":
+            }
+            case "agents": {
                 const { newAgents } = await inquirer.prompt([
                     {
                         type: "input",
@@ -561,8 +561,9 @@ export class OrchestratorDebugUI {
                 ]);
                 edited.agents = newAgents.split(",").map((a: string) => a.trim()).filter(Boolean);
                 break;
+            }
 
-            case "reason":
+            case "reason": {
                 const { newReason } = await inquirer.prompt([
                     {
                         type: "input",
@@ -573,8 +574,8 @@ export class OrchestratorDebugUI {
                 ]);
                 edited.reason = newReason;
                 break;
-
-            case "completions":
+            }
+            case "completions": {
                 // For now, just clear completions
                 const { clearCompletions } = await inquirer.prompt([
                     {
@@ -588,6 +589,7 @@ export class OrchestratorDebugUI {
                     edited.completions = [];
                 }
                 break;
+            }
         }
 
         return edited;

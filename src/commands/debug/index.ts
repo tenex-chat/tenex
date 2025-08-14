@@ -74,8 +74,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         if (agent) {
             const projectCtx = getProjectContext();
             const project = projectCtx.project;
-            const titleTag = project.tags.find((tag) => tag[0] === "title");
-            const repoTag = project.tags.find((tag) => tag[0] === "repo");
 
             // Get all available agents for handoffs
             const availableAgents = Array.from(projectCtx.agents.values());
