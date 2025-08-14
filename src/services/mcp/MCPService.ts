@@ -4,6 +4,7 @@ import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import type { Tool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { formatAnyError } from "@/utils/error-formatter";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
@@ -279,7 +280,7 @@ export class MCPService {
 
             return result;
         } catch (error) {
-            logger.error(`Failed to execute tool '${toolName}' on server '${serverName}':`, error);
+            logger.error(`Failed to execute tool '${toolName}' on server '${serverName}':`, formatAnyError(error));
             throw error;
         }
     }
@@ -323,7 +324,7 @@ export class MCPService {
 
             logger.info(`Shut down MCP server '${name}'`);
         } catch (error) {
-            logger.error(`Error shutting down MCP server '${name}':`, error);
+            logger.error(`Error shutting down MCP server '${name}':`, formatAnyError(error));
             // Force kill if graceful shutdown fails
             try {
                 if (mcpClient.process) {

@@ -30,13 +30,13 @@ export class OrchestratorDebugUI {
         return this.showMenuWithShortcuts(choices, state);
     }
     
-    private async showMenuWithShortcuts(choices: any[], state?: OrchestratorDebugState): Promise<DebugAction> {
+    private async showMenuWithShortcuts(choices: Array<{ type?: string; name?: string; value?: string; line?: string; short?: string }>, state?: OrchestratorDebugState): Promise<DebugAction> {
         const readline = await import('readline');
         
         // Create shortcut map
         const shortcutMap = new Map<string, string>();
         let selectedIndex = 0;
-        const selectableChoices: any[] = [];
+        const selectableChoices: Array<{ type?: string; name?: string; value?: string; line?: string; short?: string }> = [];
         
         // Display the menu
         console.clear();
@@ -136,7 +136,7 @@ export class OrchestratorDebugUI {
         logger.info("");
     }
     
-    private redrawMenu(choices: any[], selectedIndex: number, state?: OrchestratorDebugState): void {
+    private redrawMenu(choices: Array<{ type?: string; name?: string; value?: string; line?: string; short?: string }>, selectedIndex: number, state?: OrchestratorDebugState): void {
         console.clear();
         logger.info(chalk.cyan("🎭 Orchestrator Debug Tool\n"));
         
@@ -213,7 +213,7 @@ export class OrchestratorDebugUI {
         
         // Add separator if we added priority items
         if (choices.length > 0) {
-            choices.push(new inquirer.Separator("── Other Actions ──") as any);
+            choices.push({ type: 'separator', value: '', line: "── Other Actions ──" });
         }
         
         // Secondary actions based on state
@@ -279,7 +279,7 @@ export class OrchestratorDebugUI {
         });
         
         // Utility actions
-        choices.push(new inquirer.Separator("── Utilities ──") as any);
+        choices.push({ type: 'separator', value: '', line: "── Utilities ──" });
         
         choices.push({ 
             name: "[G] List Agents", 
@@ -307,7 +307,7 @@ export class OrchestratorDebugUI {
             short: "C"
         });
         
-        choices.push(new inquirer.Separator() as any);
+        choices.push({ type: 'separator', value: '', line: "──────────" });
         choices.push({ 
             name: "[X] Exit", 
             value: "exit",

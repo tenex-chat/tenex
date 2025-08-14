@@ -4,6 +4,7 @@ import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { handleCliError } from "@/utils/cli-error";
 import { determineConfigScope } from "@/utils/cli-config-scope";
+import { isValidSlug } from "@/utils/validation";
 import { Command } from "commander";
 
 interface AddOptions {
@@ -38,7 +39,7 @@ export const addCommand = new Command("add")
             const args = commandArgs.slice(1);
 
             // Validate name
-            if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
+            if (!isValidSlug(name)) {
                 handleCliError("Name can only contain letters, numbers, hyphens, and underscores");
             }
 

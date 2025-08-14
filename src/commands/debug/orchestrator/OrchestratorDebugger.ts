@@ -388,7 +388,7 @@ export class OrchestratorDebugger {
             const messages = await this.buildOrchestratorMessages(context);
             
             // Get routing decision
-            const getRoutingDecision = (routingBackend as any).getRoutingDecision.bind(routingBackend);
+            const getRoutingDecision = (routingBackend as unknown as { getRoutingDecision: Function }).getRoutingDecision.bind(routingBackend);
             const decision = await getRoutingDecision(
                 messages,
                 { 
@@ -438,7 +438,7 @@ export class OrchestratorDebugger {
         };
     }
 
-    private async buildOrchestratorMessages(context: any): Promise<any[]> {
+    private async buildOrchestratorMessages(context: { user_request: string; routing_history: RoutingEntry[]; current_routing?: RoutingEntry }): Promise<Array<{ role: string; content: string }>> {
         const { Message } = await import("multi-llm-ts");
         const projectCtx = getProjectContext();
         const orchestrator = Array.from(projectCtx.agents.values()).find(a => a.isOrchestrator);

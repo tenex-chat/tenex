@@ -16,6 +16,7 @@ import {
     TenexMCPSchema,
 } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import { formatAnyError } from "@/utils/error-formatter";
 import { TENEX_DIR, CONFIG_FILE, MCP_CONFIG_FILE, AGENTS_FILE, LLMS_FILE } from "@/constants";
 import type { z } from "zod";
 
@@ -325,7 +326,7 @@ export class ConfigService {
             this.addToCache(filePath, validated);
             return validated as T;
         } catch (error) {
-            logger.error(`Failed to load config file: ${filePath}`, { error });
+            logger.error(`Failed to load config file: ${filePath}`, { error: formatAnyError(error) });
             return defaultValue;
         }
     }
@@ -350,7 +351,7 @@ export class ConfigService {
 
             logger.debug(`Configuration saved: ${filePath}`);
         } catch (error) {
-            logger.error(`Failed to save config file: ${filePath}`, { error });
+            logger.error(`Failed to save config file: ${filePath}`, { error: formatAnyError(error) });
             throw error;
         }
     }

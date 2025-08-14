@@ -3,6 +3,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { resolveConfigScope, formatConfigScope } from "@/utils/cli-config-scope";
+import { isValidSlug } from "@/utils/validation";
 import { confirm, input } from "@inquirer/prompts";
 import { Command } from "commander";
 
@@ -32,7 +33,7 @@ export const agentAddCommand = new Command("add")
                 message: "Agent name:",
                 validate: (value) => {
                     if (!value.trim()) return "Name is required";
-                    if (!/^[a-zA-Z0-9-_]+$/.test(value)) {
+                    if (!isValidSlug(value)) {
                         return "Name must contain only alphanumeric characters, hyphens, and underscores";
                     }
                     return true;
