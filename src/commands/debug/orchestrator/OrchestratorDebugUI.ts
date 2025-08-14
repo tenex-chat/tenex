@@ -165,7 +165,7 @@ export class OrchestratorDebugUI {
         const hasUserMessage = !!state.userRequest;
         const hasRouting = state.routingHistory.length > 0 || state.currentRouting !== null;
         const hasActiveRouting = state.currentRouting !== null;
-        const needsCompletion = hasActiveRouting && 
+        const needsCompletion = hasActiveRouting && state.currentRouting && 
             state.currentRouting.completions.length < state.currentRouting.agents.length;
         
         // Priority 1: Most likely next action based on last action
@@ -559,7 +559,7 @@ export class OrchestratorDebugUI {
                         default: entry.agents.join(", ")
                     }
                 ]);
-                edited.agents = newAgents.split(",").map(a => a.trim()).filter(Boolean);
+                edited.agents = newAgents.split(",").map((a: string) => a.trim()).filter(Boolean);
                 break;
 
             case "reason":
@@ -737,14 +737,11 @@ export class OrchestratorDebugUI {
     }
 
     async promptToContinue(): Promise<void> {
-        await inquirer.prompt([
-            {
-                type: "input",
-                name: "continue",
-                message: "Press Enter to continue...",
-                prefix: ""
-            }
-        ]);
+        await inquirer.prompt({
+            type: "input",
+            name: "continue",
+            message: "Press Enter to continue..."
+        });
     }
     
     async promptDebugQuestion(): Promise<string> {

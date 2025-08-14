@@ -61,7 +61,7 @@ export class ProjectDisplay {
         }
     }
 
-    private displayAgentBySlug(slug: string, agent: Agent): void {
+    private displayAgentBySlug(slug: string, agent: AgentInstance): void {
         // Display agent information
         logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
         logInfo(chalk.gray("Slug:        ") + chalk.white(slug));

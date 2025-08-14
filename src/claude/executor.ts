@@ -83,7 +83,6 @@ export class ClaudeCodeExecutor {
             // Stream messages from Claude Code SDK
             for await (const message of query({
               prompt: this.options.prompt,
-              abortController: this.abortController,
               options: {
                 cwd: this.options.projectPath,
                 permissionMode: "bypassPermissions",

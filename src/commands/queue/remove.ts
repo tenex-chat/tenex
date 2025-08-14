@@ -58,7 +58,7 @@ export async function removeFromQueue(options: RemoveOptions = {}): Promise<void
     }
 
     // Verify the conversation is actually in the queue
-    const position = await queueManager.getQueuePosition(conversationId);
+    const position = await queueManager.getQueuePosition(conversationId!);
     if (position === 0) {
       console.error(chalk.red(`Error: Conversation ${conversationId} is not in the queue`));
       process.exit(1);
@@ -82,7 +82,7 @@ export async function removeFromQueue(options: RemoveOptions = {}): Promise<void
     }
 
     // Remove from queue
-    const removed = await queueManager.removeFromQueue(conversationId);
+    const removed = await queueManager.removeFromQueue(conversationId!);
     
     if (removed) {
       console.log(chalk.green(`✅ Successfully removed ${conversationId} from queue`));

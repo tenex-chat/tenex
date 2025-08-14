@@ -510,6 +510,7 @@ export class OrchestratorDebugger {
     }
 
     private generateTestCase(): string {
+        const agentSlugs = Array.from(this.state.agentStates.keys());
         return `import { describe, it, expect } from 'vitest';
 import type { OrchestratorRoutingContext } from '@/conversations/types';
 
@@ -526,7 +527,7 @@ describe('Orchestrator Routing Test', () => {
         // Verify phase-specific routing logic
         const orchestratorResponse = routeToAgent(context);
         expect(orchestratorResponse).toBeDefined();
-        expect(orchestratorResponse.agent).toMatch(/^(${this.state.selectedAgents.join('|')})$/);
+        expect(orchestratorResponse.agent).toMatch(/^(${agentSlugs.join('|')})$/);
     });
 });`;
     }
@@ -745,19 +746,6 @@ DO NOT output a routing decision JSON. Output a detailed explanation in plain te
             }
             
             logger.info(chalk.gray(`    Backend: ${backend}, Tools: ${toolCount}`));
-            
-            // Show key capabilities if available
-            if (agent.capabilities && agent.capabilities.length > 0) {
-                const capPreview = agent.capabilities.slice(0, 3).join(", ");
-                const more = agent.capabilities.length > 3 ? ` +${agent.capabilities.length - 3} more` : "";
-                logger.info(chalk.gray(`    Capabilities: ${capPreview}${more}`));
-            }
-            
-            // Show phase preferences if defined
-            if (agent.phases) {
-                logger.info(chalk.gray(`    Phases: ${agent.phases.join(", ")}`));
-            }
-            
             logger.info("");
         }
         

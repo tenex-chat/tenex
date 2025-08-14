@@ -85,7 +85,7 @@ export async function releaseExecutionLock(options: ReleaseOptions = {}): Promis
     }
 
     // Perform the force release
-    await queueManager.forceRelease(conversationId, reason);
+    await queueManager.forceRelease(conversationId, reason!);
     
     console.log(chalk.green(`✅ Successfully released lock for conversation ${conversationId}`));
     console.log(chalk.gray(`Reason: ${reason}`));

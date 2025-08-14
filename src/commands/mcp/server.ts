@@ -133,7 +133,8 @@ class LessonService {
         if (agentEventId) {
             const agentEvent = await this.ndk.fetchEvent(agentEventId);
             if (agentEvent) {
-                lessonEvent.agent = agentEvent;
+                // Agent reference would go here but NDKAgentLesson doesn't have agent property
+                lessonEvent.tag(["e", agentEventId, "", "agent"]);
             } else {
                 logger.warn("Could not fetch agent event for lesson", { agentEventId });
             }
@@ -166,7 +167,7 @@ class LessonService {
 
     async getLessons(filter: { agentPubkey: string }) {
         const lessons = await this.ndk.fetchEvents({
-            kinds: [4129],  // Updated to match NDKAgentLesson.kind
+            kinds: [4129 as any],  // NDKAgentLesson.kind
             authors: [filter.agentPubkey],
         });
         
@@ -601,7 +602,7 @@ export const serverCommand = new Command("server")
                             // Fetch 24010 events (project status - online agents)
                             // Only get status events from the last minute to determine if online
                             ndk.fetchEvents({
-                                kinds: [24010],
+                                kinds: [24010 as any],
                                 "#p": [pubkey],
                                 since: oneMinuteAgo,
                             }),

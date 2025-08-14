@@ -16,6 +16,10 @@ import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
 import { isToollessBackend } from "./utils";
 
+/**
+ * AgentRegistry manages agent configuration and instances for a project.
+ * Handles loading, saving, and publishing agents to the Nostr network.
+ */
 export class AgentRegistry {
     private agents: Map<string, AgentInstance> = new Map();
     private agentsByPubkey: Map<string, AgentInstance> = new Map();
@@ -25,6 +29,11 @@ export class AgentRegistry {
     private globalRegistry: TenexAgents = {};
     private isGlobal: boolean;
 
+    /**
+     * Creates a new AgentRegistry instance.
+     * @param basePath - Base directory path for the project
+     * @param isGlobal - Whether this is the global agent registry
+     */
     constructor(
         private basePath: string,
         isGlobal = false
@@ -889,7 +898,7 @@ export class AgentRegistry {
 
         // Use passed NDKProject if available, otherwise fall back to ProjectContext
         if (ndkProject) {
-            projectTitle = ndkProject.title;
+            projectTitle = ndkProject.title || '';
             projectEvent = ndkProject;
         } else {
             // Check if project context is initialized
