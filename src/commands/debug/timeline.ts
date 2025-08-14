@@ -7,6 +7,7 @@ import type { LLMCallLogEntry } from "@/llm/callLogger";
 import type { ToolCallLogEntry } from "@/tools/toolLogger";
 import { selectConversation } from "./conversationSelector";
 import { formatDuration } from "@/utils/formatting";
+import { logInfo, logWarning, logError } from "@/utils/logger";
 
 interface TimelineEvent {
     timestamp: number;
@@ -42,18 +43,18 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
             if (!conversationId) {
                 const selectedId = await selectConversation(conversationManager);
                 if (!selectedId) {
-                    console.log(chalk.yellow("No conversation selected."));
+                    logWarning("No conversation selected.");
                     process.exit(0);
                 }
                 conversationId = selectedId;
             }
             
-            console.log(chalk.bold.blue(`\n📊 Timeline Analysis for Conversation: ${conversationId}\n`));
+            logInfo(chalk.bold.blue(`\n📊 Timeline Analysis for Conversation: ${conversationId}\n`));
             
             // Get conversation data
             const conversation = conversationManager.getConversation(conversationId);
             if (!conversation) {
-                console.error(chalk.red(`❌ Conversation ${conversationId} not found`));
+                logError(`Conversation ${conversationId} not found`);
                 process.exit(1);
             }
             
@@ -183,7 +184,7 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
             events.sort((a, b) => a.timestamp - b.timestamp);
             
             // Display timeline
-            console.log(chalk.bold("Timeline:\n"));
+            logInfo(chalk.bold("Timeline:\n"));
             
             let lastTimestamp = startedAt;
             for (const event of events) {
@@ -225,38 +226,38 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
                 }
                 
                 // Main timeline entry
-                console.log(color(`${icon} [${time}] +${relativeTime} ${event.description}`));
+                logInfo(color(`${icon} [${time}] +${relativeTime} ${event.description}`));
                 
                 // Agent info
                 if (event.agent) {
-                    console.log(chalk.gray(`   Agent: ${event.agent}`));
+                    logInfo(chalk.gray(`   Agent: ${event.agent}`));
                 }
                 
                 // Duration
                 if (event.duration) {
-                    console.log(chalk.gray(`   Duration: ${formatDuration(event.duration)}`));
+                    logInfo(chalk.gray(`   Duration: ${formatDuration(event.duration)}`));
                 }
                 
                 // Key details
                 if (event.details) {
                     for (const [key, value] of Object.entries(event.details)) {
                         if (value && key !== "reasoning") {
-                            console.log(chalk.gray(`   ${key}: ${String(value)}`));
+                            logInfo(chalk.gray(`   ${key}: ${String(value)}`));
                         }
                     }
                     
                     // Show reasoning separately if present
                     if (event.details.reasoning) {
-                        console.log(chalk.italic.gray(`   Reasoning: ${event.details.reasoning}`));
+                        logInfo(chalk.italic.gray(`   Reasoning: ${event.details.reasoning}`));
                     }
                 }
                 
                 // Time gap indicator
                 if (timeSinceLast > 5000) {
-                    console.log(chalk.dim(`   [${formatDuration(timeSinceLast)} gap]`));
+                    logInfo(chalk.dim(`   [${formatDuration(timeSinceLast)} gap]`));
                 }
                 
-                console.log();
+                logInfo("");
                 lastTimestamp = event.timestamp;
             }
             
@@ -268,13 +269,13 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
             const toolCalls = events.filter(e => e.type === "tool_call").length;
             const phaseTransitions = events.filter(e => e.type === "phase_transition").length;
             
-            console.log(chalk.bold("\n📈 Summary Statistics:\n"));
-            console.log(`Total Duration: ${formatDuration(totalDuration * 1000)}`);
-            console.log(`Total Events: ${events.length}`);
-            console.log(`LLM Calls: ${llmCalls}`);
-            console.log(`Tool Calls: ${toolCalls}`);
-            console.log(`Phase Transitions: ${phaseTransitions}`);
-            console.log(`Final Phase: ${conversation.phase}`);
+            logInfo(chalk.bold("\n📈 Summary Statistics:\n"));
+            logInfo(`Total Duration: ${formatDuration(totalDuration * 1000)}`);
+            logInfo(`Total Events: ${events.length}`);
+            logInfo(`LLM Calls: ${llmCalls}`);
+            logInfo(`Tool Calls: ${toolCalls}`);
+            logInfo(`Phase Transitions: ${phaseTransitions}`);
+            logInfo(`Final Phase: ${conversation.phase}`);
             
             // Performance insights
             const avgLLMDuration = events
@@ -286,14 +287,14 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
                 .reduce((sum, e) => sum + (e.duration || 0), 0) / (toolCalls || 1);
             
             if (llmCalls > 0) {
-                console.log(`Avg LLM Response Time: ${formatDuration(avgLLMDuration)}`);
+                logInfo(`Avg LLM Response Time: ${formatDuration(avgLLMDuration)}`);
             }
             if (toolCalls > 0) {
-                console.log(`Avg Tool Execution Time: ${formatDuration(avgToolDuration)}`);
+                logInfo(`Avg Tool Execution Time: ${formatDuration(avgToolDuration)}`);
             }
             
         } catch (error) {
-            console.error(chalk.red("\n❌ Error generating timeline:"), error);
+            logError("Error generating timeline:", error);
             process.exit(1);
         }
     },

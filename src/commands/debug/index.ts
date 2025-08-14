@@ -10,6 +10,7 @@ import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
 import { formatMarkdown, colorizeJSON } from "@/utils/formatting";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { logWarning } from "@/utils/logger";
 
 // Format content with enhancements
 function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {
@@ -57,19 +58,19 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         await agentRegistry.loadFromProject();
         const agent = agentRegistry.getAgent(options.agent);
 
-        console.log(chalk.cyan("\n=== Agent Information ==="));
+        logInfo(chalk.cyan("\n=== Agent Information ==="));
         if (agent) {
-            console.log(chalk.white("Name:"), agent.name);
-            console.log(chalk.white("Role:"), agent.role);
-            console.log(chalk.white("Phase:"), options.phase);
+            logInfo(chalk.white("Name:") + " " + agent.name);
+            logInfo(chalk.white("Role:") + " " + agent.role);
+            logInfo(chalk.white("Phase:") + " " + options.phase);
             if (agent.tools && agent.tools.length > 0) {
-                console.log(chalk.white("Tools:"), agent.tools.map((t) => t.name).join(", "));
+                logInfo(chalk.white("Tools:") + " " + agent.tools.map((t) => t.name).join(", "));
             }
         } else {
-            console.log(chalk.yellow(`Note: Agent '${options.agent}' not found in registry`));
+            logWarning(`Note: Agent '${options.agent}' not found in registry`);
         }
 
-        console.log(chalk.cyan("\n=== System Prompt ==="));
+        logInfo(chalk.cyan("\n=== System Prompt ==="));
 
         if (agent) {
             const projectCtx = getProjectContext();
@@ -115,9 +116,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
             });
 
             // Display each system message separately with metadata
-            console.log(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-            console.log(chalk.bold.cyan("                    SYSTEM PROMPT MESSAGES"));
-            console.log(chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+            logInfo(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+            logInfo(chalk.bold.cyan("                    SYSTEM PROMPT MESSAGES"));
+            logInfo(chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
             
             for (let i = 0; i < systemMessages.length; i++) {
                 const msg = systemMessages[i];

@@ -290,81 +290,19 @@ export class AgentRegistry {
 
         // Create NDKPrivateKeySigner
         const signer = new NDKPrivateKeySigner(registryEntry.nsec);
-        const pubkey = signer.pubkey;
 
-        // Determine agent name - use project name for project-manager agent
-        let agentName = agentDefinition.name;
-        const isProjectManager = name === "project-manager";
-        
-        if (isProjectManager) {
-            try {
-                const { getProjectContext } = await import("@/services");
-                const projectCtx = getProjectContext();
-                const projectTitle = projectCtx.project.tagValue("title");
-                if (projectTitle) {
-                    agentName = projectTitle;
-                }
-            } catch {
-                // If project context not available, use default name
-                agentName = agentDefinition.name;
-            }
-        } else if (registryEntry.orchestratorAgent && name !== "orchestrator") {
-            // Keep support for custom orchestrator agents using project name
-            try {
-                const { getProjectContext } = await import("@/services");
-                const projectCtx = getProjectContext();
-                const projectTitle = projectCtx.project.tagValue("title");
-                if (projectTitle) {
-                    agentName = projectTitle;
-                }
-            } catch {
-                // If project context not available, use default name
-                agentName = agentDefinition.name;
-            }
-        }
-
-        // Determine if this is a built-in agent early
-        const isBuiltIn = getBuiltInAgents().some((builtIn) => builtIn.slug === name);
-
-        // Create Agent instance with all properties set
-        const agent: AgentInstance = {
-            name: agentName,
-            pubkey,
+        // Use the helper to build the agent instance
+        const agent = await this.buildAgentInstance(
+            name,
+            agentDefinition,
+            registryEntry,
             signer,
-            role: agentDefinition.role,
-            description: agentDefinition.description,
-            instructions: agentDefinition.instructions,
-            useCriteria: agentDefinition.useCriteria,
-            llmConfig: agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-            tools: [], // Will be set next
-            mcp: agentDefinition.mcp ?? !registryEntry.orchestratorAgent, // Default to true for non-orchestrator agents
-            eventId: registryEntry.eventId,
-            slug: name,
-            isOrchestrator: registryEntry.orchestratorAgent,
-            isBuiltIn: isBuiltIn, // Set the isBuiltIn property here
-            backend: agentDefinition.backend, // Propagate backend configuration
-            isGlobal: fromGlobal, // Track if agent is from global configuration
-        };
-
-        // Set tools - use explicit tools if configured, otherwise use defaults
-        let toolNames: string[];
-        if (isToollessBackend(agent)) {
-            // Claude and routing backend agents don't use tools through the traditional tool system
-            toolNames = [];
-        } else {
-            toolNames =
-                agentDefinition.tools !== undefined
-                    ? agentDefinition.tools
-                    : getDefaultToolsForAgent(agent);
-        }
-
-        // Convert tool names to Tool instances
-        const { getTools } = await import("@/tools/registry");
-        agent.tools = getTools(toolNames);
+            fromGlobal
+        );
 
         // Store in both maps
         this.agents.set(name, agent);
-        this.agentsByPubkey.set(pubkey, agent);
+        this.agentsByPubkey.set(agent.pubkey, agent);
 
         return agent;
     }
@@ -710,20 +648,20 @@ export class AgentRegistry {
     }
 
     /**
-     * Create an agent instance directly without going through ensureAgent
-     * Used to avoid infinite recursion when loading global agents
+     * Helper method to build an AgentInstance from configuration and registry data
+     * Centralizes the logic for creating agent instances to avoid duplication
      */
-    private async createAgentInstance(
+    private async buildAgentInstance(
         slug: string,
-        config: AgentConfig,
-        registryEntry: TenexAgents[string]
+        agentDefinition: StoredAgentData,
+        registryEntry: TenexAgents[string],
+        signer: NDKPrivateKeySigner,
+        isGlobal: boolean
     ): Promise<AgentInstance> {
-        // Create NDKPrivateKeySigner
-        const signer = new NDKPrivateKeySigner(registryEntry.nsec);
         const pubkey = signer.pubkey;
 
-        // Determine agent name
-        let agentName = config.name;
+        // Determine agent name - use project name for project-manager agent
+        let agentName = agentDefinition.name;
         const isProjectManager = slug === "project-manager";
         
         if (isProjectManager) {
@@ -736,50 +674,102 @@ export class AgentRegistry {
                 }
             } catch {
                 // If project context not available, use default name
-                agentName = config.name;
+                agentName = agentDefinition.name;
+            }
+        } else if (registryEntry.orchestratorAgent && slug !== "orchestrator") {
+            // Keep support for custom orchestrator agents using project name
+            try {
+                const { getProjectContext } = await import("@/services");
+                const projectCtx = getProjectContext();
+                const projectTitle = projectCtx.project.tagValue("title");
+                if (projectTitle) {
+                    agentName = projectTitle;
+                }
+            } catch {
+                // If project context not available, use default name
+                agentName = agentDefinition.name;
             }
         }
 
         // Determine if this is a built-in agent
         const isBuiltIn = getBuiltInAgents().some((builtIn) => builtIn.slug === slug);
 
-        // Create Agent instance
+        // Create Agent instance with all properties set
         const agent: AgentInstance = {
             name: agentName,
             pubkey,
             signer,
-            role: config.role,
-            description: config.description,
-            instructions: config.instructions || "",
-            useCriteria: config.useCriteria,
-            llmConfig: config.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+            role: agentDefinition.role,
+            description: agentDefinition.description,
+            instructions: agentDefinition.instructions || "",
+            useCriteria: agentDefinition.useCriteria,
+            llmConfig: agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
             tools: [], // Will be set next
-            mcp: config.mcp ?? !registryEntry.orchestratorAgent,
+            mcp: agentDefinition.mcp ?? !registryEntry.orchestratorAgent, // Default to true for non-orchestrator agents
             eventId: registryEntry.eventId,
             slug: slug,
             isOrchestrator: registryEntry.orchestratorAgent,
             isBuiltIn: isBuiltIn,
-            backend: config.backend,
-            isGlobal: true, // createAgentInstance is only called for global agents
+            backend: agentDefinition.backend,
+            isGlobal: isGlobal,
         };
 
-        // Set tools
+        // Set tools - use explicit tools if configured, otherwise use defaults
         let toolNames: string[];
         if (isToollessBackend(agent)) {
+            // Claude and routing backend agents don't use tools through the traditional tool system
             toolNames = [];
         } else {
-            toolNames = config.tools !== undefined
-                ? config.tools
-                : getDefaultToolsForAgent(agent);
+            toolNames =
+                agentDefinition.tools !== undefined
+                    ? agentDefinition.tools
+                    : getDefaultToolsForAgent(agent);
         }
 
         // Convert tool names to Tool instances
         const { getTools } = await import("@/tools/registry");
         agent.tools = getTools(toolNames);
 
+        return agent;
+    }
+
+    /**
+     * Create an agent instance directly without going through ensureAgent
+     * Used to avoid infinite recursion when loading global agents
+     */
+    private async createAgentInstance(
+        slug: string,
+        config: AgentConfig,
+        registryEntry: TenexAgents[string]
+    ): Promise<AgentInstance> {
+        // Create NDKPrivateKeySigner
+        const signer = new NDKPrivateKeySigner(registryEntry.nsec);
+        
+        // Create agent definition from config
+        const agentDefinition: StoredAgentData = {
+            name: config.name,
+            role: config.role,
+            description: config.description,
+            instructions: config.instructions || "",
+            useCriteria: config.useCriteria,
+            llmConfig: config.llmConfig,
+            backend: config.backend,
+            tools: config.tools,
+            mcp: config.mcp,
+        };
+
+        // Use the helper to build the agent instance
+        const agent = await this.buildAgentInstance(
+            slug,
+            agentDefinition,
+            registryEntry,
+            signer,
+            true // createAgentInstance is only called for global agents
+        );
+
         // Store in both maps
         this.agents.set(slug, agent);
-        this.agentsByPubkey.set(pubkey, agent);
+        this.agentsByPubkey.set(agent.pubkey, agent);
 
         return agent;
     }
