@@ -11,14 +11,14 @@ import type {
 } from "./types";
 import type { 
     RoutingEntry, 
-    OrchestratorTurn, 
-    Completion 
+    OrchestratorTurn,
+    Completion
 } from "@/conversations/types";
 import type { AgentInstance } from "@/agents/types";
 import { v4 as uuidv4 } from 'uuid';
 
 export class OrchestratorDebugUI {
-    displayState(state: OrchestratorDebugState): void {
+    displayState(_state: OrchestratorDebugState): void {
         // Don't clear console here since menu will handle it
     }
 
@@ -30,13 +30,13 @@ export class OrchestratorDebugUI {
         return this.showMenuWithShortcuts(choices, state);
     }
     
-    private async showMenuWithShortcuts(choices: Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string }>, state?: OrchestratorDebugState): Promise<DebugAction> {
+    private async showMenuWithShortcuts(choices: any[], state?: OrchestratorDebugState): Promise<DebugAction> {
         const readline = await import('readline');
         
         // Create shortcut map
         const shortcutMap = new Map<string, string>();
         let selectedIndex = 0;
-        const selectableChoices: Array<{ type?: string; name?: string; value: string; char?: string; shortcut?: string }> = [];
+        const selectableChoices: any[] = [];
         
         // Display the menu
         console.clear();
@@ -49,7 +49,7 @@ export class OrchestratorDebugUI {
         
         logger.info(chalk.gray("Use arrow keys to navigate, Enter to select, or press shortcut keys directly\n"));
         
-        choices.forEach((choice, index) => {
+        choices.forEach((choice) => {
             if (choice.type === 'separator') {
                 logger.info(chalk.gray(choice.line || "──────────"));
             } else if (choice.value) {
@@ -213,7 +213,7 @@ export class OrchestratorDebugUI {
         
         // Add separator if we added priority items
         if (choices.length > 0) {
-            choices.push(new inquirer.Separator("── Other Actions ──"));
+            choices.push(new inquirer.Separator("── Other Actions ──") as any);
         }
         
         // Secondary actions based on state
@@ -279,7 +279,7 @@ export class OrchestratorDebugUI {
         });
         
         // Utility actions
-        choices.push(new inquirer.Separator("── Utilities ──"));
+        choices.push(new inquirer.Separator("── Utilities ──") as any);
         
         choices.push({ 
             name: "[G] List Agents", 
@@ -307,7 +307,7 @@ export class OrchestratorDebugUI {
             short: "C"
         });
         
-        choices.push(new inquirer.Separator());
+        choices.push(new inquirer.Separator() as any);
         choices.push({ 
             name: "[X] Exit", 
             value: "exit",

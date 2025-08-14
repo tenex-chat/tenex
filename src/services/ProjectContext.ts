@@ -193,7 +193,7 @@ export function setProjectContext(project: NDKProject, agents: Map<string, Agent
  */
 export function getProjectContext(): ProjectContext {
     if (!projectContext) {
-        throw new Error("ProjectContext not initialized. Call setProjectContext() first.");
+        throw new Error("ProjectContext not initialized. Please call setProjectContext() first or ensure the project has been properly initialized.");
     }
     return projectContext;
 }

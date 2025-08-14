@@ -3,8 +3,7 @@ import type {
     RoutingEntry, 
     OrchestratorTurn, 
     AgentState, 
-    ConversationMetadata,
-    Completion 
+    ConversationMetadata
 } from "@/conversations/types";
 
 export interface OrchestratorDebugState {

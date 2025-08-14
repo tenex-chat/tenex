@@ -31,7 +31,7 @@ export async function initNDK(): Promise<void> {
 
 export function getNDK(): NDK {
     if (!ndk) {
-        throw new Error("NDK not initialized. Call initNDK() first.");
+        throw new Error("NDK not initialized. Please call initNDK() first or check your network configuration.");
     }
     return ndk;
 }

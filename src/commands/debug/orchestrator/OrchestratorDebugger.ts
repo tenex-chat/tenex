@@ -434,7 +434,7 @@ export class OrchestratorDebugger {
         return {
             user_request: this.state.userRequest,
             routing_history: this.state.routingHistory,
-            current_routing: this.state.currentRouting
+            current_routing: this.state.currentRouting || undefined
         };
     }
 

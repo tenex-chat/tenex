@@ -31,7 +31,6 @@ playwright/.cache/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Logs
 logs/
