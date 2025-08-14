@@ -18,45 +18,45 @@ export const mcpPhaseExamplesFragment: PromptFragment<McpPhaseExamplesArgs> = {
         if (!hasMcpTools) return "";
 
         const examples: Record<Phase, string> = {
-            chat: `## MCP in CHAT Phase
+            CHAT: `## MCP in CHAT Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Understand codebase | \`filesystem/list\` → \`filesystem/read_file\` |
 | Check project state | \`git-server/status\` → \`git-server/diff\` |`,
 
-            brainstorm: `## MCP in BRAINSTORM Phase
+            BRAINSTORM: `## MCP in BRAINSTORM Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Explore structure | \`filesystem/search\` → \`filesystem/read_multiple\` |
 | Review patterns | \`git-server/log\` → \`git-server/show\` |`,
 
-            plan: `## MCP in PLAN Phase
+            PLAN: `## MCP in PLAN Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Analyze dependencies | \`filesystem/read_file:package.json\` → \`filesystem/search:import\` |
 | Review architecture | \`filesystem/tree\` → \`filesystem/read_multiple:*.config.*\` |`,
 
-            execute: `## MCP in EXECUTE Phase
+            EXECUTE: `## MCP in EXECUTE Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Implement feature | \`filesystem/write_file\` → \`filesystem/create_directory\` |
 | Update configs | \`filesystem/read_file\` → \`filesystem/write_file\` |
 | Run commands | \`shell/execute:npm install\` → \`shell/execute:npm test\` |`,
 
-            verification: `## MCP in VERIFICATION Phase
+            VERIFICATION: `## MCP in VERIFICATION Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Check changes | \`git-server/diff\` → \`git-server/status\` |
 | Test functionality | \`shell/execute:npm test\` → \`filesystem/read_file:test-results\` |`,
 
-            chores: `## MCP in CHORES Phase
+            CHORES: `## MCP in CHORES Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Update docs | \`filesystem/write_file:README.md\` |
 | Format code | \`shell/execute:npm run format\` |
 | Clean artifacts | \`filesystem/delete\` → \`shell/execute:npm run clean\` |`,
 
-            reflection: `## MCP in REFLECTION Phase
+            REFLECTION: `## MCP in REFLECTION Phase
 | Goal | Tool Sequence |
 |------|---------------|
 | Review changes | \`git-server/diff:HEAD~1\` |

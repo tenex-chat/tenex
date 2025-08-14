@@ -25,13 +25,12 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
         const title = lesson.title || "Untitled Lesson";
         const content = lesson.lesson || lesson.content || "";
         const phase = lesson.tags.find((tag) => tag[0] === "phase")?.[1];
-        const quality = lesson.quality || "unknown";
         const category = lesson.category;
         const hashtags = lesson.hashtags;
         const hasDetailed = !!lesson.detailed;
 
         // Build metadata line
-        let metadata = `[${quality}]`;
+        let metadata = "";
         if (category) metadata += ` [${category}]`;
         if (hasDetailed) metadata += ` [detailed available]`;
         if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(' #')}`;

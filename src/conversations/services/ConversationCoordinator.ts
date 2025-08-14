@@ -20,7 +20,7 @@ import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import type { TracingContext } from "@/tracing";
-import { createTracingContext, createPhaseExecutionContext } from "@/tracing";
+import { createTracingContext, createPhaseExecutionContext, createTracingLogger } from "@/tracing";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
 import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/phaseInstructionsBuilder";
@@ -261,7 +261,7 @@ export class ConversationCoordinator {
         const isOrchestrator = targetAgent.isOrchestrator || false;
         const agentHasSeenPhase = agentState.lastSeenPhase !== undefined;
         
-        if (agentHasSeenPhase) {
+        if (agentHasSeenPhase && agentState.lastSeenPhase) {
             context.setCurrentPhase(agentState.lastSeenPhase);
         }
         
@@ -637,11 +637,11 @@ export class ConversationCoordinator {
                     if (tracingContext) {
                         const executionLogger = createExecutionLogger(tracingContext, "conversation");
                         executionLogger.logEvent({
-                            type: "execution_started",
+                            type: "execution_start",
                             timestamp: new Date(),
                             conversationId,
                             agent: agentPubkey,
-                            message: "Execution lock acquired - starting EXECUTE phase"
+                            narrative: "Execution lock acquired - starting EXECUTE phase"
                         });
                     }
                 }
@@ -668,14 +668,9 @@ export class ConversationCoordinator {
                         `Time remaining: ${minutes} minutes\n\n` +
                         `The execution will be automatically terminated if not completed soon.`;
                     
-                    const executionLogger = createExecutionLogger(tracingContext, "conversation");
-                    executionLogger.logEvent({
-                        type: "timeout_warning",
-                        timestamp: new Date(),
-                        conversationId,
-                        remainingMs,
-                        message: warningMessage
-                    });
+                    const tracingLogger = createTracingLogger(tracingContext, "conversation");
+                    // Log as a normal warning since timeout_warning is not a defined event type
+                    tracingLogger.warning(warningMessage, { remainingMs });
                 }
             }
         );

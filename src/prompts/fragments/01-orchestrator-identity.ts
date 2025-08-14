@@ -20,7 +20,7 @@ export const orchestratorIdentityFragment: PromptFragment<OrchestratorIdentityAr
         
         // Orchestrator identity
         parts.push(`## Your Identity\n`);
-        parts.push(`Your npub: ${agent.npub}`);
+        parts.push(`Your pubkey: ${agent.pubkey}`);
         parts.push("");
         
         if (agent.instructions) {

@@ -34,7 +34,7 @@ describe("Agent Routing Integration", () => {
 
     it("should build complete system prompt for regular agent", () => {
         const prompt = new PromptBuilder()
-            .add("available-agents", {
+            .add("specialist-available-agents", {
                 agents: mockAgents,
                 currentAgentPubkey: "dev456",
             })
@@ -48,7 +48,7 @@ describe("Agent Routing Integration", () => {
 
     it("should build complete system prompt for orchestrator agent with routing instructions", () => {
         const prompt = new PromptBuilder()
-            .add("available-agents", {
+            .add("orchestrator-available-agents", {
                 agents: mockAgents,
                 currentAgentPubkey: "pm123",
             })
@@ -69,8 +69,8 @@ describe("Agent Routing Integration", () => {
         expect(prompt).toContain("Standard flow: chat → plan → execute → verification");
     });
 
-    it("should not include identity section for orchestrator agent", () => {
-        const orchestratorAgent: Agent = {
+    it("should include identity section with pubkey for orchestrator agent", () => {
+        const orchestratorAgent: AgentInstance = {
             name: "Orchestrator",
             slug: "orchestrator",
             role: "Coordinates complex workflows by delegating tasks to specialized agents.",
@@ -84,20 +84,18 @@ describe("Agent Routing Integration", () => {
         };
 
         const prompt = new PromptBuilder()
-            .add("agent-system-prompt", {
+            .add("orchestrator-identity", {
                 agent: orchestratorAgent,
-                phase: "CHAT" as Phase,
                 projectTitle: "Test Project",
-                projectRepository: "test-repo",
+                projectOwnerPubkey: "owner-pubkey",
             })
             .build();
 
-        // Should NOT have identity section
-        expect(prompt).not.toContain("# Your Identity");
-        expect(prompt).not.toContain("Your name: Orchestrator");
-        expect(prompt).not.toContain("Your role: Coordinates");
+        // Should have identity section with pubkey
+        expect(prompt).toContain("## Your Identity");
+        expect(prompt).toContain("Your pubkey: orchestrator-pubkey");
 
-        // Should still have instructions and project context
+        // Should have instructions and project context
         expect(prompt).toContain("## Your Instructions");
         expect(prompt).toContain("You are a message router");
         expect(prompt).toContain("## Project Context");
@@ -105,7 +103,7 @@ describe("Agent Routing Integration", () => {
     });
 
     it("should use project name as identity for project-manager agent", () => {
-        const projectManagerAgent: Agent = {
+        const projectManagerAgent: AgentInstance = {
             name: "Test Project", // This would be set by AgentRegistry
             slug: "project-manager",
             role: "Project Knowledge Expert",
@@ -118,11 +116,10 @@ describe("Agent Routing Integration", () => {
         };
 
         const prompt = new PromptBuilder()
-            .add("agent-system-prompt", {
+            .add("specialist-identity", {
                 agent: projectManagerAgent,
-                phase: "CHAT" as Phase,
                 projectTitle: "Test Project",
-                projectRepository: "test-repo",
+                projectOwnerPubkey: "owner-pubkey",
             })
             .build();
 

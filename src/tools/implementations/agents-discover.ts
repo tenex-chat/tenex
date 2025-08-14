@@ -8,7 +8,7 @@ import { z } from "zod";
 // Define the input schema
 const agentsDiscoverSchema = z.object({
     searchText: z.string().optional().describe("Text to search for in agent name/description/role"),
-    limit: z.coerce.number().optional().default(50).describe("Maximum number of agents to return"),
+    limit: z.coerce.number().default(50).describe("Maximum number of agents to return"),
 });
 
 type AgentsDiscoverInput = z.infer<typeof agentsDiscoverSchema>;

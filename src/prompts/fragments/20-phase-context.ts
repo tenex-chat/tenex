@@ -47,7 +47,7 @@ function getPhaseContext(targetPhase: Phase, conversation?: Conversation): strin
     // Find the most recent transition to the target phase
     const relevantTransition = [...conversation.phaseTransitions]
         .reverse()
-        .find(t => t.toPhase === targetPhase);
+        .find(t => t.to === targetPhase);
 
     if (relevantTransition?.message) {
         return relevantTransition.message;

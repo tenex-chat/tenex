@@ -61,7 +61,7 @@ async function handleReplyLogic(
     // Find the conversation this reply belongs to
     const convRoot = event.tagValue("E") || event.tagValue("A");
     
-    let conversation = conversationManager.getConversationByEvent(convRoot);
+    let conversation = convRoot ? conversationManager.getConversationByEvent(convRoot) : undefined;
 
 
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)

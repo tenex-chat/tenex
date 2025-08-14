@@ -136,14 +136,20 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 # Run tests
 bun test
 
+# Run tests with coverage
+bun test --coverage
+
 # Type checking
 bun run typecheck
 
 # Linting
 bun run lint
 
-# Build
+# Build for production
 bun run build
+
+# Watch mode for development
+bun test --watch
 ```
 
 ## 🔮 What Makes TENEX Different?
