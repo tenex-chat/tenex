@@ -18,7 +18,7 @@ export const specialistCompletionGuidanceFragment: PromptFragment<SpecialistComp
         // CHAT and BRAINSTORM phases don't require termination
         if (phase === "CHAT" || phase === "BRAINSTORM") {
             return `## Phase Completion
-**${phase}**: No explicit termination required. Simply respond naturally to the user.`;
+**${phase}**: No explicit termination required. Simply respond naturally to the user. If the user is clear on wanting to move forward use the complete() tool with a report of what needs to happen next.`;
         }
 
         const phaseGuidance: Record<Phase, string> = {

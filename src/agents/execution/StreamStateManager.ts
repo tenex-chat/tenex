@@ -48,14 +48,6 @@ export class StreamStateManager {
         this.state = this.createInitialState();
     }
 
-    /**
-     * Reset state for a retry attempt (keeps streamPublisher)
-     */
-    resetForRetry(): void {
-        const streamPublisher = this.state.streamPublisher;
-        this.state = this.createInitialState();
-        this.state.streamPublisher = streamPublisher;
-    }
 
     /**
      * Append content to the accumulated full content

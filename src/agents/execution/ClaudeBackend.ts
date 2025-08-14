@@ -57,6 +57,7 @@ export class ClaudeBackend implements ExecutionBackend {
             title: `Claude Code Execution (via ${context.agent.name})`,
             conversationRootEventId: context.conversationId,
             conversation: context.conversationManager.getConversation(context.conversationId),
+            conversationManager: context.conversationManager,
             abortSignal: abortController.signal,
             resumeSessionId: context.claudeSessionId,
         });
@@ -80,7 +81,7 @@ export class ClaudeBackend implements ExecutionBackend {
             result.finalResponse || result.task.content || "Task completed successfully";
 
         // Use the same completion handler as the complete() tool
-        // This will publish the completion event
+        // This will publish the completion event and add to orchestrator turn
         await handleAgentCompletion({
             response: claudeReport,
             summary: `Claude Code execution completed. Task ID: ${result.task.id}`,
@@ -88,6 +89,7 @@ export class ClaudeBackend implements ExecutionBackend {
             conversationId: context.conversationId,
             publisher,
             triggeringEvent: context.triggeringEvent,
+            conversationManager: context.conversationManager,
         });
     }
 }

@@ -62,19 +62,32 @@ async function handleReplyLogic(
     const convRoot = event.tagValue("E") || event.tagValue("A");
     
     let conversation = convRoot ? conversationManager.getConversationByEvent(convRoot) : undefined;
-
+    let mappedClaudeSessionId: string | undefined;
 
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
     if (!conversation && event.tagValue("K") === "1934") {
         const taskId = event.tagValue("E");
         if (taskId) {
-            // The task itself is the conversation root, so look for it directly
-            conversation = conversationManager.getConversation(taskId);
-            
-            if (conversation) {
-                const claudeSession = event.tagValue('claude-session');
-                if (claudeSession) {
-                    logInfo(chalk.gray("Found claude-session tag in kind:1111 event: ") + chalk.cyan(claudeSession));
+            // First check if we have a task mapping for this task
+            const taskMapping = conversationManager.getTaskMapping(taskId);
+            if (taskMapping) {
+                conversation = conversationManager.getConversation(taskMapping.conversationId);
+                mappedClaudeSessionId = taskMapping.claudeSessionId;
+                
+                if (conversation) {
+                    logInfo(chalk.gray("Found conversation via task mapping: ") + 
+                           chalk.cyan(taskMapping.conversationId) + 
+                           (mappedClaudeSessionId ? chalk.gray(" with session: ") + chalk.cyan(mappedClaudeSessionId) : ""));
+                }
+            } else {
+                // Fallback: The task itself might be the conversation root
+                conversation = conversationManager.getConversation(taskId);
+                
+                if (conversation) {
+                    const claudeSession = event.tagValue('claude-session');
+                    if (claudeSession) {
+                        logInfo(chalk.gray("Found claude-session tag in kind:1111 event: ") + chalk.cyan(claudeSession));
+                    }
                 }
             }
         }
@@ -143,6 +156,33 @@ async function handleReplyLogic(
         }
     }
 
+    // Check if orchestrator is waiting for agents to complete
+    // Skip orchestrator invocation if there's an active (incomplete) turn
+    if (targetAgent === orchestratorAgent && !conversationManager.isCurrentTurnComplete(conversation.id)) {
+        // Get detailed information about the current turn
+        const currentTurn = conversationManager.getCurrentTurn(conversation.id);
+        if (currentTurn) {
+            const completedAgents = new Set(currentTurn.completions.map(c => c.agent));
+            const pendingAgents = currentTurn.agents.filter(agent => !completedAgents.has(agent));
+            const completionStatus = currentTurn.agents.map(agent => {
+                const completed = completedAgents.has(agent);
+                return `${agent}: ${completed ? '✓' : 'pending'}`;
+            });
+            
+            logInfo(chalk.gray(
+                `Orchestrator has active routing - skipping invocation while waiting for agents to complete\n` +
+                `  Turn ID: ${currentTurn.turnId}\n` +
+                `  Phase: ${currentTurn.phase}\n` +
+                `  Agents: [${completionStatus.join(', ')}]\n` +
+                `  Pending: [${pendingAgents.join(', ')}]\n` +
+                `  Completions: ${currentTurn.completions.length}/${currentTurn.agents.length}`
+            ));
+        } else {
+            logInfo(chalk.gray("Orchestrator has active routing - skipping invocation while waiting for agents to complete"));
+        }
+        return;
+    }
+
     // For non-user events without valid p-tags, skip processing
     if (
         !isEventFromUser(event) &&
@@ -168,10 +208,11 @@ async function handleReplyLogic(
         }
     }
 
-    // Extract claude-session from the event
-    const claudeSessionId = event.tagValue('claude-session');
+    // Extract claude-session from the event or use mapped session
+    const claudeSessionId = mappedClaudeSessionId || event.tagValue('claude-session');
     if (claudeSessionId) {
-        logInfo(chalk.gray("Passing claude-session to execution context: ") + chalk.cyan(claudeSessionId));
+        logInfo(chalk.gray("Passing claude-session to execution context: ") + chalk.cyan(claudeSessionId) +
+               (mappedClaudeSessionId ? chalk.gray(" (from task mapping)") : ""));
     }
 
 

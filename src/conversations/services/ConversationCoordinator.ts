@@ -6,7 +6,8 @@ import type {
     ConversationMetadata, 
     PhaseTransition,
     OrchestratorRoutingContext,
-    AgentState 
+    AgentState,
+    OrchestratorTurn 
 } from "../types";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
@@ -97,7 +98,6 @@ export class ConversationCoordinator {
         this.store.set(conversation.id, conversation);
         await this.persistence.save(conversation);
 
-        logger.info(`[ConversationCoordinator] Created conversation ${conversation.id}`);
         return conversation;
     }
 
@@ -264,9 +264,6 @@ export class ConversationCoordinator {
         
         const needsPhaseInstructions = !isOrchestrator && 
             (!agentHasSeenPhase || context.getCurrentPhase() !== conversation.phase);
-        
-        // Clear messages and rebuild
-        context.clearMessages();
         
         // Build complete history
         const historyToProcess: NDKEvent[] = [];
@@ -489,6 +486,36 @@ export class ConversationCoordinator {
         // Sync back
         conversation.orchestratorTurns = this.turnTracker.getTurns(conversationId);
         await this.persistence.save(conversation);
+    }
+
+    /**
+     * Check if the current turn is complete
+     */
+    isCurrentTurnComplete(conversationId: string): boolean {
+        const conversation = this.store.get(conversationId);
+        if (!conversation) {
+            return true; // No conversation means no pending turns
+        }
+
+        // Sync turns with tracker
+        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
+        
+        return this.turnTracker.isCurrentTurnComplete(conversationId);
+    }
+
+    /**
+     * Get the current (most recent) turn for a conversation
+     */
+    getCurrentTurn(conversationId: string): OrchestratorTurn | null {
+        const conversation = this.store.get(conversationId);
+        if (!conversation) {
+            return null;
+        }
+
+        // Sync turns with tracker
+        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
+        
+        return this.turnTracker.getCurrentTurn(conversationId);
     }
 
     /**

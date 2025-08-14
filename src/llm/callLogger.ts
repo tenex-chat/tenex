@@ -155,7 +155,7 @@ export class LLMCallLogger {
                         let content = msg.content;
                         
                         // Trim system prompt if it's the first message and longer than 1000 chars
-                        if (index === 0 && msg.role === "system" && msg.content.length > 1000) {
+                        if (index === 0 && msg.role === "system" && msg.content.length > 10000) {
                             content = msg.content.substring(0, 100) + "<REST-OF-SYSTEM-PROMPT-TRIMMED>";
                         } else if (request.options?.agentName === "Orchestrator" && msg.role === "user") {
                             // Parse JSON content for orchestrator to make logs more readable

@@ -3,12 +3,15 @@ import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKTask } from "@nostr-dev-kit/ndk";
+import type { ConversationManager } from "@/conversations/ConversationManager";
 
 export interface TaskCreationOptions {
     title: string;
     prompt: string;
     branch?: string;
     conversationRootEventId?: string;
+    conversationManager?: ConversationManager;
+    claudeSessionId?: string;
 }
 
 export interface TaskCompletionOptions {
@@ -60,6 +63,20 @@ export class TaskPublisher {
 
         // Store the task instance for future operations
         this.currentTask = task;
+
+        // Register task mapping if conversation manager is provided
+        if (options.conversationManager && options.conversationRootEventId && task.id) {
+            await options.conversationManager.registerTaskMapping(
+                task.id,
+                options.conversationRootEventId,
+                options.claudeSessionId
+            );
+            logger.debug("Registered task mapping for conversation", {
+                taskId: task.id,
+                conversationId: options.conversationRootEventId,
+                claudeSessionId: options.claudeSessionId
+            });
+        }
 
         return task;
     }

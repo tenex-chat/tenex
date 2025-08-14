@@ -16,7 +16,6 @@ CRITICAL: Output ONLY valid JSON. No reasoning tags, no explanations, no text ou
 **Input:** JSON object containing:
 - **user_request**: Original user request
 - **routing_history**: Past routing decisions with agent completions
-- **current_routing**: Active routing (if agents working) or null (if need new routing)
 
 **Output:** JSON only:
 \`\`\`json
@@ -30,11 +29,10 @@ CRITICAL: Output ONLY valid JSON. No reasoning tags, no explanations, no text ou
 ### Decision Logic
 
 1. **routing_history empty** → Initial routing based on user_request
-2. **current_routing exists** → Return { "agents": [], "phase": current_phase, "reason": "Waiting for agent completions" } unless new user_request requires re-routing. If re-routing, proceed to Step 3.
-3. **current_routing null** → Analyze completions, route next steps
-4. Expert Pre-Phase Judgment (Before PLAN/EXECUTE): Analyze the full context (user_request, history) to judge if foundational domain experts are relevant and enabling. If yes, route to them for advisory guidance. Reason must explain your judgment (e.g., "Task intent requires Nostr expertise for schema recommendations"). Skip if not directly enabling or if expert is review-oriented.
-5. Expert Post-Phase Judgment (After PLAN/EXECUTE completions): Judge if review-focused experts align with the outputs for critique. If yes, route during transition to VERIFICATION. Reason must explain (e.g., "Plan complexity warrants YAGNI review for over-engineering"). Integrate feedback into next steps.
-6. Success/Failure Assessment: Judge completion "message" fields for success (e.g., "task complete", "no issues") or failure (e.g., "error found", "retry needed"). If ambiguous, assume failure and retry in the current phase, noting in "reason" (e.g., "Ambiguous completion, retrying EXECUTE").
+2. **routing_history has entries** → Analyze last completions, route next steps
+3. Expert Pre-Phase Judgment (Before PLAN/EXECUTE): Analyze the full context (user_request, history) to judge if foundational domain experts are relevant and enabling. If yes, route to them for advisory guidance. Reason must explain your judgment (e.g., "Task intent requires Nostr expertise for schema recommendations"). Skip if not directly enabling or if expert is review-oriented.
+4. Expert Post-Phase Judgment (After PLAN/EXECUTE completions): Judge if review-focused experts align with the outputs for critique. If yes, route during transition to VERIFICATION. Reason must explain (e.g., "Plan complexity warrants YAGNI review for over-engineering"). Integrate feedback into next steps.
+5. Success/Failure Assessment: Judge completion "message" fields for success (e.g., "task complete", "no issues") or failure (e.g., "error found", "retry needed"). If ambiguous, assume failure and retry in the current phase, noting in "reason" (e.g., "Ambiguous completion, retrying EXECUTE").
 
 Focus on the "message" field in completions - it contains what agents accomplished and their recommendations.
 
@@ -45,8 +43,8 @@ Focus on the "message" field in completions - it contains what agents accomplish
 |-------|-------------|----------|----------|-------------------|--------------------|
 | **${PHASES.EXECUTE}** | Clear action verbs, specific requests | "Fix typo", "Add button", "Update API" | executor | Judgment-based: Yes if task setup needs domain input (e.g., Bitcoin protocol) | Judgment-based: Yes in VERIFICATION (e.g., domain/YAGNI review if complexity warrants) |
 | **${PHASES.PLAN}** | Complex architecture needed | "Implement OAuth2", "Refactor to PostgreSQL" | planner | Judgment-based: Yes if foundational domain expertise enables design (e.g., Nostr for schema) | Judgment-based: Yes for initial critique (e.g., YAGNI if over-design inferred) |
-| **${PHASES.CHAT}** | Ambiguous, needs clarification | "Make it better", "What about performance?" | project-manager, human-replica if personalization needed | Judgment-based: Rarely, only if domain expertise clarifies intent (e.g., Nostr for protocol context) | No, defer to VERIFICATION |
-| **${PHASES.BRAINSTORM}** | Creative exploration | "Let's brainstorm engagement ideas" | project-manager, human-replica if user-specific | Judgment-based: Yes if foundational expertise shapes ideation (e.g., Bitcoin for crypto ideas) | No, defer to PLAN or VERIFICATION |
+| **${PHASES.CHAT}** | Ambiguous, needs clarification | "Make it better", "What about performance?" | project-manager | Judgment-based: Rarely, only if domain expertise clarifies intent (e.g., Nostr for protocol context) | No, defer to VERIFICATION |
+| **${PHASES.BRAINSTORM}** | Creative exploration | "Let's brainstorm engagement ideas" | project-manager and other agents with grand visions | Judgment-based: Yes if foundational expertise shapes ideation (e.g., Bitcoin for crypto ideas) | No, defer to PLAN or VERIFICATION |
 
 **Default to ACTION**: When uncertain, choose ${PHASES.EXECUTE} over ${PHASES.CHAT}
 
@@ -88,7 +86,7 @@ Experts provide advisory input only and should be routed based on the Orchestrat
 | executor | ✅ YES | Files, commands, implementation | EXECUTE phase, fallback for reviews |
 | planner | ❌ NO | Architecture, design decisions | PLAN phase, fallback for planning reviews |
 | project-manager | ❌ NO | Requirements, knowledge, summaries | CHAT, VERIFICATION, REFLECTION |
-| human-replica | ❌ NO | Replicate user preferences | CHAT, BRAINSTORM for personalization |
+| human-replica | ❌ NO | Replicate user preferences | REFLECTIOn, BRAINSTORM |
 | experts | ❌ NO | Advisory only → pass to executor | Pre-PLAN/EXECUTE for foundational guidance; Post-PLAN/EXECUTE for review in VERIFICATION |
 
 ### Phase Starting Points

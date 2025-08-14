@@ -3,7 +3,6 @@ import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
 import { getLLMLogger, initializeLLMLogger } from "./callLogger";
-import { wrapWithSafeArguments } from "./providers/SafeArgumentsWrapper";
 import type {
     CompletionRequest,
     CompletionResponse,
@@ -128,7 +127,7 @@ export class LLMRouter implements LLMService {
                 baseURL: config.baseUrl,
             };
 
-            const llm = wrapWithSafeArguments(igniteEngine(config.provider, llmConfig));
+            const llm = igniteEngine(config.provider, llmConfig);
 
             // Register tools as plugins if provided
             if (request.tools && request.toolContext) {
@@ -244,7 +243,7 @@ export class LLMRouter implements LLMService {
                 baseURL: config.baseUrl,
             };
 
-            const llm = wrapWithSafeArguments(igniteEngine(config.provider, llmConfig));
+            const llm = igniteEngine(config.provider, llmConfig);
 
             // Register tools as plugins if provided
             if (request.tools && request.toolContext) {

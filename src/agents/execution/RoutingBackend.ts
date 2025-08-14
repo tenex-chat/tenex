@@ -31,17 +31,14 @@ export class RoutingBackend implements ExecutionBackend {
 
     async execute(
         messages: Message[],
-        _tools: Tool[], // Ignored - routing backend doesn't use tools
-        context: ExecutionContext,
-        _publisher: NostrPublisher
+        _tools: Tool[],
+        context: ExecutionContext
     ): Promise<void> {
         const tracingContext = context.tracingContext || createTracingContext(context.conversationId);
         const tracingLogger = createTracingLogger(tracingContext, "agent");
         const executionLogger = createExecutionLogger(tracingContext, "agent");
 
         try {
-            // Log routing analysis start (removed - not in new event system)
-
             // Get routing decision from LLM
             const routingDecision = await this.getRoutingDecision(messages, context, tracingLogger, executionLogger);
             
@@ -216,7 +213,6 @@ Please re-route using the correct agent slug from the list above.`);
         
         tracingLogger.info("📚 Routing lesson learned", lesson);
         
-        // Log the feedback (removed - not in new event system)
         
         // Build messages with the feedback
         const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
@@ -309,7 +305,6 @@ No other text, only valid JSON.`)
         }
         
         // Extract and log reasoning if present in the response
-        // (agentThinking removed - not in new event system)
 
         try {
             // Parse the JSON response

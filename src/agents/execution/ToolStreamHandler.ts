@@ -1,4 +1,5 @@
-import type { NostrPublisher, StreamPublisher } from "@/nostr/NostrPublisher";
+import type { NostrPublisher } from "@/nostr/NostrPublisher";
+import { StreamPublisher } from "@/nostr/NostrPublisher";
 import type { TracingLogger } from "@/tracing";
 import type { ExecutionContext } from "./types";
 import type { ExecutionLogger } from "@/logging/ExecutionLogger";
@@ -40,8 +41,27 @@ export class ToolStreamHandler {
             this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
         }
 
-        // Flush stream for all tools
-        await streamPublisher?.flush();
+        // Finalize the stream if there's any buffered content
+        // This ensures any content generated before tool use is published as a complete reply
+        if (streamPublisher && !streamPublisher.isFinalized()) {
+            const hasContent = this.stateManager.getFullContent().trim().length > 0;
+            if (hasContent) {
+                tracingLogger.debug("Finalizing buffered content before tool execution", {
+                    tool: toolName,
+                    contentLength: this.stateManager.getFullContent().length
+                });
+                await streamPublisher.finalize({});
+                
+                // Create a new stream publisher for subsequent content
+                if (publisher) {
+                    const newStreamPublisher = new StreamPublisher(publisher);
+                    this.stateManager.setStreamPublisher(newStreamPublisher);
+                }
+            } else {
+                // Just flush if no content
+                await streamPublisher.flush();
+            }
+        }
 
         // Publish typing indicator with tool information
         if (publisher) {
@@ -248,7 +268,6 @@ export class ToolStreamHandler {
         if (isComplete(output)) {
             this.stateManager.setTermination(output);
             
-            // agentDecision removed - not in new event system
         }
     }
 

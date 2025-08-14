@@ -19,10 +19,6 @@ export const orchestratorIdentityFragment: PromptFragment<OrchestratorIdentityAr
         const parts: string[] = [];
         
         // Orchestrator identity
-        parts.push(`## Your Identity\n`);
-        parts.push(`Your pubkey: ${agent.pubkey}`);
-        parts.push("");
-        
         if (agent.instructions) {
             parts.push(`## Your Instructions\n${agent.instructions}`);
         }

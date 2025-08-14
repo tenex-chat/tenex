@@ -8,14 +8,12 @@ import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
 import type { ConversationManager } from "@/conversations/ConversationManager";
-import { logger } from "@/utils/logger";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolStreamHandler } from "./ToolStreamHandler";
 import { TerminationHandler } from "./TerminationHandler";
-import { ExecutionConfig } from "./constants";
 
 /**
  * Simplified ReasonActLoop implementation using extracted handlers.
@@ -27,8 +25,7 @@ export class ReasonActLoop implements ExecutionBackend {
     private lastLoggedChunk: Map<string, string> = new Map();
 
     constructor(
-        private llmService: LLMService,
-        _conversationManager: ConversationManager
+        private llmService: LLMService
     ) {}
 
     /**
@@ -76,63 +73,36 @@ export class ReasonActLoop implements ExecutionBackend {
         this.logExecutionStart(tracingLogger, context, tools);
 
         try {
-            let currentMessages = messages;
-            let attempt = 0;
-
-            // Main termination loop
-            while (attempt < ExecutionConfig.MAX_TERMINATION_ATTEMPTS) {
-                attempt++;
-                logger.debug(`Agent termination attempt ${attempt}.`)
-                
-                // Reset state for retry (but keep stream publisher)
-                if (attempt > 1) {
-                    logger.debug(`Reset retry counter`)
-                    stateManager.resetForRetry();
-                }
-
-                // Create and process stream
-                const stream = this.createLLMStream(context, currentMessages, tools, publisher);
-                const streamPublisher = attempt === 1 
-                    ? this.createStreamPublisher(publisher) 
-                    : stateManager.getStreamPublisher();
-                
-                if (streamPublisher) {
-                    stateManager.setStreamPublisher(streamPublisher);
-                }
-
-                // Process stream events
-                yield* this.processStream(
-                    stream,
-                    stateManager,
-                    toolHandler,
-                    streamPublisher,
-                    publisher,
-                    tracingLogger,
-                    context
-                );
-
-                // Finalize stream
-                await this.finalizeStream(
-                    streamPublisher,
-                    stateManager,
-                    context,
-                    currentMessages,
-                    tracingLogger
-                );
-
-                // Check if should retry for termination
-                if (!terminationHandler.shouldRetryForTermination(context, attempt, tracingLogger)) {
-                    break;
-                }
-
-                // Prepare for retry with reminder
-                logger.debug('will give retry instruction')
-                currentMessages = terminationHandler.prepareRetryMessages(
-                    currentMessages,
-                    context,
-                    tracingLogger
-                );
+            // Create and process stream
+            const stream = this.createLLMStream(context, messages, tools, publisher);
+            const streamPublisher = this.createStreamPublisher(publisher);
+            
+            if (streamPublisher) {
+                stateManager.setStreamPublisher(streamPublisher);
             }
+
+            // Process stream events
+            yield* this.processStream(
+                stream,
+                stateManager,
+                toolHandler,
+                streamPublisher,
+                publisher,
+                tracingLogger,
+                context
+            );
+
+            // Finalize stream
+            await this.finalizeStream(
+                streamPublisher,
+                stateManager,
+                context,
+                messages,
+                tracingLogger
+            );
+
+            // Check if agent completed properly (just log, don't retry)
+            terminationHandler.checkTermination(context, tracingLogger);
 
             yield this.createFinalEvent(stateManager);
 
@@ -156,7 +126,6 @@ export class ReasonActLoop implements ExecutionBackend {
         this.streamingBuffer.set(agentKey, "");
         
         for await (const event of stream) {
-            logger.debug(`[processStream] ${event.type}`)
             yield event;
 
             switch (event.type) {
@@ -246,8 +215,7 @@ export class ReasonActLoop implements ExecutionBackend {
         streamPublisher: StreamPublisher | undefined,
         stateManager: StreamStateManager,
         context: ExecutionContext,
-        messages: Message[],
-        _tracingLogger: TracingLogger
+        messages: Message[]
     ): Promise<void> {
         if (!streamPublisher || streamPublisher.isFinalized()) return;
 
@@ -380,7 +348,6 @@ export class ReasonActLoop implements ExecutionBackend {
             // Mark this block as logged
             stateManager.markThinkingBlockLogged(thinkingContent);
             
-            // agentThinking removed - not in new event system
             // Previously parsed reasoning data here but no longer needed
         });
     }

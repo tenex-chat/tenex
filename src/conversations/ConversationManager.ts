@@ -1,10 +1,11 @@
 import * as path from "node:path";
 import type { Phase } from "@/conversations/phases";
-import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, OrchestratorRoutingContext } from "@/conversations/types";
+import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, OrchestratorRoutingContext, OrchestratorTurn } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
 import type { TracingContext } from "@/tracing";
 import { TENEX_DIR, CONVERSATIONS_DIR } from "@/constants";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { logger } from "@/utils/logger";
 import { FileSystemAdapter } from "./persistence";
 import type { ConversationPersistenceAdapter } from "./persistence/types";
 import type { AgentInstance } from "@/agents/types";
@@ -27,6 +28,7 @@ import {
 export class ConversationManager {
     private coordinator: ConversationCoordinator;
     private conversationsDir: string;
+    private taskMappings: Map<string, { conversationId: string; claudeSessionId?: string }> = new Map();
 
     constructor(
         private projectPath: string, 
@@ -72,6 +74,9 @@ export class ConversationManager {
     async initialize(): Promise<void> {
         await ensureDirectory(this.conversationsDir);
         await this.coordinator.initialize();
+        
+        // Load task mappings from persistence
+        await this.loadTaskMappings();
     }
 
     async createConversation(event: NDKEvent): Promise<Conversation> {
@@ -218,6 +223,78 @@ export class ConversationManager {
             agentSlug,
             message
         );
+    }
+
+    isCurrentTurnComplete(conversationId: string): boolean {
+        return this.coordinator.isCurrentTurnComplete(conversationId);
+    }
+
+    getCurrentTurn(conversationId: string): OrchestratorTurn | null {
+        return this.coordinator.getCurrentTurn(conversationId);
+    }
+
+    /**
+     * Register a task ID with its associated conversation and Claude session
+     */
+    async registerTaskMapping(taskId: string, conversationId: string, claudeSessionId?: string): Promise<void> {
+        this.taskMappings.set(taskId, { conversationId, claudeSessionId });
+        logger.debug("Registered task mapping", { taskId, conversationId, claudeSessionId });
+        
+        // Save mappings to disk
+        await this.saveTaskMappings();
+    }
+
+    /**
+     * Get conversation and session info for a task ID
+     */
+    getTaskMapping(taskId: string): { conversationId: string; claudeSessionId?: string } | undefined {
+        return this.taskMappings.get(taskId);
+    }
+
+    /**
+     * Remove a task mapping
+     */
+    async removeTaskMapping(taskId: string): Promise<void> {
+        this.taskMappings.delete(taskId);
+        logger.debug("Removed task mapping", { taskId });
+        
+        // Save updated mappings to disk
+        await this.saveTaskMappings();
+    }
+
+    /**
+     * Load task mappings from disk
+     */
+    private async loadTaskMappings(): Promise<void> {
+        const mappingsPath = path.join(this.conversationsDir, "task-mappings.json");
+        try {
+            const { promises: fs } = await import("node:fs");
+            const data = await fs.readFile(mappingsPath, "utf-8");
+            const mappings = JSON.parse(data) as Record<string, { conversationId: string; claudeSessionId?: string }>;
+            
+            this.taskMappings = new Map(Object.entries(mappings));
+            logger.debug(`Loaded ${this.taskMappings.size} task mappings from disk`);
+        } catch (error) {
+            // File doesn't exist yet or is corrupted - start with empty mappings
+            if ((error as any).code !== "ENOENT") {
+                logger.warn("Failed to load task mappings", { error });
+            }
+        }
+    }
+
+    /**
+     * Save task mappings to disk
+     */
+    private async saveTaskMappings(): Promise<void> {
+        const mappingsPath = path.join(this.conversationsDir, "task-mappings.json");
+        try {
+            const { promises: fs } = await import("node:fs");
+            const mappings = Object.fromEntries(this.taskMappings.entries());
+            await fs.writeFile(mappingsPath, JSON.stringify(mappings, null, 2), "utf-8");
+            logger.debug(`Saved ${this.taskMappings.size} task mappings to disk`);
+        } catch (error) {
+            logger.error("Failed to save task mappings", { error });
+        }
     }
 
 }

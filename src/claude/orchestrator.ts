@@ -1,5 +1,6 @@
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { Conversation } from "@/conversations/types";
+import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { TaskPublisher } from "@/nostr/TaskPublisher";
 import { logger } from "@/utils/logger";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -16,6 +17,7 @@ export interface ClaudeTaskOptions {
     branch?: string;
     conversationRootEventId?: string;
     conversation?: Conversation;
+    conversationManager?: ConversationManager;
     abortSignal?: AbortSignal;
     resumeSessionId?: string;
 }
@@ -41,12 +43,14 @@ export class ClaudeTaskOrchestrator {
     async execute(options: ClaudeTaskOptions): Promise<ClaudeTaskResult> {
         const startTime = Date.now();
 
-        // Create task
+        // Create task with conversation mapping
         const task = await this.taskPublisher.createTask({
             title: options.title,
             prompt: options.prompt,
             branch: options.branch,
             conversationRootEventId: options.conversationRootEventId,
+            conversationManager: options.conversationManager,
+            claudeSessionId: options.resumeSessionId,
         });
 
         // Log if we're resuming a session

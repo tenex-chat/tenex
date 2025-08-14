@@ -31,11 +31,11 @@ interface LessonLearnOutput {
 }
 
 export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
-    name: "lesson_learn",
-    description:
-        "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
+  name: "lesson_learn",
+  description:
+    "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
 
-    promptFragment: `Record important lessons that will improve future performance.
+  promptFragment: `Record important lessons that will improve future performance.
 
 ## Quick Decision Checklist
 | ✅ RECORD if... | ❌ SKIP if... |
@@ -48,10 +48,9 @@ export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
 
 ## Metacognition Questions (answer 2+ YES to record):
 □ Will remembering this permanently improve my behavior?
-□ Is this specific to THIS project/codebase?
-□ Does it violate normal expectations?
-□ Did it waste significant time to discover?
 □ Is it within my role's expertise?
+□ Am I the right agent in the system to learn this or is there an agent better suited for this?
+□ Is it absolutely obvious?
 
 Use <thinking> tags to justify why this lesson meets the quality bar.
 
@@ -72,135 +71,126 @@ When modeling the user, ALWAYS be especially keen to capture rich details in the
 - Specific examples of their behavior and choices
 - Nuanced preferences that go beyond simple likes/dislikes
 
-The detailed version is CRITICAL for human-replica agents to accurately model the user's personality and behavior.
+The detailed version is CRITICAL to avoid losing nuance and detail; you should write there all the important nuance that would be lost in the summary version.
+`,
 
-## Categories:
-Use one of these standard categories or create a specific one if needed:
-- architecture: System design and structure decisions
-- debugging: Problem-solving patterns and techniques  
-- user-preferences: User-specific patterns and preferences
-- performance: Optimization insights
-- security: Security considerations
-- workflow: Process and methodology insights
-- domain-specific: Domain expertise insights`,
+  parameters: createZodSchema(lessonLearnSchema),
 
-    parameters: createZodSchema(lessonLearnSchema),
+  execute: async (input, context) => {
+    const { title, lesson, detailed, category, hashtags } = input.value;
 
-    execute: async (input, context) => {
-        const { title, lesson, detailed, category, hashtags } = input.value;
+    logger.info("🎓 Agent recording new lesson", {
+      agent: context.agent.name,
+      agentPubkey: context.agent.pubkey,
+      title,
+      lessonLength: lesson.length,
+      phase: context.phase,
+      conversationId: context.conversationId,
+    });
 
-        logger.info("🎓 Agent recording new lesson", {
-            agent: context.agent.name,
-            agentPubkey: context.agent.pubkey,
-            title,
-            lessonLength: lesson.length,
-            phase: context.phase,
-            conversationId: context.conversationId,
-        });
+    const agentSigner = context.agent.signer;
+    if (!agentSigner) {
+      const error = "Agent signer not available";
+      logger.error("❌ Learn tool failed", {
+        error,
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        title,
+        phase: context.phase,
+        conversationId: context.conversationId,
+      });
+      return {
+        ok: false,
+        error: {
+          kind: "execution" as const,
+          tool: "lesson_learn",
+          message: error,
+        },
+      };
+    }
 
-        const agentSigner = context.agent.signer;
-        if (!agentSigner) {
-            const error = "Agent signer not available";
-            logger.error("❌ Learn tool failed", {
-                error,
-                agent: context.agent.name,
-                agentPubkey: context.agent.pubkey,
-                title,
-                phase: context.phase,
-                conversationId: context.conversationId,
-            });
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "lesson_learn",
-                    message: error,
-                },
-            };
-        }
+    const ndk = getNDK();
+    if (!ndk) {
+      const error = "NDK instance not available";
+      logger.error("❌ Learn tool failed", {
+        error,
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        title,
+        phase: context.phase,
+        conversationId: context.conversationId,
+      });
+      return {
+        ok: false,
+        error: {
+          kind: "execution" as const,
+          tool: "lesson_learn",
+          message: error,
+        },
+      };
+    }
 
-        const ndk = getNDK();
-        if (!ndk) {
-            const error = "NDK instance not available";
-            logger.error("❌ Learn tool failed", {
-                error,
-                agent: context.agent.name,
-                agentPubkey: context.agent.pubkey,
-                title,
-                phase: context.phase,
-                conversationId: context.conversationId,
-            });
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "lesson_learn",
-                    message: error,
-                },
-            };
-        }
+    const projectCtx = getProjectContext();
 
-        const projectCtx = getProjectContext();
+    try {
+      // Create the lesson event
+      const lessonEvent = new NDKAgentLesson(ndk);
+      lessonEvent.title = title;
+      lessonEvent.lesson = lesson;
 
-        try {
-            // Create the lesson event
-            const lessonEvent = new NDKAgentLesson(ndk);
-            lessonEvent.title = title;
-            lessonEvent.lesson = lesson;
-            
-            // Add optional fields if provided
-            if (detailed) {
-                lessonEvent.detailed = detailed;
-            }
-            if (category) {
-                lessonEvent.category = category;
-            }
-            if (hashtags && hashtags.length > 0) {
-                lessonEvent.hashtags = hashtags;
-            }
+      // Add optional fields if provided
+      if (detailed) {
+        lessonEvent.detailed = detailed;
+      }
+      if (category) {
+        lessonEvent.category = category;
+      }
+      if (hashtags && hashtags.length > 0) {
+        lessonEvent.hashtags = hashtags;
+      }
 
-            // Add reference to the agent event if available
-            const agentEventId = context.agent.eventId;
-            if (agentEventId) {
-                lessonEvent.agentDefinitionId = agentEventId;
-            }
+      // Add reference to the agent event if available
+      const agentEventId = context.agent.eventId;
+      if (agentEventId) {
+        lessonEvent.agentDefinitionId = agentEventId;
+      }
 
-            // Add project tag for scoping
-            lessonEvent.tag(projectCtx.project);
+      // Add project tag for scoping
+      lessonEvent.tag(projectCtx.project);
 
-            // Sign and publish the event
-            await lessonEvent.sign(agentSigner);
-            lessonEvent.publish();
+      // Sign and publish the event
+      await lessonEvent.sign(agentSigner);
+      lessonEvent.publish();
 
-            const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
+      const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 
-            return {
-                ok: true,
-                value: {
-                    message,
-                    eventId: lessonEvent.encode(),
-                    title,
-                    hasDetailed: !!detailed,
-                },
-            };
-        } catch (error) {
-            logger.error("❌ Learn tool failed", {
-                error: formatAnyError(error),
-                agent: context.agent.name,
-                agentPubkey: context.agent.pubkey,
-                title,
-                phase: context.phase,
-                conversationId: context.conversationId,
-            });
+      return {
+        ok: true,
+        value: {
+          message,
+          eventId: lessonEvent.encode(),
+          title,
+          hasDetailed: !!detailed,
+        },
+      };
+    } catch (error) {
+      logger.error("❌ Learn tool failed", {
+        error: formatAnyError(error),
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        title,
+        phase: context.phase,
+        conversationId: context.conversationId,
+      });
 
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "lesson_learn",
-                    message: formatAnyError(error),
-                },
-            };
-        }
-    },
+      return {
+        ok: false,
+        error: {
+          kind: "execution" as const,
+          tool: "lesson_learn",
+          message: formatAnyError(error),
+        },
+      };
+    }
+  },
 };

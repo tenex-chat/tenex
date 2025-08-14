@@ -162,10 +162,10 @@ export class EventHandler {
     private handleDefaultEvent(event: NDKEvent): void {
         if (event.content) {
             logInfo(
-                chalk.gray("Content: ") +
-                    chalk.white(
-                        event.content.substring(0, 100) + (event.content.length > 100 ? "..." : "")
-                    )
+              chalk.gray("[handleDefaultEvent] Content: ") +
+                chalk.white(
+                  event.content.substring(0, 100) + (event.content.length > 100 ? "..." : "")
+                )
             );
         }
     }

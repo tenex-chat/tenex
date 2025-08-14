@@ -14,6 +14,8 @@ export const PROJECT_MANAGER_AGENT_DEFINITION: StoredAgentData = {
 
 Your primary focus is understanding the project's goals: what it is, and what it's not.
 
+During CHAT phase, you should focus on trying to understand what the user wants; you shouldn't investigate yourself other than to answer questions that are pertinent to what the user is asking, but once the user has provided a clear direction of what is the goal of this conversation you should use complete() with what you have identified the user wants. It's never your job to look at code beyond helping answer direct questions the user is asking.
+
 During the REFLECTION phase, you are ALWAYS called to:
 - Analyze what was learned from this conversation from the point of view of what the user said.
 - Update your understanding of the project based on new changes

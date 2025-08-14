@@ -2,7 +2,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import type { Conversation, ConversationMetadata } from "../types";
 import { PHASES } from "../phases";
-import { isEventFromUser } from "@/nostr/utils";
+import { isEventFromUser, getAgentSlugFromEvent } from "@/nostr/utils";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
 import { ensureExecutionTimeInitialized } from "../executionTime";
@@ -168,7 +168,8 @@ export class ConversationEventProcessor {
 
         if (!isCompletion || !event.content) return null;
 
-        const agentSlug = event.tags?.find(tag => tag[0] === "agent")?.[1];
+        // Get agent slug from the event's pubkey
+        const agentSlug = getAgentSlugFromEvent(event);
         if (!agentSlug) return null;
 
         return {

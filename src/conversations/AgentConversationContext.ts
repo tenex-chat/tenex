@@ -206,16 +206,6 @@ export class AgentConversationContext {
     }
 
     /**
-     * Clear all messages (useful for phase resets if needed)
-     * WARNING: This should rarely be used as it breaks conversation continuity
-     */
-    clearMessages(): void {
-        this.messages = [];
-        this.lastProcessedIndex = 0;
-        logger.warn(`[AGENT_CONTEXT] Cleared all messages for ${this.agentSlug} - conversation reset`);
-    }
-
-    /**
      * Remove the last message (useful for error recovery)
      */
     popMessage(): Message | undefined {

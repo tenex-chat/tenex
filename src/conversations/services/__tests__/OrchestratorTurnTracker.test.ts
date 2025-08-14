@@ -150,7 +150,7 @@ describe("OrchestratorTurnTracker", () => {
 
             expect(context.user_request).toBe("User request");
             expect(context.routing_history).toEqual([]);
-            expect(context.current_routing).toBeNull();
+            // current_routing no longer exists in the interface
         });
 
         it("should include completed turns in history", () => {
@@ -160,22 +160,21 @@ describe("OrchestratorTurnTracker", () => {
             const context = tracker.buildRoutingContext(conversationId, "User request");
 
             expect(context.routing_history).toHaveLength(1);
-            expect(context.current_routing).toBeNull();
+            // current_routing no longer exists in the interface
         });
 
-        it("should set current_routing for incomplete turn", () => {
+        it("should skip incomplete turns in routing context", () => {
             tracker.startTurn(conversationId, PHASES.PLAN, ["agent1", "agent2"]);
             tracker.addCompletion(conversationId, "agent1", "Partial");
 
             const context = tracker.buildRoutingContext(conversationId, "User request");
 
+            // Incomplete turn should not be in history since orchestrator
+            // is only called when turns are complete
             expect(context.routing_history).toHaveLength(0);
-            expect(context.current_routing).toBeDefined();
-            expect(context.current_routing?.agents).toEqual(["agent1", "agent2"]);
-            expect(context.current_routing?.completions).toHaveLength(1);
         });
 
-        it("should handle triggering completion", () => {
+        it("should not include triggering completion in context", () => {
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1", "agent2"]);
 
             const triggeringCompletion: Completion = {
@@ -190,11 +189,12 @@ describe("OrchestratorTurnTracker", () => {
                 triggeringCompletion
             );
 
-            expect(context.current_routing?.completions).toHaveLength(1);
-            expect(context.current_routing?.completions[0].agent).toBe("agent1");
+            // With new optimization, orchestrator isn't called until turn is complete
+            // so triggering completion handling is no longer needed
+            expect(context.routing_history).toHaveLength(0);
         });
 
-        it("should complete turn when triggering completion is final", () => {
+        it("should include completed turn in history", () => {
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
 
             const triggeringCompletion: Completion = {
@@ -203,14 +203,15 @@ describe("OrchestratorTurnTracker", () => {
                 timestamp: Date.now()
             };
 
+            // First complete the turn manually
+            tracker.addCompletion(conversationId, "agent1", "Final completion");
+            
             const context = tracker.buildRoutingContext(
                 conversationId,
-                "User request",
-                triggeringCompletion
+                "User request"
             );
 
             expect(context.routing_history).toHaveLength(1);
-            expect(context.current_routing).toBeNull();
         });
     });
 

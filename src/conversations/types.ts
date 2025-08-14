@@ -75,7 +75,7 @@ export interface PhaseTransition {
 export interface OrchestratorRoutingContext {
     user_request: string;  // Original user request that started the conversation
     routing_history: RoutingEntry[];  // All past completed routing decisions
-    current_routing: RoutingEntry | null;  // Active routing (if agents working) or null (if need new routing)
+    // Note: current_routing removed - orchestrator is only invoked when ready for new routing
 }
 
 export interface RoutingEntry {

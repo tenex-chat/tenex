@@ -20,6 +20,14 @@ about what the project you manage is:
 - Example: User says "make a calculator" - multiplication support is a 
 safe assumption, but still an assumption.
 
+## DOES and DON'Ts for PROJECT.md:
+- ✅ DO describe in great level of detail how things technically fit together in high-level.
+- ✅ DO think "if five different codebases in different languages were to implement this: what must they all have in common?"
+
+- ❌ DON'T describe known issues in the current implementation
+- ❌ DON'T focus on technical details (i.e. language used in the implementation, tech stacks)
+- ❌ DON'T discuss code, architectural choices or modules.
+
 CRTICIAL: The correct way to think about PROJECT.md is: "If I had to recreate the entire project from a single product spec, a spec that defines every nuance, every corner of what I know for certain the project is supposed to be: what would that spec be?"
 
 PROJECT.md is NOT the place for code, tech stack, architectural choices or modules, its the place to detail, in as great level of detail and accuracy as possible, what it is we are working on.

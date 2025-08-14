@@ -40,12 +40,6 @@ export class OrchestratorTurnTracker {
         conversationTurns.push(turn);
         this.turns.set(conversationId, conversationTurns);
 
-        logger.info(`[OrchestratorTurnTracker] Started turn ${turnId}`, {
-            conversationId,
-            phase,
-            agents
-        });
-
         return turnId;
     }
 
@@ -151,20 +145,22 @@ export class OrchestratorTurnTracker {
 
     /**
      * Build orchestrator routing context
+     * Note: Now that orchestrator is only invoked when turns are complete,
+     * we no longer need current_routing - it would always be null
      */
     buildRoutingContext(
         conversationId: string,
         userRequest: string,
-        triggeringCompletion?: Completion
+        _triggeringCompletion?: Completion
     ): OrchestratorRoutingContext {
         const conversationTurns = this.turns.get(conversationId) || [];
         const routing_history: RoutingEntry[] = [];
-        let current_routing: RoutingEntry | null = null;
 
-        // Process all turns
+        // Process all completed turns into history
+        // Since orchestrator is only called when turns are complete,
+        // all turns should be in history
         for (const turn of conversationTurns) {
             if (turn.isCompleted) {
-                // Add to history
                 routing_history.push({
                     phase: turn.phase,
                     agents: turn.agents,
@@ -172,69 +168,15 @@ export class OrchestratorTurnTracker {
                     reason: turn.reason,
                     timestamp: turn.timestamp
                 });
-            } else {
-                // This is the current active turn
-
-                // If we have a triggering completion, check if it belongs to this turn
-                if (triggeringCompletion && turn.agents.includes(triggeringCompletion.agent)) {
-                    // Check if this completion is already recorded
-                    const alreadyRecorded = turn.completions.some(
-                        c => c.agent === triggeringCompletion.agent
-                    );
-
-                    if (!alreadyRecorded) {
-                        // Add this completion
-                        turn.completions.push(triggeringCompletion);
-
-                        // Check if turn is now complete
-                        const completedAgents = new Set(turn.completions.map(c => c.agent));
-                        if (turn.agents.every(agent => completedAgents.has(agent))) {
-                            turn.isCompleted = true;
-                            routing_history.push({
-                                phase: turn.phase,
-                                agents: turn.agents,
-                                completions: turn.completions,
-                                reason: turn.reason,
-                                timestamp: turn.timestamp
-                            });
-                            current_routing = null; // Need new routing
-                        } else {
-                            // Still waiting for other agents
-                            current_routing = {
-                                phase: turn.phase,
-                                agents: turn.agents,
-                                completions: turn.completions,
-                                reason: turn.reason,
-                                timestamp: turn.timestamp
-                            };
-                        }
-                    } else {
-                        // Completion already recorded, turn still active
-                        current_routing = {
-                            phase: turn.phase,
-                            agents: turn.agents,
-                            completions: turn.completions,
-                            reason: turn.reason,
-                            timestamp: turn.timestamp
-                        };
-                    }
-                } else {
-                    // No triggering completion or not for this turn
-                    current_routing = {
-                        phase: turn.phase,
-                        agents: turn.agents,
-                        completions: turn.completions,
-                        reason: turn.reason,
-                        timestamp: turn.timestamp
-                    };
-                }
             }
+            // Note: Incomplete turns are skipped since orchestrator won't be invoked
+            // while waiting for agents to complete
         }
 
         return {
             user_request: userRequest,
-            routing_history,
-            current_routing
+            routing_history
+            // current_routing removed - always null with new optimization
         };
     }
 

@@ -17,41 +17,28 @@ export interface CompletionOptions {
     conversationId: string;
     publisher: NostrPublisher;
     triggeringEvent?: NDKEvent;
-    conversationManager?: ConversationManager;
+    conversationManager: ConversationManager;  // Required for orchestrator turn tracking
 }
 
 /**
- * Handle agent task completion by publishing to whoever invoked this agent
+ * Handle agent task completion by always publishing to the orchestrator
  * This is the core logic extracted from the complete() tool
  */
 export async function handleAgentCompletion(options: CompletionOptions): Promise<Complete> {
-    const { response, summary, publisher, agent, conversationId, conversationManager, triggeringEvent } = options;
+    const { response, summary, publisher, agent, conversationId, conversationManager } = options;
 
     const projectContext = getProjectContext();
     const orchestratorAgent = projectContext.getProjectAgent();
 
-    // Respond to whoever p-tagged us (if available), otherwise to orchestrator
-    let respondToPubkey = orchestratorAgent.pubkey;
-    
-    // Check if triggering event has p-tags to determine who invoked us
-    if (triggeringEvent?.tags) {
-        const pTags = triggeringEvent.tags.filter(tag => tag[0] === "p");
-        // Find the first p-tag that matches our pubkey (we were p-tagged)
-        // The sender is who we should respond to
-        if (pTags.some(tag => tag[1] === agent.pubkey)) {
-            // We were p-tagged, respond to the sender
-            respondToPubkey = triggeringEvent.pubkey;
-        }
-    }
+    // Always respond to the orchestrator
+    const respondToPubkey = orchestratorAgent.pubkey;
 
-    // Track completion in orchestrator turn if conversation manager available
-    if (conversationManager) {
-        await conversationManager.addCompletionToTurn(
-            conversationId,
-            agent.slug,
-            summary || response
-        );
-    }
+    // Track completion in orchestrator turn (required for orchestrator to know when to proceed)
+    await conversationManager.addCompletionToTurn(
+        conversationId,
+        agent.slug,
+        summary || response
+    );
 
     // Publish the completion event
     await publisher.publishResponse({

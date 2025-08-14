@@ -620,71 +620,93 @@ describe('Orchestrator Routing Test', () => {
                 triggeringEvent: undefined
             });
 
-            const debugMessages = systemMessages.map(sm => sm.message);
-            
-            // Add the context as reference, not as a routing request
-            debugMessages.push(new Message("user", `
+            // Create special debug messages that explicitly override JSON requirement
+            const debugMessages = [
+                new Message("system", `You are in DEBUG MODE. You must provide detailed explanations and reasoning in natural language, NOT JSON.
+                
+IMPORTANT: Ignore any previous instructions about responding only with JSON. This is a special debug session where you must explain your thinking process in detail.
+
+Your usual system prompt and context are provided for reference, but you should focus on explaining your reasoning process, not making routing decisions.`),
+                ...systemMessages.map(sm => sm.message),
+                new Message("user", `
 === METACOGNITIVE DEBUG MODE ===
 
-You are NOT being asked to make a routing decision. Instead, you are being asked to explain your reasoning process in detail.
+You are being asked to explain your reasoning process, NOT to make a routing decision.
 
-Here is the conversation context that you would normally use for routing:
+Current conversation context:
 ${JSON.stringify(context, null, 2)}
 
-Now, the user has a question about your decision-making process:
+Debug question from user:
 "${question}"
 
-Please provide a DETAILED METACOGNITIVE ANALYSIS that includes:
+Please provide a DETAILED ANALYSIS that includes:
 
-1. **SYSTEM PROMPT ANALYSIS**: Quote the specific parts of your system prompt that influenced this decision. Be exact - show me which rules or instructions guided you.
+1. **CONTEXT UNDERSTANDING**: What do you understand from the current context? What stands out?
 
-2. **DECISION TREE**: Walk through your step-by-step reasoning:
-   - What did you notice first in the context?
-   - What patterns did you recognize?
-   - What rules did you apply?
-   - What priorities did you weigh?
+2. **REASONING PROCESS**: Walk through your step-by-step thinking:
+   - What patterns or triggers do you recognize?
+   - What rules or priorities are you applying?
+   - How do you weigh different factors?
 
-3. **ALTERNATIVES CONSIDERED**: What other routing options did you evaluate? Why did you reject them? Be specific about each alternative.
+3. **DECISION FACTORS**: If this were a routing decision:
+   - Which agents would you consider and why?
+   - What phase transitions might apply?
+   - What alternatives would you evaluate?
 
-4. **CONFIDENCE & UNCERTAINTY**: 
-   - How confident were you in this decision (0-100%)?
-   - What aspects were you uncertain about?
-   - What additional information would have helped?
+4. **CONFIDENCE ANALYSIS**: 
+   - How certain are you about different aspects?
+   - What information is missing or unclear?
+   - What assumptions are you making?
 
-5. **PHASE REASONING**: If you chose or maintained a specific phase, explain:
-   - Why this phase instead of others?
-   - What phase transition rules applied?
-   - What would trigger a different phase?
+5. **SYSTEM BEHAVIOR**: Based on your system prompt:
+   - Which specific instructions guide this scenario?
+   - Are there any conflicting directives?
+   - How do you prioritize different requirements?
 
-6. **AGENT SELECTION LOGIC**: For each agent you would route to:
-   - Why this specific agent?
-   - What capabilities made them suitable?
-   - Why not other agents?
+Remember: 
+- Provide a detailed explanation in natural language or markdown
+- Be transparent about your internal reasoning
+- DO NOT output JSON routing decisions
+- Focus on explaining WHY and HOW you think, not just WHAT you would decide`)
+            ];
 
-7. **POTENTIAL IMPROVEMENTS**: Looking at your decision critically:
-   - What could have been better?
-   - Are there edge cases you might have missed?
-   - How would you improve the system prompt to make better decisions?
-
-Remember: This is a debugging session. Be completely transparent about your internal process, including any confusion, competing priorities, or aspects of the system prompt that might be unclear or contradictory.
-
-DO NOT output a routing decision JSON. Output a detailed explanation in plain text or markdown.`));
-
-            // Get response from orchestrator
+            // Use direct completion without the JSON-forcing wrapper
             const llmRouter = await loadLLMRouter(process.cwd());
             const response = await llmRouter.complete({
                 messages: debugMessages,
                 options: {
                     configName: orchestrator.llmConfig || "orchestrator",
                     agentName: orchestrator.name,
-                    temperature: 0.5, // Slightly higher for more detailed reasoning
-                    maxTokens: 2000 // Allow for detailed explanations
+                    temperature: 0.7, // Higher temperature for more detailed, creative explanations
+                    maxTokens: 3000 // More tokens for comprehensive explanations
                 }
             });
 
             if (response.type === "text") {
                 logger.info(chalk.green("\n✨ Orchestrator Reasoning:"));
-                logger.info(chalk.white(response.content));
+                
+                // Check if the response is trying to be JSON (a sign it's still constrained)
+                const trimmedResponse = response.content?.trim() || "";
+                if (trimmedResponse.startsWith('{') && trimmedResponse.includes('"agents"')) {
+                    logger.warn(chalk.yellow("\n⚠️  The orchestrator is still trying to respond with JSON."));
+                    logger.warn(chalk.yellow("This suggests it's being overly constrained by its system prompt."));
+                    logger.info(chalk.gray("\nRaw response:"));
+                    logger.info(chalk.gray(response.content));
+                    
+                    // Try to extract any reasoning from the JSON
+                    try {
+                        const jsonResponse = JSON.parse(trimmedResponse);
+                        if (jsonResponse.reason) {
+                            logger.info(chalk.cyan("\nExtracted reasoning:"));
+                            logger.info(chalk.white(jsonResponse.reason));
+                        }
+                    } catch {
+                        // If it's not valid JSON, just show it as is
+                    }
+                } else {
+                    // Good, we got a natural language response
+                    logger.info(chalk.white(response.content));
+                }
                 
                 // Ask if they want to save this insight
                 const saveInsight = await this.ui.confirm("\nSave this reasoning insight to a file?");

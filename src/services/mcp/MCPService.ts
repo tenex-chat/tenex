@@ -91,14 +91,12 @@ export class MCPService {
     }
 
     private async startServers(mcpConfig: TenexMCP): Promise<void> {
-        const startPromises = Object.entries(mcpConfig.servers).map(async ([name, config]) => {
-            try {
-                await this.startServer(name, config);
-            } catch (error) {
+        const startPromises = Object.entries(mcpConfig.servers).map(([name, config]) => 
+            this.startServer(name, config).catch(error => {
                 logger.error(`Failed to start MCP server '${name}':`, error);
                 // Continue with other servers
-            }
-        });
+            })
+        );
 
         await Promise.all(startPromises);
     }
