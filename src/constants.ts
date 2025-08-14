@@ -7,7 +7,6 @@
  */
 export const TENEX_DIR = ".tenex" as const;
 export const CONVERSATIONS_DIR = "conversations" as const;
-export const CONTEXT_DIR = "context" as const;
 
 /**
  * File names
@@ -16,8 +15,6 @@ export const CONFIG_FILE = "config.json" as const;
 export const MCP_CONFIG_FILE = "mcp.json" as const;
 export const AGENTS_FILE = "agents.json" as const;
 export const LLMS_FILE = "llms.json" as const;
-export const PROJECT_FILE = "PROJECT.md" as const;
-export const INVENTORY_FILE = "INVENTORY.md" as const;
 
 /**
  * Default values

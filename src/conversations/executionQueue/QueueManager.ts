@@ -1,6 +1,6 @@
-import * as fs from 'fs/promises';
 import * as path from 'path';
 import { QueueEntry, QueueStatus, ExecutionQueueConfig, DEFAULT_EXECUTION_QUEUE_CONFIG, ExecutionHistory } from './types';
+import { writeJsonFile, readJsonFile, ensureDirectory, handlePersistenceError, fileExists } from '../../utils/file-persistence';
 
 export class QueueManager {
   private queue: QueueEntry[] = [];
@@ -23,7 +23,7 @@ export class QueueManager {
     if (this.config.enablePersistence) {
       // Ensure persistence directory exists
       const queueDir = path.dirname(this.queueFile);
-      await fs.mkdir(queueDir, { recursive: true });
+      await ensureDirectory(queueDir);
 
       // Load queue and history from disk
       await this.loadQueueFromDisk();
@@ -181,17 +181,16 @@ export class QueueManager {
 
   private async saveQueueToDisk(): Promise<void> {
     try {
-      await fs.writeFile(this.queueFile, JSON.stringify(this.queue, null, 2));
+      await writeJsonFile(this.queueFile, this.queue);
     } catch (error) {
-      console.error('Failed to save queue to disk:', error);
+      handlePersistenceError('save queue to disk', error);
       // Don't throw - allow operation to continue without persistence
     }
   }
 
   private async loadQueueFromDisk(): Promise<void> {
     try {
-      const data = await fs.readFile(this.queueFile, 'utf-8');
-      this.queue = JSON.parse(data);
+      this.queue = await readJsonFile<QueueEntry[]>(this.queueFile);
       
       // Validate queue entries
       this.queue = this.queue.filter(entry => 
@@ -200,10 +199,10 @@ export class QueueManager {
         typeof entry.timestamp === 'number'
       );
     } catch (error: any) {
-      if (error.code === 'ENOENT') {
+      if (!(await fileExists(this.queueFile))) {
         this.queue = []; // No queue file exists
       } else {
-        console.error('Failed to load queue from disk:', error);
+        handlePersistenceError('load queue from disk', error);
         this.queue = [];
       }
     }
@@ -211,17 +210,16 @@ export class QueueManager {
 
   private async saveHistoryToDisk(): Promise<void> {
     try {
-      await fs.writeFile(this.historyFile, JSON.stringify(this.executionHistory, null, 2));
+      await writeJsonFile(this.historyFile, this.executionHistory);
     } catch (error) {
-      console.error('Failed to save history to disk:', error);
+      handlePersistenceError('save history to disk', error);
       // Don't throw - allow operation to continue without persistence
     }
   }
 
   private async loadHistoryFromDisk(): Promise<void> {
     try {
-      const data = await fs.readFile(this.historyFile, 'utf-8');
-      this.executionHistory = JSON.parse(data);
+      this.executionHistory = await readJsonFile<ExecutionHistory[]>(this.historyFile);
       
       // Validate history entries
       this.executionHistory = this.executionHistory.filter(entry =>
@@ -235,10 +233,10 @@ export class QueueManager {
         this.executionHistory = this.executionHistory.slice(-this.config.maxHistorySize!);
       }
     } catch (error: any) {
-      if (error.code === 'ENOENT') {
+      if (!(await fileExists(this.historyFile))) {
         this.executionHistory = []; // No history file exists
       } else {
-        console.error('Failed to load history from disk:', error);
+        handlePersistenceError('load history from disk', error);
         this.executionHistory = [];
       }
     }
@@ -264,14 +262,14 @@ export class QueueManager {
   clearQueue(): void {
     this.queue = [];
     if (this.config.enablePersistence) {
-      this.saveQueueToDisk().catch(console.error);
+      this.saveQueueToDisk().catch(error => handlePersistenceError('save queue after update', error));
     }
   }
 
   clearHistory(): void {
     this.executionHistory = [];
     if (this.config.enablePersistence) {
-      this.saveHistoryToDisk().catch(console.error);
+      this.saveHistoryToDisk().catch(error => handlePersistenceError('save history after update', error));
     }
   }
 }

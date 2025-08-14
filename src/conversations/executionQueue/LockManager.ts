@@ -1,6 +1,7 @@
-import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import { ExecutionLock, PersistedLock, ExecutionQueueConfig, DEFAULT_EXECUTION_QUEUE_CONFIG } from './types';
+import { writeJsonFile, readJsonFile, ensureDirectory, handlePersistenceError, fileExists } from '../../utils/file-persistence';
 
 export class LockManager {
   private currentLock: ExecutionLock | null = null;
@@ -20,7 +21,7 @@ export class LockManager {
     if (this.config.enablePersistence) {
       // Ensure persistence directory exists
       const lockDir = path.dirname(this.lockFile);
-      await fs.mkdir(lockDir, { recursive: true });
+      await ensureDirectory(lockDir);
 
       // Try to load existing lock from disk
       this.currentLock = await this.loadLockFromDisk();
@@ -160,17 +161,16 @@ export class LockManager {
     };
 
     try {
-      await fs.writeFile(this.lockFile, JSON.stringify(persistedLock, null, 2));
+      await writeJsonFile(this.lockFile, persistedLock);
     } catch (error) {
-      console.error('Failed to save lock to disk:', error);
+      handlePersistenceError('save lock to disk', error);
       // Don't throw - allow operation to continue without persistence
     }
   }
 
   private async loadLockFromDisk(): Promise<ExecutionLock | null> {
     try {
-      const data = await fs.readFile(this.lockFile, 'utf-8');
-      const persistedLock: PersistedLock = JSON.parse(data);
+      const persistedLock = await readJsonFile<PersistedLock>(this.lockFile);
 
       // Verify this lock belongs to the current project
       if (persistedLock.projectPath !== this.projectPath) {
@@ -194,10 +194,10 @@ export class LockManager {
 
       return lock;
     } catch (error: any) {
-      if (error.code === 'ENOENT') {
+      if (!(await fileExists(this.lockFile))) {
         return null; // No lock file exists
       }
-      console.error('Failed to load lock from disk:', error);
+      handlePersistenceError('load lock from disk', error);
       return null;
     }
   }
@@ -207,7 +207,7 @@ export class LockManager {
       await fs.unlink(this.lockFile);
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
-        console.error('Failed to delete lock file:', error);
+        handlePersistenceError('delete lock file', error);
       }
       // Don't throw - allow operation to continue
     }

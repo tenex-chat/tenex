@@ -1,7 +1,8 @@
-import { NDKEvent } from '@nostr-dev-kit/ndk';
 import { ExecutionLock, QueueEntry, ForceReleaseRequest } from './types';
 import { NostrEventService } from '../../nostr/NostrEventService';
 import { EVENT_KINDS } from '../../llm/types';
+import { createNDKEvent } from '../../nostr/event-builder';
+import { handlePersistenceError } from '../../utils/file-persistence';
 
 export class ExecutionEventPublisher {
   constructor(
@@ -16,11 +17,11 @@ export class ExecutionEventPublisher {
     estimatedWait: number
   ): Promise<void> {
     try {
-      const event = new NDKEvent();
-      event.kind = EVENT_KINDS.PROJECT_STATUS;
-      event.content = ''; // No JSON - keeping empty as per specification
-      event.pubkey = this.projectPubkey;
-      event.created_at = Math.floor(Date.now() / 1000);
+      const event = createNDKEvent(
+        EVENT_KINDS.PROJECT_STATUS,
+        '', // No JSON - keeping empty as per specification
+        this.projectPubkey
+      );
 
       // Build tags
       const tags: string[][] = [];
@@ -77,18 +78,18 @@ export class ExecutionEventPublisher {
       // Sign and publish
       await this.nostrService.signAndPublishEvent(event);
     } catch (error) {
-      console.error('Failed to publish execution status update:', error);
+      handlePersistenceError('publish execution status update', error);
       // Don't throw - status updates are non-critical
     }
   }
 
   async publishForceReleaseEvent(request: ForceReleaseRequest): Promise<void> {
     try {
-      const event = new NDKEvent();
-      event.kind = EVENT_KINDS.FORCE_RELEASE; // 24019
-      event.content = request.reason; // Simple human-readable reason, no JSON
-      event.pubkey = request.releasedBy;
-      event.created_at = Math.floor(Date.now() / 1000);
+      const event = createNDKEvent(
+        EVENT_KINDS.FORCE_RELEASE, // 24019
+        request.reason, // Simple human-readable reason, no JSON
+        request.releasedBy
+      );
 
       // Build tags
       const tags: string[][] = [];
@@ -107,7 +108,7 @@ export class ExecutionEventPublisher {
       // Sign and publish
       await this.nostrService.signAndPublishEvent(event);
     } catch (error) {
-      console.error('Failed to publish force release event:', error);
+      handlePersistenceError('publish force release event', error);
       // Don't throw - event publishing is non-critical
     }
   }
@@ -119,11 +120,11 @@ export class ExecutionEventPublisher {
     details?: Record<string, any>
   ): Promise<void> {
     try {
-      const event = new NDKEvent();
-      event.kind = EVENT_KINDS.PROJECT_STATUS;
-      event.content = ''; // No JSON - empty as per specification
-      event.pubkey = this.projectPubkey;
-      event.created_at = Math.floor(Date.now() / 1000);
+      const event = createNDKEvent(
+        EVENT_KINDS.PROJECT_STATUS,
+        '', // No JSON - empty as per specification
+        this.projectPubkey
+      );
 
       // Build tags
       const tags: string[][] = [];
@@ -150,7 +151,7 @@ export class ExecutionEventPublisher {
       // Sign and publish
       await this.nostrService.signAndPublishEvent(event);
     } catch (error) {
-      console.error(`Failed to publish queue event ${type}:`, error);
+      handlePersistenceError(`publish queue event ${type}`, error);
       // Don't throw - event publishing is non-critical
     }
   }
@@ -160,11 +161,11 @@ export class ExecutionEventPublisher {
     remainingMs: number
   ): Promise<void> {
     try {
-      const event = new NDKEvent();
-      event.kind = EVENT_KINDS.PROJECT_STATUS;
-      event.content = ''; // No content - data in tags only
-      event.pubkey = this.projectPubkey;
-      event.created_at = Math.floor(Date.now() / 1000);
+      const event = createNDKEvent(
+        EVENT_KINDS.PROJECT_STATUS,
+        '', // No content - data in tags only
+        this.projectPubkey
+      );
 
       // Build tags
       const tags: string[][] = [];
@@ -182,7 +183,7 @@ export class ExecutionEventPublisher {
       // Sign and publish
       await this.nostrService.signAndPublishEvent(event);
     } catch (error) {
-      console.error('Failed to publish timeout warning:', error);
+      handlePersistenceError('publish timeout warning', error);
       // Don't throw - warnings are non-critical
     }
   }
