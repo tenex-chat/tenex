@@ -31,7 +31,6 @@ export function getRelayUrls(): string[] {
         
         // If after filtering we have no valid URLs, return defaults
         if (urls.length === 0) {
-            console.warn("No valid WebSocket URLs found in RELAYS environment variable, using defaults");
             return DEFAULT_RELAY_URLS;
         }
         return urls;

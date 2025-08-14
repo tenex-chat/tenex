@@ -4,7 +4,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import type { Tool } from "@/tools/types";
-import { formatAnyError } from "@/utils/error-formatter";
+import { handleCliError } from "@/utils/cli-error";
 import { logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
@@ -152,8 +152,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         logInfo("System prompt displayed successfully");
         process.exit(0);
     } catch (err) {
-        const errorMessage = formatAnyError(err);
-        logError(`Failed to generate system prompt: ${errorMessage}`);
-        process.exit(1);
+        handleCliError(err, "Failed to generate system prompt");
     }
 }

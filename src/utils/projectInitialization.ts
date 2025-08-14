@@ -2,6 +2,7 @@ import { ProjectManager } from "@/daemon/ProjectManager";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { isProjectContextInitialized } from "@/services";
 import { logger } from "@/utils/logger";
+import { handleCliError } from "@/utils/cli-error";
 
 /**
  * Initialize project context if not already initialized
@@ -30,12 +31,14 @@ export async function ensureProjectInitialized(projectPath: string): Promise<voi
     } catch (error: any) {
         // Check if this is a missing project configuration error
         if (error?.message?.includes("Project configuration missing projectNaddr")) {
-            console.error("\n❌ Not in a TENEX project directory\n");
-            console.error("This command must be run from within a TENEX project.");
-            console.error("\nTo initialize a new project, run:");
-            console.error("  tenex init\n");
-            console.error("Or navigate to an existing TENEX project directory.\n");
-            process.exit(1);
+            const message = [
+                "\n❌ Not in a TENEX project directory\n",
+                "This command must be run from within a TENEX project.",
+                "\nTo initialize a new project, run:",
+                "  tenex init\n",
+                "Or navigate to an existing TENEX project directory.\n"
+            ].join("\n");
+            handleCliError(new Error(message));
         }
         throw error;
     }

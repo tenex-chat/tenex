@@ -7,8 +7,9 @@ import { loadLLMRouter } from "@/llm";
 import { getNDK, shutdownNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { handleCliError } from "@/utils/cli-error";
+import { formatAnyError } from "@/utils/error-formatter";
 import { setupGracefulShutdown } from "@/utils/process";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -31,14 +32,13 @@ export const projectRunCommand = new Command("run")
 
             // Start the project listener
             await runProjectListener(projectPath, ndk);
-        } catch (err: any) {
+        } catch (err) {
             // Don't double-log project configuration errors
             // as they're already handled in ensureProjectInitialized
-            if (!err?.message?.includes("Project configuration missing projectNaddr")) {
-                const errorMessage = formatAnyError(err);
-                logger.error(`Failed to start project: ${errorMessage}`);
+            const error = err as Error;
+            if (!error?.message?.includes("Project configuration missing projectNaddr")) {
+                handleCliError(error, "Failed to start project");
             }
-            process.exit(1);
         }
     });
 
