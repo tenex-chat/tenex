@@ -1,6 +1,7 @@
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import type { NDKMCPTool } from "@/events/NDKMCPTool";
+import type { MCPServerConfig } from "@/services/config/types";
 
 /**
  * Installs an MCP server from an NDKMCPTool event into a project's configuration

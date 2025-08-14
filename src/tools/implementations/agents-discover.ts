@@ -61,7 +61,7 @@ export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDi
     parameters: createZodSchema(agentsDiscoverSchema) as ParameterSchema<z.input<typeof agentsDiscoverSchema>>,
     execute: async (
         input: Validated<z.input<typeof agentsDiscoverSchema>>,
-        context: ExecutionContext
+        _context: ExecutionContext
     ): Promise<Result<ToolError, AgentsDiscoverOutput>> => {
         try {
             const { searchText, limit = 50 } = input.value;

@@ -1,7 +1,6 @@
 import type { LogModule } from "@/utils/logger";
 import { logInfo } from "@/utils/logger";
-import type { TracingContext, TracingLogger } from "@/tracing";
-import { createTracingLogger } from "@/tracing";
+import type { TracingContext } from "@/tracing";
 import { formatDuration } from "@/utils/formatting";
 import chalk from "chalk";
 import type { Phase } from "@/conversations/phases";
@@ -29,14 +28,12 @@ export type LogEvent = {
  * Unified execution logger for structured event logging
  */
 export class ExecutionLogger {
-    private tracingLogger: TracingLogger;
     private startTimes: Map<string, number> = new Map();
 
     constructor(
         private context: TracingContext,
         private module: LogModule = "agent"
     ) {
-        this.tracingLogger = createTracingLogger(context, module);
     }
 
     /**
@@ -44,7 +41,6 @@ export class ExecutionLogger {
      */
     updateContext(context: TracingContext): void {
         this.context = context;
-        this.tracingLogger = createTracingLogger(context, this.module);
     }
 
     /**

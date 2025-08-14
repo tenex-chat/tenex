@@ -1,6 +1,5 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr";
-import { getProjectContext } from "@/services/ProjectContext";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -70,8 +69,6 @@ The tool will return both the summary and detailed version (if available) of the
                 },
             };
         }
-
-        const _projectCtx = getProjectContext();
 
         try {
             // Build filter to find lessons by title for this agent

@@ -11,8 +11,6 @@ import { logger } from "@/utils/logger";
  * Proxy handler that intercepts and fixes tool call arguments
  */
 class SafeArgumentsHandler implements ProxyHandler<any> {
-    constructor(target: any) {}
-
     get(target: any, prop: string | symbol, receiver: any): any {
         const value = Reflect.get(target, prop, receiver);
         
@@ -85,5 +83,5 @@ class SafeArgumentsHandler implements ProxyHandler<any> {
  * Wrap an LLM engine to handle empty arguments safely
  */
 export function wrapWithSafeArguments<T>(engine: T): T {
-    return new Proxy(engine, new SafeArgumentsHandler(engine));
+    return new Proxy(engine, new SafeArgumentsHandler());
 }

@@ -174,7 +174,6 @@ export class OrchestratorTurnTracker {
                 });
             } else {
                 // This is the current active turn
-                let updatedTurn = turn;
 
                 // If we have a triggering completion, check if it belongs to this turn
                 if (triggeringCompletion && turn.agents.includes(triggeringCompletion.agent)) {

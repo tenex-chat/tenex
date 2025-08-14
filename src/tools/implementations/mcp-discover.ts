@@ -64,7 +64,7 @@ export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOut
   parameters: createZodSchema(mcpDiscoverSchema) as ParameterSchema<z.input<typeof mcpDiscoverSchema>>,
   execute: async (
     input: Validated<z.input<typeof mcpDiscoverSchema>>,
-    context: ExecutionContext
+    _context: ExecutionContext
   ): Promise<Result<ToolError, McpDiscoverOutput>> => {
     try {
       const { searchText, limit = 50 } = input.value;

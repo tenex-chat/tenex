@@ -104,7 +104,7 @@ export class ToolPlugin extends Plugin {
     }
 
     async execute(
-        context: PluginExecutionContext,
+        _context: PluginExecutionContext,
         parameters: Record<string, unknown>
     ): Promise<unknown> {
         const startTime = Date.now();

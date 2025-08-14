@@ -13,7 +13,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class TypingIndicatorManager {
     private static readonly MINIMUM_DURATION_MS = 5000; // 5 seconds
-    private static readonly DEBOUNCE_DELAY_MS = 200; // 200ms debounce for rapid messages
     private static readonly MAX_RETRY_ATTEMPTS = 3;
     private static readonly RETRY_DELAY_MS = 1000; // 1 second between retries
     

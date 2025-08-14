@@ -93,7 +93,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         );
 
         // We'll process if there are any changes to agents OR MCP tools
-        const _hasAgentChanges = newAgentEventIds.length > 0 || agentsToRemove.length > 0;
         
         if (newAgentEventIds.length > 0) {
             logger.info(`Found ${newAgentEventIds.length} new agent(s) to add`);

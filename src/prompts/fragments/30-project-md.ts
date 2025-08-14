@@ -52,7 +52,7 @@ ${content}
 </PROJECT.md>`;
     },
 
-    validateArgs: (args): args is ProjectMdArgs => {
+    validateArgs: (_args): _args is ProjectMdArgs => {
         return true;
     },
     expectedArgs: "{ projectPath?: string, currentAgent?: { id: string, slug?: string } }",

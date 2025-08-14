@@ -22,7 +22,6 @@ import type { ExecutionQueueManager } from "../executionQueue";
 import type { TracingContext } from "@/tracing";
 import { createTracingContext, createPhaseExecutionContext } from "@/tracing";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
-import { isEventFromUser } from "@/nostr/utils";
 import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/phaseInstructionsBuilder";
 import { logger } from "@/utils/logger";
 import { ensureExecutionTimeInitialized } from "../executionTime";
@@ -37,7 +36,6 @@ export class ConversationCoordinator {
     private phaseManager: PhaseManager;
     private eventProcessor: ConversationEventProcessor;
     private turnTracker: OrchestratorTurnTracker;
-    private agentResolver: IAgentResolver;
     private messageBuilder: MessageBuilder;
     
     // Context management
@@ -50,7 +48,7 @@ export class ConversationCoordinator {
         phaseManager: PhaseManager,
         eventProcessor: ConversationEventProcessor,
         turnTracker: OrchestratorTurnTracker,
-        agentResolver: IAgentResolver,
+        _agentResolver: IAgentResolver,
         executionQueueManager?: ExecutionQueueManager
     ) {
         this.store = store;
@@ -58,7 +56,6 @@ export class ConversationCoordinator {
         this.phaseManager = phaseManager;
         this.eventProcessor = eventProcessor;
         this.turnTracker = turnTracker;
-        this.agentResolver = agentResolver;
         this.messageBuilder = new MessageBuilder();
 
         // Setup queue listeners if available
@@ -671,11 +668,11 @@ export class ConversationCoordinator {
                     // Log timeout warning using execution logger
                     const executionLogger = createExecutionLogger(tracingContext, "conversation");
                     executionLogger.logEvent({
-                        type: "timeout_warning",
+                        type: "execution_start",
                         timestamp: new Date(),
                         conversationId,
-                        narrative: warningMessage,
-                        remainingMs
+                        agent: "system",
+                        narrative: warningMessage
                     });
                 }
             }

@@ -29,13 +29,13 @@ export class EventHandler {
     constructor(
         private projectPath: string,
         private llmService: LLMService,
-        private ndk: NDK
+        _ndk: NDK
     ) {}
 
     async initialize(): Promise<void> {
         // Initialize components directly
         this.conversationManager = new ConversationManager(this.projectPath);
-        this.agentExecutor = new AgentExecutor(this.llmService, this.ndk, this.conversationManager);
+        this.agentExecutor = new AgentExecutor(this.llmService, this.conversationManager);
 
         // Initialize components
         await this.conversationManager.initialize();

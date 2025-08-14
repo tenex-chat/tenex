@@ -13,7 +13,6 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { ConversationManager } from "@/conversations/ConversationManager";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
 import { loadLLMRouter } from "@/llm";
-import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -55,10 +54,9 @@ export class OrchestratorDebugger {
         }
         
         const projectPath = process.cwd();
-        const llmRouter = await loadLLMRouter(projectPath);
+        await loadLLMRouter(projectPath);
         this.conversationManager = new ConversationManager(projectPath);
-        // Initialize agent executor for conversation manager
-        new AgentExecutor(llmRouter, ndk, this.conversationManager);
+        // Note: AgentExecutor instance not needed here, removed unused initialization
     }
 
     async run(): Promise<void> {
@@ -391,7 +389,7 @@ export class OrchestratorDebugger {
                 },
                 null,
                 null
-            );
+            ) as { phase?: Phase; agents: string[]; reason: string };
 
             // Display the decision
             logger.info(chalk.green("\n✨ Routing Decision:"));
@@ -412,7 +410,7 @@ export class OrchestratorDebugger {
                 
                 // Update phase if changed
                 if (decision.phase && decision.phase !== this.state.phase) {
-                    this.state.phase = decision.phase as Phase;
+                    this.state.phase = decision.phase;
                     logger.info(chalk.green(`✓ Phase changed to ${decision.phase}`));
                 }
                 

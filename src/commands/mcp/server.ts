@@ -411,7 +411,7 @@ export const serverCommand = new Command("server")
 
                     try {
                         // Create LessonService instance
-                        const lessonService = new LessonService(ndk, agent, project);
+                        const lessonService = new LessonService(ndk, project);
                         
                         // Use LessonService to create the lesson
                         const result = await lessonService.createLesson(
@@ -483,7 +483,7 @@ export const serverCommand = new Command("server")
                         });
 
                         // Create LessonService instance
-                        const lessonService = new LessonService(ndk, agent, project);
+                        const lessonService = new LessonService(ndk, project);
                         
                         // Use LessonService to fetch lessons
                         const lessons = await lessonService.getLessons({

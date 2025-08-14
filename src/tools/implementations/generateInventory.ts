@@ -25,7 +25,7 @@ export const generateInventoryTool: Tool<GenerateInventoryInput, GenerateInvento
 
     parameters: createZodSchema(generateInventorySchema),
 
-    execute: async (input, context) => {
+    execute: async (_input, context) => {
         logger.info("Agent requesting inventory generation", {
             projectPath: context.projectPath,
         });

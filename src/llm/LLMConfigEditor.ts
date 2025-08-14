@@ -352,7 +352,7 @@ export class LLMConfigEditor {
         }
     }
 
-    private async editConfigName(config: LLMConfigWithName, oldName: string, llmsConfig: TenexLLMs): Promise<void> {
+    private async editConfigName(_config: LLMConfigWithName, oldName: string, llmsConfig: TenexLLMs): Promise<void> {
         const newName = await this.ui.promptNewConfigName(oldName, llmsConfig.configurations);
 
         if (newName !== oldName) {

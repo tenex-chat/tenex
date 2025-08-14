@@ -105,15 +105,6 @@ export class LLMCallLogger {
         return `${configKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
 
-    private calculateTokensPerSecond(
-        usage?: { completionTokens?: number },
-        durationMs?: number
-    ): number | undefined {
-        if (!usage?.completionTokens || !durationMs || durationMs === 0) {
-            return undefined;
-        }
-        return Math.round((usage.completionTokens / durationMs) * 1000);
-    }
 
     async logLLMCall(
         configKey: string,

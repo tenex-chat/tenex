@@ -39,7 +39,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
     parameters: createZodSchema(agentsHireSchema),
     execute: async (
         input: Validated<AgentsHireInput>,
-        context: ExecutionContext
+        _context: ExecutionContext
     ): Promise<Result<ToolError, AgentsHireOutput>> => {
         try {
             const { eventId, slug } = input.value;

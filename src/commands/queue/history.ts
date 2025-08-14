@@ -3,7 +3,6 @@ import { ensureProjectInitialized } from '@/utils/projectInitialization';
 import { logger } from '@/utils/logger';
 import chalk from 'chalk';
 import { format } from 'date-fns';
-import Table from 'cli-table3';
 
 interface HistoryOptions {
   limit?: number;

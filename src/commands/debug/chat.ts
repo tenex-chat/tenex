@@ -9,7 +9,7 @@ import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { createAgentAwareLLMService, loadLLMRouter } from "@/llm";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { getNDK, initNDK } from "@/nostr/ndkClient";
+import { initNDK } from "@/nostr/ndkClient";
 import { PromptBuilder } from "@/prompts";
 import { getProjectContext } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -104,13 +104,12 @@ export async function runDebugChat(
 
         // Initialize NDK for AgentExecutor
         await initNDK();
-        const ndk = getNDK();
 
         // Create agent-aware LLM service that routes based on agent's llmConfig
         const llmService = createAgentAwareLLMService(llmRouter, agent.name);
 
         // Initialize AgentExecutor
-        const agentExecutor = new AgentExecutor(llmService, ndk, _conversationManager);
+        const agentExecutor = new AgentExecutor(llmService, _conversationManager);
 
         // Track messages separately for interactive mode
         const messages: Array<{ role: string; content: string }> = [];

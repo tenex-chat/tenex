@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { logger, logError } from "@/utils/logger";
+import { logError } from "@/utils/logger";
 import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
 import { Command } from "commander";
