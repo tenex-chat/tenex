@@ -34,7 +34,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 export class AgentExecutor {
     constructor(
         private llmService: LLMService,
-        private ndk: NDK,
+        ndk: NDK,
         private conversationManager: ConversationManager
     ) {}
 

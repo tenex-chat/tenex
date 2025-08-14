@@ -1,6 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Phase } from "./phases";
-import type { AgentConversationContext } from "./AgentConversationContext";
 
 // Simplified agent state to track what an agent has seen
 export interface AgentState {

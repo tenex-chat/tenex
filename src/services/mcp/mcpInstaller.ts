@@ -1,5 +1,4 @@
 import { configService } from "@/services/ConfigService";
-import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import type { NDKMCPTool } from "@/events/NDKMCPTool";
 

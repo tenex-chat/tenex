@@ -33,7 +33,7 @@ export class ExecutionQueueManager extends EventEmitter {
   private initialized = false;
 
   constructor(
-    private projectPath: string,
+    projectPath: string,
     private projectPubkey?: string,
     private projectIdentifier?: string,
     private nostrService?: NostrEventService,

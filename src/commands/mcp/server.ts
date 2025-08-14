@@ -99,7 +99,7 @@ const ToolsCallRequestSchema = z.object({
 class LessonService {
     constructor(
         private ndk: NDK,
-        private agent: AgentInstance | null,
+        agent: AgentInstance | null,
         private project: NDKEvent | null
     ) {}
 

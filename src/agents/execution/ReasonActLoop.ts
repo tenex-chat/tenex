@@ -28,7 +28,7 @@ export class ReasonActLoop implements ExecutionBackend {
 
     constructor(
         private llmService: LLMService,
-        private conversationManager: ConversationManager
+        _conversationManager: ConversationManager
     ) {}
 
     /**

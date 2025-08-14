@@ -31,7 +31,7 @@ export class PhaseManager {
     /**
      * Check if a phase transition is valid
      */
-    canTransition(from: Phase, to: Phase): boolean {
+    canTransition(_from: Phase, _to: Phase): boolean {
         // For now, allow all phase transitions as the system is flexible
         // Each phase can transition to any other phase based on conversation needs
         return true;

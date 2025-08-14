@@ -213,7 +213,7 @@ export class OrchestratorDebugUI {
         
         // Add separator if we added priority items
         if (choices.length > 0) {
-            choices.push({ type: 'separator', value: '', line: "── Other Actions ──" });
+            choices.push({ type: 'separator', value: '── Other Actions ──' });
         }
         
         // Secondary actions based on state
@@ -279,7 +279,7 @@ export class OrchestratorDebugUI {
         });
         
         // Utility actions
-        choices.push({ type: 'separator', value: '', line: "── Utilities ──" });
+        choices.push({ type: 'separator', value: '── Utilities ──' });
         
         choices.push({ 
             name: "[G] List Agents", 
@@ -307,7 +307,7 @@ export class OrchestratorDebugUI {
             short: "C"
         });
         
-        choices.push({ type: 'separator', value: '', line: "──────────" });
+        choices.push({ type: 'separator', value: '──────────' });
         choices.push({ 
             name: "[X] Exit", 
             value: "exit",
@@ -595,7 +595,7 @@ export class OrchestratorDebugUI {
         return edited;
     }
 
-    async promptOrchestratorTurn(agents: AgentInstance[], currentPhase: Phase): Promise<OrchestratorTurn> {
+    async promptOrchestratorTurn(_agents: AgentInstance[], currentPhase: Phase): Promise<OrchestratorTurn> {
         const { agentSlugs } = await inquirer.prompt([
             {
                 type: "input",

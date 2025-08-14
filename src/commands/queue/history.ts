@@ -2,7 +2,7 @@ import { getProjectContext } from '@/services';
 import { ensureProjectInitialized } from '@/utils/projectInitialization';
 import { logger } from '@/utils/logger';
 import chalk from 'chalk';
-import { formatDistanceToNow, format } from 'date-fns';
+import { format } from 'date-fns';
 import Table from 'cli-table3';
 
 interface HistoryOptions {
@@ -10,7 +10,7 @@ interface HistoryOptions {
   format?: 'table' | 'json' | 'csv';
 }
 
-export async function showExecutionHistory(options: HistoryOptions = {}): Promise<void> {
+export async function showExecutionHistory(_options: HistoryOptions = {}): Promise<void> {
   try {
     // Initialize project context first
     await ensureProjectInitialized(process.cwd());
@@ -72,7 +72,7 @@ export async function showExecutionHistory(options: HistoryOptions = {}): Promis
   }
 }
 
-function formatHistory(history: any[], outputFormat: string): void {
+function _formatHistory(history: any[], outputFormat: string): void {
   switch (outputFormat) {
     case 'json':
       console.log(JSON.stringify(history, null, 2));

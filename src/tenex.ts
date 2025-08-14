@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { logger, logError } from "@/utils/logger";
+import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
 import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
@@ -102,7 +103,6 @@ export async function main(): Promise<void> {
 // Only run if called directly (not imported)
 if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((error) => {
-        logger.error("Fatal error in TENEX CLI", error);
-        process.exit(1);
+        handleCliError(error, "Fatal error in TENEX CLI");
     });
 }

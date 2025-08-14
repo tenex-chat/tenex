@@ -10,7 +10,7 @@ export class QueueManager {
   private config: ExecutionQueueConfig;
 
   constructor(
-    private projectPath: string,
+    projectPath: string,
     config: Partial<ExecutionQueueConfig> = {}
   ) {
     this.config = { ...DEFAULT_EXECUTION_QUEUE_CONFIG, ...config };

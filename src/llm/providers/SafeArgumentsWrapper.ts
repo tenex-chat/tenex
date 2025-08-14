@@ -11,7 +11,7 @@ import { logger } from "@/utils/logger";
  * Proxy handler that intercepts and fixes tool call arguments
  */
 class SafeArgumentsHandler implements ProxyHandler<any> {
-    constructor(private target: any) {}
+    constructor(target: any) {}
 
     get(target: any, prop: string | symbol, receiver: any): any {
         const value = Reflect.get(target, prop, receiver);

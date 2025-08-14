@@ -17,14 +17,12 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";
 import { formatAnyError } from "@/utils/error-formatter";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ProjectManager } from "@/daemon/ProjectManager";
 
 export class OrchestratorDebugger {
     private state: OrchestratorDebugState;
     private ui: OrchestratorDebugUI;
     private conversationManager?: ConversationManager;
-    private agentExecutor?: AgentExecutor;
     private lastAction?: DebugAction;
 
     constructor() {
@@ -59,7 +57,8 @@ export class OrchestratorDebugger {
         const projectPath = process.cwd();
         const llmRouter = await loadLLMRouter(projectPath);
         this.conversationManager = new ConversationManager(projectPath);
-        this.agentExecutor = new AgentExecutor(llmRouter, ndk, this.conversationManager);
+        // Initialize agent executor for conversation manager
+        new AgentExecutor(llmRouter, ndk, this.conversationManager);
     }
 
     async run(): Promise<void> {
@@ -365,13 +364,7 @@ export class OrchestratorDebugger {
                 return;
             }
 
-            // Create a mock triggering event
-            const _mockEvent: Partial<NDKEvent> = {
-                content: this.state.userRequest,
-                kind: 14,
-                tags: [["t", "user"]],
-                created_at: Math.floor(Date.now() / 1000)
-            };
+            // Mock event would be created here if needed for debugging
 
             // Run the orchestrator's routing backend
             logger.info(chalk.cyan("\n🚀 Running orchestrator..."));
@@ -388,7 +381,7 @@ export class OrchestratorDebugger {
             const messages = await this.buildOrchestratorMessages(context);
             
             // Get routing decision
-            const getRoutingDecision = (routingBackend as unknown as { getRoutingDecision: Function }).getRoutingDecision.bind(routingBackend);
+            const getRoutingDecision = (routingBackend as unknown as { getRoutingDecision: (...args: unknown[]) => unknown }).getRoutingDecision.bind(routingBackend);
             const decision = await getRoutingDecision(
                 messages,
                 { 

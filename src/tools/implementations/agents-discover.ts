@@ -11,7 +11,6 @@ const agentsDiscoverSchema = z.object({
     limit: z.coerce.number().default(50).describe("Maximum number of agents to return"),
 });
 
-type AgentsDiscoverInput = z.infer<typeof agentsDiscoverSchema>;
 
 // Define the output type - returns markdown formatted string
 interface AgentsDiscoverOutput {

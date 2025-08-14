@@ -19,7 +19,6 @@ import {
     OrchestratorTurnTracker,
     ProjectAgentResolver,
     ConversationCoordinator,
-    type IConversationPersistenceService
 } from "./services";
 
 /**

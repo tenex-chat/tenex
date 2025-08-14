@@ -71,7 +71,7 @@ The tool will return both the summary and detailed version (if available) of the
             };
         }
 
-        const projectCtx = getProjectContext();
+        const _projectCtx = getProjectContext();
 
         try {
             // Build filter to find lessons by title for this agent

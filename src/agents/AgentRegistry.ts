@@ -23,7 +23,6 @@ import { isToollessBackend } from "./utils";
 export class AgentRegistry {
     private agents: Map<string, AgentInstance> = new Map();
     private agentsByPubkey: Map<string, AgentInstance> = new Map();
-    private registryPath: string;
     private agentsDir: string;
     private registry: TenexAgents = {};
     private globalRegistry: TenexAgents = {};
@@ -41,10 +40,8 @@ export class AgentRegistry {
         this.isGlobal = isGlobal;
         // If basePath already includes .tenex, use it as is
         if (basePath.endsWith(".tenex")) {
-            this.registryPath = path.join(basePath, "agents.json");
             this.agentsDir = path.join(basePath, "agents");
         } else {
-            this.registryPath = path.join(basePath, ".tenex", "agents.json");
             this.agentsDir = path.join(basePath, ".tenex", "agents");
         }
     }
