@@ -81,24 +81,4 @@ export class ProjectDisplay {
         }
     }
 
-    private displayAgent(eventId: string, agents: Map<string, AgentInstance>): void {
-        // Find agent by eventId
-        const agentEntry = Array.from(agents.entries()).find(
-            ([, agent]) => agent.eventId === eventId
-        );
-
-        if (!agentEntry) {
-            logInfo(chalk.red(`No agent instance found for event: ${eventId}`));
-            return;
-        }
-
-        const [_agentKey, agent] = agentEntry;
-
-        // Display agent information with instance pubkey
-        logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
-        logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
-        logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
-        logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
-        logInfo(chalk.gray("Cached:      ") + chalk.green(`✓ ${eventId}.json`));
-    }
 }

@@ -11,7 +11,6 @@ import {
   ForceReleaseRequest,
   ExecutionHistory,
   ExecutionLock,
-  QueueEntry,
   QueueStatus
 } from './types';
 
@@ -35,8 +34,8 @@ export class ExecutionQueueManager extends EventEmitter {
   constructor(
     projectPath: string,
     private projectPubkey?: string,
-    private projectIdentifier?: string,
-    private nostrService?: NostrEventService,
+    projectIdentifier?: string,
+    nostrService?: NostrEventService,
     config: Partial<ExecutionQueueConfig> = {}
   ) {
     super();
@@ -51,7 +50,6 @@ export class ExecutionQueueManager extends EventEmitter {
     if (nostrService && projectPubkey && projectIdentifier) {
       this.eventPublisher = new ExecutionEventPublisher(
         nostrService,
-        projectPath,
         projectPubkey,
         projectIdentifier
       );

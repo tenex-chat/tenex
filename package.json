@@ -42,8 +42,7 @@
         "typecheck": "tsc --noEmit",
         "lint": "eslint src --ext .ts,.tsx",
         "lint:fix": "eslint src --ext .ts,.tsx --fix",
-        "clean": "rm -rf dist node_modules bun.lockb coverage",
-        "llm-log": "bun run scripts/llm-log.ts"
+        "clean": "rm -rf dist node_modules bun.lockb coverage"
     },
     "engines": {
         "node": ">=18.0.0"

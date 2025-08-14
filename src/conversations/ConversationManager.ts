@@ -3,7 +3,6 @@ import type { Phase } from "@/conversations/phases";
 import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, OrchestratorRoutingContext } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
 import type { TracingContext } from "@/tracing";
-import { logger } from "@/utils/logger";
 import { TENEX_DIR, CONVERSATIONS_DIR } from "@/constants";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { FileSystemAdapter } from "./persistence";
@@ -221,8 +220,4 @@ export class ConversationManager {
         );
     }
 
-    // Stub method kept for compatibility
-    private setupQueueEventListeners(): void {
-        // Now handled internally by the coordinator
-    }
 }

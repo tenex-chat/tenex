@@ -20,9 +20,9 @@ import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import type { TracingContext } from "@/tracing";
-import { createTracingContext, createPhaseExecutionContext, createTracingLogger } from "@/tracing";
+import { createTracingContext, createPhaseExecutionContext } from "@/tracing";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
-import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
+import { isEventFromUser } from "@/nostr/utils";
 import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/phaseInstructionsBuilder";
 import { logger } from "@/utils/logger";
 import { ensureExecutionTimeInitialized } from "../executionTime";
@@ -668,9 +668,15 @@ export class ConversationCoordinator {
                         `Time remaining: ${minutes} minutes\n\n` +
                         `The execution will be automatically terminated if not completed soon.`;
                     
-                    const tracingLogger = createTracingLogger(tracingContext, "conversation");
-                    // Log as a normal warning since timeout_warning is not a defined event type
-                    tracingLogger.warning(warningMessage, { remainingMs });
+                    // Log timeout warning using execution logger
+                    const executionLogger = createExecutionLogger(tracingContext, "conversation");
+                    executionLogger.logEvent({
+                        type: "timeout_warning",
+                        timestamp: new Date(),
+                        conversationId,
+                        narrative: warningMessage,
+                        remainingMs
+                    });
                 }
             }
         );

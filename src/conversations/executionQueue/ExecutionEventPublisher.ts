@@ -6,7 +6,6 @@ import { EVENT_KINDS } from '../../llm/types';
 export class ExecutionEventPublisher {
   constructor(
     private nostrService: NostrEventService,
-    projectPath: string,
     private projectPubkey: string,
     private projectIdentifier: string
   ) {}

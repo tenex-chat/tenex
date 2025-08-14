@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentRegistry } from "../agents/AgentRegistry";
 import type { AgentInstance } from "../agents/types";

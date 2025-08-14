@@ -11,7 +11,6 @@ import {
     createTracingContext,
 } from "@/tracing";
 import { logger } from "@/utils/logger";
-import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
@@ -34,7 +33,6 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 export class AgentExecutor {
     constructor(
         private llmService: LLMService,
-        ndk: NDK,
         private conversationManager: ConversationManager
     ) {}
 
