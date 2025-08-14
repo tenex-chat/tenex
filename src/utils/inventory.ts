@@ -13,6 +13,9 @@ import "@/prompts"; // This ensures all fragments are registered
 import type { AgentInstance } from "@/agents/types";
 
 const DEFAULT_INVENTORY_PATH = "context/INVENTORY.md";
+const MAX_COMPLEX_MODULES = 10;
+const JSON_BLOCK_REGEX = /```json\s*\n([\s\S]*?)\n```/;
+const COMPLEX_MODULES_SECTION_REGEX = /At the end.*?```json\s*\n[\s\S]*?"complexModules"[\s\S]*?\n```/g;
 
 interface ComplexModule {
     name: string;
@@ -89,8 +92,8 @@ export async function generateInventory(
 
         // Progress tracking handled by TaskPublisher
 
-        // Step 4: Generate individual module guides for complex modules (max 10)
-        const modulesToProcess = inventoryResult.complexModules.slice(0, 10);
+        // Step 4: Generate individual module guides for complex modules (max MAX_COMPLEX_MODULES)
+        const modulesToProcess = inventoryResult.complexModules.slice(0, MAX_COMPLEX_MODULES);
 
         for (let i = 0; i < modulesToProcess.length; i++) {
             const module = modulesToProcess[i];
@@ -243,16 +246,11 @@ async function generateModuleGuide(
  * Strip the complexModules JSON block from the inventory content
  */
 function stripComplexModulesJson(content: string): string {
-    // Pattern to match the entire section about complex modules JSON format
-    // This includes the instruction text and the JSON block
-    const complexModulesSection = /At the end.*?```json\s*\n[\s\S]*?"complexModules"[\s\S]*?\n```/g;
-
     // Remove the entire complex modules JSON section
-    let cleanedContent = content.replace(complexModulesSection, "").trim();
+    let cleanedContent = content.replace(COMPLEX_MODULES_SECTION_REGEX, "").trim();
 
     // Also handle case where JSON block might appear without the instruction text
-    const jsonBlockPattern = /```json\s*\n[\s\S]*?\n```/g;
-    const jsonMatches = cleanedContent.match(jsonBlockPattern);
+    const jsonMatches = cleanedContent.match(JSON_BLOCK_REGEX);
     if (jsonMatches) {
         for (const match of jsonMatches) {
             if (match.includes('"complexModules"')) {
@@ -294,6 +292,21 @@ function isComplexModulesResponse(data: unknown): data is ComplexModulesResponse
 }
 
 /**
+ * Parse JSON from content and validate it
+ */
+function parseComplexModulesJson(jsonString: string): ComplexModule[] | null {
+    try {
+        const jsonData = JSON.parse(jsonString) as unknown;
+        if (isComplexModulesResponse(jsonData)) {
+            return jsonData.complexModules;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Extract complex modules from LLM response with fallback mechanism
  */
 async function extractComplexModules(
@@ -302,7 +315,7 @@ async function extractComplexModules(
 ): Promise<ComplexModule[]> {
     try {
         // Look for JSON block at the end
-        const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n```/);
+        const jsonMatch = content.match(JSON_BLOCK_REGEX);
         if (!jsonMatch) {
             logger.debug("No JSON block found in response, trying fallback extraction");
             return projectPath ? await fallbackExtractComplexModules(content, projectPath) : [];
@@ -314,11 +327,9 @@ async function extractComplexModules(
             return projectPath ? await fallbackExtractComplexModules(content, projectPath) : [];
         }
 
-        const jsonData = JSON.parse(jsonString) as unknown;
-
-        // Type guard to validate the structure
-        if (isComplexModulesResponse(jsonData)) {
-            return jsonData.complexModules;
+        const modules = parseComplexModulesJson(jsonString);
+        if (modules) {
+            return modules;
         }
 
         logger.warn("Invalid JSON structure for complex modules");
@@ -364,7 +375,7 @@ async function fallbackExtractComplexModules(
         });
 
         const fallbackContent = response.content || "";
-        const jsonMatch = fallbackContent.match(/```json\s*\n([\s\S]*?)\n```/);
+        const jsonMatch = fallbackContent.match(JSON_BLOCK_REGEX);
 
         if (jsonMatch) {
             const jsonString = jsonMatch[1];
@@ -373,11 +384,9 @@ async function fallbackExtractComplexModules(
                 return [];
             }
 
-            const jsonData = JSON.parse(jsonString) as unknown;
-
-            // Type guard to validate the structure
-            if (isComplexModulesResponse(jsonData)) {
-                return jsonData.complexModules;
+            const modules = parseComplexModulesJson(jsonString);
+            if (modules) {
+                return modules;
             }
 
             logger.warn("Invalid JSON structure in fallback extraction");
