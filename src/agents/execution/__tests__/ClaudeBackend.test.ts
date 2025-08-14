@@ -60,7 +60,6 @@ describe("ClaudeBackend", () => {
     let mockPublisher: NostrPublisher;
     let mockConversationManager: ConversationManager;
     let mockOrchestrator: ClaudeTaskOrchestrator;
-    let mockTaskPublisher: TaskPublisher;
     let mockAgent: AgentInstance;
     let mockTriggeringEvent: NDKEvent;
 

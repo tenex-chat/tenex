@@ -63,9 +63,8 @@ export const agentListCommand = new Command("list")
                         logger.info("");
                     }
                 } catch (error) {
-                    logger.debug("Failed to load global agents", { error });
+                    logger.error("Failed to load global agents", { error });
                     if (showGlobal && !showProject) {
-                        logger.error("Failed to load global agents");
                         process.exit(1);
                     }
                 }
@@ -135,9 +134,8 @@ export const agentListCommand = new Command("list")
                         logger.info("No project-specific agents found.");
                     }
                 } catch (error) {
-                    logger.debug("Failed to load project agents", { error });
+                    logger.error("Failed to load project agents", { error });
                     if (showProject && !showGlobal) {
-                        logger.error("Failed to load project agents");
                         process.exit(1);
                     }
                 }

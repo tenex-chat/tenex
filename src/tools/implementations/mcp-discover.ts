@@ -1,4 +1,4 @@
-import type { Tool, ExecutionContext, Result, ToolError, Validated } from "@/tools/types";
+import type { Tool, ExecutionContext, Result, ToolError, Validated, ParameterSchema } from "@/tools/types";
 import { createZodSchema, success, failure } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
@@ -57,18 +57,18 @@ function formatToolsAsMarkdown(tools: Array<{
   return lines.join('\n');
 }
 
-export const mcpDiscover: Tool<McpDiscoverInput, McpDiscoverOutput> = {
+export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOutput> = {
   name: "discover_capabilities",
   description:
     "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
   promptFragment: `When showing the tools to the user, just use their nostr:id, the frontend will display them properly. You cannot install MCP tools directly, you can only suggest them to the user.`,
-  parameters: createZodSchema(mcpDiscoverSchema),
+  parameters: createZodSchema(mcpDiscoverSchema) as ParameterSchema<z.input<typeof mcpDiscoverSchema>>,
   execute: async (
-    input: Validated<McpDiscoverInput>,
+    input: Validated<z.input<typeof mcpDiscoverSchema>>,
     context: ExecutionContext
   ): Promise<Result<ToolError, McpDiscoverOutput>> => {
     try {
-      const { searchText, limit } = input.value;
+      const { searchText, limit = 50 } = input.value;
       const ndk = getNDK();
 
       // Build filter for kind:4200 (NDKMCPTool)

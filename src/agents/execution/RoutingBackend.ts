@@ -31,7 +31,7 @@ export class RoutingBackend implements ExecutionBackend {
 
     async execute(
         messages: Message[],
-        tools: Tool[], // Ignored - routing backend doesn't use tools
+        _tools: Tool[], // Ignored - routing backend doesn't use tools
         context: ExecutionContext,
         _publisher: NostrPublisher
     ): Promise<void> {

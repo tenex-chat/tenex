@@ -80,7 +80,7 @@ function resolveRecipientToPubkey(recipient: string): string | null {
  * When delegating to multiple recipients, the agent will wait for all responses
  * before continuing. The agent should NOT call complete() after delegating.
  */
-export const delegateTool = createToolDefinition<z.output<typeof delegateSchema>, { success: boolean; recipientPubkeys: string[] }>({
+export const delegateTool = createToolDefinition<z.input<typeof delegateSchema>, { success: boolean; recipientPubkeys: string[] }>({
     name: "delegate",
     description: "Delegate a task or question to one or more agents by publishing a reply event with their p-tags",
     promptFragment: `DELEGATE TOOL:
@@ -97,7 +97,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
 - The delegated agents will respond back to you
 - Once all responses are received, you'll be invoked again to process them
 - THEN you can call complete() with your final answer`,
-    schema: delegateSchema,
+    schema: delegateSchema as z.ZodType<z.input<typeof delegateSchema>>,
     execute: async (input, context) => {
         const { recipients, fullRequest } = input.value;
         

@@ -1,4 +1,4 @@
-import type { Tool, ExecutionContext, Result, ToolError, Validated } from "@/tools/types";
+import type { Tool, ExecutionContext, Result, ToolError, Validated, ParameterSchema } from "@/tools/types";
 import { createZodSchema, success, failure } from "@/tools/types";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
 import { getNDK } from "@/nostr";
@@ -55,17 +55,17 @@ function formatAgentsAsMarkdown(agents: Array<{
   return lines.join('\n');
 }
 
-export const agentsDiscover: Tool<AgentsDiscoverInput, AgentsDiscoverOutput> = {
+export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDiscoverOutput> = {
     name: "agents_discover",
     description: "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
     promptFragment: `When showing the agents to the user, just use their nostr:id, the frontend will display them properly. You cannot use agents directly, you can only suggest them to the user.`,
-    parameters: createZodSchema(agentsDiscoverSchema),
+    parameters: createZodSchema(agentsDiscoverSchema) as ParameterSchema<z.input<typeof agentsDiscoverSchema>>,
     execute: async (
-        input: Validated<AgentsDiscoverInput>,
+        input: Validated<z.input<typeof agentsDiscoverSchema>>,
         context: ExecutionContext
     ): Promise<Result<ToolError, AgentsDiscoverOutput>> => {
         try {
-            const { searchText, limit } = input.value;
+            const { searchText, limit = 50 } = input.value;
 
             const ndk = getNDK();
             const discovery = new NDKAgentDiscovery(ndk);

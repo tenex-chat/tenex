@@ -3,7 +3,7 @@ import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { handleCliError } from "@/utils/cli-error";
-import { determineConfigScope } from "@/utils/project-detection";
+import { determineConfigScope } from "@/utils/cli-config-scope";
 import { Command } from "commander";
 
 interface AddOptions {

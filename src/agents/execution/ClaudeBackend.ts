@@ -17,7 +17,7 @@ import type { Message } from "multi-llm-ts";
 export class ClaudeBackend implements ExecutionBackend {
     async execute(
         messages: Array<Message>,
-        tools: Tool[],
+        _tools: Tool[],
         context: ExecutionContext,
         publisher: NostrPublisher
     ): Promise<void> {

@@ -8,6 +8,7 @@ import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
 import type { ConversationManager } from "@/conversations/ConversationManager";
+import { logger } from "@/utils/logger";
 import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
@@ -81,11 +82,11 @@ export class ReasonActLoop implements ExecutionBackend {
             // Main termination loop
             while (attempt < ExecutionConfig.MAX_TERMINATION_ATTEMPTS) {
                 attempt++;
-                console.log(`Agent termination attempt ${attempt}.`)
+                logger.debug(`Agent termination attempt ${attempt}.`)
                 
                 // Reset state for retry (but keep stream publisher)
                 if (attempt > 1) {
-                    console.log(`Reset retry counter`)
+                    logger.debug(`Reset retry counter`)
                     stateManager.resetForRetry();
                 }
 
@@ -125,7 +126,7 @@ export class ReasonActLoop implements ExecutionBackend {
                 }
 
                 // Prepare for retry with reminder
-                console.log('will give retry instruction')
+                logger.debug('will give retry instruction')
                 currentMessages = terminationHandler.prepareRetryMessages(
                     currentMessages,
                     context,
@@ -155,7 +156,7 @@ export class ReasonActLoop implements ExecutionBackend {
         this.streamingBuffer.set(agentKey, "");
         
         for await (const event of stream) {
-            console.log(`[processStream] ${event.type}`)
+            logger.debug(`[processStream] ${event.type}`)
             yield event;
 
             switch (event.type) {

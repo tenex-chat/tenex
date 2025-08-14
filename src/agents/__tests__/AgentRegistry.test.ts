@@ -32,8 +32,6 @@ mock.module("@/agents/builtInAgents", () => ({
 describe("AgentRegistry", () => {
     let registry: AgentRegistry;
     const testProjectPath = "/test/project";
-    const _agentsPath = path.join(testProjectPath, "agents.json");
-    const _agentsDir = path.join(testProjectPath, ".tenex", "agents");
 
     beforeEach(() => {
         // Reset mocks
