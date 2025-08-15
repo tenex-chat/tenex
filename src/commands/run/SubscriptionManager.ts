@@ -30,8 +30,6 @@ export class SubscriptionManager {
     }
 
     async start(): Promise<void> {
-        logger.info(chalk.cyan("📡 Setting up project subscriptions..."));
-
         // Load previously processed event IDs from disk
         await loadProcessedEvents(this.projectPath);
 
@@ -57,7 +55,6 @@ export class SubscriptionManager {
         // Get all agent pubkeys
         const agentPubkeys = Array.from(projectCtx.agents.values()).map((agent) => agent.pubkey);
 
-        logger.info(chalk.blue("  • Setting up project update subscription..."));
         logger.debug("Project update filter:", projectFilter);
 
         // Create filters array
@@ -79,7 +76,6 @@ export class SubscriptionManager {
         });
 
         this.subscriptions.push(projectSubscription);
-        logger.info(chalk.green("    ✓ Project update subscription active"));
     }
 
     private async subscribeToAgentLessons(): Promise<void> {
@@ -146,7 +142,6 @@ export class SubscriptionManager {
             limit: 1,
         };
 
-        logger.info(chalk.blue("  • Setting up project event subscription..."));
         logger.debug("Project event filter:", projectTagFilter);
 
         const ndk = getNDK();
@@ -164,7 +159,6 @@ export class SubscriptionManager {
         );
 
         this.subscriptions.push(projectEventSubscription);
-        logger.info(chalk.green("    ✓ Project event subscription active"));
     }
 
     private async subscribeToSpecReplies(): Promise<void> {
@@ -200,7 +194,6 @@ export class SubscriptionManager {
         );
 
         this.subscriptions.push(specReplySubscription);
-        logger.info(chalk.green("    ✓ Spec reply subscription active"));
     }
 
     private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {
@@ -224,8 +217,6 @@ export class SubscriptionManager {
     }
 
     async stop(): Promise<void> {
-        logger.info("Stopping subscriptions...");
-
         for (const subscription of this.subscriptions) {
             subscription.stop();
         }
@@ -235,7 +226,5 @@ export class SubscriptionManager {
         // Flush any pending saves to disk before stopping
         await flushProcessedEvents(this.projectPath);
         clearProcessedEvents();
-
-        logger.info("All subscriptions stopped");
     }
 }

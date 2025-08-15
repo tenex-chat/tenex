@@ -1,6 +1,9 @@
 import { logger } from "@/utils/logger";
 import { type SDKMessage, query } from "@anthropic-ai/claude-code";
 import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
+import { getLLMLogger } from "@/llm/callLogger";
+import type { CompletionRequest, CompletionResponse } from "@/llm/types";
+import { Message } from "multi-llm-ts";
 
 export interface ClaudeCodeExecutorOptions {
     prompt: string;
@@ -9,6 +12,7 @@ export interface ClaudeCodeExecutorOptions {
     timeout?: number;
     abortSignal?: AbortSignal;
     resumeSessionId?: string;
+    agentName?: string;
 }
 
 export interface ClaudeCodeResult {
@@ -58,6 +62,35 @@ export class ClaudeCodeExecutor {
             messageCount: 0,
             assistantMessages: [],
         };
+
+        // Prepare data for logging
+        const llmLogger = getLLMLogger();
+        const startTime = Date.now();
+        
+        // Build request object for logging
+        const messages: Message[] = [];
+        if (this.options.systemPrompt) {
+            messages.push(new Message("system", this.options.systemPrompt));
+        }
+        messages.push(new Message("user", this.options.prompt));
+        
+        const request: CompletionRequest = {
+            messages,
+            options: {
+                agentName: this.options.agentName || "claude-backend",
+                configName: "claude-code",
+                resumeSessionId: this.options.resumeSessionId
+            }
+        };
+
+        // Log the request details
+        logger.debug("[Claude Backend] Starting Claude Code execution", {
+            agentName: this.options.agentName,
+            promptLength: this.options.prompt.length,
+            hasSystemPrompt: !!this.options.systemPrompt,
+            systemPromptLength: this.options.systemPrompt?.length || 0,
+            resumeSessionId: this.options.resumeSessionId
+        });
 
         try {
             // Set timeout if specified
@@ -115,6 +148,44 @@ export class ClaudeCodeExecutor {
             if (timeoutId) clearTimeout(timeoutId);
 
             const duration = Date.now() - this.startTime;
+            const endTime = Date.now();
+            
+            // Log successful completion to JSONL
+            if (llmLogger) {
+                const response: CompletionResponse = {
+                    type: "text",
+                    content: metrics.assistantMessages.join("\n\n"),
+                    model: "claude-code",
+                    usage: {
+                        total_cost_usd: metrics.totalCost,
+                        // Claude Code doesn't provide token counts
+                    }
+                } as CompletionResponse;
+                
+                // Create a resolved config for logging
+                const config = {
+                    provider: "claude-code",
+                    model: "claude-code",
+                    apiKey: "claude-code-sdk", // Placeholder since it uses SDK
+                    enableCaching: false,
+                };
+                
+                await llmLogger.logLLMCall(
+                    "claude-code",
+                    config,
+                    request,
+                    { response },
+                    { startTime, endTime }
+                );
+                
+                logger.debug("[Claude Backend] Logged to JSONL", {
+                    agentName: this.options.agentName,
+                    sessionId: metrics.sessionId,
+                    duration: `${duration}ms`,
+                    messageCount: metrics.messageCount
+                });
+            }
+            
             return {
                 success: true,
                 sessionId: metrics.sessionId,
@@ -125,9 +196,34 @@ export class ClaudeCodeExecutor {
             };
         } catch (err) {
             const duration = Date.now() - this.startTime;
+            const endTime = Date.now();
             const error = err instanceof Error ? err.message : "Unknown error";
 
             logger.error("[ClaudeCodeExecutor] Execution failed", { error, duration });
+
+            // Log error to JSONL
+            if (llmLogger) {
+                const config = {
+                    provider: "claude-code",
+                    model: "claude-code",
+                    apiKey: "claude-code-sdk",
+                    enableCaching: false,
+                };
+                
+                await llmLogger.logLLMCall(
+                    "claude-code",
+                    config,
+                    request,
+                    { error: err instanceof Error ? err : new Error(error) },
+                    { startTime, endTime }
+                );
+                
+                logger.debug("[Claude Backend] Logged error to JSONL", {
+                    agentName: this.options.agentName,
+                    error,
+                    duration: `${duration}ms`
+                });
+            }
 
             return {
                 success: false,

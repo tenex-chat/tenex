@@ -20,6 +20,7 @@ export interface ClaudeTaskOptions {
     conversationManager?: ConversationManager;
     abortSignal?: AbortSignal;
     resumeSessionId?: string;
+    agentName?: string;
 }
 
 export interface ClaudeTaskResult {
@@ -67,6 +68,7 @@ export class ClaudeTaskOrchestrator {
             projectPath: options.projectPath,
             abortSignal: options.abortSignal,
             resumeSessionId: options.resumeSessionId,
+            agentName: options.agentName,
         });
 
         // Set up abort event subscription

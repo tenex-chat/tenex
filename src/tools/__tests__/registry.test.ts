@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { getTool, getTools, getAllTools } from "../registry";
+import { getTool, getTools, getAllTools, type ToolName } from "../registry";
 import { readPathTool } from "../implementations/readPath";
 import { completeTool } from "../implementations/complete";
 import { shellTool } from "../implementations/shell";
@@ -13,12 +13,14 @@ describe("Tool Registry", () => {
         });
 
         it("should return undefined for non-existent tool", () => {
-            const tool = getTool("non_existent_tool");
+            // @ts-expect-error Testing invalid tool name
+            const tool = getTool("non_existent_tool" as ToolName);
             expect(tool).toBeUndefined();
         });
 
         it("should handle empty string", () => {
-            const tool = getTool("");
+            // @ts-expect-error Testing invalid tool name
+            const tool = getTool("" as ToolName);
             expect(tool).toBeUndefined();
         });
     });
@@ -33,14 +35,16 @@ describe("Tool Registry", () => {
         });
 
         it("should filter out non-existent tools", () => {
-            const tools = getTools(["read_path", "non_existent", "complete"]);
+            // @ts-expect-error Testing with invalid tool name
+            const tools = getTools(["read_path", "non_existent" as ToolName, "complete"]);
             expect(tools).toHaveLength(2);
             expect(tools[0]).toBe(readPathTool);
             expect(tools[1]).toBe(completeTool);
         });
 
         it("should return empty array for all non-existent tools", () => {
-            const tools = getTools(["non_existent1", "non_existent2"]);
+            // @ts-expect-error Testing with invalid tool names
+            const tools = getTools(["non_existent1" as ToolName, "non_existent2" as ToolName]);
             expect(tools).toHaveLength(0);
         });
 

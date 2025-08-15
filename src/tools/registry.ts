@@ -22,10 +22,29 @@ import { nostrProjectsTool } from "./implementations/nostr-projects";
 import type { Tool } from "./types";
 
 /**
+ * Union type of all available tool names in the system.
+ * This ensures type safety when referencing tools throughout the codebase.
+ */
+export type ToolName = 
+  | "read_path"
+  | "write_context_file"
+  | "complete"
+  | "analyze"
+  | "generate_inventory"
+  | "lesson_learn"
+  | "lesson_get"
+  | "shell"
+  | "agents_discover"
+  | "agents_hire"
+  | "discover_capabilities"
+  | "delegate"
+  | "nostr_projects";
+
+/**
  * Registry of all available tools mapped by their canonical names.
  * Tool names serve as unique identifiers for tool lookup and execution.
  */
-const toolsMap = new Map<string, Tool<any, any>>([
+const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["read_path", readPathTool],
   ["write_context_file", writeContextFileTool],
   ["complete", completeTool],
@@ -38,7 +57,7 @@ const toolsMap = new Map<string, Tool<any, any>>([
   ["agents_hire", agentsHire],
   ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
-  [nostrProjectsTool.name, nostrProjectsTool],
+  ["nostr_projects", nostrProjectsTool],
 ]);
 
 /**
@@ -47,7 +66,7 @@ const toolsMap = new Map<string, Tool<any, any>>([
  * @param name - The canonical name of the tool to retrieve
  * @returns The tool instance if found, undefined otherwise
  */
-export function getTool(name: string): Tool<any, any> | undefined {
+export function getTool(name: ToolName): Tool<any, any> | undefined {
     return toolsMap.get(name);
 }
 
@@ -58,7 +77,7 @@ export function getTool(name: string): Tool<any, any> | undefined {
  * @param names - Array of tool names to retrieve
  * @returns Array of found tools (may be shorter than input if some tools don't exist)
  */
-export function getTools(names: string[]): Tool<any, any>[] {
+export function getTools(names: ToolName[]): Tool<any, any>[] {
     return names
         .map((name) => toolsMap.get(name))
         .filter((tool): tool is Tool<any, any> => tool !== undefined);

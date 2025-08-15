@@ -277,8 +277,12 @@ export class LLMRouter implements LLMService {
             let fullContent = "";
             let lastResponse: CompletionResponse | undefined;
             const chunkMetadata: Array<{ type: string; chunkKeys: string[]; fullChunk: string }> = [];
+            let chunkCount = 0;
+            let hasUsageChunk = false;
 
             for await (const chunk of stream) {
+                chunkCount++;
+                
                 // Log chunk metadata
                 const chunkInfo = {
                     type: chunk.type,
@@ -286,6 +290,14 @@ export class LLMRouter implements LLMService {
                     fullChunk: JSON.stringify(chunk),
                 };
                 chunkMetadata.push(chunkInfo);
+
+                // Debug logging for chunk types
+                logger.debug(`[LLM Stream] Chunk #${chunkCount} type: ${chunk.type}`, {
+                    agentName: request.options?.agentName,
+                    configKey,
+                    chunkType: chunk.type,
+                    chunkKeys: Object.keys(chunk),
+                });
 
                 if (chunk.type === "content" || chunk.type === "reasoning") {
                     fullContent += chunk.text;
@@ -310,6 +322,13 @@ export class LLMRouter implements LLMService {
                         };
                     }
                 } else if (chunk.type === "usage") {
+                    hasUsageChunk = true;
+                    logger.debug(`[LLM Stream] Found usage chunk`, {
+                        agentName: request.options?.agentName,
+                        configKey,
+                        usage: chunk.usage
+                    });
+                    
                     // Build the final response with model information
                     lastResponse = {
                         type: "text",
@@ -323,10 +342,26 @@ export class LLMRouter implements LLMService {
 
             const endTime = Date.now();
 
+            // Log summary of streaming session
+            logger.debug(`[LLM Stream] Stream completed`, {
+                agentName: request.options?.agentName,
+                configKey,
+                totalChunks: chunkCount,
+                hasUsageChunk,
+                hasLastResponse: !!lastResponse,
+                contentLength: fullContent.length,
+                duration: `${endTime - startTime}ms`
+            });
+
             if (lastResponse) {
                 // Log to comprehensive JSONL logger
                 const llmLogger = getLLMLogger();
                 if (llmLogger) {
+                    logger.debug(`[LLM Stream] Logging to JSONL`, {
+                        agentName: request.options?.agentName,
+                        loggerExists: true
+                    });
+                    
                     await llmLogger.logLLMCall(
                         configKey,
                         config,
@@ -334,9 +369,52 @@ export class LLMRouter implements LLMService {
                         { response: lastResponse },
                         { startTime, endTime }
                     );
+                } else {
+                    logger.error(`[LLM Stream] LLM Logger is not initialized (with usage)!`, {
+                        agentName: request.options?.agentName,
+                        configKey
+                    });
                 }
 
                 yield { type: "done", response: lastResponse };
+            } else {
+                // No usage chunk received - create a response anyway for logging
+                logger.warn(`[LLM Stream] No usage chunk received, creating response for logging`, {
+                    agentName: request.options?.agentName,
+                    configKey,
+                    contentLength: fullContent.length
+                });
+                
+                // Create a response without usage data
+                const fallbackResponse: CompletionResponse = {
+                    type: "text",
+                    content: fullContent,
+                    toolCalls: [],
+                    model: config.model
+                } as CompletionResponse & { model: string };
+                
+                // Log even without usage data
+                const llmLogger = getLLMLogger();
+                if (llmLogger) {
+                    logger.debug(`[LLM Stream] Logging to JSONL (no usage data)`, {
+                        agentName: request.options?.agentName
+                    });
+                    
+                    await llmLogger.logLLMCall(
+                        configKey,
+                        config,
+                        request,
+                        { response: fallbackResponse },
+                        { startTime, endTime }
+                    );
+                } else {
+                    logger.error(`[LLM Stream] LLM Logger is not initialized!`, {
+                        agentName: request.options?.agentName,
+                        configKey
+                    });
+                }
+                
+                yield { type: "done", response: fallbackResponse };
             }
         } catch (error) {
             const endTime = Date.now();

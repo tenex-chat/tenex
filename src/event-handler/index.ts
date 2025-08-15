@@ -1,5 +1,5 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import { type NDKEvent, type NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
@@ -15,8 +15,10 @@ import { handleTask } from "./task";
 
 const logInfo = logger.info.bind(logger);
 
-const IGNORED_EVENT_KIDNS = [
+const IGNORED_EVENT_KINDS = [
+    NDKKind.Metadata,
     EVENT_KINDS.PROJECT_STATUS as NDKKind,
+    EVENT_KINDS.STREAMING_RESPONSE as NDKKind,
     EVENT_KINDS.TYPING_INDICATOR as NDKKind,
     EVENT_KINDS.TYPING_INDICATOR_STOP as NDKKind,
 ];
@@ -43,7 +45,7 @@ export class EventHandler {
 
     async handleEvent(event: NDKEvent): Promise<void> {
         // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
-        if (IGNORED_EVENT_KIDNS.includes(event.kind)) return;
+        if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
         switch (event.kind) {
             case EVENT_KINDS.GENERIC_REPLY:
@@ -162,8 +164,9 @@ export class EventHandler {
     private handleDefaultEvent(event: NDKEvent): void {
         if (event.content) {
             logInfo(
-              chalk.gray("[handleDefaultEvent] Content: ") +
-                chalk.white(
+              chalk.white(`[handleDefaultEvent ${event.id.substring(0, 6)}] Handling event kind ${event.kind}`) +
+              chalk.white(`[handleDefaultEvent ${event.id.substring(0, 6)}] Content: `) +
+                chalk.gray(
                   event.content.substring(0, 100) + (event.content.length > 100 ? "..." : "")
                 )
             );

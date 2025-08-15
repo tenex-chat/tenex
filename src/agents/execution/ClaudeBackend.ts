@@ -60,6 +60,7 @@ export class ClaudeBackend implements ExecutionBackend {
             conversationManager: context.conversationManager,
             abortSignal: abortController.signal,
             resumeSessionId: context.claudeSessionId,
+            agentName: context.agent.name,
         });
 
         if (!result.success) {

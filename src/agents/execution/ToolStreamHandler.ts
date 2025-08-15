@@ -9,6 +9,7 @@ import { ExecutionConfig } from "./constants";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import { isComplete } from "./control-flow-types";
+import type { ToolName } from "@/tools/registry";
 
 /**
  * Handles tool-related events in the LLM stream.
@@ -288,55 +289,32 @@ export class ToolStreamHandler {
      */
     private getToolDescription(toolName: string, args: Record<string, unknown>): string {
         const descriptions = this.getToolDescriptions();
-        const descFn = descriptions[toolName.toLowerCase()] || descriptions.default;
+        const normalizedName = toolName.toLowerCase();
+        const descFn = descriptions[normalizedName as keyof typeof descriptions] || descriptions.default;
         return descFn ? descFn(args) : `🛠️ Using ${toolName}`;
     }
 
     /**
      * Tool description generators
      */
-    private getToolDescriptions(): Record<string, (args: Record<string, unknown>) => string> {
+    private getToolDescriptions(): Partial<Record<ToolName | 'default', (args: Record<string, unknown>) => string>> {
         return {
-            // File operations
-            read: (args) => `📖 Reading ${args.file_path || args.path || "file"}`,
-            write: (args) => `✏️ Writing to ${args.file_path || args.path || "file"}`,
-            edit: (args) => `✏️ Editing ${args.file_path || args.path || "file"}`,
-            multiedit: (args) => `✏️ Making multiple edits to ${args.file_path || args.path || "file"}`,
-            ls: (args) => `📁 Listing files in ${args.path || "directory"}`,
-            glob: (args) => `🔍 Searching for files matching "${args.pattern || "pattern"}"`,
-            grep: (args) => `🔍 Searching for "${args.pattern || "pattern"}" in files`,
-            
-            // Git operations
-            bash: (args) => {
-                const cmd = args.command as string || "";
-                if (cmd.startsWith("git")) {
-                    return `🔧 Running git command: ${cmd.substring(0, 50)}${cmd.length > 50 ? "..." : ""}`;
-                }
-                return `🖥️ Running command: ${cmd.substring(0, 50)}${cmd.length > 50 ? "..." : ""}`;
-            },
-            
-            // Web operations
-            webfetch: (args) => `🌐 Fetching content from ${args.url || "web"}`,
-            websearch: (args) => `🔎 Searching the web for "${args.query || "query"}"`,
-            
-            // Documentation
-            notebookread: (args) => `📓 Reading notebook ${args.notebook_path || "file"}`,
-            notebookedit: (args) => `📓 Editing notebook ${args.notebook_path || "file"}`,
-            
-            // Analysis
-            task: (args) => `🤖 Delegating task: ${args.description || "complex task"}`,
+            // Core tool operations
+            read_path: (args) => `📖 Reading ${args.path || "file"}`,
+            write_context_file: (args) => `✏️ Writing context to ${args.filePath || "file"}`,
+            shell: (args) => `🖥️ Executing shell command: ${(args.command as string || "").substring(0, 50)}${(args.command as string || "").length > 50 ? "..." : ""}`,
             analyze: (args) => `🔬 Analyzing code with prompt: "${(args.prompt as string || "").substring(0, 50)}..."`,
+            generate_inventory: () => `📃 Generating inventory`,
+            lesson_learn: (args) => `🎓 Learning lesson: ${args.title || "new lesson"}`,
+            lesson_get: (args) => `📖 Getting lesson: ${args.id || "lesson"}`,
+            agents_discover: () => `🔍 Discovering available agents`,
+            agents_hire: (args) => `🤖 Hiring agent: ${args.agentId || "agent"}`,
+            discover_capabilities: () => `🔌 Discovering MCP capabilities`,
+            delegate: (args) => `🔄 Delegating task: ${args.description || "task"}`,
+            nostr_projects: () => `📡 Managing Nostr projects`,
             
             // Control flow
-            continue: (args) => {
-                const routing = args.routing as { agents?: unknown[]; reason?: string };
-                if (routing?.agents && Array.isArray(routing.agents)) {
-                    return `🔄 Routing to agents for ${routing.reason || "next phase"}`;
-                }
-                return `🔄 Continuing workflow`;
-            },
             complete: () => `✅ Completing task and returning control`,
-            endconversation: () => `🏁 Ending conversation`,
             
             // MCP tools
             default: (args) => {

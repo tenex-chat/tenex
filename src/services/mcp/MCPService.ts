@@ -173,8 +173,6 @@ export class MCPService {
                     setTimeout(() => reject(new Error("Health check timeout")), 5000)
                 ),
             ]);
-
-            logger.info(`MCP server '${name}' passed health check`);
         } catch (error) {
             logger.error(`MCP server '${name}' failed health check:`, error);
             try {

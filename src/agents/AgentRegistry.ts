@@ -728,7 +728,8 @@ export class AgentRegistry {
 
         // Convert tool names to Tool instances
         const { getTools } = await import("@/tools/registry");
-        agent.tools = getTools(toolNames);
+        // Cast to ToolName[] - tool names from storage are validated at runtime
+        agent.tools = getTools(toolNames as any);
 
         return agent;
     }
