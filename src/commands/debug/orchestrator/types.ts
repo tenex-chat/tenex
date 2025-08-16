@@ -10,7 +10,8 @@ export interface OrchestratorDebugState {
     userRequest: string;
     originalRequest?: string;
     phase: Phase;
-    routingHistory: RoutingEntry[];
+    routingHistory: RoutingEntry[];  // Keep for internal tracking
+    workflowNarrative?: string;  // The new narrative that the orchestrator sees
     currentRouting: RoutingEntry | null;
     orchestratorTurns: OrchestratorTurn[];
     agentStates: Map<string, AgentState>;

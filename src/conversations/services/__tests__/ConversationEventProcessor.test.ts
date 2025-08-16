@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, mock } from "@jest/globals";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ConversationEventProcessor } from "../ConversationEventProcessor";
+import type { Conversation } from "../../types";
+import { PHASES } from "../../phases";
 
 // Mock the getAgentSlugFromEvent function
 mock.module("@/nostr/utils", () => ({
@@ -115,6 +117,184 @@ describe("ConversationEventProcessor", () => {
                 message: "Planning complete",
                 timestamp: 1234567890
             });
+        });
+    });
+
+    describe("processIncomingEvent - duplicate prevention", () => {
+        it("should add new event to conversation history", () => {
+            const conversation: Conversation = {
+                id: "conv-1",
+                title: "Test Conversation",
+                phase: PHASES.CHAT,
+                history: [],
+                agentStates: new Map(),
+                phaseStartedAt: Date.now(),
+                metadata: {},
+                phaseTransitions: [],
+                orchestratorTurns: [],
+                executionTime: {
+                    totalSeconds: 0,
+                    isActive: false,
+                    lastUpdated: Date.now()
+                }
+            };
+
+            const event = {
+                id: "event-1",
+                content: "Test message",
+                pubkey: "user-pubkey",
+                created_at: 1234567890
+            } as NDKEvent;
+
+            processor.processIncomingEvent(conversation, event);
+
+            expect(conversation.history).toHaveLength(1);
+            expect(conversation.history[0].id).toBe("event-1");
+        });
+
+        it("should not add duplicate event with same id", () => {
+            const existingEvent = {
+                id: "event-1",
+                content: "First message",
+                pubkey: "user-pubkey",
+                created_at: 1234567890
+            } as NDKEvent;
+
+            const conversation: Conversation = {
+                id: "conv-1",
+                title: "Test Conversation",
+                phase: PHASES.CHAT,
+                history: [existingEvent],
+                agentStates: new Map(),
+                phaseStartedAt: Date.now(),
+                metadata: {},
+                phaseTransitions: [],
+                orchestratorTurns: [],
+                executionTime: {
+                    totalSeconds: 0,
+                    isActive: false,
+                    lastUpdated: Date.now()
+                }
+            };
+
+            const duplicateEvent = {
+                id: "event-1",
+                content: "Duplicate message with same ID",
+                pubkey: "another-pubkey",
+                created_at: 9999999999
+            } as NDKEvent;
+
+            processor.processIncomingEvent(conversation, duplicateEvent);
+
+            // History should still have only one event
+            expect(conversation.history).toHaveLength(1);
+            // Original event should be preserved
+            expect(conversation.history[0].content).toBe("First message");
+            expect(conversation.history[0].pubkey).toBe("user-pubkey");
+        });
+
+        it("should add multiple unique events", () => {
+            const conversation: Conversation = {
+                id: "conv-1",
+                title: "Test Conversation",
+                phase: PHASES.CHAT,
+                history: [],
+                agentStates: new Map(),
+                phaseStartedAt: Date.now(),
+                metadata: {},
+                phaseTransitions: [],
+                orchestratorTurns: [],
+                executionTime: {
+                    totalSeconds: 0,
+                    isActive: false,
+                    lastUpdated: Date.now()
+                }
+            };
+
+            const event1 = {
+                id: "event-1",
+                content: "First message",
+                pubkey: "user-pubkey",
+                created_at: 1234567890
+            } as NDKEvent;
+
+            const event2 = {
+                id: "event-2",
+                content: "Second message",
+                pubkey: "executor-pubkey",
+                created_at: 1234567891
+            } as NDKEvent;
+
+            const event3 = {
+                id: "event-3",
+                content: "Third message",
+                pubkey: "planner-pubkey",
+                created_at: 1234567892
+            } as NDKEvent;
+
+            processor.processIncomingEvent(conversation, event1);
+            processor.processIncomingEvent(conversation, event2);
+            processor.processIncomingEvent(conversation, event3);
+
+            expect(conversation.history).toHaveLength(3);
+            expect(conversation.history[0].id).toBe("event-1");
+            expect(conversation.history[1].id).toBe("event-2");
+            expect(conversation.history[2].id).toBe("event-3");
+        });
+
+        it("should handle mixed unique and duplicate events", () => {
+            const conversation: Conversation = {
+                id: "conv-1",
+                title: "Test Conversation",
+                phase: PHASES.CHAT,
+                history: [],
+                agentStates: new Map(),
+                phaseStartedAt: Date.now(),
+                metadata: {},
+                phaseTransitions: [],
+                orchestratorTurns: [],
+                executionTime: {
+                    totalSeconds: 0,
+                    isActive: false,
+                    lastUpdated: Date.now()
+                }
+            };
+
+            const event1 = {
+                id: "event-1",
+                content: "First message",
+                pubkey: "user-pubkey",
+                created_at: 1234567890
+            } as NDKEvent;
+
+            const event2 = {
+                id: "event-2",
+                content: "Second message",
+                pubkey: "executor-pubkey",
+                created_at: 1234567891
+            } as NDKEvent;
+
+            // Process events including duplicates
+            processor.processIncomingEvent(conversation, event1);
+            processor.processIncomingEvent(conversation, event2);
+            processor.processIncomingEvent(conversation, event1); // duplicate
+            processor.processIncomingEvent(conversation, event2); // duplicate
+
+            const event3 = {
+                id: "event-3",
+                content: "Third message",
+                pubkey: "planner-pubkey",
+                created_at: 1234567892
+            } as NDKEvent;
+
+            processor.processIncomingEvent(conversation, event3);
+            processor.processIncomingEvent(conversation, event1); // duplicate again
+
+            // Should only have 3 unique events
+            expect(conversation.history).toHaveLength(3);
+            expect(conversation.history[0].id).toBe("event-1");
+            expect(conversation.history[1].id).toBe("event-2");
+            expect(conversation.history[2].id).toBe("event-3");
         });
     });
 });

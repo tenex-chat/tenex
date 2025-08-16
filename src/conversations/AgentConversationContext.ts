@@ -13,6 +13,7 @@ import { logger } from "@/utils/logger";
  */
 export class AgentConversationContext {
     private messages: Message[] = [];
+    private processedEventIds: Set<string> = new Set();  // Track processed events
     private lastProcessedIndex: number = 0;
     private claudeSessionId?: string;
     private currentPhase?: Phase;
@@ -32,13 +33,28 @@ export class AgentConversationContext {
     async addEvent(event: NDKEvent): Promise<void> {
         if (!event.content) return;
         
+        // Check if we've already processed this event
+        if (event.id && this.processedEventIds.has(event.id)) {
+            logger.debug(`[AGENT_CONTEXT] Skipping already processed event for ${this.agentSlug}`, {
+                eventId: event.id,
+                processedCount: this.processedEventIds.size
+            });
+            return;
+        }
+        
         const processed = await this.messageBuilder.processNostrEntities(event.content);
         const message = this.messageBuilder.formatEventAsMessage(
             event,
             processed,
             this.agentSlug
         );
+        
         this.messages.push(message);
+        
+        // Mark this event as processed
+        if (event.id) {
+            this.processedEventIds.add(event.id);
+        }
         
         logger.debug(`[AGENT_CONTEXT] Added event to ${this.agentSlug}`, {
             eventId: event.id,
@@ -76,6 +92,15 @@ export class AgentConversationContext {
     async addTriggeringEvent(event: NDKEvent): Promise<void> {
         if (!event.content) return;
         
+        // Check if we've already processed this triggering event
+        if (event.id && this.processedEventIds.has(event.id)) {
+            logger.debug(`[AGENT_CONTEXT] Skipping already processed triggering event for ${this.agentSlug}`, {
+                eventId: event.id,
+                processedCount: this.processedEventIds.size
+            });
+            return;
+        }
+        
         // Process the content
         const processed = await this.messageBuilder.processNostrEntities(event.content);
         const message = this.messageBuilder.formatEventAsMessage(
@@ -94,6 +119,11 @@ export class AgentConversationContext {
         }
         
         this.messages.push(message);
+        
+        // Mark this event as processed
+        if (event.id) {
+            this.processedEventIds.add(event.id);
+        }
     }
 
     /**
@@ -259,6 +289,7 @@ export class AgentConversationContext {
                 role: m.role,
                 content: m.content
             })),
+            processedEventIds: Array.from(this.processedEventIds),
             lastProcessedIndex: this.lastProcessedIndex,
             claudeSessionId: this.claudeSessionId,
             currentPhase: this.currentPhase
@@ -280,6 +311,11 @@ export class AgentConversationContext {
             context.messages = data.messages.map((m: any) => 
                 new Message(m.role, m.content)
             );
+        }
+        
+        // Restore processed event IDs
+        if (data.processedEventIds && Array.isArray(data.processedEventIds)) {
+            context.processedEventIds = new Set(data.processedEventIds);
         }
         
         context.lastProcessedIndex = data.lastProcessedIndex || 0;

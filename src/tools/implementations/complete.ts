@@ -60,8 +60,8 @@ REMEMBER:
     execute: async (input, context) => {
         const { response, summary } = input.value;
 
-        // Use the shared completion handler
-        const completion = await handleAgentCompletion({
+        // Use the shared completion handler to get both completion and event
+        const { completion, event } = await handleAgentCompletion({
             response,
             summary,
             agent: context.agent,
@@ -71,7 +71,23 @@ REMEMBER:
             conversationManager: context.conversationManager,
         });
 
-        // Return success with the completion
-        return success(completion);
+        // Serialize the event for passing through tool layer
+        const serializedEvent = event.rawEvent();
+        
+        // Debug logging
+        const { logger } = await import("@/utils/logger");
+        logger.debug("[complete() tool] Serializing event for deferred publishing", {
+            agent: context.agent.name,
+            eventId: event.id,
+            serializedEventKeys: Object.keys(serializedEvent),
+            contentLength: serializedEvent.content?.length || 0,
+            tagCount: serializedEvent.tags?.length || 0,
+        });
+
+        // Return success with completion and serialized event
+        return success({
+            ...completion,
+            serializedEvent
+        });
     },
 });

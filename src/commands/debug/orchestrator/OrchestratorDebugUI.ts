@@ -133,6 +133,11 @@ export class OrchestratorDebugUI {
             logger.info(chalk.gray(`  User Message: ${chalk.gray('not set')}`));
         }
         
+        // Show if workflow narrative is available
+        if (state.workflowNarrative) {
+            logger.info(chalk.gray(`  Workflow Narrative: ${chalk.green('✓ Generated')} (use 'show-context' to view)`));
+        }
+        
         logger.info("");
     }
     

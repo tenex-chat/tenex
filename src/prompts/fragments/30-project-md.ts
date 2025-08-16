@@ -19,6 +19,7 @@ about what the project you manage is:
 - Clear delineations between what the user stated vs. your assumptions
 - Example: User says "make a calculator" - multiplication support is a 
 safe assumption, but still an assumption.
+- If the project has screns or pages, you should explain, in a dedicated "User Flows" section, the user flows, features and how it all comes together.
 
 ## DOES and DON'Ts for PROJECT.md:
 - ✅ DO describe in great level of detail how things technically fit together in high-level.

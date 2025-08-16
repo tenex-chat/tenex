@@ -45,11 +45,12 @@ export class ToolStreamHandler {
         // Finalize the stream if there's any buffered content
         // This ensures any content generated before tool use is published as a complete reply
         if (streamPublisher && !streamPublisher.isFinalized()) {
-            const hasContent = this.stateManager.getFullContent().trim().length > 0;
+            // Check the content accumulated within the streamPublisher itself
+            const hasContent = streamPublisher.getAccumulatedContent().trim().length > 0;
             if (hasContent) {
                 tracingLogger.debug("Finalizing buffered content before tool execution", {
                     tool: toolName,
-                    contentLength: this.stateManager.getFullContent().length
+                    contentLength: streamPublisher.getAccumulatedContent().length
                 });
                 await streamPublisher.finalize({});
                 
@@ -57,6 +58,7 @@ export class ToolStreamHandler {
                 if (publisher) {
                     const newStreamPublisher = new StreamPublisher(publisher);
                     this.stateManager.setStreamPublisher(newStreamPublisher);
+                    tracingLogger.debug("Created new StreamPublisher for post-tool content");
                 }
             } else {
                 // Just flush if no content
@@ -269,6 +271,20 @@ export class ToolStreamHandler {
         if (isComplete(output)) {
             this.stateManager.setTermination(output);
             
+            // Store the serialized event if present (for deferred publishing)
+            if (output.serializedEvent) {
+                this.stateManager.setDeferredEvent(output.serializedEvent);
+                
+                tracingLogger.info("[ToolStreamHandler] Stored serialized event for deferred publishing", {
+                    hasSerializedEvent: true,
+                    eventKeys: Object.keys(output.serializedEvent),
+                    contentLength: output.serializedEvent.content?.length || 0,
+                });
+            } else {
+                tracingLogger.info("[ToolStreamHandler] Complete tool has no serialized event", {
+                    hasSerializedEvent: false,
+                });
+            }
         }
     }
 

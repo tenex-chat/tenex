@@ -14,7 +14,7 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * All agents now have access to all tools except orchestrator-only tools
  */
 export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
-    let tools = [readPathTool.name, lessonLearnTool.name, analyze.name, delegateTool.name];
+    let tools = [readPathTool.name, lessonLearnTool.name, analyze.name];
 
     // Built-in agents
     if (agent.isBuiltIn) {
@@ -27,17 +27,20 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
             tools.push(completeTool.name);
 
             if (agent.slug === PROJECT_MANAGER_AGENT) {
+                // Project manager gets delegate tool
+                tools.push(delegateTool.name);
+                
                 // Use the tools defined in the PROJECT_MANAGER_AGENT_DEFINITION
                 // This ensures consistency between the definition and runtime
                 if (PROJECT_MANAGER_AGENT_DEFINITION.tools) {
                     // Replace the default tools with the ones from the definition
-                    // but keep the complete tool and delegate tool since they're added for all non-orchestrator agents
+                    // but keep the complete tool and delegate tool since they're added for project-manager
                     tools = [completeTool.name, delegateTool.name, ...PROJECT_MANAGER_AGENT_DEFINITION.tools];
                 }
             }
         }
     } else {
-        // Custom agents default to complete tool and delegate tool
+        // Custom agents default to complete tool (no delegate tool)
         tools.push(completeTool.name);
     }
 

@@ -47,6 +47,8 @@ export class EventHandler {
         // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
+        logger.info(`event handler, kind: ${event.kind} from ${event.pubkey}`);
+
         switch (event.kind) {
             case EVENT_KINDS.GENERIC_REPLY:
                 await handleChatMessage(event, {

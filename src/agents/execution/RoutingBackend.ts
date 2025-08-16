@@ -1,5 +1,4 @@
 import type { LLMService } from "@/llm/types";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { Tool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { createTracingLogger, type TracingLogger, createTracingContext } from "@/tracing";
@@ -39,8 +38,22 @@ export class RoutingBackend implements ExecutionBackend {
         const executionLogger = createExecutionLogger(tracingContext, "agent");
 
         try {
+            // Build orchestrator routing context with the narrative
+            const routingContext = await this.conversationManager.buildOrchestratorRoutingContext(
+                context.conversationId,
+                context.triggeringEvent
+            );
+            
+            // Replace the messages with our narrative-based approach
+            const narrativeMessages: Message[] = [
+                // First, the system prompt explaining the orchestrator's role
+                ...messages.filter(m => m.role === "system"),
+                // Then add the workflow narrative as a user message
+                new Message("user", routingContext.workflow_narrative)
+            ];
+            
             // Get routing decision from LLM
-            const routingDecision = await this.getRoutingDecision(messages, context, tracingLogger, executionLogger);
+            const routingDecision = await this.getRoutingDecision(narrativeMessages, context, tracingLogger, executionLogger);
             
             // Log routing decision with ExecutionLogger
             executionLogger.routingDecision(
@@ -52,11 +65,28 @@ export class RoutingBackend implements ExecutionBackend {
                 }
             );
 
-            // Start a new orchestrator turn to track this routing decision
+            // Convert agent slugs to pubkeys for consistent tracking
+            const projectContext = getProjectContext();
+            const agentPubkeys: string[] = [];
+            for (const agentSlug of routingDecision.agents) {
+                if (agentSlug === "END") {
+                    agentPubkeys.push("END");
+                } else {
+                    const agent = findAgentByName(projectContext.agents, agentSlug);
+                    if (agent) {
+                        agentPubkeys.push(agent.pubkey);
+                    } else {
+                        // If agent not found, use the slug as-is (will be handled later)
+                        agentPubkeys.push(agentSlug);
+                    }
+                }
+            }
+
+            // Start a new orchestrator turn to track this routing decision using pubkeys
             const turnId = await this.conversationManager.startOrchestratorTurn(
                 context.conversationId,
                 (routingDecision.phase || context.phase) as Phase,
-                routingDecision.agents,
+                agentPubkeys,
                 routingDecision.reason
             );
             
@@ -64,6 +94,7 @@ export class RoutingBackend implements ExecutionBackend {
                 turnId,
                 phase: routingDecision.phase || context.phase,
                 agents: routingDecision.agents,
+                agentPubkeys,
                 reason: routingDecision.reason
             });
 
@@ -86,7 +117,6 @@ export class RoutingBackend implements ExecutionBackend {
             }
 
             // Execute target agents
-            const projectContext = getProjectContext();
             for (const agentSlug of routingDecision.agents) {
                 // Handle special END agent to cleanly terminate conversation
                 if (agentSlug === "END") {
@@ -144,6 +174,9 @@ export class RoutingBackend implements ExecutionBackend {
                     
                     continue;
                 }
+
+                // Loop prevention is now handled by the orchestrator analyzing the workflow narrative
+                // The orchestrator can see all completions in the narrative and avoid routing loops
 
                 // Create a new publisher for the target agent
                 const targetPublisher = await createNostrPublisher({

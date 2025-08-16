@@ -1,6 +1,7 @@
 import type { ToolExecutionResult, Complete } from "@/tools/types";
 import type { CompletionResponse } from "@/llm/types";
 import type { StreamPublisher } from "@/nostr/NostrPublisher";
+import type { NostrEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * Represents the mutable state during stream processing
@@ -13,6 +14,7 @@ export interface StreamingState {
     streamPublisher: StreamPublisher | undefined;
     startedTools: Set<string>;
     loggedThinkingBlocks: Set<string>;
+    deferredEvent?: NostrEvent; // The serialized event to publish after metadata arrives
 }
 
 /**
@@ -75,6 +77,21 @@ export class StreamStateManager {
      */
     getToolResults(): ToolExecutionResult[] {
         return this.state.allToolResults;
+    }
+
+    /**
+     * Get all tool results (alias for getToolResults)
+     */
+    getAllToolResults(): ToolExecutionResult[] {
+        return this.state.allToolResults;
+    }
+
+    /**
+     * Get the last tool result
+     */
+    getLastToolResult(): ToolExecutionResult | null {
+        const results = this.state.allToolResults;
+        return results.length > 0 ? results[results.length - 1] : null;
     }
 
 
@@ -163,6 +180,38 @@ export class StreamStateManager {
     }
 
     /**
+     * Set the deferred event (serialized NDKEvent to publish later)
+     */
+    setDeferredEvent(serializedEvent: NostrEvent): void {
+        this.state.deferredEvent = serializedEvent;
+        
+        // Debug logging
+        const { logger } = require("@/utils/logger");
+        logger.debug("[StreamStateManager] Stored deferred event", {
+            hasEvent: true,
+            contentLength: serializedEvent.content?.length || 0,
+            tagCount: serializedEvent.tags?.length || 0,
+            eventKeys: Object.keys(serializedEvent),
+        });
+    }
+
+    /**
+     * Get the deferred event
+     */
+    getDeferredEvent(): NostrEvent | undefined {
+        const hasEvent = !!this.state.deferredEvent;
+        
+        // Debug logging
+        const { logger } = require("@/utils/logger");
+        logger.debug("[StreamStateManager] Retrieved deferred event", {
+            hasEvent,
+            contentLength: this.state.deferredEvent?.content?.length || 0,
+        });
+        
+        return this.state.deferredEvent;
+    }
+
+    /**
      * Get a summary of the current state for logging
      */
     getStateSummary(): Record<string, unknown> {
@@ -174,6 +223,7 @@ export class StreamStateManager {
             terminationType: this.state.termination?.type,
             hasFinalResponse: !!this.state.finalResponse,
             startedToolsCount: this.state.startedTools.size,
+            hasDeferredEvent: !!this.state.deferredEvent,
         };
     }
 

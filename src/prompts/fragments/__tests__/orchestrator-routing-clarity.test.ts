@@ -1,57 +1,47 @@
 import { describe, expect, it } from "bun:test";
 import {
     orchestratorRoutingInstructionsFragment,
-    orchestratorHandoffGuidanceFragment,
-} from "../orchestrator-routing";
+} from "../25-orchestrator-routing";
 
 describe("Orchestrator Routing - Clarity-Based Decision Making", () => {
     it("should contain request clarity assessment instructions", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Initial Phase Routing");
-        expect(result).toContain("Analyze the user's message to determine the appropriate starting phase");
-        expect(result).toContain("Clear, specific requests with actionable instructions");
-        expect(result).toContain("Clear but architecturally complex tasks");
-        expect(result).toContain("Ambiguous, unclear, or exploratory requests");
+        expect(result).toContain("Phase Starting Points");
+        expect(result).toContain("Clear, specific requests: Start directly in EXECUTE");
+        expect(result).toContain("Complex but clear tasks: Start in PLAN");
+        expect(result).toContain("Unclear requirements: Start in CHAT");
     });
 
     it("should specify clarity-based routing actions", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        // Clear requests
-        expect(result).toContain("→ EXECUTE phase");
-        expect(result).toContain("Has explicit action verbs");
-
-        // Complex clear requests
-        expect(result).toContain("→ PLAN phase");
-        expect(result).toContain("requires significant design decisions");
-
-        // Ambiguous requests
-        expect(result).toContain("→ CHAT phase");
-        expect(result).toContain("Route to project-manager for requirements gathering");
+        // Check phase selection table
+        expect(result).toContain("Phase Selection Table");
+        expect(result).toContain("Clear action verbs, specific requests");
+        expect(result).toContain("Complex architecture needed");
+        expect(result).toContain("Ambiguous, needs clarification");
+        expect(result).toContain("project-manager");
     });
 
-    it("should contain mandatory double-consultation instructions", () => {
+    it("should contain agent restriction rules", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Quality Control Guidelines");
-        expect(result).toContain("Ensure quality through review cycles");
+        expect(result).toContain("CRITICAL AGENT RESTRICTION RULES");
+        expect(result).toContain("planner agent**: Use ONLY in");
+        expect(result).toContain("executor agent**: Use ONLY in");
         expect(result).toContain(
-            "If no experts: Route to project-manager for review"
+            "NEVER delegate verification, chores, reflection"
         );
     });
 
-    it("should contain availability-based verification strategy", () => {
+    it("should specify proper agent usage per phase", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Quality Control Guidelines");
-        expect(result).toContain("EXECUTE Phase Process");
-        expect(result).toContain(
-            "If no experts: Route to project-manager for review"
-        );
-        expect(result).toContain(
-            "Collect all feedback, route back if needed"
-        );
+        expect(result).toContain("Agent Capabilities");
+        expect(result).toContain("EXECUTE phase ONLY - never for verification/chores/reflection");
+        expect(result).toContain("PLAN phase ONLY - never for verification/chores/reflection");
+        expect(result).toContain("project-manager or domain experts (NEVER planner/executor)");
     });
 
     it("should enforce mandatory post-execute phases", () => {
@@ -60,96 +50,67 @@ describe("Orchestrator Routing - Clarity-Based Decision Making", () => {
         expect(result).toContain(
             "After execution work, you MUST proceed through VERIFICATION → CHORES → REFLECTION"
         );
-        expect(result).toContain("VERIFICATION Phase");
-        expect(result).toContain("Emergency fixes: Can skip VERIFICATION/CHORES/REFLECTION if critical");
+        expect(result).toContain("Standard flow");
+        expect(result).toContain("VERIFICATION");
+        expect(result).toContain("CHORES");
+        expect(result).toContain("REFLECTION");
     });
 
-    it("should specify that orchestrator is a silent router", () => {
+    it("should specify that orchestrator is an invisible router", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain(
-            "Silent Orchestrator Routing Instructions"
-        );
-        expect(result).toContain("NEVER write messages to users");
-        expect(result).toContain("Your ONLY tool:** continue()");
+        expect(result).toContain("Output:** JSON only");
+        expect(result).toContain("You're invisible - users never see your output");
     });
 
-    it("should contain feedback collection instructions", () => {
+    it("should contain phase transition rules", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Review Interpretation");
-        expect(result).toContain(
-            "Approval signals:"
-        );
-        expect(result).toContain(
-            "Mixed feedback:** Route ALL feedback back to primary agent"
-        );
+        expect(result).toContain("Phase Transitions");
+        expect(result).toContain("Success → Next");
+        expect(result).toContain("Failure → Retry");
     });
 
-    it("should specify verification-execute feedback loop", () => {
+    it("should specify loop prevention", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("If issues: Back to EXECUTE");
-        expect(result).toContain("If good: Proceed to CHORES");
-        expect(result).toContain("Focus: \"Does this work for users?\"");
-    });
-});
-
-describe("Orchestrator Handoff Guidance", () => {
-    it("should not mention complexity assessment", () => {
-        const routingResult = orchestratorRoutingInstructionsFragment.template();
-        const handoffResult = orchestratorHandoffGuidanceFragment.template();
-
-        // Should not contain "complexity" or "complex" in the context of task assessment
-        expect(routingResult).not.toContain("Task Complexity Assessment");
-        expect(handoffResult).not.toContain("assess the complexity");
-    });
-
-    it("should emphasize agent availability for routing decisions", () => {
-        const result = orchestratorHandoffGuidanceFragment.template();
-
-        expect(result).toContain("Agent Capabilities Match");
-        expect(result).toContain("When to Use Multi-Agent Queries");
-        expect(result).toContain("Gathering specialized knowledge from domain experts");
+        expect(result).toContain("Loop Prevention");
+        expect(result).toContain("Understand the workflow narrative to avoid loops");
+        expect(result).toContain("Don't route to agents who just completed their work");
     });
 });
 
 describe("Orchestrator No Assumptions Principle", () => {
-    it("should explicitly forbid adding assumptions", () => {
+    it("should contain key routing rules", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Pure Routing Rules");
-        expect(result).toContain("Don't compose messages or instructions");
-        expect(result).toContain("Your ONLY job is to make routing decisions");
+        expect(result).toContain("Key Rules");
+        expect(result).toContain("You're invisible - users never see your output");
+        expect(result).toContain("Messages are NEVER for you - find the right recipient");
+        expect(result).toContain("ALWAYS route to at least one agent");
     });
 
-    it("should provide clear examples of no assumptions", () => {
+    it("should emphasize JSON-only output", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        // Should show routing rules
-        expect(result).toContain(
-            'The continue() tool directly executes agents'
-        );
-        expect(result).toContain(
-            'Target agents process the event as if they were p-tagged originally'
-        );
+        expect(result).toContain("Output:** JSON only");
+        expect(result).toContain("Input/Output Format");
     });
 
-    it("should show routing principles", () => {
+    it("should show routing decision logic", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain(
-            "Messages are NEVER for you - find the right recipient"
-        );
-        expect(result).toContain("Just decide WHERE to route (which agents/phase)");
-        expect(result).toContain("Don't respond to messages - route them");
+        expect(result).toContain("Decision Logic");
+        expect(result).toContain("No agents have been routed yet");
+        expect(result).toContain("Workflow narrative shows completed actions");
     });
 
-    it("should emphasize routing without modification", () => {
+    it("should specify agent capabilities clearly", () => {
         const result = orchestratorRoutingInstructionsFragment.template();
 
-        expect(result).toContain("Pure Routing Rules");
-        expect(result).toContain("You remain completely invisible to users");
-        expect(result).toContain("Every message needs a recipient - find who should handle it");
+        expect(result).toContain("Agent Capabilities");
+        expect(result).toContain("executor | ✅ YES | Files, commands, implementation");
+        expect(result).toContain("planner | ❌ NO | Architecture, design decisions");
+        expect(result).toContain("project-manager | ❌ NO | Requirements, knowledge, summaries");
     });
 });

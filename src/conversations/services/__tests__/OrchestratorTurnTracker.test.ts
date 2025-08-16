@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { OrchestratorTurnTracker } from "../OrchestratorTurnTracker";
-import { PHASES } from "../../phases";
-import type { Completion } from "../../types";
+import { PHASES } from "@/conversations/phases";
+import type { Completion } from "@/conversations/types";
 
 describe("OrchestratorTurnTracker", () => {
     let tracker: OrchestratorTurnTracker;
@@ -13,8 +13,8 @@ describe("OrchestratorTurnTracker", () => {
 
     describe("startTurn", () => {
         it("should create a new turn with unique ID", () => {
-            const turnId1 = tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"], "test reason");
-            const turnId2 = tracker.startTurn(conversationId, PHASES.PLAN, ["agent2"], "another reason");
+            const turnId1 = tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
+            const turnId2 = tracker.startTurn(conversationId, PHASES.PLAN, ["agent2"]);
 
             expect(turnId1).toBeTruthy();
             expect(turnId2).toBeTruthy();
@@ -22,14 +22,19 @@ describe("OrchestratorTurnTracker", () => {
         });
 
         it("should initialize turn with correct properties", () => {
-            const turnId = tracker.startTurn(conversationId, PHASES.EXECUTE, ["agent1", "agent2"], "test");
-            const turn = tracker.getCurrentTurn(conversationId);
+            const turnId = tracker.startTurn(
+                conversationId,
+                PHASES.EXECUTE,
+                ["agent1", "agent2"],
+                "Test reason"
+            );
 
-            expect(turn).toBeDefined();
+            const turn = tracker.getCurrentTurn(conversationId);
+            expect(turn).toBeTruthy();
             expect(turn?.turnId).toBe(turnId);
             expect(turn?.phase).toBe(PHASES.EXECUTE);
             expect(turn?.agents).toEqual(["agent1", "agent2"]);
-            expect(turn?.reason).toBe("test");
+            expect(turn?.reason).toBe("Test reason");
             expect(turn?.isCompleted).toBe(false);
             expect(turn?.completions).toEqual([]);
         });
@@ -37,47 +42,48 @@ describe("OrchestratorTurnTracker", () => {
 
     describe("addCompletion", () => {
         it("should add completion to active turn", () => {
-            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1", "agent2"]);
-            tracker.addCompletion(conversationId, "agent1", "Task completed");
+            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
+            tracker.addCompletion(conversationId, "agent1", "Test response");
 
             const turn = tracker.getCurrentTurn(conversationId);
             expect(turn?.completions).toHaveLength(1);
-            expect(turn?.completions[0]).toMatchObject({
+            expect(turn?.completions[0]).toEqual({
                 agent: "agent1",
-                message: "Task completed"
+                message: "Test response",
+                timestamp: expect.any(Number)
             });
         });
 
         it("should mark turn as completed when all agents complete", () => {
-            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1", "agent2"]);
+            tracker.startTurn(conversationId, PHASES.PLAN, ["agent1", "agent2"]);
             
-            tracker.addCompletion(conversationId, "agent1", "Agent 1 done");
+            tracker.addCompletion(conversationId, "agent1", "Response 1");
             let turn = tracker.getCurrentTurn(conversationId);
             expect(turn?.isCompleted).toBe(false);
 
-            tracker.addCompletion(conversationId, "agent2", "Agent 2 done");
+            tracker.addCompletion(conversationId, "agent2", "Response 2");
             turn = tracker.getCurrentTurn(conversationId);
             expect(turn?.isCompleted).toBe(true);
         });
 
         it("should not add completion to non-existent conversation", () => {
-            tracker.addCompletion("nonexistent", "agent1", "message");
-            // Should not throw, just warn
+            tracker.addCompletion("nonexistent", "agent1", "Response");
+            expect(tracker.getTurns("nonexistent")).toHaveLength(0);
         });
 
         it("should find correct turn for agent in multiple turns", () => {
-            // Start first turn with agent1
+            // First turn - complete it
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
-            tracker.addCompletion(conversationId, "agent1", "First turn done");
+            tracker.addCompletion(conversationId, "agent1", "Chat response");
 
-            // Start second turn with agent2 and agent3
-            tracker.startTurn(conversationId, PHASES.PLAN, ["agent2", "agent3"]);
-            tracker.addCompletion(conversationId, "agent2", "Second turn agent2");
+            // Second turn - incomplete
+            tracker.startTurn(conversationId, PHASES.PLAN, ["agent2"]);
+            tracker.addCompletion(conversationId, "agent2", "Plan response");
 
             const turns = tracker.getTurns(conversationId);
             expect(turns).toHaveLength(2);
-            expect(turns[0].isCompleted).toBe(true);
-            expect(turns[1].completions).toHaveLength(1);
+            expect(turns[0].completions[0].message).toBe("Chat response");
+            expect(turns[1].completions[0].message).toBe("Plan response");
         });
     });
 
@@ -87,16 +93,13 @@ describe("OrchestratorTurnTracker", () => {
         });
 
         it("should return false when current turn is incomplete", () => {
-            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1", "agent2"]);
-            tracker.addCompletion(conversationId, "agent1", "Done");
-
+            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
             expect(tracker.isCurrentTurnComplete(conversationId)).toBe(false);
         });
 
         it("should return true when current turn is complete", () => {
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
-            tracker.addCompletion(conversationId, "agent1", "Done");
-
+            tracker.addCompletion(conversationId, "agent1", "Response");
             expect(tracker.isCurrentTurnComplete(conversationId)).toBe(true);
         });
     });
@@ -112,18 +115,18 @@ describe("OrchestratorTurnTracker", () => {
 
             const current = tracker.getCurrentTurn(conversationId);
             expect(current?.turnId).toBe(turnId2);
+            expect(current?.phase).toBe(PHASES.PLAN);
         });
     });
 
     describe("getRoutingHistory", () => {
         it("should return only completed turns", () => {
-            // Create completed turn
+            // Complete turn
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
-            tracker.addCompletion(conversationId, "agent1", "Done");
+            tracker.addCompletion(conversationId, "agent1", "Response");
 
-            // Create incomplete turn
-            tracker.startTurn(conversationId, PHASES.PLAN, ["agent2", "agent3"]);
-            tracker.addCompletion(conversationId, "agent2", "Partial");
+            // Incomplete turn
+            tracker.startTurn(conversationId, PHASES.PLAN, ["agent2"]);
 
             const history = tracker.getRoutingHistory(conversationId);
             expect(history).toHaveLength(1);
@@ -131,70 +134,67 @@ describe("OrchestratorTurnTracker", () => {
         });
 
         it("should include all turn data in routing entries", () => {
-            tracker.startTurn(conversationId, PHASES.EXECUTE, ["agent1"], "Execute task");
-            tracker.addCompletion(conversationId, "agent1", "Task executed");
+            tracker.startTurn(conversationId, PHASES.EXECUTE, ["agent1"], "Execute reason");
+            tracker.addCompletion(conversationId, "agent1", "Execute response");
 
             const history = tracker.getRoutingHistory(conversationId);
-            expect(history[0]).toMatchObject({
+            expect(history).toHaveLength(1);
+            expect(history[0]).toEqual({
                 phase: PHASES.EXECUTE,
                 agents: ["agent1"],
-                reason: "Execute task"
+                completions: [{
+                    agent: "agent1",
+                    message: "Execute response",
+                    timestamp: expect.any(Number)
+                }],
+                reason: "Execute reason",
+                timestamp: expect.any(Number)
             });
-            expect(history[0].completions).toHaveLength(1);
         });
     });
 
     describe("buildRoutingContext", () => {
-        it("should build context with empty history for new conversation", () => {
+        it("should build context with narrative for new conversation", () => {
             const context = tracker.buildRoutingContext(conversationId, "User request");
 
             expect(context.user_request).toBe("User request");
-            expect(context.routing_history).toEqual([]);
-            // current_routing no longer exists in the interface
+            expect(context.workflow_narrative).toContain("ORCHESTRATOR ROUTING CONTEXT");
+            expect(context.workflow_narrative).toContain("User request");
+            expect(context.workflow_narrative).toContain("No agents have been routed yet");
         });
 
-        it("should include completed turns in history", () => {
+        it("should include completed turns in narrative", () => {
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
             tracker.addCompletion(conversationId, "agent1", "Response");
 
             const context = tracker.buildRoutingContext(conversationId, "User request");
 
-            expect(context.routing_history).toHaveLength(1);
-            // current_routing no longer exists in the interface
+            expect(context.workflow_narrative).toContain("WORKFLOW HISTORY");
+            expect(context.workflow_narrative).toContain("CHAT phase");
+            expect(context.workflow_narrative).toContain("Response");
         });
 
-        it("should skip incomplete turns in routing context", () => {
+        it("should show incomplete turns as waiting in narrative", () => {
             tracker.startTurn(conversationId, PHASES.PLAN, ["agent1", "agent2"]);
             tracker.addCompletion(conversationId, "agent1", "Partial");
 
             const context = tracker.buildRoutingContext(conversationId, "User request");
 
-            // Incomplete turn should not be in history since orchestrator
-            // is only called when turns are complete
-            expect(context.routing_history).toHaveLength(0);
+            // Incomplete turn should show as waiting
+            expect(context.workflow_narrative).toContain("Waiting for agent responses");
         });
 
-        it("should not include triggering completion in context", () => {
-            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1", "agent2"]);
-
-            const triggeringCompletion: Completion = {
-                agent: "agent1",
-                message: "New completion",
-                timestamp: Date.now()
-            };
-
+        it("should include analysis hint for analysis requests", () => {
             const context = tracker.buildRoutingContext(
                 conversationId,
-                "User request",
-                triggeringCompletion
+                "Tell me if the README is good"
             );
 
-            // With new optimization, orchestrator isn't called until turn is complete
-            // so triggering completion handling is no longer needed
-            expect(context.routing_history).toHaveLength(0);
+            // Should detect this as an analysis request
+            expect(context.workflow_narrative).toContain("analysis/review request");
         });
 
-        it("should include completed turn in history", () => {
+        it("should include completed turn in narrative", () => {
             tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
 
             const triggeringCompletion: Completion = {
@@ -211,7 +211,27 @@ describe("OrchestratorTurnTracker", () => {
                 "User request"
             );
 
-            expect(context.routing_history).toHaveLength(1);
+            expect(context.workflow_narrative).toContain("Final completion");
+        });
+
+        it("should build narrative from multiple completed turns", () => {
+            // First turn
+            tracker.startTurn(conversationId, PHASES.CHAT, ["agent1"]);
+            tracker.addCompletion(conversationId, "agent1", "Chat response");
+
+            // Second turn  
+            tracker.startTurn(conversationId, PHASES.EXECUTE, ["agent2"]);
+            tracker.addCompletion(conversationId, "agent2", "Execute response");
+
+            const context = tracker.buildRoutingContext(
+                conversationId,
+                "User request"
+            );
+
+            expect(context.workflow_narrative).toContain("CHAT phase");
+            expect(context.workflow_narrative).toContain("Chat response");
+            expect(context.workflow_narrative).toContain("EXECUTE phase");
+            expect(context.workflow_narrative).toContain("Execute response");
         });
     });
 

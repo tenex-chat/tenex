@@ -236,9 +236,9 @@ export class NostrPublisher {
 
             const event = new NDKEvent(getNDK());
             event.kind =
-                state === "start"
-                    ? EVENT_KINDS.TYPING_INDICATOR
-                    : EVENT_KINDS.TYPING_INDICATOR_STOP;
+                state === "stop"
+                    ? EVENT_KINDS.TYPING_INDICATOR_STOP
+                    : EVENT_KINDS.TYPING_INDICATOR;
 
             // Use provided message or default
             if (state === "start") {
@@ -254,7 +254,7 @@ export class NostrPublisher {
             event.tag(["e", this.context.conversationId]);
 
             await event.sign(this.context.agent.signer);
-            await event.publish();
+            event.publish();
 
             logger.debug(`Published typing indicator ${state}`, {
                 conversationId: this.context.conversationId,
@@ -277,7 +277,7 @@ export class NostrPublisher {
         return new StreamPublisher(this);
     }
 
-    // Private helper methods
+    // Public helper methods (made public for handleAgentCompletion)
     public createBaseReply(): NDKEvent {
         const reply = this.context.triggeringEvent.reply();
 
@@ -325,8 +325,24 @@ export class NostrPublisher {
         event.tags = event.tags.filter((tag) => tag[0] !== "p");
     }
 
-    private addLLMMetadata(event: NDKEvent, metadata?: LLMMetadata): void {
-        if (!metadata) return;
+    public addLLMMetadata(event: NDKEvent, metadata?: LLMMetadata): void {
+        if (!metadata) {
+            logger.debug("[NostrPublisher] No metadata to add");
+            return;
+        }
+
+        logger.debug("[NostrPublisher] Adding LLM metadata to event", {
+            eventId: event.id,
+            model: metadata.model,
+            cost: metadata.cost,
+            promptTokens: metadata.promptTokens,
+            completionTokens: metadata.completionTokens,
+            totalTokens: metadata.totalTokens,
+            hasSystemPrompt: !!metadata.systemPrompt,
+            hasUserPrompt: !!metadata.userPrompt,
+            systemPromptLength: metadata.systemPrompt?.length || 0,
+            userPromptLength: metadata.userPrompt?.length || 0,
+        });
 
         event.tag(["llm-model", metadata.model]);
         event.tag(["llm-cost-usd", metadata.cost.toString()]);
@@ -341,7 +357,7 @@ export class NostrPublisher {
             event.tag(["llm-max-completion-tokens", metadata.maxCompletionTokens.toString()]);
         }
         if (metadata.systemPrompt) {
-            event.tag(["llm-system-prompt", metadata.systemPrompt]);
+            // event.tag(["llm-system-prompt", metadata.systemPrompt]);
         }
         if (metadata.userPrompt) {
             event.tag(["llm-user-prompt", metadata.userPrompt]);
@@ -349,6 +365,12 @@ export class NostrPublisher {
         if (metadata.rawResponse) {
             event.tag(["llm-raw-response", metadata.rawResponse]);
         }
+        
+        logger.debug("[NostrPublisher] ✅ Metadata tags added", {
+            eventId: event.id,
+            totalTags: event.tags.length,
+            metadataTags: event.tags.filter(t => t[0].startsWith("llm-")).length,
+        });
     }
 
 }
@@ -489,6 +511,14 @@ export class StreamPublisher {
 
     getSequenceNumber(): number {
         return this.sequence;
+    }
+
+    /**
+     * Get the total content accumulated by this publisher instance
+     * since its creation or last finalization.
+     */
+    getAccumulatedContent(): string {
+        return this.accumulatedContent;
     }
 
     // Private helper methods

@@ -37,6 +37,19 @@ export interface BuildSystemPromptOptions {
     triggeringEvent?: NDKEvent;
 }
 
+export interface BuildStandalonePromptOptions {
+    // Required data
+    agent: AgentInstance;
+    phase: Phase;
+
+    // Optional runtime data
+    availableAgents?: AgentInstance[];
+    conversation?: Conversation;
+    agentLessons?: Map<string, NDKAgentLesson[]>;
+    mcpTools?: Tool[];
+    triggeringEvent?: NDKEvent;
+}
+
 export interface SystemMessage {
     message: Message;
     metadata?: {
@@ -78,19 +91,17 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
         }
     }
     
-    // Add project inventory as separate cacheable message for non-orchestrator agents
-    if (!options.agent.isOrchestrator) {
-        const inventoryContent = buildProjectInventoryContent(options);
-        if (inventoryContent) {
-            messages.push({
-                message: new Message("system", inventoryContent),
-                metadata: {
-                    cacheable: true,
-                    cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
-                    description: "Project inventory"
-                }
-            });
-        }
+    // Add project inventory as separate cacheable message for all agents
+    const inventoryContent = buildProjectInventoryContent(options);
+    if (inventoryContent) {
+        messages.push({
+            message: new Message("system", inventoryContent),
+            metadata: {
+                cacheable: true,
+                cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
+                description: "Project inventory"
+            }
+        });
     }
     
     return messages;
@@ -188,7 +199,7 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
         systemPromptBuilder.add("orchestrator-routing-instructions", {});
     } else {
         // Specialists use reasoning tags
-        systemPromptBuilder.add("specialist-reasoning", {});
+        // systemPromptBuilder.add("specialist-reasoning", {});
     }
 
     return systemPromptBuilder.build();
@@ -217,6 +228,101 @@ function buildProjectInventoryContent(options: BuildSystemPromptOptions): string
     });
     const content = builder.build();
     return content.trim() ? content : null;
+}
+
+/**
+ * Builds system prompt messages for standalone agents (without project context).
+ * Includes most fragments except project-specific ones.
+ */
+export function buildStandaloneSystemPromptMessages(options: BuildStandalonePromptOptions): SystemMessage[] {
+    const messages: SystemMessage[] = [];
+    
+    // Build the main system prompt
+    const mainPrompt = buildStandaloneMainPrompt(options);
+    messages.push({
+        message: new Message("system", mainPrompt),
+        metadata: {
+            description: "Main standalone system prompt"
+        }
+    });
+    
+    return messages;
+}
+
+/**
+ * Builds the main system prompt for standalone agents
+ */
+function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): string {
+    const {
+        agent,
+        phase,
+        availableAgents = [],
+        conversation,
+        agentLessons,
+        mcpTools = [],
+        triggeringEvent,
+    } = options;
+
+    const systemPromptBuilder = new PromptBuilder();
+    
+    // For standalone agents, use a simplified identity without project references
+    systemPromptBuilder.add("specialist-identity", {
+        agent,
+        projectTitle: "Standalone Mode",
+        projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
+    });
+    
+    // Add available agents if any (for potential handoffs in standalone mode)
+    if (availableAgents.length > 1) {
+        systemPromptBuilder.add("specialist-available-agents", {
+            agents: availableAgents,
+            currentAgent: agent,
+        });
+    }
+    
+    // Add voice mode instructions if applicable
+    if (isVoiceMode(triggeringEvent)) {
+        systemPromptBuilder.add("voice-mode", {
+            isVoiceMode: true,
+        });
+    }
+
+    // Add referenced article context if present
+    if (conversation?.metadata?.referencedArticle) {
+        systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
+    }
+
+    // Keep phase definitions as foundational knowledge
+    systemPromptBuilder
+        .add("phase-definitions", {})
+        .add("retrieved-lessons", {
+            agent,
+            phase,
+            conversation,
+            agentLessons: agentLessons || new Map(),
+        });
+    
+    // Add tools
+    systemPromptBuilder.add("specialist-tools", {
+        agent,
+        mcpTools,
+    });
+    
+    // Add MCP phase examples if MCP tools are available
+    if (mcpTools.length > 0) {
+        systemPromptBuilder.add("mcp-phase-examples", {
+            phase,
+            hasMcpTools: true,
+        });
+    }
+
+    // Specialists use reasoning tags
+    // systemPromptBuilder.add("specialist-reasoning", {});
+
+    // Add completion guidance for non-orchestrator agents
+    systemPromptBuilder.add("specialist-completion-guidance", {});
+
+    return systemPromptBuilder.build();
 }
 
 /**

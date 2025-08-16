@@ -87,6 +87,40 @@ export class ConversationManager {
         return this.coordinator.getConversation(id);
     }
 
+    async loadConversation(id: string): Promise<Conversation | undefined> {
+        // First check if already in memory
+        const existing = this.coordinator.getConversation(id);
+        if (existing) {
+            return existing;
+        }
+
+        // Try to load from disk
+        const persistence = (this.coordinator as any).persistence;
+        if (persistence && persistence.adapter) {
+            const loaded = await persistence.adapter.load(id);
+            if (loaded) {
+                // Ensure execution time is initialized
+                if (!loaded.executionTime) {
+                    loaded.executionTime = {
+                        totalSeconds: 0,
+                        isActive: false,
+                        lastUpdated: Date.now()
+                    };
+                }
+                // Ensure agentStates is a Map
+                if (!(loaded.agentStates instanceof Map)) {
+                    const statesObj = loaded.agentStates as any;
+                    loaded.agentStates = new Map(Object.entries(statesObj || {}));
+                }
+                // Add to store
+                (this.coordinator as any).store.set(id, loaded);
+                return loaded;
+            }
+        }
+        
+        return undefined;
+    }
+
     async updatePhase(
         id: string,
         phase: Phase,
@@ -215,12 +249,12 @@ export class ConversationManager {
 
     async addCompletionToTurn(
         conversationId: string,
-        agentSlug: string,
+        agentPubkey: string,
         message: string
     ): Promise<void> {
         return await this.coordinator.addCompletionToTurn(
             conversationId,
-            agentSlug,
+            agentPubkey,
             message
         );
     }

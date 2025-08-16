@@ -198,8 +198,8 @@ describe("ConversationCoordinator E2E", () => {
             const routingContext = await coordinator.buildOrchestratorRoutingContext("event3");
             
             expect(routingContext.user_request).toBe("Build a calculator");
-            expect(routingContext.routing_history).toHaveLength(1);
-            expect(routingContext.current_routing).toBeNull();
+            expect(routingContext.workflow_narrative).toContain("Build a calculator");
+            expect(routingContext.workflow_narrative).toContain("specialist");
         });
 
         it("should handle execution queue for EXECUTE phase", async () => {

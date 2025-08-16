@@ -197,21 +197,20 @@ interface OrchestratorTurn {
 
 **Routing Context Building**:
 
-The `buildOrchestratorRoutingContext()` method creates structured JSON for the orchestrator:
+The `buildOrchestratorRoutingContext()` method creates a context with a workflow narrative for the orchestrator:
 
 ```typescript
 interface OrchestratorRoutingContext {
-    user_request: string;        // Original request
-    routing_history: RoutingEntry[]; // Past decisions
-    current_routing: RoutingEntry | null; // Active routing
+    user_request: string;  // Original user request that started the conversation
+    workflow_narrative: string;  // Human-readable narrative of conversation flow and agent interactions
 }
 ```
 
 **Context Processing Logic**:
 1. Extract original user request
-2. Build routing history from orchestrator turns
-3. Determine if current routing is active or complete
-4. Include agent completions for decision-making
+2. Build workflow narrative from orchestrator turns and completions
+3. Present agent interactions in a human-readable format
+4. Include all completion messages for context-aware decision-making
 
 **Agent Message Building**:
 

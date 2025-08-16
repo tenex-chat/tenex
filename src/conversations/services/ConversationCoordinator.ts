@@ -439,6 +439,7 @@ export class ConversationCoordinator {
 
     /**
      * Start a new orchestrator turn
+     * @param agents Array of agent pubkeys for consistent identification
      */
     async startOrchestratorTurn(
         conversationId: string,
@@ -466,10 +467,11 @@ export class ConversationCoordinator {
 
     /**
      * Add a completion to the current turn
+     * @param agentPubkey The pubkey of the agent that completed
      */
     async addCompletionToTurn(
         conversationId: string,
-        agentSlug: string,
+        agentPubkey: string,
         message: string
     ): Promise<void> {
         const conversation = this.store.get(conversationId);
@@ -481,7 +483,7 @@ export class ConversationCoordinator {
         this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
 
         // Add completion
-        this.turnTracker.addCompletion(conversationId, agentSlug, message);
+        this.turnTracker.addCompletion(conversationId, agentPubkey, message);
 
         // Sync back
         conversation.orchestratorTurns = this.turnTracker.getTurns(conversationId);

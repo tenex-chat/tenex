@@ -199,7 +199,7 @@ export class SubscriptionManager {
     private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {
         // Check for duplicate events
         if (hasProcessedEvent(event.id)) {
-            logger.debug(`Skipping duplicate event ${event.id} from ${source}`);
+            logger.info(`Skipping duplicate event ${event.id} from ${source}`);
             return;
         }
 
@@ -207,12 +207,10 @@ export class SubscriptionManager {
         addProcessedEvent(this.projectPath, event.id);
 
         // Log receipt
-        if (event.kind !== EVENT_KINDS.PROJECT_STATUS) {
-            try {
-                await this.eventHandler.handleEvent(event);
-            } catch (error) {
-                logger.error(`Error handling event from ${source}:`, error);
-            }
+        try {
+            await this.eventHandler.handleEvent(event);
+        } catch (error) {
+            logger.error(`Error handling event from ${source}:`, error);
         }
     }
 

@@ -392,8 +392,7 @@ buildAgentMessages() →
 buildOrchestratorRoutingContext() →
     {
         user_request: string,
-        routing_history: RoutingEntry[],
-        current_routing: RoutingEntry | null
+        workflow_narrative: string  // Human-readable narrative of workflow
     }
 ```
 

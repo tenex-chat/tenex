@@ -74,22 +74,24 @@ export interface PhaseTransition {
 // Orchestrator routing context types
 export interface OrchestratorRoutingContext {
     user_request: string;  // Original user request that started the conversation
-    routing_history: RoutingEntry[];  // All past completed routing decisions
-    // Note: current_routing removed - orchestrator is only invoked when ready for new routing
+    workflow_narrative: string;  // Human-readable narrative of conversation flow and agent interactions
+    // Note: routing_history replaced with workflow_narrative for better LLM understanding
 }
 
 export interface RoutingEntry {
     phase: Phase;
-    agents: string[];  // Agents routed to
+    agents: string[];  // Agent names/slugs (human-readable)
     completions: Completion[];  // Their complete() outputs
     reason?: string;  // Why this routing was chosen
     timestamp?: number;  // When routing decision was made
+    phase_complete?: boolean;  // Explicit: is this phase done?
 }
 
 export interface Completion {
-    agent: string;  // Agent slug
+    agent: string;  // Agent name/slug (human-readable)
     message: string;  // The complete() tool response
     timestamp?: number;  // When completion happened
+    status?: "success" | "failure" | "partial";  // How did it go?
 }
 
 // Orchestrator turn tracking (internal state)

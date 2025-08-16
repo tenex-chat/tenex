@@ -200,21 +200,16 @@ The orchestrator operates as a completely invisible routing layer:
 
 #### Orchestrator Input Format
 
-```json
-{
-    "user_request": "Current user message or agent completion",
-    "routing_history": [
-        {
-            "agents": ["agent-slug"],
-            "phase": "execute",
-            "reason": "Routing rationale"
-        }
-    ],
-    "current_routing": {
-        "agents": ["completing-agent"],
-        "phase": "current-phase",
-        "completions": ["Agent completion summaries"]
-    }
+The orchestrator receives a workflow narrative as text that contains:
+- The user's request
+- Complete workflow history showing what agents have done
+- Full completion messages from agents
+- Current status and phase information
+
+```typescript
+interface OrchestratorRoutingContext {
+    user_request: string;  // Original user request that started the conversation
+    workflow_narrative: string;  // Human-readable narrative of conversation flow and agent interactions
 }
 ```
 

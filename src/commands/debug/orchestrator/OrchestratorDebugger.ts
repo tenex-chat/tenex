@@ -290,10 +290,12 @@ export class OrchestratorDebugger {
         }
 
         try {
-            const conversation = await this.conversationManager.getConversation(conversationId);
+            // Load conversation (will check memory first, then disk)
+            const conversation = await this.conversationManager.loadConversation(conversationId);
             
             if (!conversation) {
                 logger.error(chalk.red(`Conversation ${conversationId} not found`));
+                logger.info(chalk.gray(`Looked in: .tenex/conversations/${conversationId}.json`));
                 return;
             }
 
@@ -421,15 +423,108 @@ export class OrchestratorDebugger {
         }
     }
 
-    private buildOrchestratorContext(): { user_request: string; routing_history: RoutingEntry[]; current_routing?: RoutingEntry } {
+    private buildOrchestratorContext(): { user_request: string; workflow_narrative: string } {
+        // Build the workflow narrative from the state
+        const narrative = this.buildWorkflowNarrative();
+        
+        // Cache it in state for display
+        this.state.workflowNarrative = narrative;
+        
         return {
             user_request: this.state.userRequest,
-            routing_history: this.state.routingHistory,
-            current_routing: this.state.currentRouting || undefined
+            workflow_narrative: narrative
         };
     }
+    
+    private buildWorkflowNarrative(): string {
+        const narrativeParts: string[] = [];
+        const projectCtx = getProjectContext();
+        
+        narrativeParts.push(`=== ORCHESTRATOR ROUTING CONTEXT ===\n`);
+        narrativeParts.push(`Initial user request: "${this.state.userRequest}"\n`);
+        
+        if (this.state.routingHistory.length === 0 && !this.state.currentRouting) {
+            narrativeParts.push(`\nThis is the first routing decision for this conversation.`);
+            narrativeParts.push(`No agents have been routed yet.\n`);
+        } else {
+            narrativeParts.push(`\n--- WORKFLOW HISTORY ---\n`);
+            
+            // Add completed routing history
+            for (const entry of this.state.routingHistory) {
+                const agentNames = entry.agents.map(slug => {
+                    const agent = Array.from(projectCtx.agents.values()).find(a => a.slug === slug);
+                    return agent ? `@${agent.name || agent.slug}` : `@${slug}`;
+                }).join(', ');
+                
+                narrativeParts.push(`[${entry.phase} phase → ${agentNames}]`);
+                if (entry.reason) {
+                    narrativeParts.push(`Routing reason: "${entry.reason}"`);
+                }
+                
+                if (entry.completions.length > 0) {
+                    for (const completion of entry.completions) {
+                        const agent = Array.from(projectCtx.agents.values()).find(a => a.slug === completion.agent);
+                        const agentName = agent ? `@${agent.name || agent.slug}` : `@${completion.agent}`;
+                        narrativeParts.push(`\n${agentName} completed:`);
+                        narrativeParts.push(`"${completion.message}"\n`);
+                    }
+                }
+            }
+            
+            // Add current routing if exists
+            if (this.state.currentRouting) {
+                const agentNames = this.state.currentRouting.agents.map(slug => {
+                    const agent = Array.from(projectCtx.agents.values()).find(a => a.slug === slug);
+                    return agent ? `@${agent.name || agent.slug}` : `@${slug}`;
+                }).join(', ');
+                
+                narrativeParts.push(`\n[CURRENT: ${this.state.currentRouting.phase} phase → ${agentNames}]`);
+                if (this.state.currentRouting.reason) {
+                    narrativeParts.push(`Routing reason: "${this.state.currentRouting.reason}"`);
+                }
+                
+                if (this.state.currentRouting.completions.length > 0) {
+                    for (const completion of this.state.currentRouting.completions) {
+                        const agent = Array.from(projectCtx.agents.values()).find(a => a.slug === completion.agent);
+                        const agentName = agent ? `@${agent.name || agent.slug}` : `@${completion.agent}`;
+                        narrativeParts.push(`\n${agentName} completed:`);
+                        narrativeParts.push(`"${completion.message}"\n`);
+                    }
+                    
+                    // Check if waiting for more completions
+                    const waitingFor = this.state.currentRouting.agents.filter(
+                        agent => !this.state.currentRouting!.completions.some(c => c.agent === agent)
+                    );
+                    if (waitingFor.length > 0) {
+                        const waitingNames = waitingFor.map(slug => {
+                            const agent = Array.from(projectCtx.agents.values()).find(a => a.slug === slug);
+                            return agent ? `@${agent.name || agent.slug}` : `@${slug}`;
+                        }).join(', ');
+                        narrativeParts.push(`(Waiting for responses from: ${waitingNames})\n`);
+                    }
+                } else {
+                    narrativeParts.push(`(Waiting for agent responses...)\n`);
+                }
+            }
+        }
+        
+        narrativeParts.push(`\n--- YOU ARE HERE ---`);
+        narrativeParts.push(`The user's request was: "${this.state.userRequest}"`);
+        
+        // Check if this appears to be an analysis-only request
+        const lowerRequest = this.state.userRequest.toLowerCase();
+        if (lowerRequest.includes("tell me") || lowerRequest.includes("check") || 
+            lowerRequest.includes("review") || lowerRequest.includes("don't want any changes")) {
+            narrativeParts.push(`Note: This appears to be an analysis/review request (no implementation needed).`);
+        }
+        
+        narrativeParts.push(`\nDetermine the NEXT routing action based on the above workflow history.`);
+        narrativeParts.push(`If the user's request has been fully addressed, route to ["END"].`);
+        
+        return narrativeParts.join('\n');
+    }
 
-    private async buildOrchestratorMessages(context: { user_request: string; routing_history: RoutingEntry[]; current_routing?: RoutingEntry }): Promise<Array<{ role: string; content: string }>> {
+    private async buildOrchestratorMessages(context: { user_request: string; workflow_narrative: string }): Promise<Array<{ role: string; content: string }>> {
         const { Message } = await import("multi-llm-ts");
         const projectCtx = getProjectContext();
         const orchestrator = Array.from(projectCtx.agents.values()).find(a => a.isOrchestrator);
@@ -467,8 +562,8 @@ export class OrchestratorDebugger {
 
         const messages = systemMessages.map(sm => sm.message);
         
-        // Add the routing context as user message
-        messages.push(new Message("user", JSON.stringify(context, null, 2)));
+        // Add the workflow narrative as user message (new format)
+        messages.push(new Message("user", context.workflow_narrative));
         
         return messages;
     }
@@ -560,6 +655,16 @@ describe('Orchestrator Routing Test', () => {
         const context = this.buildOrchestratorContext();
         
         logger.info(chalk.cyan("\n📋 Current Orchestrator Context:"));
+        
+        // Show the workflow narrative if available
+        if (this.state.workflowNarrative) {
+            logger.info(chalk.yellow("\n=== WORKFLOW NARRATIVE ==="));
+            logger.info(chalk.white(this.state.workflowNarrative));
+            logger.info(chalk.yellow("=========================\n"));
+        }
+        
+        // Also show the raw context for debugging
+        logger.info(chalk.gray("\nRaw Context (for debugging):"));
         logger.info(chalk.white(JSON.stringify(context, null, 2)));
         
         await this.ui.promptToContinue();

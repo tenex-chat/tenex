@@ -2,8 +2,8 @@ import { formatAnyError } from "@/utils/error-formatter";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { LLMService } from "@/llm/types";
 import { NostrPublisher } from "@/nostr";
-import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext } from "@/services";
+import { buildSystemPromptMessages, buildStandaloneSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import {
     type TracingContext,
@@ -11,7 +11,8 @@ import {
     createTracingContext,
 } from "@/tracing";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
@@ -30,10 +31,22 @@ import { startExecutionTime, stopExecutionTime } from "@/conversations/execution
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
+/**
+ * Minimal context for standalone agent execution
+ */
+export interface StandaloneAgentContext {
+    agents: Map<string, AgentInstance>;
+    pubkey: string;
+    signer: NDKPrivateKeySigner;
+    project?: NDKProject;
+    getLessonsForAgent?: (pubkey: string) => NDKAgentLesson[];
+}
+
 export class AgentExecutor {
     constructor(
         private llmService: LLMService,
-        private conversationManager: ConversationManager
+        private conversationManager: ConversationManager,
+        private standaloneContext?: StandaloneAgentContext
     ) {}
 
     /**
@@ -49,7 +62,7 @@ export class AgentExecutor {
                 return new RoutingBackend(this.llmService, this.conversationManager);
             case "reason-act-loop":
             default:
-                return new ReasonActLoop(this.llmService, this.conversationManager);
+                return new ReasonActLoop(this.llmService);
         }
     }
 
@@ -186,58 +199,93 @@ export class AgentExecutor {
         context: ExecutionContext,
         _triggeringEvent: NDKEvent
     ): Promise<Message[]> {
-        const projectCtx = getProjectContext();
-        const project = projectCtx.project;
-
+        const messages: Message[] = [];
+        
         // Get fresh conversation data
         const conversation = context.conversationManager.getConversation(context.conversationId);
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
-        // Create tag map for efficient lookup
-        const tagMap = new Map<string, string>();
-        for (const tag of project.tags) {
-            if (tag.length >= 2 && tag[0] && tag[1]) {
-                tagMap.set(tag[0], tag[1]);
-            }
-        }
-
-        // Get all available agents for handoffs
-        const availableAgents = Array.from(projectCtx.agents.values());
-
-        const messages: Message[] = [];
-
         // Get MCP tools for the prompt
         const mcpTools = mcpService.getCachedTools();
 
-        // Build system prompt using the shared function
-        // Only pass the current agent's lessons
-        const agentLessonsMap = new Map<
-            string,
-            NDKAgentLesson[]
-        >();
-        const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
-        
-        if (currentAgentLessons.length > 0) {
-            agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
-        }
+        // Check if we're in standalone mode or project mode
+        if (this.standaloneContext) {
+            // Standalone mode - use minimal context
+            const availableAgents = Array.from(this.standaloneContext.agents.values());
+            
+            // Get lessons if available
+            const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
+            if (this.standaloneContext.getLessonsForAgent) {
+                const lessons = this.standaloneContext.getLessonsForAgent(context.agent.pubkey);
+                if (lessons.length > 0) {
+                    agentLessonsMap.set(context.agent.pubkey, lessons);
+                }
+            }
 
-        // Build system prompt messages for all agents (including orchestrator)
-        const systemMessages = buildSystemPromptMessages({
-            agent: context.agent,
-            phase: context.phase,
-            project,
-            availableAgents,
-            conversation,
-            agentLessons: agentLessonsMap,
-            mcpTools,
-            triggeringEvent: context.triggeringEvent,
-        });
+            // Build standalone system prompt
+            const systemMessages = buildStandaloneSystemPromptMessages({
+                agent: context.agent,
+                phase: context.phase,
+                availableAgents,
+                conversation,
+                agentLessons: agentLessonsMap,
+                mcpTools,
+                triggeringEvent: context.triggeringEvent,
+            });
 
-        // Add all system messages
-        for (const systemMsg of systemMessages) {
-            messages.push(systemMsg.message);
+            // Add all system messages
+            for (const systemMsg of systemMessages) {
+                messages.push(systemMsg.message);
+            }
+        } else if (isProjectContextInitialized()) {
+            // Project mode - use full project context
+            const projectCtx = getProjectContext();
+            const project = projectCtx.project;
+
+            // Create tag map for efficient lookup
+            const tagMap = new Map<string, string>();
+            for (const tag of project.tags) {
+                if (tag.length >= 2 && tag[0] && tag[1]) {
+                    tagMap.set(tag[0], tag[1]);
+                }
+            }
+
+            // Get all available agents for handoffs
+            const availableAgents = Array.from(projectCtx.agents.values());
+
+            // Build system prompt using the shared function
+            // Only pass the current agent's lessons
+            const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
+            const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
+            
+            if (currentAgentLessons.length > 0) {
+                agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
+            }
+
+            // Build system prompt messages for all agents (including orchestrator)
+            const systemMessages = buildSystemPromptMessages({
+                agent: context.agent,
+                phase: context.phase,
+                project,
+                availableAgents,
+                conversation,
+                agentLessons: agentLessonsMap,
+                mcpTools,
+                triggeringEvent: context.triggeringEvent,
+            });
+
+            // Add all system messages
+            for (const systemMsg of systemMessages) {
+                messages.push(systemMsg.message);
+            }
+        } else {
+            // Fallback: No context available - use absolute minimal prompt
+            logger.warn("No context available for agent execution, using minimal prompt");
+            messages.push(new Message("system", 
+                `You are ${context.agent.name}. ${context.agent.instructions || ""}`
+            ));
         }
 
         // Check for #debug flag in triggering event content
@@ -309,6 +357,21 @@ Be completely transparent about your internal process. If you made a mistake or 
         if (context.agent.mcp !== false) {
             const mcpTools = mcpService.getCachedTools();
             allTools = [...tools, ...mcpTools];
+        }
+
+        // Add claude_code tool for all agents using reason-act-loop backend
+        // (except those using the claude backend directly)
+        const backendType = context.agent.backend || "reason-act-loop";
+        if (backendType === "reason-act-loop") {
+            const { getTool } = await import("@/tools/registry");
+            const claudeCodeTool = getTool("claude_code");
+            if (claudeCodeTool && !allTools.some(t => t.name === "claude_code")) {
+                allTools = [...allTools, claudeCodeTool];
+                logger.debug(`[AgentExecutor] Added claude_code tool to ${context.agent.name}`, {
+                    originalToolCount: tools.length,
+                    finalToolCount: allTools.length
+                });
+            }
         }
 
         // Get the appropriate backend for this agent

@@ -153,8 +153,7 @@ describe("AgentExecutor", () => {
             })),
             buildOrchestratorRoutingContext: mock(async () => ({
                 user_request: "Test user request",
-                routing_history: [],
-                current_routing: null
+                workflow_narrative: "=== ORCHESTRATOR ROUTING CONTEXT ===\nInitial user request: \"Test user request\"\n\nNo agents have been routed yet."
             })),
             saveConversation: mock(async () => {}),
             updateState: mock(async () => {}),

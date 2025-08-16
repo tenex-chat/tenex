@@ -737,19 +737,12 @@ The system provides routing context based on turn history:
 ```typescript
 private buildRoutingContext(conversation: Conversation): RoutingContext {
     const turns = conversation.orchestratorTurns;
-    const currentTurn = turns[turns.length - 1];
+    // Build a human-readable narrative of the workflow
+    const narrative = buildWorkflowNarrative(turns);
     
     return {
-        routing_history: turns.slice(0, -1).map(turn => ({
-            agents: turn.agents,
-            phase: turn.phase,
-            reason: turn.reason
-        })),
-        current_routing: currentTurn ? {
-            agents: currentTurn.agents,
-            phase: currentTurn.phase,
-            completions: currentTurn.completions.map(c => c.summary)
-        } : null
+        user_request: originalRequest,
+        workflow_narrative: narrative
     };
 }
 ```

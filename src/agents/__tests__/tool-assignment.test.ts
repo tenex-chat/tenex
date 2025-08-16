@@ -40,6 +40,7 @@ describe("Tool assignment", () => {
             expect(executorTools).toContain("lesson_learn");
             expect(executorTools).toContain("analyze");
             expect(executorTools).not.toContain("continue");
+            expect(executorTools).not.toContain("delegate"); // No delegate tool for non-PM agents
 
             // Planner gets the same default tools
             expect(plannerTools).toContain("complete");
@@ -47,13 +48,14 @@ describe("Tool assignment", () => {
             expect(plannerTools).toContain("lesson_learn");
             expect(plannerTools).toContain("analyze");
             expect(plannerTools).not.toContain("continue");
+            expect(plannerTools).not.toContain("delegate"); // No delegate tool for non-PM agents
 
             // Note: AgentRegistry.ts will remove all tools from these agents
             // since they use claude backend, but getDefaultToolsForAgent
             // returns the default set for non-orchestrator built-in agents
         });
 
-        it("custom agents should have complete tool", () => {
+        it("custom agents should have complete tool but not delegate", () => {
             const mockCustomAgent = {
                 isOrchestrator: false,
                 isBuiltIn: false,
@@ -63,9 +65,10 @@ describe("Tool assignment", () => {
 
             expect(tools).toContain("complete");
             expect(tools).not.toContain("continue");
+            expect(tools).not.toContain("delegate"); // No delegate tool for custom agents
         });
 
-        it("project-manager agent should have additional tools", () => {
+        it("project-manager agent should have additional tools including delegate", () => {
             const mockProjectManager = {
                 isOrchestrator: false,
                 isBuiltIn: true,
@@ -74,7 +77,7 @@ describe("Tool assignment", () => {
             const tools = getDefaultToolsForAgent(mockProjectManager);
 
             expect(tools).toContain("complete");
-            expect(tools).toContain("generate_inventory");
+            expect(tools).toContain("delegate"); // Only PM agent has delegate tool
             expect(tools).toContain("write_context_file");
             expect(tools).not.toContain("continue");
         });

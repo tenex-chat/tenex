@@ -19,6 +19,7 @@ import { agentsHire } from "./implementations/agents-hire";
 import { mcpDiscover } from "./implementations/mcp-discover";
 import { delegateTool } from "./implementations/delegate";
 import { nostrProjectsTool } from "./implementations/nostr-projects";
+import { claudeCode } from "./implementations/claude_code";
 import type { Tool } from "./types";
 
 /**
@@ -38,7 +39,8 @@ export type ToolName =
   | "agents_hire"
   | "discover_capabilities"
   | "delegate"
-  | "nostr_projects";
+  | "nostr_projects"
+  | "claude_code";
 
 /**
  * Registry of all available tools mapped by their canonical names.
@@ -58,6 +60,7 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
   ["nostr_projects", nostrProjectsTool],
+  ["claude_code", claudeCode],
 ]);
 
 /**

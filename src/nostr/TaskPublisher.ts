@@ -20,6 +20,7 @@ export interface TaskCompletionOptions {
     messageCount?: number;
     duration?: number;
     error?: string;
+    finalMessage?: string;
 }
 
 /**
@@ -101,23 +102,51 @@ export class TaskPublisher {
         const status = success ? "completed" : "failed";
         const statusEmoji = success ? "✅" : "❌";
         
-        let content = `${statusEmoji} Task ${status}`;
+        let content: string;
         
-        if (options.error) {
-            content += `\n\nError: ${options.error}`;
-        }
-        
-        if (options.messageCount) {
-            content += `\n\nMessages exchanged: ${options.messageCount}`;
-        }
-        
-        if (options.duration) {
-            const durationInSeconds = Math.round(options.duration / 1000);
-            content += `\nDuration: ${durationInSeconds}s`;
-        }
-        
-        if (options.totalCost) {
-            content += `\nCost: $${options.totalCost.toFixed(4)}`;
+        // Use finalMessage if provided, otherwise use generic completion message
+        if (options.finalMessage && success) {
+            content = options.finalMessage;
+            
+            // Append metadata as a footer
+            const metadata: string[] = [];
+            
+            if (options.messageCount) {
+                metadata.push(`Messages: ${options.messageCount}`);
+            }
+            
+            if (options.duration) {
+                const durationInSeconds = Math.round(options.duration / 1000);
+                metadata.push(`Duration: ${durationInSeconds}s`);
+            }
+            
+            if (options.totalCost) {
+                metadata.push(`Cost: $${options.totalCost.toFixed(4)}`);
+            }
+            
+            if (metadata.length > 0) {
+                content += `\n\n---\n${statusEmoji} Task ${status} • ${metadata.join(" • ")}`;
+            }
+        } else {
+            // Fallback to generic message
+            content = `${statusEmoji} Task ${status}`;
+            
+            if (options.error) {
+                content += `\n\nError: ${options.error}`;
+            }
+            
+            if (options.messageCount) {
+                content += `\n\nMessages exchanged: ${options.messageCount}`;
+            }
+            
+            if (options.duration) {
+                const durationInSeconds = Math.round(options.duration / 1000);
+                content += `\nDuration: ${durationInSeconds}s`;
+            }
+            
+            if (options.totalCost) {
+                content += `\nCost: $${options.totalCost.toFixed(4)}`;
+            }
         }
 
         completionEvent.content = content;

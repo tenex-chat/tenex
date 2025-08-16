@@ -112,7 +112,7 @@ export function addLLMMetadataTags(event: NDKEvent, metadata: LLMMetadata): void
         event.tag([LLM_TAGS.MAX_COMPLETION_TOKENS, metadata.maxCompletionTokens.toString()]);
     }
     if (metadata.systemPrompt) {
-        event.tag(["llm-system-prompt", metadata.systemPrompt]);
+        // event.tag(["llm-system-prompt", metadata.systemPrompt]);
     }
     if (metadata.userPrompt) {
         event.tag(["llm-user-prompt", metadata.userPrompt]);

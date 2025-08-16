@@ -145,7 +145,7 @@ function getProjectFiles(): { files: string[]; isEmpty: boolean; tree: string } 
 
     // Count total files to decide whether to show individual files
     totalFileCount = countTotalFiles(process.cwd());
-    const showFiles = totalFileCount <= 40;
+    const showFiles = totalFileCount < 200;
 
     // Build the tree structure
     const treeLines = buildTree(process.cwd(), "", true, showFiles);
@@ -166,7 +166,7 @@ function getProjectFiles(): { files: string[]; isEmpty: boolean; tree: string } 
 }
 
 // Helper function to load inventory and context synchronously
-function loadProjectContextSync(phase: Phase): {
+function loadProjectContextSync(): {
     inventoryContent: string | null;
     projectContent: string | null;
     contextFiles: string[];
@@ -174,16 +174,13 @@ function loadProjectContextSync(phase: Phase): {
     let inventoryContent: string | null = null;
     let contextFiles: string[] = [];
 
-    // Load inventory content for chat and brainstorm phases
-    if (phase === PHASES.CHAT || phase === PHASES.BRAINSTORM) {
-        try {
-            const inventoryPath = path.join(process.cwd(), "context", "INVENTORY.md");
-            if (fs.existsSync(inventoryPath)) {
-                inventoryContent = fs.readFileSync(inventoryPath, "utf8");
-            }
-        } catch (error) {
-            logger.debug("Could not load inventory content", { error });
+    try {
+        const inventoryPath = path.join(process.cwd(), "context", "INVENTORY.md");
+        if (fs.existsSync(inventoryPath)) {
+            inventoryContent = fs.readFileSync(inventoryPath, "utf8");
         }
+    } catch (error) {
+        logger.debug("Could not load inventory content", { error });
     }
 
     // Get list of context files
@@ -206,11 +203,9 @@ function loadProjectContextSync(phase: Phase): {
 export const inventoryContextFragment: PromptFragment<InventoryContextArgs> = {
     id: "project-inventory-context",
     priority: 25,
-    template: (args) => {
-        const { phase } = args;
-
+    template: () => {
         // If content is provided directly, use it; otherwise load from file
-        const loaded = loadProjectContextSync(phase);
+        const loaded = loadProjectContextSync();
         const { inventoryContent, contextFiles } = loaded;
 
         const parts: string[] = [];

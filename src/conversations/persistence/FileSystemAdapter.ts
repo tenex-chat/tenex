@@ -115,20 +115,43 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 }
             }
 
+            // Deserialize events first
+            const deserializedEvents = data.history
+                .map((serializedEvent: string) => {
+                    try {
+                        return NDKEvent.deserialize(ndk, serializedEvent);
+                    } catch (error) {
+                        logger.error("Failed to deserialize event", { error, serializedEvent });
+                        return null;
+                    }
+                })
+                .filter((event): event is NDKEvent => event !== null);
+
+            // Deduplicate events based on event.id
+            const seenIds = new Set<string>();
+            const deduplicatedHistory: NDKEvent[] = [];
+            for (const event of deserializedEvents) {
+                if (event.id && !seenIds.has(event.id)) {
+                    deduplicatedHistory.push(event);
+                    seenIds.add(event.id);
+                }
+            }
+
+            // Log if deduplication occurred
+            if (deduplicatedHistory.length !== deserializedEvents.length) {
+                logger.info(`[FileSystemAdapter] Deduplicated conversation history during load`, {
+                    conversationId,
+                    original: deserializedEvents.length,
+                    deduplicated: deduplicatedHistory.length,
+                    removed: deserializedEvents.length - deduplicatedHistory.length
+                });
+            }
+
             const conversation: Conversation = {
                 id: data.id,
                 title: data.title,
                 phase: data.phase as Phase, // Phase validation happens in schema parsing
-                history: data.history
-                    .map((serializedEvent: string) => {
-                        try {
-                            return NDKEvent.deserialize(ndk, serializedEvent);
-                        } catch (error) {
-                            logger.error("Failed to deserialize event", { error, serializedEvent });
-                            return null;
-                        }
-                    })
-                    .filter((event): event is NDKEvent => event !== null),
+                history: deduplicatedHistory,
                 agentStates: agentStatesMap,
                 phaseStartedAt: data.phaseStartedAt,
                 metadata: data.metadata,

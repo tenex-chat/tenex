@@ -8,6 +8,7 @@ import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messag
 import type { NDKTask, NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { ClaudeCodeExecutor } from "./executor";
 import { getNDK } from "@/nostr/ndkClient";
+import { DelayedMessageBuffer } from "./DelayedMessageBuffer";
 
 export interface ClaudeTaskOptions {
     prompt: string;
@@ -61,6 +62,15 @@ export class ClaudeTaskOrchestrator {
             });
         }
 
+        // Create message buffer for delayed publishing
+        const messageBuffer = new DelayedMessageBuffer({
+            delayMs: 500, // Configurable delay
+            onFlush: async (message) => {
+                // Publish as progress when timeout expires
+                await this.taskPublisher.publishTaskProgress(message.content, message.sessionId);
+            }
+        });
+
         // Create executor
         const executor = new ClaudeCodeExecutor({
             prompt: options.prompt,
@@ -94,6 +104,9 @@ export class ClaudeTaskOrchestrator {
                 // Abort the executor
                 executor.kill();
 
+                // Flush any pending message before interrupting
+                await messageBuffer.flush();
+
                 // Update task status to interrupted
                 await this.taskPublisher.publishTaskProgress("Task interrupted by user request");
             });
@@ -126,13 +139,18 @@ export class ClaudeTaskOrchestrator {
                         stopExecutionTime(options.conversation);
                     }
 
-                    // Complete task
+                    // Consume buffered message if available
+                    const bufferedMessage = messageBuffer.consume();
+                    const finalMessage = bufferedMessage?.content || lastAssistantMessage;
+
+                    // Complete task with the final message
                     await this.taskPublisher.completeTask(executionResult.success, {
                         sessionId: executionResult.sessionId,
                         totalCost: executionResult.totalCost,
                         messageCount: executionResult.messageCount,
                         duration: executionResult.duration,
                         error: executionResult.error,
+                        finalMessage: executionResult.success ? finalMessage : undefined,
                     });
 
                     result = {
@@ -143,7 +161,7 @@ export class ClaudeTaskOrchestrator {
                         duration: executionResult.duration,
                         success: executionResult.success,
                         error: executionResult.error,
-                        finalResponse: lastAssistantMessage,
+                        finalResponse: finalMessage,
                     };
                     break;
                 }
@@ -154,7 +172,7 @@ export class ClaudeTaskOrchestrator {
                     logger.debug("Captured Claude session ID", { sessionId });
                 }
 
-                // Process SDK message and publish progress updates
+                // Process SDK message and buffer progress updates
                 if (message && message.type === "assistant" && message.message?.content) {
                     const textContent = message.message.content
                         .filter((c: ContentBlock): c is TextBlock => c.type === "text")
@@ -164,8 +182,8 @@ export class ClaudeTaskOrchestrator {
                     if (textContent) {
                         lastAssistantMessage = textContent;
 
-                        // Publish progress update using TaskPublisher with session ID
-                        await this.taskPublisher.publishTaskProgress(textContent, sessionId);
+                        // Buffer the message instead of publishing immediately
+                        await messageBuffer.buffer(textContent, sessionId);
                     }
                 }
             }
@@ -179,6 +197,9 @@ export class ClaudeTaskOrchestrator {
             if (options.conversation) {
                 stopExecutionTime(options.conversation);
             }
+
+            // Clean up message buffer
+            messageBuffer.cleanup();
 
             const errorMessage = formatAnyError(error);
 
@@ -204,6 +225,9 @@ export class ClaudeTaskOrchestrator {
                 error: errorMessage,
             };
         } finally {
+            // Clean up resources
+            messageBuffer.cleanup();
+            
             // Clean up abort subscription
             if (abortSubscription) {
                 abortSubscription.stop();

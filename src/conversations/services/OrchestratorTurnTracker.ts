@@ -6,6 +6,7 @@ import type {
     OrchestratorRoutingContext 
 } from "../types";
 import { logger } from "@/utils/logger";
+import { getProjectContext } from "@/services/ProjectContext";
 
 /**
  * Tracks orchestrator routing decisions and turn management.
@@ -16,6 +17,7 @@ export class OrchestratorTurnTracker {
 
     /**
      * Start a new orchestrator turn
+     * @param agents Array of agent pubkeys (not slugs or names) for consistent identification
      */
     startTurn(
         conversationId: string,
@@ -45,10 +47,11 @@ export class OrchestratorTurnTracker {
 
     /**
      * Add a completion to the current turn
+     * @param agentPubkey The pubkey of the agent that completed (not slug or name)
      */
     addCompletion(
         conversationId: string,
-        agentSlug: string,
+        agentPubkey: string,
         message: string
     ): void {
         const conversationTurns = this.turns.get(conversationId);
@@ -57,13 +60,13 @@ export class OrchestratorTurnTracker {
             return;
         }
 
-        // Find the most recent incomplete turn that includes this agent
+        // Find the most recent incomplete turn that includes this agent pubkey
         const currentTurn = [...conversationTurns]
             .reverse()
-            .find(turn => !turn.isCompleted && turn.agents.includes(agentSlug));
+            .find(turn => !turn.isCompleted && turn.agents.includes(agentPubkey));
 
         if (!currentTurn) {
-            logger.warn(`[OrchestratorTurnTracker] No active turn found for agent ${agentSlug}`, {
+            logger.warn(`[OrchestratorTurnTracker] No active turn found for agent ${agentPubkey}`, {
                 conversationId
             });
             return;
@@ -71,7 +74,7 @@ export class OrchestratorTurnTracker {
 
         // Add completion
         currentTurn.completions.push({
-            agent: agentSlug,
+            agent: agentPubkey,
             message,
             timestamp: Date.now()
         });
@@ -144,9 +147,8 @@ export class OrchestratorTurnTracker {
     }
 
     /**
-     * Build orchestrator routing context
-     * Note: Now that orchestrator is only invoked when turns are complete,
-     * we no longer need current_routing - it would always be null
+     * Build orchestrator routing context with a human-readable narrative
+     * This narrative replaces the abstract JSON history for better LLM understanding
      */
     buildRoutingContext(
         conversationId: string,
@@ -154,30 +156,91 @@ export class OrchestratorTurnTracker {
         _triggeringCompletion?: Completion
     ): OrchestratorRoutingContext {
         const conversationTurns = this.turns.get(conversationId) || [];
-        const routing_history: RoutingEntry[] = [];
+        const narrativeParts: string[] = [];
 
-        // Process all completed turns into history
-        // Since orchestrator is only called when turns are complete,
-        // all turns should be in history
-        for (const turn of conversationTurns) {
-            if (turn.isCompleted) {
-                routing_history.push({
-                    phase: turn.phase,
-                    agents: turn.agents,
-                    completions: turn.completions,
-                    reason: turn.reason,
-                    timestamp: turn.timestamp
-                });
+        narrativeParts.push(`=== ORCHESTRATOR ROUTING CONTEXT ===\n`);
+        narrativeParts.push(`Initial user request: "${userRequest}"\n`);
+
+        if (conversationTurns.length === 0) {
+            narrativeParts.push(`\nThis is the first routing decision for this conversation.`);
+            narrativeParts.push(`No agents have been routed yet.\n`);
+        } else {
+            narrativeParts.push(`\n--- WORKFLOW HISTORY ---\n`);
+            
+            for (const turn of conversationTurns) {
+                // Show routing decision
+                narrativeParts.push(`[${turn.phase} phase → ${this.formatAgentList(turn.agents)}]`);
+                if (turn.reason) {
+                    narrativeParts.push(`Routing reason: "${turn.reason}"`);
+                }
+                
+                // Show completions if any
+                if (turn.completions.length > 0) {
+                    for (const completion of turn.completions) {
+                        const agentName = this.getAgentName(completion.agent);
+                        narrativeParts.push(`\n${agentName} completed:`);
+                        // Include full completion message for context
+                        narrativeParts.push(`"${completion.message}"\n`);
+                    }
+                    
+                    // If turn is not complete despite having some completions
+                    if (!turn.isCompleted) {
+                        const waitingForAgents = turn.agents.filter(
+                            agent => !turn.completions.some(c => c.agent === agent)
+                        );
+                        if (waitingForAgents.length > 0) {
+                            narrativeParts.push(`(Waiting for agent responses from: ${this.formatAgentList(waitingForAgents)})\n`);
+                        }
+                    }
+                } else if (!turn.isCompleted) {
+                    narrativeParts.push(`(Waiting for agent responses...)\n`);
+                }
             }
-            // Note: Incomplete turns are skipped since orchestrator won't be invoked
-            // while waiting for agents to complete
+        }
+
+        narrativeParts.push(`\n--- YOU ARE HERE ---`);
+        narrativeParts.push(`The user's request was: "${userRequest}"`);
+        narrativeParts.push(`\nDetermine the NEXT routing action based on the above workflow history.`);
+        
+        // Simple, clear instruction
+        if (conversationTurns.length === 0 || !conversationTurns.some(turn => turn.completions.length > 0)) {
+            narrativeParts.push(`No agent has responded yet. Route to an appropriate agent to handle this request.`);
+        } else {
+            narrativeParts.push(`If the user's request has been fully addressed, route to ["END"]. Otherwise, continue routing.`);
         }
 
         return {
             user_request: userRequest,
-            routing_history
-            // current_routing removed - always null with new optimization
+            workflow_narrative: narrativeParts.join('\n')
         };
+    }
+
+    /**
+     * Format agent list from pubkeys to readable names
+     */
+    private formatAgentList(agentPubkeys: string[]): string {
+        return agentPubkeys.map(pubkey => this.getAgentName(pubkey)).join(', ');
+    }
+
+    /**
+     * Get human-readable agent name from pubkey
+     */
+    private getAgentName(agentPubkey: string): string {
+        try {
+            const projectContext = getProjectContext();
+            // Look through all agents to find matching pubkey
+            for (const [slug, agent] of projectContext.agents) {
+                if (agent.pubkey === agentPubkey) {
+                    return `@${agent.name || slug}`;
+                }
+            }
+        } catch (error) {
+            // ProjectContext might not be initialized yet
+            logger.debug("Could not get agent name from ProjectContext", { error });
+        }
+        
+        // Fallback to shortened pubkey
+        return `@agent-${agentPubkey.substring(0, 8)}`;
     }
 
     /**

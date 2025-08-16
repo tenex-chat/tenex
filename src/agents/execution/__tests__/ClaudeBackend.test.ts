@@ -8,7 +8,13 @@ import type { Message } from "multi-llm-ts";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Mock dependencies
-const mockHandleAgentCompletion = mock(() => Promise.resolve());
+const mockHandleAgentCompletion = mock(() => Promise.resolve({
+    event: {
+        id: "test-event-id",
+        sign: mock(async () => {}),
+        publish: mock(async () => {}),
+    }
+}));
 const mockOrchestratorExecute = mock(() => Promise.resolve({
     success: true,
     task: {
@@ -78,6 +84,9 @@ describe("ClaudeBackend", () => {
             tools: [],
             capabilities: [],
             builtIn: false,
+            signer: {
+                privateKey: "test-private-key",
+            },
         };
 
         // Setup mock triggering event
@@ -103,6 +112,7 @@ describe("ClaudeBackend", () => {
                 claudeSessionId: undefined,
             })),
             saveConversation: mock(() => Promise.resolve()),
+            updateAgentState: mock(() => Promise.resolve()),
         } as unknown as ConversationManager;
 
         // Setup mock execution context
@@ -120,6 +130,7 @@ describe("ClaudeBackend", () => {
             publishAgentMessage: mock(() => Promise.resolve()),
             publishToolUse: mock(() => Promise.resolve()),
             publishToolResult: mock(() => Promise.resolve()),
+            addLLMMetadata: mock(() => {}),
         } as unknown as NostrPublisher;
 
         // Reset orchestrator mock to default success response
@@ -167,8 +178,10 @@ describe("ClaudeBackend", () => {
                     phase: "CHAT",
                     messages: [],
                 },
+                conversationManager: mockConversationManager,
                 abortSignal: expect.any(AbortSignal),
                 resumeSessionId: undefined,
+                agentName: "TestAgent",
             });
 
             // Verify completion handler was called
@@ -179,10 +192,15 @@ describe("ClaudeBackend", () => {
                 conversationId: "test-conversation-id",
                 publisher: mockPublisher,
                 triggeringEvent: mockTriggeringEvent,
+                conversationManager: mockConversationManager,
             });
 
             // Verify session ID was stored
-            expect(mockConversationManager.saveConversation as Mock<any>).toHaveBeenCalledWith("test-conversation-id");
+            expect(mockConversationManager.updateAgentState as Mock<any>).toHaveBeenCalledWith(
+                "test-conversation-id",
+                "test-agent",
+                { claudeSessionId: "test-session-id" }
+            );
         });
 
         test("should resume an existing Claude session when claudeSessionId is provided", async () => {
@@ -211,7 +229,7 @@ describe("ClaudeBackend", () => {
 
             await expect(
                 backend.execute(messages, [], mockContext, mockPublisher)
-            ).rejects.toThrow("No messages provided");
+            ).rejects.toThrow("No user message provided");
         });
 
         test("should throw error when prompt is empty", async () => {
@@ -339,8 +357,31 @@ describe("ClaudeBackend", () => {
 
             expect(mockOrchestratorExecute).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    systemPrompt: undefined,
+                    systemPrompt: "",  // Empty string when no system message
                     prompt: "Execute without system prompt.",
+                })
+            );
+        });
+        
+        test("should strip thinking blocks from messages", async () => {
+            const messages: Message[] = [
+                {
+                    role: "system",
+                    content: "You are a helpful assistant.<thinking>Internal thoughts here</thinking> Be concise.",
+                },
+                {
+                    role: "user",
+                    content: "Task with <thinking>user thoughts</thinking> content.",
+                },
+            ];
+
+            await backend.execute(messages, [], mockContext, mockPublisher);
+
+            // Verify that the orchestrator was called with cleaned content
+            expect(mockOrchestratorExecute).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    prompt: "Task with  content.",
+                    systemPrompt: "You are a helpful assistant. Be concise.",
                 })
             );
         });
