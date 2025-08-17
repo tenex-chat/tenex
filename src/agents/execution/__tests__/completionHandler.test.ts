@@ -7,26 +7,26 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 describe("completionHandler", () => {
     let mockPublisher: NostrPublisher;
     let mockAgent: AgentInstance;
-    let mockOrchestratorAgent: AgentInstance;
+    let mockPMAgent: AgentInstance;
     let mockGetProjectContext: any;
 
     beforeEach(() => {
         // Reset mocks
         mock.restore();
 
-        // Setup mock orchestrator agent
-        mockOrchestratorAgent = {
-            id: "orchestrator-123",
-            pubkey: "orchestrator-pubkey",
-            name: "Orchestrator",
-            description: "Orchestrator agent",
+        // Setup mock PM agent
+        mockPMAgent = {
+            id: "pm-123",
+            pubkey: "pm-pubkey",
+            name: "ProjectManager",
+            description: "Project Manager agent",
             capabilities: [],
             tools: [],
         } as Agent;
 
         // Mock ProjectContext
         mockGetProjectContext = mock(() => ({
-            getProjectAgent: () => mockOrchestratorAgent,
+            getProjectAgent: () => mockPMAgent,
         }));
         mock.module("@/services/ProjectContext", () => ({
             getProjectContext: mockGetProjectContext,
@@ -42,9 +42,26 @@ describe("completionHandler", () => {
             },
         }));
 
-        // Setup mock publisher
+        // Setup mock publisher with createBaseReply method
+        const mockReply = {
+            content: "",
+            tags: [],
+            tag: mock((tag: string[]) => {}),
+            rawEvent: mock(() => ({})),
+            id: "mock-event-id",
+        };
+        
         mockPublisher = {
             publishResponse: mock(() => Promise.resolve()),
+            createBaseReply: mock(() => mockReply),
+            context: {
+                triggeringEvent: {
+                    id: "triggering-event-id",
+                    pubkey: "user-pubkey",
+                    tagValue: mock(() => undefined),
+                },
+                agent: mockAgent,
+            },
         } as unknown as NostrPublisher;
 
         // Setup mock agent
@@ -52,10 +69,11 @@ describe("completionHandler", () => {
             id: "agent-123",
             pubkey: "agent-pubkey",
             name: "TestAgent",
+            slug: "test-agent",
             description: "Test agent",
             capabilities: [],
             tools: [],
-        } as Agent;
+        } as AgentInstance;
     });
 
     it("should handle basic completion successfully", async () => {
@@ -67,31 +85,23 @@ describe("completionHandler", () => {
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
         // Verify the result
-        expect(result).toEqual({
+        expect(result.completion).toEqual({
             type: "complete",
             completion: {
                 response,
                 summary: response,
-                nextAgent: mockOrchestratorAgent.pubkey,
+                nextAgent: "user-pubkey", // Now responds to triggering event author
             },
         });
+        expect(result.event).toBeDefined();
 
-        // Verify publishResponse was called correctly
-        expect(mockPublisher.publishResponse).toHaveBeenCalledWith({
-            content: response,
-            destinationPubkeys: [mockOrchestratorAgent.pubkey],
-            completeMetadata: {
-                type: "complete",
-                completion: {
-                    response,
-                    summary: response,
-                    nextAgent: mockOrchestratorAgent.pubkey,
-                },
-            },
-        });
+        // Verify the event was created with correct p-tag
+        const mockReplyTag = mockPublisher.createBaseReply().tag as any;
+        expect(mockReplyTag).toHaveBeenCalledWith(["p", "user-pubkey"]);
     });
 
     it("should handle completion with custom summary", async () => {
@@ -105,28 +115,19 @@ describe("completionHandler", () => {
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
         // Verify the result uses the custom summary
-        expect(result.completion.summary).toBe(summary);
-        expect(result.completion.response).toBe(response);
+        expect(result.completion.completion.summary).toBe(summary);
+        expect(result.completion.completion.response).toBe(response);
 
-        // Verify publishResponse was called with custom summary
-        expect(mockPublisher.publishResponse).toHaveBeenCalledWith({
-            content: response,
-            destinationPubkeys: [mockOrchestratorAgent.pubkey],
-            completeMetadata: {
-                type: "complete",
-                completion: {
-                    response,
-                    summary,
-                    nextAgent: mockOrchestratorAgent.pubkey,
-                },
-            },
-        });
+        // Verify the result has both completion and event
+        expect(result.completion).toBeDefined();
+        expect(result.event).toBeDefined();
     });
 
-    it("should always route to orchestrator agent", async () => {
+    it("should always route to PM agent when no explicit triggering event", async () => {
         const response = "Task done";
         const conversationId = "conv-789";
 
@@ -135,17 +136,15 @@ describe("completionHandler", () => {
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
-        // Verify it retrieved the orchestrator
+        // Verify it retrieved the PM
         expect(mockGetProjectContext).toHaveBeenCalled();
 
-        // Verify it published to orchestrator's pubkey
-        expect(mockPublisher.publishResponse).toHaveBeenCalledWith(
-            expect.objectContaining({
-                destinationPubkeys: [mockOrchestratorAgent.pubkey],
-            })
-        );
+        // Verify it created reply event with p-tag to triggering author
+        const mockReplyTag = mockPublisher.createBaseReply().tag as any;
+        expect(mockReplyTag).toHaveBeenCalledWith(["p", "user-pubkey"]);
     });
 
     it("should handle completion with triggering event", async () => {
@@ -164,35 +163,35 @@ describe("completionHandler", () => {
             triggeringEvent,
         });
 
-        // The triggering event is passed but not used in the current implementation
-        // This test ensures it doesn't break when provided
-        expect(result).toEqual({
+        // With explicit triggering event, should use its pubkey
+        expect(result.completion).toEqual({
             type: "complete",
             completion: {
                 response,
                 summary: response,
-                nextAgent: mockOrchestratorAgent.pubkey,
+                nextAgent: "user-pubkey", // Uses triggering event's pubkey
             },
         });
+        expect(result.event).toBeDefined();
     });
 
-    it("should handle publisher error gracefully", async () => {
+    it("should return event without publishing", async () => {
         const response = "Task completed";
-        const conversationId = "conv-error";
-        const publishError = new Error("Failed to publish to Nostr");
+        const conversationId = "conv-no-publish";
 
-        // Make publisher throw an error
-        mockPublisher.publishResponse = mock(() => Promise.reject(publishError));
-
-        // The function should throw the error up
-        await expect(
-            handleAgentCompletion({
-                response,
-                agent: mockAgent,
-                conversationId,
-                publisher: mockPublisher,
-            })
-        ).rejects.toThrow("Failed to publish to Nostr");
+        // The completion handler no longer publishes, just creates the event
+        const result = await handleAgentCompletion({
+            response,
+            agent: mockAgent,
+            conversationId,
+            publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
+        });
+        
+        // Should return both completion and unpublished event
+        expect(result.completion).toBeDefined();
+        expect(result.event).toBeDefined();
+        expect(result.event.content).toBe(response);
     });
 
     it("should handle empty response", async () => {
@@ -204,17 +203,19 @@ describe("completionHandler", () => {
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
         // Should still work with empty response
-        expect(result).toEqual({
+        expect(result.completion).toEqual({
             type: "complete",
             completion: {
                 response: "",
                 summary: "",
-                nextAgent: mockOrchestratorAgent.pubkey,
+                nextAgent: "user-pubkey",
             },
         });
+        expect(result.event).toBeDefined();
     });
 
     it("should handle very long responses", async () => {
@@ -228,33 +229,33 @@ describe("completionHandler", () => {
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
         // Should handle long responses without truncation
-        expect(result.completion.response).toBe(response);
-        expect(result.completion.summary).toBe(summary);
+        expect(result.completion.completion.response).toBe(response);
+        expect(result.completion.completion.summary).toBe(summary);
     });
 
     it("should preserve completion metadata structure", async () => {
         const response = "Task completed";
         const conversationId = "conv-metadata";
 
-        await handleAgentCompletion({
+        const result = await handleAgentCompletion({
             response,
             agent: mockAgent,
             conversationId,
             publisher: mockPublisher,
+            triggeringEvent: mockPublisher.context.triggeringEvent as NDKEvent,
         });
 
-        // Verify the exact structure of completeMetadata
-        const publishResponseMock = mockPublisher.publishResponse as any;
-        const call = publishResponseMock.mock.calls[0][0];
-        expect(call.completeMetadata).toEqual({
+        // Verify the exact structure of completion metadata
+        expect(result.completion).toEqual({
             type: "complete",
             completion: {
                 response,
                 summary: response,
-                nextAgent: mockOrchestratorAgent.pubkey,
+                nextAgent: "user-pubkey", // Now responds to triggering event author
             },
         });
     });

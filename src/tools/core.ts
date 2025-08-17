@@ -54,12 +54,9 @@ export interface Tool<Input = unknown, Output = unknown> {
  */
 export type Termination = Complete;
 
-import type { NostrEvent } from "@nostr-dev-kit/ndk";
-
 export interface Complete {
     readonly type: "complete";
     readonly completion: CompletionSummary;
-    readonly serializedEvent?: NostrEvent; // The serialized NDKEvent for deferred publishing
 }
 
 export interface CompletionSummary {

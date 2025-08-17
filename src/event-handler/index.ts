@@ -47,7 +47,9 @@ export class EventHandler {
         // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
-        logger.info(`event handler, kind: ${event.kind} from ${event.pubkey}`);
+        const pTags = event.getMatchingTags("p").map(t => t[1].substring(0, 8));
+
+        logger.info(`event handler, kind: ${event.kind} from ${event.pubkey} for (${pTags.join(', ')})`);
 
         switch (event.kind) {
             case EVENT_KINDS.GENERIC_REPLY:

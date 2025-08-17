@@ -199,7 +199,6 @@ export class SubscriptionManager {
     private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {
         // Check for duplicate events
         if (hasProcessedEvent(event.id)) {
-            logger.info(`Skipping duplicate event ${event.id} from ${source}`);
             return;
         }
 

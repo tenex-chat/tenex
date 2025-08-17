@@ -1,4 +1,5 @@
 import { formatAnyError } from "@/utils/error-formatter";
+import { logger } from "@/utils/logger";
 import type { LLMService, Tool } from "@/llm/types";
 import type { StreamEvent } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
@@ -93,19 +94,22 @@ export class ReasonActLoop {
             // Main Reason-Act-Observe loop
             while (!isComplete && iterations < MAX_ITERATIONS) {
                 iterations++;
-                tracingLogger.debug("[ReasonActLoop] Starting iteration", {
+                tracingLogger.info("[ReasonActLoop] Starting iteration", {
                     iteration: iterations,
+                    isComplete,
                     messageCount: conversationMessages.length,
                     lastMessage: conversationMessages[conversationMessages.length-1].content.substring(0, 100)
                 });
 
                 // Create and process stream for this iteration
-                const stream = this.createLLMStream(context, conversationMessages, tools, publisher);
                 const streamPublisher = this.createStreamPublisher(publisher);
                 
                 if (streamPublisher) {
                     stateManager.setStreamPublisher(streamPublisher);
                 }
+                
+                // Create stream with streamPublisher in context
+                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, stateManager);
 
                 // Process stream events for this iteration
                 const iterationResult = await this.processIterationStream(
@@ -126,10 +130,15 @@ export class ReasonActLoop {
 
                 // Check if we should continue iterating
                 if (iterationResult.isTerminal) {
-                    tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
+                    tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
                         iteration: iterations,
+                        willExitLoop: true,
                     });
                     isComplete = true;
+                    tracingLogger.info("[ReasonActLoop] isComplete set to true, loop should exit", {
+                        isComplete,
+                        iterations,
+                    });
                 } else if (iterationResult.hasToolCalls) {
                     // Add tool results to conversation for next iteration
                     this.addToolResultsToConversation(
@@ -157,13 +166,24 @@ export class ReasonActLoop {
                 }
 
                 // Finalize stream for this iteration
-                await this.finalizeStream(
-                    streamPublisher,
-                    stateManager,
-                    context,
-                    conversationMessages
-                );
+                // Skip finalization if a terminal tool already published its response
+                if (!iterationResult.isTerminal) {
+                    // Get the current StreamPublisher from stateManager (may have been updated by tools)
+                    const currentStreamPublisher = stateManager.getStreamPublisher() || streamPublisher;
+                    await this.finalizeStream(
+                        currentStreamPublisher,
+                        stateManager,
+                        context,
+                        conversationMessages
+                    );
+                }
             }
+            
+            tracingLogger.info("[ReasonActLoop] Exited main loop", {
+                iterations,
+                isComplete,
+                reason: isComplete ? "completed" : "max iterations",
+            });
 
             if (iterations >= MAX_ITERATIONS && !isComplete) {
                 const error = new Error(`Agent ${context.agent.name} reached maximum iterations (${MAX_ITERATIONS}) without completing task`);
@@ -222,11 +242,20 @@ export class ReasonActLoop {
                 type: event.type,
             })
             events.push(event);
+            
+            // If we've already detected a terminal tool, skip processing remaining events
+            if (isTerminal) {
+                tracingLogger.debug("[processIterationStream] Skipping event after terminal tool", {
+                    eventType: event.type,
+                });
+                continue;
+            }
 
             switch (event.type) {
                 case "content":
                     this.handleContentEvent(event, stateManager, streamPublisher, context);
-                    this.updateStreamingLog(agentKey, event.content);
+                    // Buffer content instead of streaming immediately
+                    // We'll decide whether to output it after processing all events
                     assistantMessage += event.content;
                     break;
 
@@ -272,7 +301,7 @@ export class ReasonActLoop {
                             tool: event.tool,
                         });
                         isTerminal = true;
-                        // Continue processing to capture metadata
+                        // Continue to let the stream finish naturally
                     }
                     break;
                 }
@@ -294,6 +323,14 @@ export class ReasonActLoop {
             }
         }
 
+        // Only output buffered content to stdout if no terminal tool was used
+        // Terminal tools handle their own output
+        if (!isTerminal && assistantMessage.trim()) {
+            // Output the accumulated content that wasn't part of a terminal tool
+            process.stdout.write(assistantMessage);
+            process.stdout.write('\n');
+        }
+        
         return {
             events,
             isTerminal,
@@ -369,67 +406,10 @@ export class ReasonActLoop {
             cost: event.response?.usage?.total_cost_usd,
         });
         
-        // Check for deferred event from complete() tool
-        const serializedEvent = stateManager.getDeferredEvent();
-        if (serializedEvent && publisher) {
-            this.processDeferredEvent(
-                serializedEvent,
-                event.response,
-                publisher,
-                tracingLogger,
-                context,
-                messages
-            );
-        }
+        // Note: Both complete() and delegate() tools now publish events immediately,
+        // no deferred event processing needed
     }
 
-    /**
-     * Process deferred event from complete() tool
-     */
-    private async processDeferredEvent(
-        serializedEvent: any,
-        response: any,
-        publisher: NostrPublisher,
-        tracingLogger: TracingLogger,
-        context: ExecutionContext,
-        messages: Message[]
-    ): Promise<void> {
-        tracingLogger.debug("[ReasonActLoop] Processing deferred event", {
-            serializedEventKeys: Object.keys(serializedEvent),
-            contentLength: serializedEvent.content?.length || 0,
-        });
-        
-        // Reconstruct the NDKEvent from serialized form
-        const { NDKEvent } = await import("@nostr-dev-kit/ndk");
-        const { getNDK } = await import("@/nostr/ndkClient");
-        const deferredEvent = new NDKEvent(getNDK(), serializedEvent);
-        
-        // Build and add LLM metadata
-        const metadata = await buildLLMMetadata(response, messages);
-        
-        tracingLogger.debug("[ReasonActLoop] Adding metadata to deferred event", {
-            model: metadata?.model,
-            cost: metadata?.cost,
-            promptTokens: metadata?.promptTokens,
-            completionTokens: metadata?.completionTokens,
-            hasSystemPrompt: !!metadata?.systemPrompt,
-            hasUserPrompt: !!metadata?.userPrompt,
-        });
-        
-        publisher.addLLMMetadata(deferredEvent, metadata);
-        
-        // Sign and publish with full metadata
-        await deferredEvent.sign(context.agent.signer);
-        await deferredEvent.publish();
-        
-        tracingLogger.debug("[ReasonActLoop] ✅ Published deferred complete() event with metadata", {
-            eventId: deferredEvent.id,
-            hasMetadata: !!metadata,
-            model: metadata?.model,
-            cost: metadata?.cost ? Number(metadata.cost).toFixed(8) : undefined,
-            totalTokens: metadata?.totalTokens,
-        });
-    }
 
 
     private handleContentEvent(
@@ -443,7 +423,10 @@ export class ReasonActLoop {
         // Extract and log reasoning if present
         this.extractAndLogReasoning(stateManager.getFullContent(), context, stateManager);
         
-        streamPublisher?.addContent(event.content);
+        // Always use the current StreamPublisher from stateManager
+        // It may have been updated by tool execution
+        const currentStreamPublisher = stateManager.getStreamPublisher() || streamPublisher;
+        currentStreamPublisher?.addContent(event.content);
     }
 
     private handleErrorEvent(
@@ -490,8 +473,30 @@ export class ReasonActLoop {
         context: ExecutionContext,
         messages: Message[],
         tools?: Tool[],
-        publisher?: NostrPublisher
+        publisher?: NostrPublisher,
+        stateManager?: StreamStateManager
     ): ReturnType<LLMService["stream"]> {
+        // Log what we're sending to the LLM
+        logger.info("[ReasonActLoop] Calling LLM stream", {
+            agent: context.agent.name,
+            phase: context.phase,
+            messageCount: messages.length,
+            toolCount: tools?.length || 0,
+            toolNames: tools?.map(t => t.name).join(", ") || "none",
+        });
+        
+        // Log the actual messages being sent
+        messages.forEach((msg, index) => {
+            const preview = msg.content.length > 200 
+                ? msg.content.substring(0, 200) + "..." 
+                : msg.content;
+            logger.debug(`[ReasonActLoop] Message ${index + 1}/${messages.length}`, {
+                role: msg.role,
+                contentLength: msg.content.length,
+                preview,
+            });
+        });
+        
         return this.llmService.stream({
             messages,
             options: {
@@ -503,6 +508,8 @@ export class ReasonActLoop {
                 ...context,
                 publisher: publisher || context.publisher,
                 conversationManager: context.conversationManager,
+                streamPublisher: stateManager?.getStreamPublisher(),
+                setStreamPublisher: stateManager ? (sp) => stateManager.setStreamPublisher(sp) : undefined,
             },
         });
     }
@@ -598,14 +605,8 @@ export class ReasonActLoop {
     }
 
     private updateStreamingLog(agentKey: string, content: string): void {
-        // Only log the new chunk, not the entire buffer
-        if (content.trim()) {
-            // Simple approach: just log each chunk as it arrives
-            // This avoids the complexity of trying to update in place
-            process.stdout.write(content);
-        }
-        
-        // Still track the full buffer for debugging if needed
+        // Buffer content for later decision on whether to output
+        // Terminal tools will handle their own output
         const currentBuffer = this.streamingBuffer.get(agentKey) || "";
         this.streamingBuffer.set(agentKey, currentBuffer + content);
     }

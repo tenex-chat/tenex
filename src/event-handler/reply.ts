@@ -20,7 +20,6 @@ interface EventHandlerContext {
 interface TaskCompletionResult {
     shouldReactivate: boolean;
     targetAgent?: AgentInstance;
-    syntheticEvent?: NDKEvent;
 }
 
 /**
@@ -212,7 +211,8 @@ async function processTaskCompletion(
         });
         
         if (allComplete) {
-            // Synthesize responses and reactivate agent
+            // Clear delegation state - no need to reactivate since
+            // the complete() tool now properly tags the main conversation
             const result = await synthesizeAndReactivate(
                 agentState,
                 agentSlug,
@@ -238,7 +238,7 @@ async function processTaskCompletion(
 }
 
 /**
- * Synthesize task responses and prepare for agent reactivation
+ * Clear pending delegation after all tasks complete
  */
 async function synthesizeAndReactivate(
     agentState: AgentState,
@@ -251,46 +251,16 @@ async function synthesizeAndReactivate(
     if (!agentState.pendingDelegation) {
         return { shouldReactivate: false };
     }
-
-    // Synthesize all responses
-    const responses: string[] = [];
-    for (const tid of agentState.pendingDelegation.taskIds) {
-        const t = agentState.pendingDelegation.tasks?.get(tid);
-        if (t?.response) {
-            const agent = Array.from(projectCtx.agents.values())
-                .find(a => a.pubkey === t.recipientPubkey);
-            responses.push(`[${agent?.name || 'Unknown Agent'}]: ${t.response}`);
-        }
-    }
-    
-    const synthesizedMessage = `All delegated tasks have completed. Here are the responses:\n\n${responses.join('\n\n')}`;
     
     // Clear the pending delegation
     delete agentState.pendingDelegation;
     await conversationManager.updateAgentState(conversation.id, agentSlug, agentState);
     
-    // Prepare for reactivation
-    const delegatingAgent = projectCtx.getAgent(agentSlug);
-    if (delegatingAgent) {
-        logInfo(chalk.green(`Reactivating ${delegatingAgent.name} with synthesized responses from completed tasks`));
-        
-        // Create a synthetic event with the synthesized responses
-        const syntheticEvent: NDKEvent = {
-            ...event,
-            content: synthesizedMessage,
-            tags: [["p", delegatingAgent.pubkey]],
-        } as NDKEvent;
-        
-        // Add to conversation
-        await conversationManager.addEvent(conversation.id, syntheticEvent);
-        
-        return {
-            shouldReactivate: true,
-            targetAgent: delegatingAgent,
-            syntheticEvent
-        };
-    }
-
+    // No need for synthetic events anymore - the complete() tool now properly
+    // tags both the task and the root conversation, so the delegating agent
+    // will naturally see the completion in the main thread
+    logInfo(chalk.green(`All tasks completed for ${agentSlug}. Delegation cleared.`));
+    
     return { shouldReactivate: false };
 }
 
@@ -407,6 +377,14 @@ async function handleReplyLogic(
     // Skip if the target agent is the same as the sender (prevent self-reply loops)
     if (targetAgent.pubkey === event.pubkey) {
         logInfo(chalk.gray(`Skipping self-reply: ${targetAgent.name} would process its own message`));
+        logInfo(chalk.yellow(`[DEBUG] Self-reply prevention triggered`), {
+            targetAgent: targetAgent.name,
+            targetPubkey: targetAgent.pubkey.substring(0, 8),
+            eventPubkey: event.pubkey.substring(0, 8),
+            eventContent: event.content.substring(0, 50),
+            hasToolTag: event.tags.some(t => t[0] === "tool"),
+            toolTag: event.tagValue("tool"),
+        });
         return;
     }
 
@@ -417,12 +395,13 @@ async function handleReplyLogic(
     if (isTaskCompletion) {
         const result = await processTaskCompletion(event, conversation, conversationManager);
         
-        if (result.shouldReactivate && result.targetAgent && result.syntheticEvent) {
-            targetAgent = result.targetAgent;
-            processedEvent = result.syntheticEvent;
-        } else if (!result.shouldReactivate) {
-            // Still waiting for more completions
+        if (!result.shouldReactivate) {
+            // Still waiting for more completions or all complete
             return;
+        }
+        
+        if (result.targetAgent) {
+            targetAgent = result.targetAgent;
         }
     }
     

@@ -65,6 +65,12 @@ export class ProjectDisplay {
         logInfo(chalk.gray("Slug:        ") + chalk.white(slug));
         logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
         logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
+        
+        // Display tools - CRITICAL for debugging tool loading issues
+        const toolNames = agent.tools.map(t => t.name).join(", ");
+        const toolCount = agent.tools.length;
+        logInfo(chalk.gray("Tools:       ") + chalk.cyan(`[${toolCount}] ${toolNames || "none"}`));
+        
         logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
         if (agent.isBuiltIn) {
             logInfo(chalk.gray("Built-in:    ") + chalk.green("✓"));

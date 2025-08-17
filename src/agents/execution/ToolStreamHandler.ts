@@ -41,42 +41,10 @@ export class ToolStreamHandler {
         if (this.executionLogger && context) {
             this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
         }
-
-        // Finalize the stream if there's any buffered content
-        // This ensures any content generated before tool use is published as a complete reply
+        
+        // Just flush any pending content if streamPublisher exists
         if (streamPublisher && !streamPublisher.isFinalized()) {
-            // Check the content accumulated within the streamPublisher itself
-            const hasContent = streamPublisher.getAccumulatedContent().trim().length > 0;
-            if (hasContent) {
-                tracingLogger.debug("Finalizing buffered content before tool execution", {
-                    tool: toolName,
-                    contentLength: streamPublisher.getAccumulatedContent().length
-                });
-                await streamPublisher.finalize({});
-                
-                // Create a new stream publisher for subsequent content
-                if (publisher) {
-                    const newStreamPublisher = new StreamPublisher(publisher);
-                    this.stateManager.setStreamPublisher(newStreamPublisher);
-                    tracingLogger.debug("Created new StreamPublisher for post-tool content");
-                }
-            } else {
-                // Just flush if no content
-                await streamPublisher.flush();
-            }
-        }
-
-        // Publish typing indicator with tool information
-        if (publisher) {
-            const message = this.getToolDescription(toolName, toolArgs);
-            
-            tracingLogger.debug("Publishing typing indicator with tool info", {
-                tool: toolName,
-                hasArgs: Object.keys(toolArgs).length > 0,
-                message,
-            });
-
-            await publisher.publishTypingIndicator("start", message);
+            await streamPublisher.flush();
         }
     }
 
@@ -95,7 +63,6 @@ export class ToolStreamHandler {
         const toolResult = this.parseToolResult(event);
         
         // Check if this tool never sent a tool_start event
-        // Pass the tool result so we can use metadata if available
         await this.handleMissingToolStart(event.tool, toolResult, publisher, tracingLogger, context);
 
         // Add result to state
@@ -131,37 +98,14 @@ export class ToolStreamHandler {
         const toolCallPattern = `${toolName}_`;
         const hasStarted = this.stateManager.hasToolStarted(toolCallPattern);
         
-        if (!hasStarted && publisher) {
-            let message: string;
+        if (!hasStarted) {
+            tracingLogger.debug("Tool completed without corresponding tool_start event", {
+                tool: toolName,
+                hasPublisher: !!publisher,
+            });
             
-            // First try to use metadata from the tool result
-            if (toolResult.metadata?.displayMessage) {
-                message = toolResult.metadata.displayMessage;
-                tracingLogger.debug("Using tool-provided display message", {
-                    tool: toolName,
-                    message,
-                });
-            } else if (toolResult.metadata?.executedArgs) {
-                // Try to generate a message from executed args
-                message = this.getToolDescription(toolName, toolResult.metadata.executedArgs);
-                tracingLogger.debug("Generated message from executed args", {
-                    tool: toolName,
-                    args: toolResult.metadata.executedArgs,
-                    message,
-                });
-            } else {
-                // Fall back to generic message
-                message = this.getToolDescription(toolName, {});
-                tracingLogger.debug("Using generic tool description", {
-                    tool: toolName,
-                    message,
-                });
-            }
-            
-            await publisher.publishTypingIndicator("start", message);
-            
-            // Brief delay to ensure the typing indicator is visible
-            await new Promise(resolve => setTimeout(resolve, ExecutionConfig.TOOL_INDICATOR_DELAY_MS));
+            // Note: We no longer publish typing indicators here since ToolPlugin.execute()
+            // handles all tool announcements via streamPublisher.toolUse()
         }
     }
 
@@ -267,29 +211,22 @@ export class ToolStreamHandler {
 
         const output = toolResult.output;
 
-        // Check if it's a termination
+        // Check if it's a termination (complete tool)
         if (isComplete(output)) {
+            // Mark as terminated
             this.stateManager.setTermination(output);
             
-            // Store the serialized event if present (for deferred publishing)
-            if (output.serializedEvent) {
-                this.stateManager.setDeferredEvent(output.serializedEvent);
-                
-                tracingLogger.info("[ToolStreamHandler] Stored serialized event for deferred publishing", {
-                    hasSerializedEvent: true,
-                    eventKeys: Object.keys(output.serializedEvent),
-                    contentLength: output.serializedEvent.content?.length || 0,
-                });
-            } else {
-                tracingLogger.info("[ToolStreamHandler] Complete tool has no serialized event", {
-                    hasSerializedEvent: false,
-                });
-            }
+            tracingLogger.info("[ToolStreamHandler] Complete tool executed", {
+                hasTermination: true,
+            });
         }
+        
+        // Note: Both complete and delegate tools now publish events immediately,
+        // no deferred processing needed
     }
 
     /**
-     * Check if tool result is terminal (complete)
+     * Check if tool result is terminal (complete or delegate)
      */
     private isTerminalResult(result: ToolExecutionResult): boolean {
         if (!result.success || !result.output) {
@@ -297,13 +234,32 @@ export class ToolStreamHandler {
         }
 
         const output = result.output as Record<string, unknown>;
-        return output.type === "complete";
+        // Both complete and delegate are terminal tools
+        // Note: delegate no longer uses serializedEvents, it has taskIds instead
+        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds));
+    }
+
+    /**
+     * Check if a tool should skip publishing tool use events
+     * Some tools handle their own event publishing or shouldn't show indicators
+     */
+    private shouldSkipToolUseEvent(toolName: string): boolean {
+        const skipTools = [
+            'claude_code',  // Handles its own event publishing
+            // Add other tools here that shouldn't publish tool use events
+        ];
+        return skipTools.includes(toolName.toLowerCase());
     }
 
     /**
      * Get human-readable description for a tool
      */
     private getToolDescription(toolName: string, args: Record<string, unknown>): string {
+        // Skip generating description for tools that don't publish events
+        if (this.shouldSkipToolUseEvent(toolName)) {
+            return '';
+        }
+        
         const descriptions = this.getToolDescriptions();
         const normalizedName = toolName.toLowerCase();
         const descFn = descriptions[normalizedName as keyof typeof descriptions] || descriptions.default;

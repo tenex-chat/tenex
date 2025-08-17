@@ -103,6 +103,65 @@ export class ToolPlugin extends Plugin {
         }
     }
 
+    /**
+     * Check if a tool should skip publishing tool use events
+     * Some tools handle their own event publishing or shouldn't show indicators
+     */
+    private shouldSkipToolUseEvent(toolName: string): boolean {
+        const skipTools = [
+            'claude_code',  // Handles its own event publishing
+            // Add other tools here that shouldn't publish tool use events
+        ];
+        return skipTools.includes(toolName.toLowerCase());
+    }
+
+    /**
+     * Get human-readable description for a tool
+     * This should match the descriptions in ToolStreamHandler
+     */
+    private getToolDescription(toolName: string, args: Record<string, unknown>): string {
+        switch (toolName) {
+            // Core tool operations
+            case "read_path":
+                return `📖 Reading ${args.path || "file"}`;
+            case "write_context_file":
+                return `✏️ Writing context to ${args.filePath || "file"}`;
+            case "shell":
+                return `🖥️ Executing shell command: ${(args.command as string || "").substring(0, 50)}${(args.command as string || "").length > 50 ? "..." : ""}`;
+            case "analyze":
+                return `🔬 Analyzing code with prompt: "${(args.prompt as string || "").substring(0, 50)}..."`;
+            case "generate_inventory":
+                return `📃 Generating inventory`;
+            case "lesson_learn":
+                return `🎓 Learning lesson: ${args.title || "new lesson"}`;
+            case "lesson_get":
+                return `📖 Getting lesson: ${args.id || "lesson"}`;
+            case "agents_discover":
+                return `🔍 Discovering available agents`;
+            case "agents_hire":
+                return `🤖 Hiring agent: ${args.agentId || "agent"}`;
+            case "discover_capabilities":
+                return `🔌 Discovering MCP capabilities`;
+            case "delegate":
+                return `🔄 Delegating task: ${args.description || args.title || "task"}`;
+            case "switch_phase":
+                return `📋 Switching to ${args.phase || "new"} phase`;
+            case "nostr_projects":
+                return `📡 Managing Nostr projects`;
+            case "complete":
+                return `✅ Completing task and returning control`;
+            default:
+                // For MCP tools or unknown tools
+                if (toolName.startsWith("mcp__")) {
+                    const parts = toolName.split("__");
+                    const provider = parts[1] || "mcp";
+                    const action = parts[2] || "action";
+                    return `🔌 Using ${provider} to ${action.replace(/_/g, " ")}`;
+                }
+                return `🛠️ Using ${toolName}`;
+        }
+    }
+
     async execute(
         _context: PluginExecutionContext,
         parameters: Record<string, unknown>
@@ -135,6 +194,36 @@ export class ToolPlugin extends Plugin {
                 conversationId: this.tenexContext.conversationId,
                 phase: this.tenexContext.phase,
             });
+
+            // CRITICAL: Before executing the tool, handle stream finalization
+            // This ensures any buffered content is published as kind:1111 before the tool runs
+            if (this.tenexContext.streamPublisher) {
+                // Determine if this tool should publish a tool use event
+                const shouldPublishToolUse = !this.shouldSkipToolUseEvent(this.tool.name);
+                
+                const toolMessage = shouldPublishToolUse 
+                    ? this.getToolDescription(this.tool.name, normalizedParameters as Record<string, unknown>)
+                    : undefined;
+                    
+                const newStreamPublisher = await this.tenexContext.streamPublisher.toolUse(toolMessage);
+                
+                // Update the context with the new StreamPublisher
+                this.tenexContext.streamPublisher = newStreamPublisher;
+                this.executor.setStreamPublisher(newStreamPublisher);
+                
+                // Also update via callback if available
+                if (this.tenexContext.setStreamPublisher) {
+                    this.tenexContext.setStreamPublisher(newStreamPublisher);
+                }
+                
+                logger.debug(`[ToolPlugin] StreamPublisher updated after toolUse`, {
+                    tool: this.tool.name,
+                    message: toolMessage,
+                    shouldPublishToolUse,
+                });
+            } else {
+                logger.warn(`[ToolPlugin] No StreamPublisher available for tool: ${this.tool.name}`);
+            }
 
             // Execute the tool using the type-safe executor
             const result = await this.executor.execute(this.tool, normalizedParameters);

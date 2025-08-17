@@ -196,8 +196,9 @@ export class AgentRegistry {
                 llmConfig: config.llmConfig,
                 };
 
-            // Only include tools if explicitly provided
-            if (config.tools && config.tools.length > 0) {
+            // Include tools if explicitly provided
+            // For built-in agents, always save tools even if empty array
+            if (config.tools !== undefined) {
                 agentDefinition.tools = config.tools;
             }
 
@@ -573,8 +574,18 @@ export class AgentRegistry {
             
             // For built-in agents, merge missing fields from TypeScript definition before validation
             const builtInAgents = getBuiltInAgents();
+            logger.info(`[AgentRegistry] Checking if ${slug} is built-in`, {
+                builtInSlugs: builtInAgents.map(a => a.slug),
+                isBuiltIn: builtInAgents.some(a => a.slug === slug),
+            });
             const builtInAgent = builtInAgents.find((agent) => agent.slug === slug);
             if (builtInAgent) {
+                logger.info(`[AgentRegistry] Loading built-in agent: ${slug}`, {
+                    builtInTools: builtInAgent.tools,
+                    fileTools: agentDefinition.tools,
+                    willOverride: builtInAgent.tools !== undefined,
+                });
+                
                 // Fill in missing required fields from built-in definition
                 if (!agentDefinition.role) {
                     agentDefinition.role = builtInAgent.role;
@@ -587,6 +598,15 @@ export class AgentRegistry {
                 }
                 if (!agentDefinition.name) {
                     agentDefinition.name = builtInAgent.name;
+                }
+                // CRITICAL: Always use tools from built-in definition for built-in agents
+                // This ensures built-in agents always have their correct tools
+                if (builtInAgent.tools !== undefined) {
+                    logger.info(`[AgentRegistry] Overriding tools for ${slug} with built-in definition`, {
+                        oldTools: agentDefinition.tools,
+                        newTools: builtInAgent.tools,
+                    });
+                    agentDefinition.tools = builtInAgent.tools;
                 }
             }
             
@@ -677,6 +697,16 @@ export class AgentRegistry {
             agentDefinition.tools !== undefined
                 ? agentDefinition.tools
                 : getDefaultToolsForAgent(agent);
+
+        // CRITICAL DEBUG: Log tool assignment for built-in agents
+        if (isBuiltIn) {
+            logger.info(`[AgentRegistry] Tool assignment for built-in agent: ${slug}`, {
+                hasDefinedTools: agentDefinition.tools !== undefined,
+                definedTools: agentDefinition.tools,
+                toolNamesUsed: toolNames,
+                source: agentDefinition.tools !== undefined ? "explicit" : "defaults",
+            });
+        }
 
         // Convert tool names to Tool instances
         const { getTools } = await import("@/tools/registry");
@@ -790,27 +820,49 @@ export class AgentRegistry {
             logger.debug(`Loading built-in agent: ${def.slug}`, {
                 name: def.name,
                 role: def.role,
+                tools: def.tools,
             });
 
-            // Use ensureAgent just like any other agent
-            const agent = await this.ensureAgent(
-                def.slug,
-                {
-                    name: def.name,
-                    role: def.role,
-                    instructions: def.instructions || "",
-                    llmConfig: def.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                    mcp: true, // Default: true for all agents
-                    tools: def.tools,
-                },
-                ndkProject
-            );
+            // Check if agent was already loaded from registry
+            const existingAgent = this.agents.get(def.slug);
+            if (existingAgent) {
+                logger.warn(`[AgentRegistry] Built-in agent ${def.slug} already loaded with wrong tools!`, {
+                    currentTools: existingAgent.tools.map(t => t.name),
+                    expectedTools: def.tools,
+                });
+                
+                // FIX: Force update the tools for built-in agents
+                if (def.tools !== undefined) {
+                    const { getTools } = await import("@/tools/registry");
+                    existingAgent.tools = getTools(def.tools as any);
+                    logger.info(`[AgentRegistry] Fixed tools for built-in agent ${def.slug}`, {
+                        newTools: existingAgent.tools.map(t => t.name),
+                    });
+                }
+            } else {
+                // Use ensureAgent just like any other agent
+                const agent = await this.ensureAgent(
+                    def.slug,
+                    {
+                        name: def.name,
+                        role: def.role,
+                        instructions: def.instructions || "",
+                        llmConfig: def.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+                        mcp: true, // Default: true for all agents
+                        tools: def.tools,
+                    },
+                    ndkProject
+                );
+
+                if (!agent) {
+                    logger.error(`Failed to load built-in agent: ${def.slug}`);
+                }
+            }
 
             // Mark as built-in
+            const agent = this.agents.get(def.slug);
             if (agent) {
                 agent.isBuiltIn = true;
-            } else {
-                logger.error(`Failed to load built-in agent: ${def.slug}`);
             }
         }
     }

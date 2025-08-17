@@ -59,7 +59,6 @@ export class ConversationEventProcessor {
     processIncomingEvent(conversation: Conversation, event: NDKEvent): void {
         // Check if event already exists in history to prevent duplicates
         if (conversation.history.some(e => e.id === event.id)) {
-            logger.debug(`[ConversationEventProcessor] Skipping duplicate event ${event.id} for conversation ${conversation.id}`);
             return;
         }
 

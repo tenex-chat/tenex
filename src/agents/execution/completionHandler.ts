@@ -47,6 +47,17 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
         const reply = publisher.createBaseReply();
         reply.content = response;
         reply.tag(["e", triggeringEvent.id, "", "reply"]);  // Reply to the task
+        
+        // Also tag the root conversation so this appears in the main thread
+        const rootConversation = triggeringEvent.tagValue("e");
+        if (rootConversation) {
+            reply.tag(["e", rootConversation, "", "root"]);  // Tag the main conversation
+            logger.debug("[handleAgentCompletion] Adding root conversation tag", {
+                taskId: triggeringEvent.id,
+                rootConversation: rootConversation,
+            });
+        }
+        
         reply.tag(["p", delegatorPubkey]);  // Notify the delegator
         reply.tag(["status", "complete"]);
         reply.tag(["tool", "complete"]);
@@ -68,9 +79,11 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
             event: reply
         };
     } else {
-        // Regular conversation completion - respond to PM/orchestrator
-        const orchestratorAgent = projectContext.getProjectAgent();
-        const respondToPubkey = orchestratorAgent.pubkey;
+        // Regular conversation completion - respond to whoever triggered this agent
+        // In CHAT phase when directly p-tagged, respond to the user
+        // Otherwise respond to the PM
+        const pmAgent = projectContext.getProjectAgent();
+        const respondToPubkey = triggeringEvent?.pubkey || pmAgent.pubkey;
 
         // No turn tracking needed - PM infers from conversation history
 

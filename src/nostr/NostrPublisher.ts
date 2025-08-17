@@ -103,10 +103,12 @@ export class NostrPublisher {
             });
 
             // Add p-tags for destination pubkeys if provided
-            if (options.destinationPubkeys) {
-                for (const pubkey of options.destinationPubkeys) {
-                    reply.tag(["p", pubkey]);
-                }
+            // If no destination pubkeys provided, default to the triggering event's author
+            // This ensures agents respond to whoever triggered them (user or another agent)
+            const destinationPubkeys = options.destinationPubkeys || [this.context.triggeringEvent.pubkey];
+            
+            for (const pubkey of destinationPubkeys) {
+                reply.tag(["p", pubkey]);
             }
 
             // Add any additional tags
@@ -375,9 +377,41 @@ export class NostrPublisher {
 
 }
 
+/**
+ * Content segment represents a chunk of content between tool executions
+ */
+class ContentSegment {
+    private content = "";
+    private finalized = false;
+
+    addContent(text: string): void {
+        if (this.finalized) {
+            throw new Error("Cannot add content to finalized segment");
+        }
+        this.content += text;
+    }
+
+    getContent(): string {
+        return this.content;
+    }
+
+    hasContent(): boolean {
+        return this.content.trim().length > 0;
+    }
+
+    markFinalized(): void {
+        this.finalized = true;
+    }
+
+    isFinalized(): boolean {
+        return this.finalized;
+    }
+}
+
 export class StreamPublisher {
-    private pendingContent = ""; // Content waiting to be published
-    private accumulatedContent = ""; // Total content accumulated so far
+    private segments: ContentSegment[] = [];
+    private currentSegment: ContentSegment;
+    private pendingContent = ""; // Content waiting to be published (for streaming)
     private sequence = 0;
     private hasFinalized = false;
     private flushTimeout: NodeJS.Timeout | null = null;
@@ -386,12 +420,16 @@ export class StreamPublisher {
     private static readonly SENTENCE_ENDINGS = /[.!?](?:\s|$)/; // Regex to detect sentence endings
     private lastFlushTime = Date.now();
 
-    constructor(private readonly publisher: NostrPublisher) {}
+    constructor(private readonly publisher: NostrPublisher) {
+        // Initialize with first segment
+        this.currentSegment = new ContentSegment();
+        this.segments.push(this.currentSegment);
+    }
 
     addContent(content: string): void {
-        // Add content to buffers
+        // Add content to current segment and pending buffer
+        this.currentSegment.addContent(content);
         this.pendingContent += content;
-        this.accumulatedContent += content;
         
         // Check if we should flush based on sentence endings
         const shouldFlushForSentence = this.shouldFlushAtSentenceEnd();
@@ -453,6 +491,17 @@ export class StreamPublisher {
     }
 
     async finalize(metadata: FinalizeMetadata): Promise<NDKEvent | undefined> {
+        logger.info("[DEBUG StreamPublisher.finalize] Called", {
+            hasFinalized: this.hasFinalized,
+            accumulatedContent: this.accumulatedContent.substring(0, 200),
+            accumulatedContentLength: this.accumulatedContent.length,
+            pendingContent: this.pendingContent.substring(0, 100),
+            pendingContentLength: this.pendingContent.length,
+            scheduledContent: this.scheduledContent.substring(0, 100),
+            scheduledContentLength: this.scheduledContent.length,
+            agent: this.publisher.context.agent.name,
+        });
+
         if (this.hasFinalized) {
             throw new Error("Stream already finalized");
         }
@@ -471,17 +520,34 @@ export class StreamPublisher {
 
             this.hasFinalized = true;
 
-            // Use accumulated content for the final reply, not just pending content
-            const finalContent = this.accumulatedContent.trim();
+            // Collect content from all segments
+            const finalContent = this.segments
+                .map(segment => segment.getContent())
+                .join('')
+                .trim();
+            logger.info("[DEBUG StreamPublisher.finalize] Content check", {
+                finalContentLength: finalContent.length,
+                finalContentPreview: finalContent.substring(0, 200),
+                willPublish: finalContent.length > 0,
+            });
+
             if (finalContent.length > 0) {
                 // StreamPublisher only handles text streaming, not terminal tool publishing
                 // Terminal tools publish their own events directly
+                logger.info("[DEBUG StreamPublisher.finalize] About to publishResponse", {
+                    contentLength: finalContent.length,
+                    metadata: Object.keys(metadata),
+                });
+
                 const finalEvent = await this.publisher.publishResponse({
                     content: finalContent,
                     ...metadata,
                 });
 
-                logger.debug("Finalized streaming response", {
+                logger.info("[DEBUG StreamPublisher.finalize] publishResponse completed", {
+                    eventId: finalEvent.id,
+                    eventKind: finalEvent.kind,
+                    eventCreatedAt: finalEvent.created_at,
                     totalSequences: this.sequence,
                     agent: this.publisher.context.agent.name,
                     finalContentLength: finalContent.length,
@@ -490,7 +556,7 @@ export class StreamPublisher {
                 return finalEvent;
             }
 
-            logger.debug("No content to publish in finalize", {
+            logger.info("[DEBUG StreamPublisher.finalize] No content to publish", {
                 totalSequences: this.sequence,
                 agent: this.publisher.context.agent.name,
             });
@@ -515,10 +581,97 @@ export class StreamPublisher {
 
     /**
      * Get the total content accumulated by this publisher instance
-     * since its creation or last finalization.
+     * across all segments.
      */
     getAccumulatedContent(): string {
-        return this.accumulatedContent;
+        return this.segments
+            .map(segment => segment.getContent())
+            .join('');
+    }
+
+    /**
+     * Called when a tool is about to be used.
+     * Finalizes the current segment and starts a new one for post-tool content.
+     * @param message Optional description of what the tool is doing (e.g., "📖 Reading file: foo.ts")
+     *                If not provided, no typing indicator is published.
+     */
+    async toolUse(message?: string): Promise<void> {
+        const currentContent = this.currentSegment.getContent();
+        logger.info("[StreamPublisher.toolUse] Tool about to execute", {
+            message: message || "(no message - tool use event skipped)",
+            hasCurrentSegmentContent: this.currentSegment.hasContent(),
+            isFinalized: this.hasFinalized,
+            currentSegmentPreview: currentContent.substring(0, 200),
+        });
+
+        // Step 1: If current segment has content, finalize it and publish as kind:1111
+        if (!this.hasFinalized && this.currentSegment.hasContent()) {
+            logger.info("[StreamPublisher.toolUse] Finalizing current segment before tool execution", {
+                contentLength: currentContent.length,
+                contentPreview: currentContent.substring(0, 200),
+            });
+            
+            try {
+                // Mark current segment as finalized
+                this.currentSegment.markFinalized();
+                
+                // Publish the content from all segments so far
+                const contentToPublish = this.segments
+                    .filter(s => s.hasContent())
+                    .map(s => s.getContent())
+                    .join('')
+                    .trim();
+                
+                if (contentToPublish.length > 0) {
+                    const event = await this.publisher.publishResponse({
+                        content: contentToPublish,
+                    });
+                    logger.info("[StreamPublisher.toolUse] Segment content published successfully", {
+                        eventId: event?.id,
+                        eventKind: event?.kind,
+                    });
+                }
+            } catch (error) {
+                logger.error("[StreamPublisher.toolUse] Failed to publish segment content", {
+                    error: formatAnyError(error),
+                });
+                // Don't throw - allow tool to continue even if publishing fails
+            }
+        }
+
+        // Step 2: Publish the tool use indicator (only if message is provided)
+        if (message) {
+            try {
+                await this.publisher.publishTypingIndicator("start", message);
+                logger.debug("[StreamPublisher.toolUse] Published tool indicator", {
+                    message,
+                });
+            } catch (error) {
+                logger.error("[StreamPublisher.toolUse] Failed to publish tool indicator", {
+                    message,
+                    error: formatAnyError(error),
+                });
+                // Don't throw - tool can still execute
+            }
+        } else {
+            logger.debug("[StreamPublisher.toolUse] No tool indicator published (message not provided)");
+        }
+
+        // Step 3: Start a new segment for post-tool content
+        this.currentSegment = new ContentSegment();
+        this.segments.push(this.currentSegment);
+        
+        // Reset pending content for the new segment
+        this.pendingContent = "";
+        this.scheduledContent = "";
+        if (this.flushTimeout) {
+            clearTimeout(this.flushTimeout);
+            this.flushTimeout = null;
+        }
+        
+        logger.debug("[StreamPublisher.toolUse] Started new segment for post-tool content", {
+            totalSegments: this.segments.length,
+        });
     }
 
     // Private helper methods
@@ -546,15 +699,14 @@ export class StreamPublisher {
             // Create streaming response event (ephemeral kind 21111)
             const streamingEvent = new NDKEvent(getNDK());
             streamingEvent.kind = EVENT_KINDS.STREAMING_RESPONSE; // Ephemeral streaming response kind
-            streamingEvent.content = this.accumulatedContent; // Send complete status, not just the delta
+            // Send complete content from all segments, not just the delta
+            streamingEvent.content = this.segments
+                .map(segment => segment.getContent())
+                .join('');
             
             // Tag the conversation
-            const conversationTag = this.publisher.context.triggeringEvent.tagValue("e") || 
-                                   this.publisher.context.triggeringEvent.id;
+            const conversationTag = this.publisher.context.triggeringEvent.id;
             streamingEvent.tag(["e", conversationTag]);
-            
-            // Add agent identifier
-            streamingEvent.tag(["p", this.publisher.context.agent.pubkey]);
             
             // Add streaming metadata
             this.sequence++;
@@ -567,7 +719,7 @@ export class StreamPublisher {
             }
 
             await streamingEvent.sign(this.publisher.context.agent.signer);
-            await streamingEvent.publish();
+            streamingEvent.publish();
 
             // Update last flush time after successful publish
             this.lastFlushTime = Date.now();

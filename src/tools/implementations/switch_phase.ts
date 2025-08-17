@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createToolDefinition, success, failure } from "../types";
+import { createToolDefinition, failure, success } from "../types";
 import { PHASES, type Phase } from "@/conversations/phases";
 import { logger } from "@/utils/logger";
 
@@ -53,7 +53,7 @@ export const switchPhaseTool = createToolDefinition<z.infer<typeof switchPhaseSc
 
         try {
             // Update conversation phase through ConversationManager
-            const success = await context.conversationManager.updatePhase(
+            const updateResult = await context.conversationManager.updatePhase(
                 context.conversationId,
                 phase,
                 reason, // This becomes the phase transition message
@@ -63,19 +63,13 @@ export const switchPhaseTool = createToolDefinition<z.infer<typeof switchPhaseSc
                 `Switching to ${phase} phase: ${reason}` // Summary for history
             );
 
-            if (!success) {
+            if (!updateResult) {
                 return failure({
                     kind: "execution",
                     tool: "switch_phase",
                     message: `Failed to switch to ${phase} phase`
                 });
             }
-
-            logger.info("[switch_phase] Phase transition successful", {
-                conversationId: context.conversationId,
-                newPhase: phase,
-                reason
-            });
 
             return success({
                 phase,

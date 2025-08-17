@@ -18,6 +18,7 @@ import { agentsDiscover } from "./implementations/agents-discover";
 import { agentsHire } from "./implementations/agents-hire";
 import { mcpDiscover } from "./implementations/mcp-discover";
 import { delegateTool } from "./implementations/delegate";
+import { delegatePhaseTool } from "./implementations/delegate_phase";
 import { nostrProjectsTool } from "./implementations/nostr-projects";
 import { claudeCode } from "./implementations/claude_code";
 import { switchPhaseTool } from "./implementations/switch_phase";
@@ -40,6 +41,7 @@ export type ToolName =
   | "agents_hire"
   | "discover_capabilities"
   | "delegate"
+  | "delegate_phase"
   | "nostr_projects"
   | "claude_code"
   | "switch_phase";
@@ -61,6 +63,7 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["agents_hire", agentsHire],
   ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
+  ["delegate_phase", delegatePhaseTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
   ["switch_phase", switchPhaseTool],

@@ -327,7 +327,7 @@ Executor: complete("Implementation complete with all reviews passed:
 ```
 
 **Key Points:**
-- Executor NEVER implements directly - always delegates to claude_code first
+- Executor NEVER implements directly - always uses the claude_code() tool first
 - Executor manages the implementation-review-revise loop
 - Executor only completes when all reviews pass
 - This keeps implementation quality high without PM involvement
@@ -417,8 +417,8 @@ Here's how a typical feature request flows through the system, showing the full 
    ↓
 5. EXECUTOR TAKES OVER EXECUTE PHASE:
    
-   5a. Executor: [First action - always delegate to claude_code]
-       - claude_code("Implement the password reset feature as planned")
+   5a. Executor: [First action - always use the claude_code() tool]
+       - Uses claude_code() tool: "Implement the password reset feature as planned"
        - [EXECUTOR GOES DORMANT]
    
    5b. claude_code: [Does all implementation work]

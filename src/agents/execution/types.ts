@@ -3,7 +3,7 @@ import type { Phase } from "@/conversations/phases";
 import type { PhaseTransition } from "@/conversations/types";
 import type { ToolExecutionResult } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
+import type { NostrPublisher, StreamPublisher } from "@/nostr/NostrPublisher";
 import type { ConversationManager } from "@/conversations/ConversationManager";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { TracingContext } from "@/tracing";
@@ -21,6 +21,8 @@ export interface ExecutionContext {
     claudeSessionId?: string;
     agentExecutor?: AgentExecutor;
     tracingContext?: TracingContext;
+    streamPublisher?: StreamPublisher;
+    setStreamPublisher?: (streamPublisher: StreamPublisher) => void;
 }
 
 export interface AgentExecutionResult {
