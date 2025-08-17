@@ -1,5 +1,5 @@
 import type { Phase } from "../phases";
-import { PHASES } from "../phases";
+import { PHASES, getValidTransitions } from "../phases";
 import type { Conversation, PhaseTransition } from "../types";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { logger } from "@/utils/logger";
@@ -31,10 +31,15 @@ export class PhaseManager {
     /**
      * Check if a phase transition is valid
      */
-    canTransition(_from: Phase, _to: Phase): boolean {
-        // For now, allow all phase transitions as the system is flexible
-        // Each phase can transition to any other phase based on conversation needs
-        return true;
+    canTransition(from: Phase, to: Phase): boolean {
+        // Allow same-phase transitions (handoffs between agents)
+        if (from === to) {
+            return true;
+        }
+        
+        // Check if the transition is in the allowed list
+        const validTransitions = getValidTransitions(from);
+        return validTransitions.includes(to);
     }
 
     /**
@@ -68,7 +73,13 @@ export class PhaseManager {
         }
 
         if (!this.canTransition(from, to)) {
-            logger.warn(`[PhaseManager] Invalid transition from ${from} to ${to}`);
+            const validTransitions = getValidTransitions(from);
+            logger.warn(`[PhaseManager] Invalid transition requested from ${from} to ${to}`, {
+                validTransitions: validTransitions.join(', '),
+                conversationId: conversation.id,
+                agent: context.agentName
+            });
+            logger.debug(`[PhaseManager] Valid transitions from ${from}: ${validTransitions.join(', ')}`);
             return {
                 success: false
             };

@@ -18,6 +18,13 @@ import type { ToolExecutionResult } from "@/tools/executor";
 // Maximum iterations to prevent infinite loops
 const MAX_ITERATIONS = 20;
 
+// Track recent tool calls to detect repetition
+interface ToolCallRecord {
+    tool: string;
+    args: string; // JSON stringified for comparison
+    timestamp: number;
+}
+
 /**
  * ReasonActLoop implementation that properly implements the Reason-Act-Observe pattern.
  * Iteratively calls the LLM, executes tools, and feeds results back for further reasoning.
@@ -26,6 +33,9 @@ export class ReasonActLoop implements ExecutionBackend {
     private executionLogger?: ExecutionLogger;
     private streamingBuffer: Map<string, string> = new Map();
     private lastLoggedChunk: Map<string, string> = new Map();
+    private recentToolCalls: ToolCallRecord[] = [];
+    private readonly MAX_TOOL_HISTORY = 10;
+    private readonly REPETITION_THRESHOLD = 3;
 
     constructor(
         private llmService: LLMService
@@ -223,6 +233,14 @@ export class ReasonActLoop implements ExecutionBackend {
 
                 case "tool_start":
                     hasToolCalls = true;
+                    
+                    // Check for repetitive tool calls
+                    const repetitionWarning = this.checkToolRepetition(
+                        event.tool, 
+                        event.args,
+                        messages
+                    );
+                    
                     await toolHandler.handleToolStartEvent(
                         streamPublisher,
                         publisher,
@@ -610,5 +628,48 @@ export class ReasonActLoop implements ExecutionBackend {
             this.streamingBuffer.delete(agentKey);
             this.lastLoggedChunk.delete(agentKey);
         }
+    }
+    
+    /**
+     * Check if a tool call is being repeated excessively
+     * Adds a warning message to the conversation if repetition is detected
+     */
+    private checkToolRepetition(
+        tool: string, 
+        args: any,
+        messages: Message[]
+    ): string | null {
+        const argsStr = JSON.stringify(args);
+        const now = Date.now();
+        
+        // Add current call to history
+        this.recentToolCalls.push({ tool, args: argsStr, timestamp: now });
+        
+        // Keep history size limited
+        if (this.recentToolCalls.length > this.MAX_TOOL_HISTORY) {
+            this.recentToolCalls.shift();
+        }
+        
+        // Count similar recent calls (same tool and args within last 10 calls)
+        const similarCalls = this.recentToolCalls.filter(
+            call => call.tool === tool && call.args === argsStr
+        );
+        
+        if (similarCalls.length >= this.REPETITION_THRESHOLD) {
+            // Add a system message to help the agent understand it's stuck
+            const warningMessage = `⚠️ SYSTEM: You have called the '${tool}' tool ${similarCalls.length} times with identical parameters. ` +
+                                 `The tool is working correctly and returning results. ` +
+                                 `Please process the tool output and continue with your task, or try a different approach. ` +
+                                 `Do not call this tool again with the same parameters.`;
+            
+            messages.push(new Message("system", warningMessage));
+            
+            // Don't clear history - keep tracking to detect persistent loops
+            // this.recentToolCalls = [];
+            
+            return warningMessage;
+        }
+        
+        return null;
     }
 }

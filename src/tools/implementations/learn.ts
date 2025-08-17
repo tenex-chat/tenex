@@ -5,7 +5,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const lessonLearnSchema = z.object({
     title: z.string().describe("Brief title/description of what this lesson is about"),
@@ -52,8 +52,6 @@ export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
 □ Am I the right agent in the system to learn this or is there an agent better suited for this?
 □ Is it absolutely obvious?
 
-Use <thinking> tags to justify why this lesson meets the quality bar.
-
 ## Detailed Version Guidelines:
 Only include a detailed version when:
 - The lesson genuinely NEEDS deeper explanation that can't be captured in 3-4 paragraphs
@@ -99,14 +97,11 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
         phase: context.phase,
         conversationId: context.conversationId,
       });
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "lesson_learn",
-          message: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "lesson_learn",
+        message: error,
+      });
     }
 
     const ndk = getNDK();
@@ -120,14 +115,11 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
         phase: context.phase,
         conversationId: context.conversationId,
       });
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "lesson_learn",
-          message: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "lesson_learn",
+        message: error,
+      });
     }
 
     const projectCtx = getProjectContext();
@@ -164,15 +156,12 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
 
       const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 
-      return {
-        ok: true,
-        value: {
-          message,
-          eventId: lessonEvent.encode(),
-          title,
-          hasDetailed: !!detailed,
-        },
-      };
+      return success({
+        message,
+        eventId: lessonEvent.encode(),
+        title,
+        hasDetailed: !!detailed,
+      });
     } catch (error) {
       logger.error("❌ Learn tool failed", {
         error: formatAnyError(error),
@@ -183,14 +172,11 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
         conversationId: context.conversationId,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "lesson_learn",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "lesson_learn",
+        message: formatAnyError(error),
+      });
     }
   },
 };

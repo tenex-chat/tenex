@@ -41,10 +41,6 @@ export const specialistIdentityFragment: PromptFragment<SpecialistIdentityArgs> 
 
         // Specialist guidelines (what used to be in expertise-boundaries and domain-expert-guidelines)
         parts.push(`
-## Your Role as a Domain Expert
-
-You are a specialist agent providing expert analysis and recommendations within your domain.
-
 ### Core Principles
 
 1. **Advisory Role Only**: You CANNOT make system changes or implement features. All your recommendations will be routed to the appropriate executor agent for implementation.

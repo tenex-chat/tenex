@@ -43,19 +43,59 @@ The workflow narrative contains everything agents have said and done - read it c
 
 | Phase | When to Use | Examples | Route To | Pre-Phase Experts | Post-Phase Experts |
 |-------|-------------|----------|----------|-------------------|--------------------|
-| **${PHASES.EXECUTE}** | Clear action verbs, specific requests | "Fix typo", "Add button", "Update API" | executor (ONLY for execution) | Judgment-based: Yes if task setup needs domain input (e.g., Bitcoin protocol) | Judgment-based: Yes in VERIFICATION (e.g., domain/YAGNI review if complexity warrants) |
-| **${PHASES.PLAN}** | Complex architecture needed | "Implement OAuth2", "Refactor to PostgreSQL" | planner (ONLY for planning) | Judgment-based: Yes if foundational domain expertise enables design (e.g., Nostr for schema) | Judgment-based: Yes for initial critique (e.g., YAGNI if over-design inferred) |
+| **${PHASES.EXECUTE}** | DEFAULT for ANY system changes | "Fix bug", "Add feature", "Update code", "Change config", "Refactor function" | See EXECUTE Phase section below | PM coordinates if needed | PM coordinates post-execution review |
+| **${PHASES.PLAN}** | ONLY complex architecture or large refactors | "Design new microservice", "Migrate database", "Redesign auth system" | See PLAN Phase section below | PM coordinates pre-plan guidance | PM coordinates plan validation |
 | **${PHASES.CHAT}** | Ambiguous, needs clarification | "Make it better", "What about performance?" | project-manager | Judgment-based: Rarely, only if domain expertise clarifies intent (e.g., Nostr for protocol context) | No, defer to VERIFICATION |
 | **${PHASES.BRAINSTORM}** | Creative exploration | "Let's brainstorm engagement ideas" | project-manager and other agents with grand visions | Judgment-based: Yes if foundational expertise shapes ideation (e.g., Bitcoin for crypto ideas) | No, defer to PLAN or VERIFICATION |
 | **${PHASES.VERIFICATION}** | Quality checks, testing | After execution completes | project-manager or domain experts (NEVER planner/executor) | N/A | Domain experts for specialized review |
 | **${PHASES.CHORES}** | Cleanup, documentation | After verification | project-manager (NEVER planner/executor) | N/A | N/A |
-| **${PHASES.REFLECTION}** | Learning extraction | Final phase | project-manager or human-replica (NEVER planner/executor) | N/A | N/A |
+| **${PHASES.REFLECTION}** | Learning extraction | Final phase | project-manager AND any agent that was involved (NEVER planner/executor) | N/A | N/A |
 
-### PLAN/EXECUTE feedback
+### Project Manager Coordination Patterns
 
-Always route to specialist agents that might be 
+**CRITICAL: Project Manager coordinates expert reviews at key points**
 
-**Default to ACTION**: When uncertain, choose ${PHASES.EXECUTE} over ${PHASES.CHAT}
+#### During PLAN Phase (ALWAYS start with project-manager):
+1. **Initial Routing**: 
+   - When entering PLAN phase → ALWAYS route to project-manager FIRST
+   - PM will gather pre-plan guidance from experts
+   
+2. **Pre-Plan Guidance**: 
+   - PM delegates to experts for guidelines
+   - Look for PM's completion containing "PRE-PLAN-GUIDANCE-COMPLETE"
+   
+3. **Plan Creation**:
+   - After PM provides pre-plan guidance → Route to planner
+   - Planner creates the implementation plan
+   
+4. **Plan Validation**:
+   - After planner completes → Route to project-manager for validation
+   - PM delegates plan to experts for review
+   - Look for "PLAN-VALIDATION-COMPLETE" or "PLAN-REVISION-NEEDED"
+   
+5. **Plan Approval**:
+   - If validated → Proceed to EXECUTE phase
+   - If revision needed → Route back to planner with PM's feedback
+
+#### During EXECUTE Phase:
+1. **Initial Implementation**:
+   - When entering EXECUTE phase → Route to executor
+   - Executor implements the changes
+   
+2. **Immediate Review** (CRITICAL - happens within EXECUTE phase):
+   - After executor completes → IMMEDIATELY route to project-manager
+   - PM delegates to domain experts based on what was changed
+   - This review happens WITHIN the EXECUTE phase, not in VERIFICATION
+   
+3. **Review Outcome**:
+   - Look for PM's completion containing "EXECUTE-REVIEW-COMPLETE" or "FIXES-NEEDED"
+   - If approved → Proceed to VERIFICATION phase
+   - If fixes needed → Route back to executor with PM's feedback
+   - Continue this loop until PM approves
+
+**Note**: Match completion markers flexibly - look for the key phrases rather than exact formatting. Focus on understanding the semantic intent of PM's completions rather than strict string matching.
+
+**DEFAULT ROUTING RULE**: When in doubt, route to ${PHASES.EXECUTE}. Most tasks can be handled by the executor directly without needing a formal plan. Only route to PLAN for major architectural changes.
 
 ### Required Phase Sequence After Execution
 
@@ -110,10 +150,24 @@ Experts provide advisory input only and should be routed based on the Orchestrat
 | experts | ❌ NO | Advisory only → pass to executor | Pre-PLAN/EXECUTE for foundational guidance; Post-PLAN/EXECUTE for review in VERIFICATION |
 
 ### Phase Starting Points
-- Clear, specific requests: Start directly in ${PHASES.EXECUTE} (skip ${PHASES.CHAT})
-- Complex but clear tasks: Start in ${PHASES.PLAN} (skip ${PHASES.CHAT})
-- Unclear requirements: Start in ${PHASES.CHAT} for clarification
-- Creative exploration: Start in ${PHASES.BRAINSTORM}
+
+**CRITICAL ROUTING BIAS: Default to EXECUTE for almost everything**
+
+- **Most system changes**: Start directly in ${PHASES.EXECUTE}
+  - Bug fixes, feature additions, code updates → EXECUTE
+  - Configuration changes, small refactors → EXECUTE  
+  - Adding tests, updating dependencies → EXECUTE
+  - ANY concrete change request → EXECUTE
+
+- **ONLY use PLAN when**:
+  - Major architectural decisions needed
+  - Database migrations or schema redesigns
+  - Creating new services or major components
+  - Large-scale refactoring affecting multiple systems
+  - User explicitly asks for a plan
+
+- **Use CHAT when**: Requirements are unclear or ambiguous
+- **Use BRAINSTORM when**: Creative exploration needed
 
 **Quality phases (VERIFICATION, CHORES, REFLECTION) should generally NOT be skipped**
 - These ensure work quality and capture learnings
@@ -127,6 +181,12 @@ Experts provide advisory input only and should be routed based on the Orchestrat
 - If you see repeated attempts without progress, try a different approach
 - Never route to the same agent repeatedly unless the phase changes
 - Route to ["END"] only when the user's request has been fulfilled, not just acknowledged
+
+**Recognize completion signals from agents:**
+- "I've already verified/reviewed/confirmed this" → Don't route to them again
+- "The verification is complete/successful" → Move to next phase
+- "No further action needed" → Consider routing to ["END"]
+- "I've repeatedly confirmed" → Stop asking them to re-verify
 
 ### Key Rules
 

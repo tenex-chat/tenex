@@ -12,7 +12,6 @@ import "@/prompts/fragments/30-project-md";
 import "@/prompts/fragments/01-specialist-identity";
 import "@/prompts/fragments/01-orchestrator-identity";
 import "@/prompts/fragments/25-specialist-tools";
-import "@/prompts/fragments/26-mcp-phase-examples";
 import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import "@/prompts/fragments/15-orchestrator-available-agents";
@@ -182,14 +181,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
             agent,
             mcpTools,
         });
-        
-        // Add MCP phase examples if MCP tools are available
-        if (mcpTools.length > 0) {
-            systemPromptBuilder.add("mcp-phase-examples", {
-                phase,
-                hasMcpTools: true,
-            });
-        }
     }
     // .add("tool-use", {});
 
@@ -307,14 +298,6 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
         agent,
         mcpTools,
     });
-    
-    // Add MCP phase examples if MCP tools are available
-    if (mcpTools.length > 0) {
-        systemPromptBuilder.add("mcp-phase-examples", {
-            phase,
-            hasMcpTools: true,
-        });
-    }
 
     // Specialists use reasoning tags
     // systemPromptBuilder.add("specialist-reasoning", {});

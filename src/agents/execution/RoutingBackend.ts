@@ -142,6 +142,10 @@ export class RoutingBackend implements ExecutionBackend {
                         }
                     }
                     
+                    // Explicitly complete the conversation
+                    await this.conversationManager.completeConversation(context.conversationId);
+                    tracingLogger.success(`🎉 Conversation ${context.conversationId} completed successfully by END agent.`);
+                    
                     // Log the end of conversation
                     executionLogger.logEvent({
                         type: "execution_complete",
@@ -149,7 +153,9 @@ export class RoutingBackend implements ExecutionBackend {
                         conversationId: context.conversationId,
                         agent: context.agent.name,
                         narrative: routingDecision.reason,
-                        success: true
+                        success: true,
+                        finalPhase: context.phase,
+                        duration: conversation?.executionTime?.totalSeconds ? conversation.executionTime.totalSeconds * 1000 : 0
                     });
                     // Don't execute any more agents
                     break;

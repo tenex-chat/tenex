@@ -14,6 +14,8 @@ import { getProjectContext } from "@/services/ProjectContext";
  */
 export class OrchestratorTurnTracker {
     private turns: Map<string, OrchestratorTurn[]> = new Map();
+    private readonly MAX_RECENT_ROUTINGS = 5;
+    private readonly REPETITION_THRESHOLD = 2;
 
     /**
      * Start a new orchestrator turn
@@ -39,6 +41,18 @@ export class OrchestratorTurnTracker {
 
         // Get or create turns array for this conversation
         const conversationTurns = this.turns.get(conversationId) || [];
+        
+        // Check for routing repetition before adding the new turn
+        if (this.detectRoutingRepetition(conversationTurns, phase, agents)) {
+            logger.warn(`[OrchestratorTurnTracker] Detected potential routing loop for conv ${conversationId}`, {
+                phase,
+                agents: this.formatAgentList(agents),
+                reason,
+            });
+            // The warning is logged but we still allow the routing to proceed
+            // The orchestrator prompt will see this in the workflow narrative
+        }
+        
         conversationTurns.push(turn);
         this.turns.set(conversationId, conversationTurns);
 
@@ -160,6 +174,14 @@ export class OrchestratorTurnTracker {
 
         narrativeParts.push(`=== ORCHESTRATOR ROUTING CONTEXT ===\n`);
         narrativeParts.push(`Initial user request: "${userRequest}"\n`);
+        
+        // Check for potential routing loops
+        if (conversationTurns.length > 0) {
+            const lastTurn = conversationTurns[conversationTurns.length - 1];
+            if (lastTurn.isCompleted && this.detectRoutingRepetition(conversationTurns.slice(0, -1), lastTurn.phase, lastTurn.agents)) {
+                narrativeParts.push(`\n⚠️ WARNING: Detected potential routing loop - the same agents in the same phase have been routed to multiple times recently.\n`);
+            }
+        }
 
         if (conversationTurns.length === 0) {
             narrativeParts.push(`\nThis is the first routing decision for this conversation.`);
@@ -249,5 +271,27 @@ export class OrchestratorTurnTracker {
     clearTurns(conversationId: string): void {
         this.turns.delete(conversationId);
         logger.debug(`[OrchestratorTurnTracker] Cleared turns for conversation ${conversationId}`);
+    }
+    
+    /**
+     * Detect if we're in a routing repetition loop
+     */
+    private detectRoutingRepetition(
+        turns: OrchestratorTurn[],
+        currentPhase: Phase,
+        currentAgents: string[]
+    ): boolean {
+        // Filter for recent completed turns with the same phase and agents
+        const recentSimilarTurns = turns
+            .slice(-this.MAX_RECENT_ROUTINGS)
+            .filter(turn =>
+                turn.isCompleted && // Only consider completed turns
+                turn.phase === currentPhase &&
+                turn.agents.length === currentAgents.length &&
+                turn.agents.every(agent => currentAgents.includes(agent))
+            );
+
+        // If we have hit the repetition threshold, it's likely a loop
+        return recentSimilarTurns.length >= this.REPETITION_THRESHOLD;
     }
 }
