@@ -14,7 +14,6 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
-import { isToollessBackend } from "./utils";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -195,8 +194,7 @@ export class AgentRegistry {
                 instructions: config.instructions || "",
                 useCriteria: config.useCriteria,
                 llmConfig: config.llmConfig,
-                backend: config.backend,
-            };
+                };
 
             // Only include tools if explicitly provided
             if (config.tools && config.tools.length > 0) {
@@ -277,8 +275,7 @@ export class AgentRegistry {
                     instructions: config.instructions || "",
                     useCriteria: config.useCriteria,
                     llmConfig: config.llmConfig,
-                    backend: config.backend,
-                };
+                        };
                 if (isBuiltIn) {
                     const { instructions: _, ...definitionWithoutInstructions } = agentDefinition;
                     await writeJsonFile(definitionPath, definitionWithoutInstructions);
@@ -476,8 +473,7 @@ export class AgentRegistry {
                     instructions: agent.instructions || "",
                     useCriteria: agent.useCriteria,
                     llmConfig: newLLMConfig,
-                    backend: agent.backend,
-                };
+                        };
             }
 
             // Update the llmConfig
@@ -501,22 +497,6 @@ export class AgentRegistry {
         }
     }
 
-    /**
-     * Get the orchestrator agent if one exists
-     */
-    getOrchestratorAgent(): AgentInstance | undefined {
-        // Look for the orchestrator by slug first (for built-in orchestrator)
-        const orchestrator = this.agents.get("orchestrator");
-        if (orchestrator) return orchestrator;
-
-        // Fallback to looking for any agent marked as orchestrator
-        for (const [slug, registryEntry] of Object.entries(this.registry)) {
-            if (registryEntry.orchestratorAgent) {
-                return this.agents.get(slug);
-            }
-        }
-        return undefined;
-    }
 
     private async publishAgentEvents(
         signer: NDKPrivateKeySigner,
@@ -608,9 +588,6 @@ export class AgentRegistry {
                 if (!agentDefinition.instructions) {
                     agentDefinition.instructions = builtInAgent.instructions || "";
                 }
-                if (!agentDefinition.backend && builtInAgent.backend) {
-                    agentDefinition.backend = builtInAgent.backend;
-                }
                 if (!agentDefinition.name) {
                     agentDefinition.name = builtInAgent.name;
                 }
@@ -636,7 +613,6 @@ export class AgentRegistry {
             tools: agentDefinition.tools, // Preserve explicit tools configuration
             mcp: agentDefinition.mcp, // Preserve MCP configuration
             llmConfig: agentDefinition.llmConfig,
-            backend: agentDefinition.backend,
         };
 
         // If loading from global registry, create agent directly without recursive ensureAgent call
@@ -676,19 +652,6 @@ export class AgentRegistry {
                 // If project context not available, use default name
                 agentName = agentDefinition.name;
             }
-        } else if (registryEntry.orchestratorAgent && slug !== "orchestrator") {
-            // Keep support for custom orchestrator agents using project name
-            try {
-                const { getProjectContext } = await import("@/services");
-                const projectCtx = getProjectContext();
-                const projectTitle = projectCtx.project.tagValue("title");
-                if (projectTitle) {
-                    agentName = projectTitle;
-                }
-            } catch {
-                // If project context not available, use default name
-                agentName = agentDefinition.name;
-            }
         }
 
         // Determine if this is a built-in agent
@@ -705,26 +668,19 @@ export class AgentRegistry {
             useCriteria: agentDefinition.useCriteria,
             llmConfig: agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
             tools: [], // Will be set next
-            mcp: agentDefinition.mcp ?? !registryEntry.orchestratorAgent, // Default to true for non-orchestrator agents
+            mcp: agentDefinition.mcp ?? true, // Default to true for all agents
             eventId: registryEntry.eventId,
             slug: slug,
-            isOrchestrator: registryEntry.orchestratorAgent,
+            isOrchestrator: false,
             isBuiltIn: isBuiltIn,
-            backend: agentDefinition.backend,
             isGlobal: isGlobal,
         };
 
         // Set tools - use explicit tools if configured, otherwise use defaults
-        let toolNames: string[];
-        if (isToollessBackend(agent)) {
-            // Claude and routing backend agents don't use tools through the traditional tool system
-            toolNames = [];
-        } else {
-            toolNames =
-                agentDefinition.tools !== undefined
-                    ? agentDefinition.tools
-                    : getDefaultToolsForAgent(agent);
-        }
+        const toolNames =
+            agentDefinition.tools !== undefined
+                ? agentDefinition.tools
+                : getDefaultToolsForAgent(agent);
 
         // Convert tool names to Tool instances
         const { getTools } = await import("@/tools/registry");
@@ -754,7 +710,6 @@ export class AgentRegistry {
             instructions: config.instructions || "",
             useCriteria: config.useCriteria,
             llmConfig: config.llmConfig,
-            backend: config.backend,
             tools: config.tools,
             mcp: config.mcp,
         };
@@ -836,13 +791,9 @@ export class AgentRegistry {
         });
 
         for (const def of builtInAgents) {
-            // Check if this is the orchestrator
-            const isOrchestrator = def.slug === "orchestrator";
-
             logger.debug(`Loading built-in agent: ${def.slug}`, {
                 name: def.name,
                 role: def.role,
-                isOrchestrator,
             });
 
             // Use ensureAgent just like any other agent
@@ -853,23 +804,15 @@ export class AgentRegistry {
                     role: def.role,
                     instructions: def.instructions || "",
                     llmConfig: def.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                    mcp: !isOrchestrator, // Default: true for all agents except orchestrator
-                    backend: def.backend,
+                    mcp: true, // Default: true for all agents
+                    tools: def.tools,
                 },
                 ndkProject
             );
 
-            // Mark as built-in and set orchestrator flag
+            // Mark as built-in
             if (agent) {
                 agent.isBuiltIn = true;
-                agent.isOrchestrator = isOrchestrator;
-
-                // Update registry to mark orchestrator
-                const registryEntry = this.registry[def.slug];
-                if (isOrchestrator && registryEntry) {
-                    registryEntry.orchestratorAgent = true;
-                    await this.saveRegistry();
-                }
             } else {
                 logger.error(`Failed to load built-in agent: ${def.slug}`);
             }

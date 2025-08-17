@@ -4,6 +4,7 @@ export const PLANNER_AGENT: BuiltInAgentDefinition = {
     name: "Planner",
     slug: "planner",
     role: "Creates implementation plans and strategies (cannot modify code)",
+    tools: ["claude_code"],
     instructions: `You are a planning specialist with direct access to analyze and plan for the codebase.
 
 CRITICAL LIMITATIONS:
@@ -27,6 +28,5 @@ CRITICAL: Your plan is to be delivered in a SINGLE message, without any prefixes
 
 CRITICAL: You MUST not create ANY modifications on the existing repo; you are to EXCLUSIVELY create/iterate on a plan. The Executor agent will implement your plans.`,
     useCriteria:
-        "Default agent for PLAN phase. Fallback agent when no agent is right to review work during PLAN phase.",
-    backend: "claude",
+        "Default agent for PLAN phase. Fallback agent when no agent is right to review work during PLAN phase."
 };

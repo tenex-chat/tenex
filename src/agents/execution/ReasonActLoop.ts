@@ -7,7 +7,6 @@ import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
-import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import { StreamStateManager } from "./StreamStateManager";
@@ -29,7 +28,7 @@ interface ToolCallRecord {
  * ReasonActLoop implementation that properly implements the Reason-Act-Observe pattern.
  * Iteratively calls the LLM, executes tools, and feeds results back for further reasoning.
  */
-export class ReasonActLoop implements ExecutionBackend {
+export class ReasonActLoop {
     private executionLogger?: ExecutionLogger;
     private streamingBuffer: Map<string, string> = new Map();
     private lastLoggedChunk: Map<string, string> = new Map();

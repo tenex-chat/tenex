@@ -45,8 +45,6 @@ export interface AgentInstance {
     isOrchestrator?: boolean;
     /** Whether this is a built-in agent (executor, planner) */
     isBuiltIn?: boolean;
-    /** Execution backend to use (defaults to 'reason-act-loop') */
-    backend?: "reason-act-loop" | "claude" | "routing";
     /** Whether this agent is from the global configuration */
     isGlobal?: boolean;
 }
@@ -99,7 +97,6 @@ export interface StoredAgentData {
     llmConfig?: string;
     tools?: string[]; // Tool names in storage - converted to Tool instances at runtime
     mcp?: boolean; // Whether this agent has access to MCP tools
-    backend?: "reason-act-loop" | "claude" | "routing"; // Execution backend to use (defaults to 'reason-act-loop')
 }
 
 /**

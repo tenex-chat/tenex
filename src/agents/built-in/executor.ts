@@ -4,6 +4,7 @@ export const EXECUTOR_AGENT: BuiltInAgentDefinition = {
     name: "Executor",
     slug: "executor",
     role: "The ONLY agent capable of making system changes",
+    tools: ["claude_code"],
     instructions: `You are an execution specialist with direct access to the codebase.
 
 CRITICAL: You are the ONLY agent in the system that can:
@@ -28,6 +29,5 @@ When you receive feedback from expert agents via the orchestrator:
 
 You have full access to read and modify files in the project. Focus on delivering working implementations.`,
     useCriteria:
-        "Default agent for EXECUTE phase. Fallback agent when no agent is right to review work during EXECUTE phase.",
-    backend: "claude",
+        "Default agent for EXECUTE phase. Fallback agent when no agent is right to review work during EXECUTE phase."
 };

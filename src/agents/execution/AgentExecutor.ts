@@ -16,9 +16,6 @@ import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
-import { ClaudeBackend } from "./ClaudeBackend";
-import { RoutingBackend } from "./RoutingBackend";
-import type { ExecutionBackend } from "./ExecutionBackend";
 import type { ExecutionContext } from "./types";
 import "@/prompts/fragments/25-orchestrator-routing";
 import "@/prompts/fragments/01-specialist-identity";
@@ -50,20 +47,10 @@ export class AgentExecutor {
     ) {}
 
     /**
-     * Get the appropriate execution backend based on agent configuration
+     * Get the execution backend - all agents now use ReasonActLoop
      */
-    private getBackend(agent: AgentInstance): ExecutionBackend {
-        const backendType = agent.backend || "reason-act-loop";
-
-        switch (backendType) {
-            case "claude":
-                return new ClaudeBackend();
-            case "routing":
-                return new RoutingBackend(this.llmService, this.conversationManager);
-            case "reason-act-loop":
-            default:
-                return new ReasonActLoop(this.llmService);
-        }
+    private getBackend(): ReasonActLoop {
+        return new ReasonActLoop(this.llmService);
     }
 
     /**
@@ -134,10 +121,8 @@ export class AgentExecutor {
                 narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`
             });
 
-            // Publish typing indicator start (skip for orchestrator)
-            if (!context.agent.isOrchestrator) {
-                await fullContext.publisher.publishTypingIndicator("start");
-            }
+            // Publish typing indicator start
+            await fullContext.publisher.publishTypingIndicator("start");
 
             await this.executeWithStreaming(fullContext, messages, tracingContext);
             
@@ -151,10 +136,8 @@ export class AgentExecutor {
                 success: true
             });
 
-            // Stop typing indicator after successful execution (skip for orchestrator)
-            if (!context.agent.isOrchestrator) {
-                await fullContext.publisher.publishTypingIndicator("stop");
-            }
+            // Stop typing indicator after successful execution
+            await fullContext.publisher.publishTypingIndicator("stop");
             
             // Clean up the publisher resources
             await fullContext.publisher.cleanup();
@@ -180,10 +163,8 @@ export class AgentExecutor {
 
             // Conversation saving is now handled by NostrPublisher
 
-            // Ensure typing indicator is stopped even on error (skip for orchestrator)
-            if (!context.agent.isOrchestrator) {
-                await fullContext.publisher.publishTypingIndicator("stop");
-            }
+            // Ensure typing indicator is stopped even on error
+            await fullContext.publisher.publishTypingIndicator("stop");
             
             // Clean up the publisher resources
             await fullContext.publisher.cleanup();
@@ -316,27 +297,16 @@ Be completely transparent about your internal process. If you made a mistake or 
             });
         }
 
-        // Orchestrator gets structured routing context, others get conversation transcript
-        if (context.agent.isOrchestrator) {
-            const routingContext = await context.conversationManager.buildOrchestratorRoutingContext(
-                context.conversationId,
-                context.triggeringEvent
-            );
-            
-            // Send as structured JSON to orchestrator
-            messages.push(new Message("user", JSON.stringify(routingContext, null, 2)));
-        } else {
-            // Use the existing buildAgentMessages method for non-orchestrator agents
-            const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
-                context.conversationId,
-                context.agent,
-                context.triggeringEvent,
-                context.handoff
-            );
+        // All agents now get conversation transcript
+        const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
+            context.conversationId,
+            context.agent,
+            context.triggeringEvent,
+            context.handoff
+        );
 
-            // Add the agent's messages
-            messages.push(...agentMessages);
-        }
+        // Add the agent's messages
+        messages.push(...agentMessages);
 
         return messages;
     }
@@ -359,23 +329,11 @@ Be completely transparent about your internal process. If you made a mistake or 
             allTools = [...tools, ...mcpTools];
         }
 
-        // Add claude_code tool for all agents using reason-act-loop backend
-        // (except those using the claude backend directly)
-        const backendType = context.agent.backend || "reason-act-loop";
-        if (backendType === "reason-act-loop") {
-            const { getTool } = await import("@/tools/registry");
-            const claudeCodeTool = getTool("claude_code");
-            if (claudeCodeTool && !allTools.some(t => t.name === "claude_code")) {
-                allTools = [...allTools, claudeCodeTool];
-                logger.debug(`[AgentExecutor] Added claude_code tool to ${context.agent.name}`, {
-                    originalToolCount: tools.length,
-                    finalToolCount: allTools.length
-                });
-            }
-        }
+        // Add claude_code tool for agents that explicitly have it in their tools list
+        // This is now handled through agent configuration directly
 
-        // Get the appropriate backend for this agent
-        const backend = this.getBackend(context.agent);
+        // Get the backend - all agents use ReasonActLoop now
+        const backend = this.getBackend();
 
         // Execute using the backend - all backends now use the same interface
         await backend.execute(messages, allTools, context, context.publisher);
