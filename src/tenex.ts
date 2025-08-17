@@ -85,14 +85,6 @@ debug
         });
     });
 
-debug
-    .command("orchestrator")
-    .description("Interactive orchestrator routing debugger")
-    .action(() => {
-        import("./commands/debug/orchestrator/index").then(({ runDebugOrchestrator }) => 
-            runDebugOrchestrator()
-        );
-    });
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {

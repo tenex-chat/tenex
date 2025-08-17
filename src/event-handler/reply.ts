@@ -3,10 +3,10 @@ import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ExecutionConfig } from "../agents/execution/constants";
 import type { ExecutionContext } from "../agents/execution/types";
-import type { ConversationManager } from "../conversations";
+import type { ConversationManager, Conversation, AgentState } from "../conversations";
 import { NostrPublisher } from "../nostr";
-import { isEventFromUser } from "../nostr/utils";
 import { getProjectContext } from "../services";
+import type { AgentInstance } from "../agents/types";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 
@@ -17,6 +17,15 @@ interface EventHandlerContext {
     agentExecutor: AgentExecutor;
 }
 
+interface TaskCompletionResult {
+    shouldReactivate: boolean;
+    targetAgent?: AgentInstance;
+    syntheticEvent?: NDKEvent;
+}
+
+/**
+ * Main entry point for handling chat messages
+ */
 export const handleChatMessage = async (
     event: NDKEvent,
     context: EventHandlerContext
@@ -25,6 +34,7 @@ export const handleChatMessage = async (
         chalk.gray("Message: ") +
             chalk.white(event.content.substring(0, 100) + (event.content.length > 100 ? "..." : ""))
     );
+
 
     // Extract p-tags to identify mentioned agents
     const pTags = event.tags.filter((tag) => tag[0] === "p");
@@ -53,12 +63,13 @@ export const handleChatMessage = async (
     }
 };
 
-async function handleReplyLogic(
+/**
+ * Find the conversation for a reply event, handling task mappings
+ */
+async function findConversationForReply(
     event: NDKEvent,
-    { conversationManager, agentExecutor }: EventHandlerContext,
-    mentionedPubkeys: string[]
-): Promise<void> {
-    // Find the conversation this reply belongs to
+    conversationManager: ConversationManager
+): Promise<{ conversation: Conversation | undefined; claudeSessionId?: string }> {
     const convRoot = event.tagValue("E") || event.tagValue("A");
     
     let conversation = convRoot ? conversationManager.getConversationByEvent(convRoot) : undefined;
@@ -87,161 +98,235 @@ async function handleReplyLogic(
                     const claudeSession = event.tagValue('claude-session');
                     if (claudeSession) {
                         logInfo(chalk.gray("Found claude-session tag in kind:1111 event: ") + chalk.cyan(claudeSession));
+                        mappedClaudeSessionId = claudeSession;
                     }
                 }
             }
         }
     }
 
-    // If no conversation found and this is a kTag 11 reply that p-tags an agent
-    if (!conversation && event.tagValue("K") === "11" && mentionedPubkeys.length > 0) {
-        const projectCtx = getProjectContext();
-        const isDirectedToAgent = mentionedPubkeys.some((pubkey) => 
-            Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
-        );
-        
-        if (isDirectedToAgent) {
-            // Create a new conversation for this orphaned reply
-            logInfo(chalk.yellow(`Creating new conversation for orphaned kTag 11 reply to conversation root: ${convRoot}`));
-            
-            // Create a synthetic root event based on the reply
-            const syntheticRootEvent: NDKEvent = {
-                ...event,
-                id: convRoot || event.id, // Use conversation root if available, otherwise use the reply's ID
-                content: `[Orphaned conversation - original root not found]\n\n${event.content}`,
-                tags: event.tags.filter(tag => tag[0] !== "E" && tag[0] !== "e"), // Remove reply tags
-            } as NDKEvent;
-            
-            conversation = await conversationManager.createConversation(syntheticRootEvent);
-            
-            // Add the actual reply event to the conversation history
-            if (conversation && event.id !== conversation.id) {
-                await conversationManager.addEvent(conversation.id, event);
-            }
-        }
+    return { conversation, claudeSessionId: mappedClaudeSessionId };
+}
+
+/**
+ * Handle orphaned replies by creating a new conversation
+ */
+async function handleOrphanedReply(
+    event: NDKEvent,
+    conversationManager: ConversationManager,
+    mentionedPubkeys: string[]
+): Promise<Conversation | undefined> {
+    if (event.tagValue("K") !== "11" || mentionedPubkeys.length === 0) {
+        return undefined;
     }
 
-    if (!conversation) {
-        logger.error("No conversation found for reply", { 
-            eventId: event.id,
-            convRoot,
-            kTag: event.tagValue("K")
-        });
-        return;
-    }
-
-    // Add event to conversation history
-    await conversationManager.addEvent(conversation.id, event);
-
-    // Get PM agent directly from project context
     const projectCtx = getProjectContext();
-    const orchestratorAgent = projectCtx.getProjectAgent();
+    const isDirectedToAgent = mentionedPubkeys.some((pubkey) => 
+        Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+    );
+    
+    if (!isDirectedToAgent) {
+        return undefined;
+    }
 
-    // Determine which agent should handle this event
-    let targetAgent = orchestratorAgent; // Default to orchestrator agent
+    const convRoot = event.tagValue("E") || event.tagValue("A");
+    logInfo(chalk.yellow(`Creating new conversation for orphaned kTag 11 reply to conversation root: ${convRoot}`));
+    
+    // Create a synthetic root event based on the reply
+    const syntheticRootEvent: NDKEvent = {
+        ...event,
+        id: convRoot || event.id, // Use conversation root if available, otherwise use the reply's ID
+        content: `[Orphaned conversation - original root not found]\n\n${event.content}`,
+        tags: event.tags.filter(tag => tag[0] !== "E" && tag[0] !== "e"), // Remove reply tags
+    } as NDKEvent;
+    
+    const conversation = await conversationManager.createConversation(syntheticRootEvent);
+    
+    // Add the actual reply event to the conversation history
+    if (conversation && event.id !== conversation.id) {
+        await conversationManager.addEvent(conversation.id, event);
+    }
+
+    return conversation;
+}
+
+/**
+ * Determine which agent should handle the event
+ */
+function determineTargetAgent(
+    _event: NDKEvent,
+    mentionedPubkeys: string[],
+    projectManager: AgentInstance
+): AgentInstance {
+    let targetAgent = projectManager; // Default to PM for coordination
 
     // Check for p-tagged agents regardless of sender
     if (mentionedPubkeys.length > 0) {
+        const projectCtx = getProjectContext();
         // Find the first p-tagged system agent
         for (const pubkey of mentionedPubkeys) {
             const agent = Array.from(projectCtx.agents.values()).find((a) => a.pubkey === pubkey);
             if (agent) {
-                // For non-user events, skip if agent is the author (prevent loops)
-                if (!isEventFromUser(event) && agent.pubkey === event.pubkey) {
-                    continue;
-                }
                 targetAgent = agent;
                 break;
             }
         }
     }
 
-    // Check if orchestrator is waiting for agents to complete
-    // Skip orchestrator invocation if there's an active (incomplete) turn
-    if (targetAgent === orchestratorAgent && !conversationManager.isCurrentTurnComplete(conversation.id)) {
-        // Get detailed information about the current turn
-        const currentTurn = conversationManager.getCurrentTurn(conversation.id);
-        if (currentTurn) {
-            const completedAgents = new Set(currentTurn.completions.map(c => c.agent));
-            const pendingAgents = currentTurn.agents.filter(agent => !completedAgents.has(agent));
-            const completionStatus = currentTurn.agents.map(agent => {
-                const completed = completedAgents.has(agent);
-                return `${agent}: ${completed ? '✓' : 'pending'}`;
-            });
-            
-            logInfo(chalk.gray(
-                `Orchestrator has active routing - skipping invocation while waiting for agents to complete\n` +
-                `  Turn ID: ${currentTurn.turnId}\n` +
-                `  Phase: ${currentTurn.phase}\n` +
-                `  Agents: [${completionStatus.join(', ')}]\n` +
-                `  Pending: [${pendingAgents.join(', ')}]\n` +
-                `  Completions: ${currentTurn.completions.length}/${currentTurn.agents.length}`
-            ));
+    return targetAgent;
+}
+
+/**
+ * Process a task completion event and update delegation state
+ */
+async function processTaskCompletion(
+    event: NDKEvent,
+    conversation: Conversation,
+    conversationManager: ConversationManager
+): Promise<TaskCompletionResult> {
+    const taskId = event.tags.find(tag => tag[0] === "e" && tag[3] === "reply")?.[1];
+    
+    if (!taskId) {
+        return { shouldReactivate: false };
+    }
+
+    const projectCtx = getProjectContext();
+    
+    // Check all agents for pending delegations that include this task
+    for (const [agentSlug, agentState] of conversation.agentStates.entries()) {
+        if (!agentState.pendingDelegation?.taskIds?.includes(taskId)) {
+            continue;
+        }
+
+        // Update the task status
+        const task = agentState.pendingDelegation.tasks?.get(taskId);
+        if (task) {
+            task.status = "complete";
+            task.response = event.content;
+        }
+        
+        // Check if all tasks are complete
+        const allComplete = agentState.pendingDelegation.taskIds.every(tid => {
+            const t = agentState.pendingDelegation?.tasks?.get(tid);
+            return t?.status === "complete";
+        });
+        
+        if (allComplete) {
+            // Synthesize responses and reactivate agent
+            const result = await synthesizeAndReactivate(
+                agentState,
+                agentSlug,
+                conversation,
+                conversationManager,
+                event,
+                projectCtx
+            );
+            return result;
         } else {
-            logInfo(chalk.gray("Orchestrator has active routing - skipping invocation while waiting for agents to complete"));
+            // Log progress
+            const completedCount = agentState.pendingDelegation.taskIds.filter(tid => 
+                agentState.pendingDelegation?.tasks?.get(tid)?.status === "complete"
+            ).length;
+            const remainingCount = agentState.pendingDelegation.taskIds.length - completedCount;
+            
+            logInfo(chalk.gray(`Task ${taskId} completed. Waiting for ${remainingCount} more tasks.`));
+            return { shouldReactivate: false };
         }
-        return;
     }
 
-    // For non-user events without valid p-tags, skip processing
+    return { shouldReactivate: false };
+}
+
+/**
+ * Synthesize task responses and prepare for agent reactivation
+ */
+async function synthesizeAndReactivate(
+    agentState: AgentState,
+    agentSlug: string,
+    conversation: Conversation,
+    conversationManager: ConversationManager,
+    event: NDKEvent,
+    projectCtx: ReturnType<typeof getProjectContext>
+): Promise<TaskCompletionResult> {
+    if (!agentState.pendingDelegation) {
+        return { shouldReactivate: false };
+    }
+
+    // Synthesize all responses
+    const responses: string[] = [];
+    for (const tid of agentState.pendingDelegation.taskIds) {
+        const t = agentState.pendingDelegation.tasks?.get(tid);
+        if (t?.response) {
+            const agent = Array.from(projectCtx.agents.values())
+                .find(a => a.pubkey === t.recipientPubkey);
+            responses.push(`[${agent?.name || 'Unknown Agent'}]: ${t.response}`);
+        }
+    }
+    
+    const synthesizedMessage = `All delegated tasks have completed. Here are the responses:\n\n${responses.join('\n\n')}`;
+    
+    // Clear the pending delegation
+    delete agentState.pendingDelegation;
+    await conversationManager.updateAgentState(conversation.id, agentSlug, agentState);
+    
+    // Prepare for reactivation
+    const delegatingAgent = projectCtx.getAgent(agentSlug);
+    if (delegatingAgent) {
+        logInfo(chalk.green(`Reactivating ${delegatingAgent.name} with synthesized responses from completed tasks`));
+        
+        // Create a synthetic event with the synthesized responses
+        const syntheticEvent: NDKEvent = {
+            ...event,
+            content: synthesizedMessage,
+            tags: [["p", delegatingAgent.pubkey]],
+        } as NDKEvent;
+        
+        // Add to conversation
+        await conversationManager.addEvent(conversation.id, syntheticEvent);
+        
+        return {
+            shouldReactivate: true,
+            targetAgent: delegatingAgent,
+            syntheticEvent
+        };
+    }
+
+    return { shouldReactivate: false };
+}
+
+/**
+ * Check for recent phase transitions that might be handoffs
+ */
+function getRecentHandoff(conversation: Conversation) {
+    if (conversation.phaseTransitions.length === 0) {
+        return undefined;
+    }
+
+    const recentTransition = conversation.phaseTransitions[conversation.phaseTransitions.length - 1];
+
+    // If this transition was very recent (within last 30 seconds) and has handoff info
     if (
-        !isEventFromUser(event) &&
-        targetAgent === orchestratorAgent &&
-        !mentionedPubkeys.includes(orchestratorAgent.pubkey)
+        recentTransition &&
+        Date.now() - recentTransition.timestamp < ExecutionConfig.RECENT_TRANSITION_THRESHOLD_MS &&
+        recentTransition.summary
     ) {
-        return;
+        return recentTransition;
     }
 
-    // Check for recent phase transition that might be a handoff for this agent
-    let handoff = undefined;
-    if (conversation.phaseTransitions.length > 0) {
-        const recentTransition =
-            conversation.phaseTransitions[conversation.phaseTransitions.length - 1];
+    return undefined;
+}
 
-        // If this transition was very recent (within last 30 seconds) and has handoff info
-        if (
-            recentTransition &&
-            Date.now() - recentTransition.timestamp < ExecutionConfig.RECENT_TRANSITION_THRESHOLD_MS &&
-            recentTransition.summary
-        ) {
-            handoff = recentTransition;
-        }
-    }
-
-    // Extract claude-session from the event or use mapped session
-    const claudeSessionId = mappedClaudeSessionId || event.tagValue('claude-session');
-    if (claudeSessionId) {
-        logInfo(chalk.gray("Passing claude-session to execution context: ") + chalk.cyan(claudeSessionId) +
-               (mappedClaudeSessionId ? chalk.gray(" (from task mapping)") : ""));
-    }
-
-
-    // Execute with the appropriate agent
-    const executionContext: ExecutionContext = {
-        agent: targetAgent,
-        conversationId: conversation.id,
-        phase: conversation.phase,
-        projectPath: process.cwd(),
-        triggeringEvent: event,
-        publisher: new NostrPublisher({
-            conversationId: conversation.id,
-            agent: targetAgent,
-            triggeringEvent: event,
-            conversationManager,
-        }),
-        conversationManager,
-        claudeSessionId,
-        agentExecutor, // Pass the executor so continue() can use it
-    };
-
-    // Add handoff if available
-    if (handoff) {
-        executionContext.handoff = handoff;
-    }
-
-    // Don't pre-add user messages to agent context - let the agent executor handle this
-    // to ensure proper bootstrapping for newly mentioned agents via p-tags
-
+/**
+ * Execute the agent with proper error handling
+ */
+async function executeAgent(
+    executionContext: ExecutionContext,
+    agentExecutor: AgentExecutor,
+    conversation: Conversation,
+    conversationManager: ConversationManager,
+    projectManager: AgentInstance,
+    event: NDKEvent
+): Promise<void> {
     try {
         await agentExecutor.execute(executionContext);
     } catch (error) {
@@ -258,7 +343,7 @@ async function handleReplyLogic(
         // Create NostrPublisher to publish error
         const publisher = new NostrPublisher({
             conversationId: conversation.id,
-            agent: orchestratorAgent,
+            agent: projectManager,
             triggeringEvent: event,
             conversationManager,
         });
@@ -275,4 +360,112 @@ async function handleReplyLogic(
             }
         );
     }
+}
+
+/**
+ * Main reply handling logic - orchestrates all the helper functions
+ */
+async function handleReplyLogic(
+    event: NDKEvent,
+    { conversationManager, agentExecutor }: EventHandlerContext,
+    mentionedPubkeys: string[]
+): Promise<void> {
+    // Find the conversation this reply belongs to
+    let { conversation, claudeSessionId: mappedClaudeSessionId } = await findConversationForReply(
+        event,
+        conversationManager
+    );
+
+    // Handle orphaned replies if no conversation found
+    if (!conversation) {
+        conversation = await handleOrphanedReply(event, conversationManager, mentionedPubkeys);
+    }
+
+    if (!conversation) {
+        logger.error("No conversation found for reply", { 
+            eventId: event.id,
+            convRoot: event.tagValue("E") || event.tagValue("A"),
+            kTag: event.tagValue("K")
+        });
+        return;
+    }
+
+    // Add event to conversation history
+    await conversationManager.addEvent(conversation.id, event);
+
+    // Get project context and PM
+    const projectCtx = getProjectContext();
+    const projectManager = projectCtx.getAgent("project-manager");
+    if (!projectManager) {
+        throw new Error("Project Manager agent not found - required for conversation coordination");
+    }
+
+    // Determine which agent should handle this event
+    let targetAgent = determineTargetAgent(event, mentionedPubkeys, projectManager);
+    let processedEvent = event;
+
+    // Skip if the target agent is the same as the sender (prevent self-reply loops)
+    if (targetAgent.pubkey === event.pubkey) {
+        logInfo(chalk.gray(`Skipping self-reply: ${targetAgent.name} would process its own message`));
+        return;
+    }
+
+    // Check if this is a task completion event
+    const isTaskCompletion = event.tagValue("status") === "complete" && 
+                             event.tags.some(tag => tag[0] === "e" && tag[3] === "reply");
+    
+    if (isTaskCompletion) {
+        const result = await processTaskCompletion(event, conversation, conversationManager);
+        
+        if (result.shouldReactivate && result.targetAgent && result.syntheticEvent) {
+            targetAgent = result.targetAgent;
+            processedEvent = result.syntheticEvent;
+        } else if (!result.shouldReactivate) {
+            // Still waiting for more completions
+            return;
+        }
+    }
+    
+    // Check for recent phase transition handoffs
+    const handoff = getRecentHandoff(conversation);
+
+    // Extract claude-session from the event or use mapped session
+    const claudeSessionId = mappedClaudeSessionId || processedEvent.tagValue('claude-session');
+    if (claudeSessionId) {
+        logInfo(chalk.gray("Passing claude-session to execution context: ") + chalk.cyan(claudeSessionId) +
+               (mappedClaudeSessionId ? chalk.gray(" (from task mapping)") : ""));
+    }
+
+    // Build execution context
+    const executionContext: ExecutionContext = {
+        agent: targetAgent,
+        conversationId: conversation.id,
+        phase: conversation.phase,
+        projectPath: process.cwd(),
+        triggeringEvent: processedEvent,
+        publisher: new NostrPublisher({
+            conversationId: conversation.id,
+            agent: targetAgent,
+            triggeringEvent: processedEvent,
+            conversationManager,
+        }),
+        conversationManager,
+        claudeSessionId,
+        agentExecutor, // Pass the executor so continue() can use it
+    };
+
+    // Add handoff if available
+    if (handoff) {
+        executionContext.handoff = handoff;
+    }
+
+    // Execute with proper error handling
+    await executeAgent(
+        executionContext,
+        agentExecutor,
+        conversation,
+        conversationManager,
+        projectManager,
+        processedEvent
+    );
 }

@@ -93,7 +93,7 @@ export class ReasonActLoop {
             // Main Reason-Act-Observe loop
             while (!isComplete && iterations < MAX_ITERATIONS) {
                 iterations++;
-                tracingLogger.info("[ReasonActLoop] Starting iteration", {
+                tracingLogger.debug("[ReasonActLoop] Starting iteration", {
                     iteration: iterations,
                     messageCount: conversationMessages.length,
                     lastMessage: conversationMessages[conversationMessages.length-1].content.substring(0, 100)
@@ -126,7 +126,7 @@ export class ReasonActLoop {
 
                 // Check if we should continue iterating
                 if (iterationResult.isTerminal) {
-                    tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
+                    tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
                         iteration: iterations,
                     });
                     isComplete = true;
@@ -140,17 +140,17 @@ export class ReasonActLoop {
                     );
                 } else if (iterationResult.assistantMessage.trim().length > 0) {
                     // Agent generated content but no tool calls or terminal tool
-                    // This means the agent has provided a textual response based on previous actions/tools
+                    // This means the agent has provided a textual response - we should complete
                     conversationMessages.push(new Message("assistant", iterationResult.assistantMessage));
-                    tracingLogger.info("[ReasonActLoop] Agent generated content, continuing loop", {
+                    tracingLogger.debug("[ReasonActLoop] Agent generated content, completing", {
                         iteration: iterations,
                         contentLength: iterationResult.assistantMessage.length,
                     });
-                    // Loop continues for next iteration
+                    isComplete = true; // Complete after generating a response
                 } else {
                     // No tool calls, no terminal tool, AND no content was generated
                     // This indicates the agent truly has nothing further to do
-                    tracingLogger.info("[ReasonActLoop] No tool calls, no content, ending loop", {
+                    tracingLogger.debug("[ReasonActLoop] No tool calls, no content, ending loop", {
                         iteration: iterations,
                     });
                     isComplete = true;
@@ -217,7 +217,7 @@ export class ReasonActLoop {
         this.streamingBuffer.set(agentKey, "");
         
         for await (const event of stream) {
-            tracingLogger.info("[processIterationStream]", {
+            tracingLogger.debug("[processIterationStream]", {
                 agent: context.agent.name,
                 type: event.type,
             })
@@ -234,7 +234,7 @@ export class ReasonActLoop {
                     hasToolCalls = true;
                     
                     // Check for repetitive tool calls
-                    const repetitionWarning = this.checkToolRepetition(
+                    this.checkToolRepetition(
                         event.tool, 
                         event.args,
                         messages
@@ -360,7 +360,7 @@ export class ReasonActLoop {
         context: ExecutionContext,
         messages: Message[]
     ): void {
-        tracingLogger.info("[ReasonActLoop] Received 'done' event", {
+        tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
             hasResponse: !!event.response,
             model: event.response?.model,
             hasUsage: !!event.response?.usage,
@@ -394,7 +394,7 @@ export class ReasonActLoop {
         context: ExecutionContext,
         messages: Message[]
     ): Promise<void> {
-        tracingLogger.info("[ReasonActLoop] Processing deferred event", {
+        tracingLogger.debug("[ReasonActLoop] Processing deferred event", {
             serializedEventKeys: Object.keys(serializedEvent),
             contentLength: serializedEvent.content?.length || 0,
         });
@@ -407,7 +407,7 @@ export class ReasonActLoop {
         // Build and add LLM metadata
         const metadata = await buildLLMMetadata(response, messages);
         
-        tracingLogger.info("[ReasonActLoop] Adding metadata to deferred event", {
+        tracingLogger.debug("[ReasonActLoop] Adding metadata to deferred event", {
             model: metadata?.model,
             cost: metadata?.cost,
             promptTokens: metadata?.promptTokens,
@@ -422,11 +422,11 @@ export class ReasonActLoop {
         await deferredEvent.sign(context.agent.signer);
         await deferredEvent.publish();
         
-        tracingLogger.info("[ReasonActLoop] ✅ Published deferred complete() event with metadata", {
+        tracingLogger.debug("[ReasonActLoop] ✅ Published deferred complete() event with metadata", {
             eventId: deferredEvent.id,
             hasMetadata: !!metadata,
             model: metadata?.model,
-            cost: metadata?.cost,
+            cost: metadata?.cost ? Number(metadata.cost).toFixed(8) : undefined,
             totalTokens: metadata?.totalTokens,
         });
     }
@@ -443,10 +443,7 @@ export class ReasonActLoop {
         // Extract and log reasoning if present
         this.extractAndLogReasoning(stateManager.getFullContent(), context, stateManager);
         
-        // Orchestrator should remain silent
-        if (!context?.agent.isOrchestrator) {
-            streamPublisher?.addContent(event.content);
-        }
+        streamPublisher?.addContent(event.content);
     }
 
     private handleErrorEvent(
@@ -459,10 +456,7 @@ export class ReasonActLoop {
         tracingLogger.error("Stream error", { error: event.error });
         stateManager.appendContent(`\n\nError: ${event.error}`);
         
-        // Orchestrator should remain silent
-        if (!context?.agent.isOrchestrator) {
-            streamPublisher?.addContent(`\n\nError: ${event.error}`);
-        }
+        streamPublisher?.addContent(`\n\nError: ${event.error}`);
     }
 
     private async finalizeStream(
@@ -486,13 +480,10 @@ export class ReasonActLoop {
             metadata.completeMetadata = termination;
         }
 
-        // Only finalize if there's content or metadata
-        if (!context.agent.isOrchestrator || termination) {
-            await streamPublisher.finalize({
-                llmMetadata,
-                ...metadata,
-            });
-        }
+        await streamPublisher.finalize({
+            llmMetadata,
+            ...metadata,
+        });
     }
 
     private createLLMStream(

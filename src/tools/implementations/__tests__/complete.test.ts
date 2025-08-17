@@ -10,13 +10,13 @@ describe("complete tool", () => {
 
         it("should have descriptive documentation", () => {
             expect(completeTool.description).toContain("Signal task completion");
-            expect(completeTool.description).toContain("orchestrator");
+            expect(completeTool.description).toContain("delegating agent");
         });
 
         it("should have helpful prompt fragment", () => {
-            expect(completeTool.promptFragment).toContain("signal task completion");
-            expect(completeTool.promptFragment).toContain("CHAT phase");
-            expect(completeTool.promptFragment).toContain("Example");
+            expect(completeTool.promptFragment).toContain("CRITICAL USAGE INSTRUCTIONS");
+            expect(completeTool.promptFragment).toContain("WHEN TO USE");
+            expect(completeTool.promptFragment).toContain("REMEMBER");
         });
     });
 

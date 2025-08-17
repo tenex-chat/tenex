@@ -102,7 +102,6 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
             requirements: "Mock requirements"
         },
         phaseTransitions: [],
-        orchestratorTurns: [],
         executionTime: {
             totalSeconds: 0,
             isActive: false,

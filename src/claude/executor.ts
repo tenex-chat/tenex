@@ -78,8 +78,8 @@ export class ClaudeCodeExecutor {
             messages,
             options: {
                 agentName: this.options.agentName || "claude-backend",
-                configName: "claude-code",
-                resumeSessionId: this.options.resumeSessionId
+                configName: "claude-code"
+                // resumeSessionId is handled separately via claudeSessionId
             }
         };
 
@@ -157,8 +157,9 @@ export class ClaudeCodeExecutor {
                     content: metrics.assistantMessages.join("\n\n"),
                     model: "claude-code",
                     usage: {
-                        total_cost_usd: metrics.totalCost,
-                        // Claude Code doesn't provide token counts
+                        prompt_tokens: 0,  // Claude Code doesn't provide token counts
+                        completion_tokens: 0,
+                        total_cost_usd: metrics.totalCost
                     }
                 } as CompletionResponse;
                 
@@ -204,7 +205,7 @@ export class ClaudeCodeExecutor {
             // Log error to JSONL
             if (llmLogger) {
                 const config = {
-                    provider: "claude-code",
+                    provider: "anthropic" as const,
                     model: "claude-code",
                     apiKey: "claude-code-sdk",
                     enableCaching: false,

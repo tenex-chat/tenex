@@ -11,37 +11,25 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
 
 /**
  * Get all available tools for an agent based on their role
- * All agents now have access to all tools except orchestrator-only tools
+ * All agents now have access to delegate for peer-to-peer collaboration
  */
 export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
-    let tools = [readPathTool.name, lessonLearnTool.name, analyze.name];
+    // Base tools for all agents
+    const tools = [
+        readPathTool.name, 
+        lessonLearnTool.name, 
+        analyze.name,
+        completeTool.name,  // All agents can complete tasks
+        delegateTool.name    // All agents can delegate to others
+    ];
 
-    // Built-in agents
-    if (agent.isBuiltIn) {
-        if (agent.isOrchestrator) {
-            // Orchestrator MUST use routing backend and doesn't need any tools
-            // It responds with structured JSON, not tool calls
-            tools = [];
-        } else {
-            // Other non-orchestrator agents use complete tool to signal task completion
-            tools.push(completeTool.name);
-
-            if (agent.slug === PROJECT_MANAGER_AGENT) {
-                // Project manager gets delegate tool
-                tools.push(delegateTool.name);
-                
-                // Use the tools defined in the PROJECT_MANAGER_AGENT_DEFINITION
-                // This ensures consistency between the definition and runtime
-                if (PROJECT_MANAGER_AGENT_DEFINITION.tools) {
-                    // Replace the default tools with the ones from the definition
-                    // but keep the complete tool and delegate tool since they're added for project-manager
-                    tools = [completeTool.name, delegateTool.name, ...PROJECT_MANAGER_AGENT_DEFINITION.tools];
-                }
-            }
-        }
-    } else {
-        // Custom agents default to complete tool (no delegate tool)
-        tools.push(completeTool.name);
+    // Special handling for project manager - ADD to defaults, don't replace
+    if (agent.slug === PROJECT_MANAGER_AGENT && PROJECT_MANAGER_AGENT_DEFINITION.tools) {
+        // Add PM-specific tools to the base set
+        const pmSpecificTools = PROJECT_MANAGER_AGENT_DEFINITION.tools.filter(
+            tool => !tools.includes(tool)
+        );
+        tools.push(...pmSpecificTools);
     }
 
     return tools;

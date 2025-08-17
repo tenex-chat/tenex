@@ -37,8 +37,6 @@ export class ProjectDisplay {
         logger.debug("Displaying agent configurations", {
             agentsSize: agents.size,
             agentKeys: Array.from(agents.keys()),
-            hasOrchestrator: !!projectCtx.orchestrator,
-            orchestratorName: projectCtx.orchestrator?.name,
         });
 
         logInfo(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
@@ -68,9 +66,6 @@ export class ProjectDisplay {
         logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
         logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
         logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
-        if (agent.isOrchestrator) {
-            logInfo(chalk.gray("Type:        ") + chalk.cyan("Orchestrator"));
-        }
         if (agent.isBuiltIn) {
             logInfo(chalk.gray("Built-in:    ") + chalk.green("✓"));
         }

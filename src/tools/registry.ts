@@ -20,6 +20,7 @@ import { mcpDiscover } from "./implementations/mcp-discover";
 import { delegateTool } from "./implementations/delegate";
 import { nostrProjectsTool } from "./implementations/nostr-projects";
 import { claudeCode } from "./implementations/claude_code";
+import { switchPhaseTool } from "./implementations/switch_phase";
 import type { Tool } from "./types";
 
 /**
@@ -40,7 +41,8 @@ export type ToolName =
   | "discover_capabilities"
   | "delegate"
   | "nostr_projects"
-  | "claude_code";
+  | "claude_code"
+  | "switch_phase";
 
 /**
  * Registry of all available tools mapped by their canonical names.
@@ -61,6 +63,7 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["delegate", delegateTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
+  ["switch_phase", switchPhaseTool],
 ]);
 
 /**

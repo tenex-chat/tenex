@@ -13,14 +13,14 @@ const completeSchema = z.object({
         .string()
         .optional()
         .describe(
-            "Comprehensive summary of work done for the orchestrator's context (if different from response)"
+            "Comprehensive summary of work done for the delegating agent's context (if different from response)"
         ),
 });
 
 /**
- * Complete tool - signals task completion and returns control to the orchestrator
+ * Complete tool - signals task completion and returns control to the delegating agent
  * 
- * IMPORTANT: This tool always responds to the orchestrator.
+ * IMPORTANT: This tool returns control to whoever delegated to you (PM or another agent).
  * Use this when:
  * - You've completed your assigned task
  * - You need to report back with results
@@ -32,7 +32,7 @@ const completeSchema = z.object({
 export const completeTool = createToolDefinition<z.infer<typeof completeSchema>, Termination>({
     name: "complete",
     description:
-        "Signal task completion and return control to the orchestrator",
+        "Signal task completion and return control to the delegating agent",
     promptFragment: `CRITICAL USAGE INSTRUCTIONS:
 - When using complete(), put YOUR ENTIRE RESPONSE inside the tool call
 - DO NOT write explanations before/after - everything goes INSIDE complete()

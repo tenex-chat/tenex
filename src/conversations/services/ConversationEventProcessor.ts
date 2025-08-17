@@ -36,7 +36,6 @@ export class ConversationEventProcessor {
                 referencedArticle
             },
             phaseTransitions: [],
-            orchestratorTurns: [],
             executionTime: {
                 totalSeconds: 0,
                 isActive: false,

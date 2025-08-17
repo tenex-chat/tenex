@@ -10,14 +10,11 @@ import "@/prompts/fragments/20-voice-mode";
 import "@/prompts/fragments/35-specialist-completion-guidance";
 import "@/prompts/fragments/30-project-md";
 import "@/prompts/fragments/01-specialist-identity";
-import "@/prompts/fragments/01-orchestrator-identity";
 import "@/prompts/fragments/25-specialist-tools";
 import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
-import "@/prompts/fragments/15-orchestrator-available-agents";
 import "@/prompts/fragments/24-retrieved-lessons";
 import "@/prompts/fragments/30-project-inventory";
-import "@/prompts/fragments/25-orchestrator-routing";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
@@ -76,7 +73,7 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     });
     
     // Add PROJECT.md as separate cacheable message for project-manager
-    if (!options.agent.isOrchestrator && options.agent.slug === "project-manager") {
+    if (options.agent.slug === "project-manager") {
         const projectMdContent = buildProjectMdContent(options);
         if (projectMdContent) {
             messages.push({
@@ -124,36 +121,21 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     // Build system prompt with all agent and phase context
     const systemPromptBuilder = new PromptBuilder();
     
-    // Choose identity fragment based on agent type - NO conditionals in fragments
-    if (agent.isOrchestrator) {
-        systemPromptBuilder.add("orchestrator-identity", {
-            agent,
-            projectTitle: project.tagValue("title") || "Unknown Project",
-            projectOwnerPubkey: project.pubkey,
-        });
-    } else {
-        systemPromptBuilder.add("specialist-identity", {
-            agent,
-            projectTitle: project.tagValue("title") || "Unknown Project",
-            projectOwnerPubkey: project.pubkey,
-        });
-    }
+    // Add specialist identity
+    systemPromptBuilder.add("specialist-identity", {
+        agent,
+        projectTitle: project.tagValue("title") || "Unknown Project",
+        projectOwnerPubkey: project.pubkey,
+    });
     
-    // Add available agents - different fragment for orchestrator vs specialist
-    if (agent.isOrchestrator) {
-        systemPromptBuilder.add("orchestrator-available-agents", {
-            agents: availableAgents,
-        });
-    } else {
-        systemPromptBuilder.add("specialist-available-agents", {
-            agents: availableAgents,
-            currentAgent: agent,
-        });
-    }
+    // Add available agents for specialists
+    systemPromptBuilder.add("specialist-available-agents", {
+        agents: availableAgents,
+        currentAgent: agent,
+    });
     
     // Add voice mode instructions if this is a voice mode event
-    // But skip for orchestrator since it doesn't speak to users
-    if (!agent.isOrchestrator && isVoiceMode(triggeringEvent)) {
+    if (isVoiceMode(triggeringEvent)) {
         systemPromptBuilder.add("voice-mode", {
             isVoiceMode: true,
         });
@@ -175,21 +157,15 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
             agentLessons: agentLessons || new Map(),
         });
     
-    // Add tools for specialists only
-    if (!agent.isOrchestrator) {
-        systemPromptBuilder.add("specialist-tools", {
-            agent,
-            mcpTools,
-        });
-    }
+    // Add tools for specialists
+    systemPromptBuilder.add("specialist-tools", {
+        agent,
+        mcpTools,
+    });
     // .add("tool-use", {});
 
-    // Add appropriate fragments based on agent type
-    if (agent.isOrchestrator) {
-        // Orchestrator only needs routing instructions, no reasoning tags
-        systemPromptBuilder.add("orchestrator-routing-instructions", {});
-    } else {
-        // Specialists use reasoning tags
+    // Add reasoning tags for specialists
+    {
         // systemPromptBuilder.add("specialist-reasoning", {});
     }
 

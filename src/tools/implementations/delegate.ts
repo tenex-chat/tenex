@@ -3,6 +3,8 @@ import { createToolDefinition, success, failure } from "../types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { nip19 } from "nostr-tools";
+import { NDKTask } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr/ndkClient";
 
 const delegateSchema = z.object({
     recipients: z
@@ -62,12 +64,12 @@ function resolveRecipientToPubkey(recipient: string): string | null {
 }
 
 /**
- * Delegate tool - enables agents to communicate with each other by publishing reply events with p-tags
+ * Delegate tool - enables agents to communicate with each other by publishing NDKTask events
  * 
  * This tool allows an agent to delegate a task or question to one or more agents by:
  * 1. Resolving each recipient (agent slug or pubkey) to a pubkey
- * 2. Publishing a reply event with all recipients' pubkeys as p-tags
- * 3. Setting up delegation state so the agent waits for all responses
+ * 2. Publishing an NDKTask event for each recipient with p-tag assignment
+ * 3. Setting up delegation state so the agent waits for all task completions
  * 
  * Recipients can be:
  * - A single recipient or array of recipients
@@ -77,8 +79,14 @@ function resolveRecipientToPubkey(recipient: string): string | null {
  * 
  * If any recipient cannot be resolved, the tool fails with an error.
  * 
- * When delegating to multiple recipients, the agent will wait for all responses
+ * When delegating to multiple recipients, the agent will wait for all task completions
  * before continuing. The agent should NOT call complete() after delegating.
+ * 
+ * Each delegation creates a formal NDKTask (Nostr kind 1934) event that:
+ * - Is assigned to a specific agent via p-tag
+ * - Links to the conversation root via e-tag
+ * - Tracks status (pending/complete)
+ * - Enables parallel execution of sub-tasks
  */
 export const delegateTool = createToolDefinition<z.input<typeof delegateSchema>, { success: boolean; recipientPubkeys: string[] }>({
     name: "delegate",
@@ -133,53 +141,77 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
         }
         
         try {
-            // Publish delegation event using the publisher from context
-            await context.publisher.publishResponse({
-                content: fullRequest,
-                destinationPubkeys: resolvedPubkeys,
-            });
+            // Create NDKTask events for each recipient
+            const taskIds: string[] = [];
+            const tasks = new Map<string, { recipientPubkey: string; status: string }>();
             
-            // Update agent's state to track pending delegation
+            for (const recipientPubkey of resolvedPubkeys) {
+                // Create a new NDKTask for this specific recipient
+                const task = new NDKTask(getNDK());
+                task.content = fullRequest;
+                task.tags = [
+                    ["p", recipientPubkey],  // Assign to this agent
+                    ["e", context.conversationId, "", "root"],  // Link to conversation (conversation ID is the root event ID)
+                    ["status", "pending"],
+                ];
+                
+                // Sign and publish the task
+                await task.sign(context.agent.signer);
+                await task.publish();
+                
+                // Track this task
+                taskIds.push(task.id);
+                tasks.set(task.id, {
+                    recipientPubkey,
+                    status: "pending"
+                });
+                
+                logger.info("Published NDKTask for delegation", {
+                    taskId: task.id,
+                    fromAgent: context.agent.slug,
+                    toAgent: recipientPubkey,
+                });
+            }
+            
+            // Update agent's state to track pending delegation with task IDs
             if (context.conversationManager) {
                 await context.conversationManager.updateAgentState(
                     context.conversationId,
                     context.agent.slug,
                     {
                         pendingDelegation: {
-                            expectedFrom: resolvedPubkeys,
-                            receivedResponses: new Map(),
+                            taskIds: taskIds,
+                            tasks: tasks,
                             originalRequest: fullRequest,
                             timestamp: Date.now(),
                         }
                     }
                 );
                 
-                logger.info("Delegation state set - agent waiting for responses", {
+                logger.info("Delegation state set - agent waiting for task completions", {
                     fromAgent: context.agent.slug,
-                    waitingFor: resolvedPubkeys.length,
-                    recipients: recipients,
+                    waitingForTasks: taskIds.length,
+                    taskIds: taskIds,
                 });
             }
             
-            logger.info("Delegation event published", {
+            logger.info("All NDKTask events published", {
                 fromAgent: context.agent.slug,
                 toRecipients: recipients,
                 toPubkeys: resolvedPubkeys,
-                recipientCount: resolvedPubkeys.length,
+                taskCount: taskIds.length,
                 requestLength: fullRequest.length,
             });
             
-            // Delegation timeout is handled in the AgentExecutor.
-            // The pendingDelegation.timestamp is checked when processing agent state
-            // to determine if the delegation has timed out (default: 5 minutes).
-            // See AgentExecutor.processPendingDelegations for timeout logic.
+            // The agent will be reactivated when all tasks complete.
+            // This is handled in the event handler when task completion events arrive.
             
             return success({
                 success: true,
                 recipientPubkeys: resolvedPubkeys,
             });
         } catch (error) {
-            logger.error("Failed to publish delegation event", {
+            logger.error("Failed to publish NDKTask events", {
                 fromAgent: context.agent.slug,
                 toRecipients: recipients,
                 error,
@@ -188,7 +220,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
             return failure({
                 kind: "execution",
                 tool: "delegate",
-                message: `Failed to publish delegation event: ${error instanceof Error ? error.message : String(error)}`,
+                message: `Failed to publish NDKTask events: ${error instanceof Error ? error.message : String(error)}`,
             });
         }
     },

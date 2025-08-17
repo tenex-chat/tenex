@@ -11,7 +11,6 @@ export {
     type PhaseTransitionResult
 } from "./PhaseManager";
 export { ConversationEventProcessor } from "./ConversationEventProcessor";
-export { OrchestratorTurnTracker } from "./OrchestratorTurnTracker";
 export { 
     type IAgentResolver,
     ProjectAgentResolver,

@@ -21,19 +21,19 @@ export class ProjectContext {
     public project: NDKProject;
 
     /**
-     * Signer the project agent uses (hardwired to orchestrator agent's signer)
+     * Signer the project uses (hardwired to project manager's signer)
      */
     public readonly signer: NDKPrivateKeySigner;
 
     /**
-     * Pubkey of the project agent
+     * Pubkey of the project (PM's pubkey)
      */
     public readonly pubkey: Hexpubkey;
 
     /**
-     * The orchestrator agent for this project
+     * The project manager agent for this project
      */
-    public orchestrator: AgentInstance;
+    public projectManager: AgentInstance;
 
     public agents: Map<string, AgentInstance>;
 
@@ -60,30 +60,23 @@ export class ProjectContext {
             agentDetails: Array.from(agents.entries()).map(([slug, agent]) => ({
                 slug,
                 name: agent.name,
-                isOrchestrator: agent.isOrchestrator,
                 isBuiltIn: agent.isBuiltIn,
             })),
         });
 
-        // Find the orchestrator agent dynamically
-        let orchestratorAgent: AgentInstance | undefined;
-        for (const agent of agents.values()) {
-            if (agent.isOrchestrator) {
-                orchestratorAgent = agent;
-                break;
-            }
-        }
-
-        if (!orchestratorAgent) {
+        // Find the project manager agent
+        const projectManagerAgent = agents.get("project-manager");
+        
+        if (!projectManagerAgent) {
             throw new Error(
-                "Orchestrator agent not found. Ensure AgentRegistry.loadFromProject() is called before initializing ProjectContext."
+                "Project Manager agent not found. Ensure AgentRegistry.loadFromProject() is called before initializing ProjectContext."
             );
         }
 
-        // Hardwire to orchestrator agent's signer and pubkey
-        this.signer = orchestratorAgent.signer;
-        this.pubkey = orchestratorAgent.pubkey;
-        this.orchestrator = orchestratorAgent;
+        // Hardwire to project manager's signer and pubkey
+        this.signer = projectManagerAgent.signer;
+        this.pubkey = projectManagerAgent.pubkey;
+        this.projectManager = projectManagerAgent;
         this.agents = new Map(agents);
         this.agentLessons = new Map();
     }
@@ -108,7 +101,8 @@ export class ProjectContext {
     }
 
     getProjectAgent(): AgentInstance {
-        return this.orchestrator;
+        // Returns the project manager agent
+        return this.projectManager;
     }
 
     getAgentSlugs(): string[] {
@@ -160,12 +154,10 @@ export class ProjectContext {
         this.project = newProject;
         this.agents = new Map(newAgents);
 
-        // Update orchestrator reference if it exists in new agents
-        for (const agent of newAgents.values()) {
-            if (agent.isOrchestrator) {
-                this.orchestrator = agent;
-                break;
-            }
+        // Update project manager reference if it exists in new agents
+        const newProjectManager = newAgents.get("project-manager");
+        if (newProjectManager) {
+            this.projectManager = newProjectManager;
         }
 
         logger.info("ProjectContext updated with new data", {

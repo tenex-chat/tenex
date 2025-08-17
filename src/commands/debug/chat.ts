@@ -94,7 +94,6 @@ export async function runDebugChat(
                 projectPath,
             },
             phaseTransitions: [],
-            orchestratorTurns: [],
             executionTime: {
                 totalSeconds: 0,
                 isActive: false,

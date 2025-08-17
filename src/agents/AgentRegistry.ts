@@ -247,9 +247,6 @@ export class AgentRegistry {
                         if (!agentDefinition.instructions) {
                             agentDefinition.instructions = builtInAgent.instructions || "";
                         }
-                        if (!agentDefinition.backend && builtInAgent.backend) {
-                            agentDefinition.backend = builtInAgent.backend;
-                        }
                         if (!agentDefinition.name) {
                             agentDefinition.name = builtInAgent.name;
                         }
@@ -671,7 +668,6 @@ export class AgentRegistry {
             mcp: agentDefinition.mcp ?? true, // Default to true for all agents
             eventId: registryEntry.eventId,
             slug: slug,
-            isOrchestrator: false,
             isBuiltIn: isBuiltIn,
             isGlobal: isGlobal,
         };

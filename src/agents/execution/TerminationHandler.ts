@@ -29,14 +29,12 @@ export class TerminationHandler {
         }
 
         // Log that agent didn't terminate properly
-        const agentType = context.agent.isOrchestrator ? "Orchestrator" : "Agent";
-        const message = `${agentType} finished without calling terminal tool (${context.agent.name})`;
+        const message = `Agent finished without calling terminal tool (${context.agent.name})`;
         
         logger.info(message, {
             agent: context.agent.name,
             phase: context.phase,
             conversationId: context.conversationId,
-            isOrchestrator: context.agent.isOrchestrator,
         });
         
         tracingLogger.info(`⚠️ ${message}`, {

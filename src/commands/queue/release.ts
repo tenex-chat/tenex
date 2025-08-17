@@ -38,7 +38,7 @@ export async function releaseExecutionLock(options: ReleaseOptions = {}): Promis
       return;
     }
 
-    let conversationId = options.conversation || currentLock.conversationId;
+    const conversationId = options.conversation || currentLock.conversationId;
     let reason = options.reason;
 
     // If no conversation specified, use the current lock

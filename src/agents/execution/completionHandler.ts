@@ -25,58 +25,85 @@ export interface CompletionOptions {
  * The caller decides when to publish (immediately for ClaudeBackend, after metadata for ReasonActLoop)
  */
 export async function handleAgentCompletion(options: CompletionOptions): Promise<{ completion: Complete; event: NDKEvent }> {
-    const { response, summary, publisher, agent, conversationId, conversationManager } = options;
+    const { response, summary, publisher, agent, conversationId: _conversationId, conversationManager: _conversationManager, triggeringEvent } = options;
 
     const projectContext = getProjectContext();
-    const orchestratorAgent = projectContext.getProjectAgent();
-
-    // Always respond to the orchestrator
-    const respondToPubkey = orchestratorAgent.pubkey;
-
-    // Track completion in orchestrator turn using pubkey for consistent identification
-    // IMPORTANT: Pass the FULL response to the orchestrator so it can make informed decisions
-    // If there's a summary, include both for complete context
-    const completionMessage = summary 
-        ? `${response}\n\n[Summary: ${summary}]`
-        : response;
-    
-    await conversationManager.addCompletionToTurn(
-        conversationId,
-        agent.pubkey,
-        completionMessage
-    );
-
-    // Build the event but don't publish
-    const reply = publisher.createBaseReply();
-    reply.content = response;
-    reply.tag(["p", respondToPubkey]);
-    reply.tag(["tool", "complete"]);
-    
-    // Add summary tag if provided
-    if (summary) {
-        reply.tag(["summary", summary]);
-    }
-    
-    // Debug logging
     const { logger } = await import("@/utils/logger");
-    logger.debug("[handleAgentCompletion] Created unpublished event", {
-        agent: agent.name,
-        responseLength: response.length,
-        hasSummary: !!summary,
-        eventId: reply.id,
-        tags: reply.tags.map(t => `${t[0]}=${t[1]?.substring(0, 20)}...`),
-    });
     
-    // Return both completion and unpublished event
-    return {
-        completion: {
-            type: "complete",
+    // Check if this is completing a sub-task (NDKTask kind 1934)
+    const isTaskCompletion = triggeringEvent?.kind === 1934;
+    
+    if (isTaskCompletion) {
+        // This is a sub-task completion - respond to the task delegator
+        const delegatorPubkey = triggeringEvent.pubkey;
+        
+        logger.info("[handleAgentCompletion] Completing NDKTask", {
+            taskId: triggeringEvent.id,
+            agent: agent.name,
+            delegator: delegatorPubkey,
+        });
+        
+        // Build completion reply to the task
+        const reply = publisher.createBaseReply();
+        reply.content = response;
+        reply.tag(["e", triggeringEvent.id, "", "reply"]);  // Reply to the task
+        reply.tag(["p", delegatorPubkey]);  // Notify the delegator
+        reply.tag(["status", "complete"]);
+        reply.tag(["tool", "complete"]);
+        
+        if (summary) {
+            reply.tag(["summary", summary]);
+        }
+        
+        // Return task completion
+        return {
             completion: {
-                response,
-                summary: summary || response,
-                nextAgent: respondToPubkey,
+                type: "complete",
+                completion: {
+                    response,
+                    summary: summary || response,
+                    nextAgent: delegatorPubkey,
+                },
             },
-        },
-        event: reply
-    };
+            event: reply
+        };
+    } else {
+        // Regular conversation completion - respond to PM/orchestrator
+        const orchestratorAgent = projectContext.getProjectAgent();
+        const respondToPubkey = orchestratorAgent.pubkey;
+
+        // No turn tracking needed - PM infers from conversation history
+
+        // Build the event but don't publish
+        const reply = publisher.createBaseReply();
+        reply.content = response;
+        reply.tag(["p", respondToPubkey]);
+        reply.tag(["tool", "complete"]);
+        
+        // Add summary tag if provided
+        if (summary) {
+            reply.tag(["summary", summary]);
+        }
+        
+        logger.debug("[handleAgentCompletion] Created unpublished event", {
+            agent: agent.name,
+            responseLength: response.length,
+            hasSummary: !!summary,
+            eventId: reply.id,
+            tags: reply.tags.map(t => `${t[0]}=${t[1]?.substring(0, 20)}...`),
+        });
+        
+        // Return both completion and unpublished event
+        return {
+            completion: {
+                type: "complete",
+                completion: {
+                    response,
+                    summary: summary || response,
+                    nextAgent: respondToPubkey,
+                },
+            },
+            event: reply
+        };
+    }
 }

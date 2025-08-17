@@ -4,17 +4,15 @@ export { FragmentRegistry, fragmentRegistry } from "./core/FragmentRegistry";
 export type { PromptFragment, FragmentConfig } from "./core/types";
 
 // Import all fragments to ensure they're registered when the module is imported
-// Priority 01 - Identity (either specialist OR orchestrator)
+// Priority 01 - Identity
 import "./fragments/01-specialist-identity";
-import "./fragments/01-orchestrator-identity";
 
 // Priority 10 - Early context
 import "./fragments/10-phase-definitions";     // Shared
 import "./fragments/10-referenced-article";    // Conditional
 
-// Priority 15 - Available agents (either specialist OR orchestrator)
+// Priority 15 - Available agents
 import "./fragments/15-specialist-available-agents";
-import "./fragments/15-orchestrator-available-agents";
 
 // Priority 20 - Phase and mode context
 import "./fragments/20-phase-constraints";     // Shared
@@ -24,9 +22,8 @@ import "./fragments/20-voice-mode";            // Conditional
 // Priority 24 - Lessons
 import "./fragments/24-retrieved-lessons";     // Shared
 
-// Priority 25 - Tools/Routing (specialist gets tools, orchestrator gets routing)
-import "./fragments/25-specialist-tools";      // Specialist only
-import "./fragments/25-orchestrator-routing";  // Orchestrator only
+// Priority 25 - Tools
+import "./fragments/25-specialist-tools";      // All agents use tools
 
 // Priority 30 - Project context
 import "./fragments/30-project-inventory";     // Shared

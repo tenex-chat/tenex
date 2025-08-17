@@ -39,22 +39,6 @@ export const AgentStateSchema = z.object({
     lastSeenPhase: z.string().optional(), // Phase as string
 });
 
-const CompletionSchema = z.object({
-    agent: z.string(),
-    message: z.string(),
-    timestamp: z.number().optional(),
-});
-
-const OrchestratorTurnSchema = z.object({
-    turnId: z.string(),
-    timestamp: z.number(),
-    phase: PhaseSchema,
-    agents: z.array(z.string()),
-    completions: z.array(CompletionSchema),
-    reason: z.string().optional(),
-    isCompleted: z.boolean(),
-});
-
 export const SerializedConversationSchema = z.object({
     id: z.string(),
     title: z.string(),
@@ -64,7 +48,6 @@ export const SerializedConversationSchema = z.object({
     phaseStartedAt: z.number().optional(),
     metadata: ConversationMetadataSchema,
     phaseTransitions: z.array(PhaseTransitionSchema).default([]),
-    orchestratorTurns: z.array(OrchestratorTurnSchema).default([]),
     executionTime: ExecutionTimeSchema.optional(),
 });
 

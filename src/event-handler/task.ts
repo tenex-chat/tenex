@@ -43,9 +43,14 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
             logInfo(chalk.gray("Claude Session: ") + chalk.cyan(claudeSession));
         }
 
-        // Get orchestrator agent directly from project context
+        // Get project context
         const projectCtx = getProjectContext();
-        const orchestratorAgent = projectCtx.getProjectAgent();
+        
+        // Get Project Manager as default coordinator
+        const projectManager = projectCtx.getAgent("project-manager");
+        if (!projectManager) {
+            throw new Error("Project Manager agent not found - required for task coordination");
+        }
 
         let targetAgent: AgentInstance | undefined;
 
@@ -61,10 +66,12 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
                 }
             }
         } else {
-            targetAgent = orchestratorAgent;
+            // Default to PM for task coordination
+            targetAgent = projectManager;
         }
 
         if (!targetAgent) {
+            logger.warn("No target agent found for task", { taskId: event.id });
             return;
         }
 
@@ -84,8 +91,6 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
             conversationManager: context.conversationManager,
             claudeSessionId: claudeSession,
         });
-
-        logInfo(chalk.green("✅ Task conversation created and routed successfully"));
     } catch (error) {
         logInfo(chalk.red(`❌ Failed to create task conversation: ${formatAnyError(error)}`));
     }

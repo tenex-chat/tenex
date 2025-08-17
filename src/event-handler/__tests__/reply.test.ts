@@ -157,4 +157,50 @@ describe('handleChatMessage (Reply Logic)', () => {
         expect(mockConversationManager.createConversation).not.toHaveBeenCalled();
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
+
+    it('should skip processing messages from agents to prevent self-reply loops', async () => {
+        // Create an event from the project manager agent
+        const pmAgent = {
+            pubkey: 'pm-agent-pubkey',
+            slug: 'project-manager',
+            name: 'Project Manager',
+            definition: { name: 'Project Manager', about: 'PM', instructions: 'Manage' },
+            tools: [],
+            llm: { provider: 'mock', model: 'mock' }
+        };
+
+        // Update project context with PM agent
+        const agentsMap = new Map<string, Agent>([
+            ['test-agent', testAgent],
+            ['project-manager', pmAgent]
+        ]);
+        Object.defineProperty(mockProjectContext, 'agents', {
+            get: jest.fn(() => agentsMap),
+        });
+        
+        // Also mock getAgent to return PM
+        mockProjectContext.getAgent = jest.fn((slug: string) => {
+            return slug === 'project-manager' ? pmAgent : undefined;
+        }) as any;
+
+        // Create an event from the PM agent (kind 1111)
+        const pmReplyEvent = new NDKEvent(undefined, {
+            kind: 1111,
+            content: "Here are your projects...",
+            pubkey: pmAgent.pubkey,
+            tags: [],
+            created_at: Math.floor(Date.now() / 1000),
+        } as any);
+
+        await handleChatMessage(pmReplyEvent, {
+            conversationManager: mockConversationManager,
+            agentExecutor: mockAgentExecutor,
+        });
+
+        // Verify the event was skipped
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Skipping agent's own message"));
+        expect(mockConversationManager.getConversationByEvent).not.toHaveBeenCalled();
+        expect(mockConversationManager.createConversation).not.toHaveBeenCalled();
+        expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
+    });
 });

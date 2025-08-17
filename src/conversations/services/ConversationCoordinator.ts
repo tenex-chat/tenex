@@ -1,13 +1,12 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr/ndkClient";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
 import type { 
     Conversation, 
     ConversationMetadata, 
     PhaseTransition,
-    OrchestratorRoutingContext,
-    AgentState,
-    OrchestratorTurn 
+    AgentState
 } from "../types";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
@@ -15,7 +14,6 @@ import { ConversationStore } from "./ConversationStore";
 import type { IConversationPersistenceService } from "./ConversationPersistenceService";
 import { PhaseManager, type PhaseTransitionContext } from "./PhaseManager";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
-import { OrchestratorTurnTracker } from "./OrchestratorTurnTracker";
 import type { IAgentResolver } from "./AgentResolver";
 import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
@@ -36,7 +34,6 @@ export class ConversationCoordinator {
     private persistence: IConversationPersistenceService;
     private phaseManager: PhaseManager;
     private eventProcessor: ConversationEventProcessor;
-    private turnTracker: OrchestratorTurnTracker;
     private messageBuilder: MessageBuilder;
     
     // Context management
@@ -48,7 +45,6 @@ export class ConversationCoordinator {
         persistence: IConversationPersistenceService,
         phaseManager: PhaseManager,
         eventProcessor: ConversationEventProcessor,
-        turnTracker: OrchestratorTurnTracker,
         _agentResolver: IAgentResolver,
         executionQueueManager?: ExecutionQueueManager
     ) {
@@ -56,7 +52,6 @@ export class ConversationCoordinator {
         this.persistence = persistence;
         this.phaseManager = phaseManager;
         this.eventProcessor = eventProcessor;
-        this.turnTracker = turnTracker;
         this.messageBuilder = new MessageBuilder();
 
         // Setup queue listeners if available
@@ -255,15 +250,13 @@ export class ConversationCoordinator {
         }
 
         // Check if we need to show phase instructions
-        const isOrchestrator = targetAgent.isOrchestrator || false;
         const agentHasSeenPhase = agentState.lastSeenPhase !== undefined;
         
         if (agentHasSeenPhase && agentState.lastSeenPhase) {
             context.setCurrentPhase(agentState.lastSeenPhase);
         }
         
-        const needsPhaseInstructions = !isOrchestrator && 
-            (!agentHasSeenPhase || context.getCurrentPhase() !== conversation.phase);
+        const needsPhaseInstructions = !agentHasSeenPhase || context.getCurrentPhase() !== conversation.phase;
         
         // Build complete history
         const historyToProcess: NDKEvent[] = [];
@@ -303,22 +296,24 @@ export class ConversationCoordinator {
 
         // Handle delegation responses if pending
         if (agentState.pendingDelegation && triggeringEvent) {
-            const senderPubkey = triggeringEvent.pubkey;
+            // Check if this is a task completion event for one of our pending tasks
+            const taskId = triggeringEvent.tagValue("e"); // Task completion events reference the task
             
-            if (agentState.pendingDelegation.expectedFrom.includes(senderPubkey)) {
-                if (!agentState.pendingDelegation.receivedResponses) {
-                    agentState.pendingDelegation.receivedResponses = new Map();
+            if (taskId && agentState.pendingDelegation.taskIds.includes(taskId)) {
+                // Update task status
+                const taskInfo = agentState.pendingDelegation.tasks.get(taskId);
+                if (taskInfo) {
+                    taskInfo.status = "completed";
+                    taskInfo.response = triggeringEvent.content;
                 }
                 
-                agentState.pendingDelegation.receivedResponses.set(senderPubkey, triggeringEvent);
-                agentState.pendingDelegation.receivedFrom = Array.from(
-                    agentState.pendingDelegation.receivedResponses.keys()
-                );
+                // Check if all tasks are completed
+                const completedTasks = Array.from(agentState.pendingDelegation.tasks.values())
+                    .filter(t => t.status === "completed");
                 
-                if (agentState.pendingDelegation.receivedResponses.size < 
-                    agentState.pendingDelegation.expectedFrom.length) {
+                if (completedTasks.length < agentState.pendingDelegation.taskIds.length) {
                     context.addMessage(new Message("system", 
-                        `Waiting for delegate responses: ${agentState.pendingDelegation.receivedResponses.size}/${agentState.pendingDelegation.expectedFrom.length} received.`
+                        `Waiting for delegate responses: ${completedTasks.length}/${agentState.pendingDelegation.taskIds.length} received.`
                     ));
                     
                     await this.persistence.save(conversation);
@@ -329,8 +324,20 @@ export class ConversationCoordinator {
                     };
                 }
                 
+                // All tasks completed - prepare responses for the agent
+                const responsesMap = new Map<string, NDKEvent>();
+                for (const [_taskId, taskInfo] of agentState.pendingDelegation.tasks) {
+                    if (taskInfo.response) {
+                        // Create a synthetic event for the response
+                        const responseEvent = new NDKEvent(getNDK());
+                        responseEvent.content = taskInfo.response;
+                        responseEvent.pubkey = taskInfo.recipientPubkey;
+                        responsesMap.set(taskInfo.recipientPubkey, responseEvent);
+                    }
+                }
+                
                 context.addDelegationResponses(
-                    agentState.pendingDelegation.receivedResponses,
+                    responsesMap,
                     agentState.pendingDelegation.originalRequest
                 );
                 
@@ -364,52 +371,6 @@ export class ConversationCoordinator {
         };
     }
 
-    /**
-     * Build orchestrator routing context
-     */
-    async buildOrchestratorRoutingContext(
-        conversationId: string,
-        triggeringEvent?: NDKEvent
-    ): Promise<OrchestratorRoutingContext> {
-        const conversation = this.store.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        // Get original and most recent user request
-        const original_request = conversation.history[0]?.content || "";
-        let user_request = original_request;
-        
-        for (let i = conversation.history.length - 1; i >= 0; i--) {
-            const event = conversation.history[i];
-            if (event.kind === 14 && event.tags?.some(tag => tag[0] === "t" && tag[1] === "user")) {
-                user_request = event.content || "";
-                break;
-            }
-        }
-
-        // Extract completion from triggering event if present
-        let triggeringCompletion = undefined;
-        if (triggeringEvent) {
-            triggeringCompletion = this.eventProcessor.extractCompletionFromEvent(triggeringEvent) || undefined;
-        }
-
-        // Set turns for this conversation
-        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
-
-        // Build routing context
-        const routingContext = this.turnTracker.buildRoutingContext(
-            conversationId,
-            user_request,
-            triggeringCompletion
-        );
-
-        // Sync back any updates
-        conversation.orchestratorTurns = this.turnTracker.getTurns(conversationId);
-        await this.persistence.save(conversation);
-
-        return routingContext;
-    }
 
     /**
      * Update an agent's state
@@ -441,83 +402,23 @@ export class ConversationCoordinator {
      * Start a new orchestrator turn
      * @param agents Array of agent pubkeys for consistent identification
      */
-    async startOrchestratorTurn(
-        conversationId: string,
-        phase: Phase,
-        agents: string[],
-        reason?: string
-    ): Promise<string> {
-        const conversation = this.store.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
 
-        // Sync turns with tracker
-        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
-
-        // Start new turn
-        const turnId = this.turnTracker.startTurn(conversationId, phase, agents, reason);
-
-        // Sync back
-        conversation.orchestratorTurns = this.turnTracker.getTurns(conversationId);
-        await this.persistence.save(conversation);
-
-        return turnId;
-    }
-
-    /**
-     * Add a completion to the current turn
-     * @param agentPubkey The pubkey of the agent that completed
-     */
-    async addCompletionToTurn(
-        conversationId: string,
-        agentPubkey: string,
-        message: string
-    ): Promise<void> {
-        const conversation = this.store.get(conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${conversationId} not found`);
-        }
-
-        // Sync turns with tracker
-        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
-
-        // Add completion
-        this.turnTracker.addCompletion(conversationId, agentPubkey, message);
-
-        // Sync back
-        conversation.orchestratorTurns = this.turnTracker.getTurns(conversationId);
-        await this.persistence.save(conversation);
-    }
 
     /**
      * Check if the current turn is complete
+     * With NDKTask-based delegation, this always returns true since
+     * agents won't be reactivated until all their delegated tasks complete
      */
-    isCurrentTurnComplete(conversationId: string): boolean {
-        const conversation = this.store.get(conversationId);
-        if (!conversation) {
-            return true; // No conversation means no pending turns
-        }
-
-        // Sync turns with tracker
-        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
-        
-        return this.turnTracker.isCurrentTurnComplete(conversationId);
+    isCurrentTurnComplete(_conversationId: string): boolean {
+        return true; // PM-centric routing with NDKTask handles this via pendingDelegation
     }
 
     /**
-     * Get the current (most recent) turn for a conversation
+     * Get the current turn for a conversation
+     * With PM-centric routing, there are no explicit turns to track
      */
-    getCurrentTurn(conversationId: string): OrchestratorTurn | null {
-        const conversation = this.store.get(conversationId);
-        if (!conversation) {
-            return null;
-        }
-
-        // Sync turns with tracker
-        this.turnTracker.setTurns(conversationId, conversation.orchestratorTurns);
-        
-        return this.turnTracker.getCurrentTurn(conversationId);
+    getCurrentTurn(_conversationId: string): null {
+        return null; // No turn tracking in PM-centric routing
     }
 
     /**

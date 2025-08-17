@@ -27,7 +27,6 @@ describe("ConversationStore", () => {
                 summary: "Test summary"
             },
             phaseTransitions: [],
-            orchestratorTurns: [],
             executionTime: {
                 totalSeconds: 0,
                 isActive: false,

@@ -138,7 +138,6 @@ describe("AgentExecutor", () => {
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 phaseTransitions: [],
-                orchestratorTurns: [],
                 executionTime: {
                     totalSeconds: 0,
                     isActive: false,

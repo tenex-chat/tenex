@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import type { Phase } from "@/conversations/phases";
-import type { AgentState, PhaseTransition, Conversation, ConversationMetadata, OrchestratorRoutingContext, OrchestratorTurn } from "@/conversations/types";
+import type { AgentState, PhaseTransition, Conversation, ConversationMetadata } from "@/conversations/types";
 import { ensureDirectory } from "@/lib/fs";
 import type { TracingContext } from "@/tracing";
 import { TENEX_DIR, CONVERSATIONS_DIR } from "@/constants";
@@ -16,7 +16,6 @@ import {
     ConversationPersistenceService,
     PhaseManager,
     ConversationEventProcessor,
-    OrchestratorTurnTracker,
     ProjectAgentResolver,
     ConversationCoordinator,
 } from "./services";
@@ -44,7 +43,6 @@ export class ConversationManager {
         );
         const phaseManager = new PhaseManager(executionQueueManager);
         const eventProcessor = new ConversationEventProcessor();
-        const turnTracker = new OrchestratorTurnTracker();
         const agentResolver = new ProjectAgentResolver();
         
         // Create coordinator
@@ -53,7 +51,6 @@ export class ConversationManager {
             persistenceService,
             phaseManager,
             eventProcessor,
-            turnTracker,
             agentResolver,
             executionQueueManager
         );
@@ -178,15 +175,6 @@ export class ConversationManager {
         );
     }
 
-    async buildOrchestratorRoutingContext(
-        conversationId: string,
-        triggeringEvent?: NDKEvent
-    ): Promise<OrchestratorRoutingContext> {
-        return await this.coordinator.buildOrchestratorRoutingContext(
-            conversationId,
-            triggeringEvent
-        );
-    }
 
     async updateAgentState(
         conversationId: string, 
@@ -233,38 +221,24 @@ export class ConversationManager {
         return await this.coordinator.completeConversation(conversationId);
     }
 
-    async startOrchestratorTurn(
-        conversationId: string,
-        phase: Phase,
-        agents: string[],
-        reason?: string
-    ): Promise<string> {
-        return await this.coordinator.startOrchestratorTurn(
-            conversationId,
-            phase,
-            agents,
-            reason
-        );
-    }
 
     async addCompletionToTurn(
-        conversationId: string,
-        agentPubkey: string,
-        message: string
+        _conversationId: string,
+        _agentPubkey: string,
+        _message: string
     ): Promise<void> {
-        return await this.coordinator.addCompletionToTurn(
-            conversationId,
-            agentPubkey,
-            message
-        );
+        // No-op: Turn tracking removed in PM-centric routing
+        return;
     }
 
-    isCurrentTurnComplete(conversationId: string): boolean {
-        return this.coordinator.isCurrentTurnComplete(conversationId);
+    isCurrentTurnComplete(_conversationId: string): boolean {
+        // Always true: NDKTask-based delegation handles completion tracking
+        return true;
     }
 
-    getCurrentTurn(conversationId: string): OrchestratorTurn | null {
-        return this.coordinator.getCurrentTurn(conversationId);
+    getCurrentTurn(_conversationId: string): null {
+        // No turn tracking in PM-centric routing
+        return null;
     }
 
     /**

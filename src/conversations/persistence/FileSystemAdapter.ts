@@ -160,10 +160,6 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                     from: transition.from as Phase, // Phase validation happens in schema parsing
                     to: transition.to as Phase
                 })),
-                orchestratorTurns: (data.orchestratorTurns || []).map(turn => ({
-                    ...turn,
-                    phase: turn.phase as Phase
-                })),
                 executionTime: data.executionTime || {
                     totalSeconds: 0,
                     isActive: false,
