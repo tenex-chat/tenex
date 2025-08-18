@@ -22,6 +22,7 @@ export interface DelegationContext {
 export interface DelegationResult {
     recipientPubkeys: string[];
     taskIds: string[];
+    serializedEvents?: any[];  // Serialized NDKTask events for deferred publishing
 }
 
 /**
@@ -255,20 +256,10 @@ export class DelegationService {
             conversationId
         });
         
-        // STEP 4: NOW publish all tasks (after state is fully ready)
-        for (const { task, recipientPubkey } of signedTasks) {
-            await task.publish();
-            
-            logger.debug("Published NDKTask", {
-                taskId: task.id,
-                conversationId,
-                phase: phase || "none",
-                fromAgent: agent.slug,
-                toAgent: recipientPubkey,
-            });
-        }
+        // STEP 4: Collect serialized events for deferred publishing
+        const serializedEvents = signedTasks.map(({ task }) => task.rawEvent());
         
-        logger.info("Delegation complete - agent waiting for task completions", {
+        logger.info("Delegation prepared - deferring task publication", {
             fromAgent: agent.slug,
             waitingForTasks: taskIds.length,
             taskIds: taskIds,
@@ -278,6 +269,7 @@ export class DelegationService {
         return {
             recipientPubkeys: resolvedPubkeys,
             taskIds: taskIds,
+            serializedEvents: serializedEvents,
         };
     }
 }

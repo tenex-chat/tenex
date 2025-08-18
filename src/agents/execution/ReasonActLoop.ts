@@ -15,6 +15,7 @@ import { ToolStreamHandler } from "./ToolStreamHandler";
 import { TerminationHandler } from "./TerminationHandler";
 import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
 import type { ToolExecutionResult } from "@/tools/executor";
+import { MessageBuilder } from "@/conversations/MessageBuilder";
 
 // Maximum iterations to prevent infinite loops
 const MAX_ITERATIONS = 20;
@@ -26,11 +27,13 @@ const MAX_ITERATIONS = 20;
 export class ReasonActLoop {
     private executionLogger?: ExecutionLogger;
     private repetitionDetector: ToolRepetitionDetector;
+    private messageBuilder: MessageBuilder;
 
     constructor(
         private llmService: LLMService
     ) {
         this.repetitionDetector = new ToolRepetitionDetector();
+        this.messageBuilder = new MessageBuilder();
     }
 
     /**
@@ -121,7 +124,19 @@ export class ReasonActLoop {
                     tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
                         iteration: iterations,
                         willExitLoop: true,
+                        hasDeferredEvent: !!iterationResult.deferredTerminalEvent,
+                        deferredType: iterationResult.deferredTerminalEvent?.type
                     });
+                    
+                    // Handle deferred terminal event
+                    if (iterationResult.deferredTerminalEvent) {
+                        await this.publishDeferredTerminalEvent(
+                            iterationResult.deferredTerminalEvent,
+                            tracingLogger,
+                            context
+                        );
+                    }
+                    
                     isComplete = true;
                     tracingLogger.info("[ReasonActLoop] isComplete set to true, loop should exit", {
                         isComplete,
@@ -210,6 +225,7 @@ export class ReasonActLoop {
         hasToolCalls: boolean;
         toolResults: ToolExecutionResult[];
         assistantMessage: string;
+        deferredTerminalEvent?: any;  // Single deferred event from terminal tool
     }> {
         const events: StreamEvent[] = [];
         let isTerminal = false;
@@ -217,6 +233,7 @@ export class ReasonActLoop {
         const toolResults: ToolExecutionResult[] = [];
         let assistantMessage = "";
         const streamPublisher = initialStreamPublisher;
+        let deferredTerminalEvent: any = null;
         
         for await (const event of stream) {
             tracingLogger.debug("[processIterationStream]", {
@@ -259,7 +276,8 @@ export class ReasonActLoop {
                         event.args
                     );
                     if (warningMessage) {
-                        messages.push(new Message("system", warningMessage));
+                        const systemMessage = this.messageBuilder.formatSystemMessage(warningMessage, "Tool Repetition Detector");
+                        messages.push(systemMessage);
                     }
                     
                     await toolHandler.handleToolStartEvent(
@@ -285,14 +303,52 @@ export class ReasonActLoop {
                     const toolResult = stateManager.getLastToolResult();
                     if (toolResult) {
                         toolResults.push(toolResult);
+                        
+                        // Check if this tool result contains deferred events
+                        if (toolResult.success && toolResult.output) {
+                            const output = toolResult.output as any;
+                            
+                            // Handle delegate/delegate_phase tools (highest priority)
+                            if ((output.toolType === 'delegate' || output.toolType === 'delegate_phase') && output.serializedEvents) {
+                                tracingLogger.info("[ReasonActLoop] Delegation tool detected - deferring events", {
+                                    tool: event.tool,
+                                    eventCount: output.serializedEvents.length
+                                });
+                                // Delegation always overwrites any previous deferred event
+                                deferredTerminalEvent = {
+                                    type: 'delegate',
+                                    events: output.serializedEvents
+                                };
+                                isTerminal = true;
+                            }
+                            // Handle complete tool (only if we don't already have a delegation)
+                            else if (output.toolType === 'complete' && output.serializedEvent) {
+                                if (!deferredTerminalEvent || deferredTerminalEvent.type !== 'delegate') {
+                                    tracingLogger.info("[ReasonActLoop] Complete tool detected - deferring event", {
+                                        tool: event.tool,
+                                        overwrites: !!deferredTerminalEvent
+                                    });
+                                    deferredTerminalEvent = {
+                                        type: 'complete',
+                                        event: output.serializedEvent
+                                    };
+                                    isTerminal = true;
+                                } else {
+                                    tracingLogger.info("[ReasonActLoop] Complete tool detected but delegation takes precedence", {
+                                        tool: event.tool
+                                    });
+                                    isTerminal = true;
+                                }
+                            }
+                        }
                     }
 
-                    if (isTerminalTool) {
-                        tracingLogger.info("[ReasonActLoop] Terminal tool detected in iteration", {
+                    if (isTerminalTool && !deferredTerminalEvent) {
+                        // Legacy terminal tool behavior (shouldn't happen with our updates)
+                        tracingLogger.info("[ReasonActLoop] Terminal tool detected (legacy path)", {
                             tool: event.tool,
                         });
                         isTerminal = true;
-                        // Continue to let the stream finish naturally
                     }
                     break;
                 }
@@ -324,6 +380,7 @@ export class ReasonActLoop {
             hasToolCalls,
             toolResults,
             assistantMessage: assistantMessage.trim(),
+            deferredTerminalEvent: deferredTerminalEvent || undefined,
         };
     }
 
@@ -338,13 +395,16 @@ export class ReasonActLoop {
     ): void {
         // Add the assistant's message (with reasoning and tool calls)
         if (assistantMessage) {
-            messages.push(new Message("assistant", assistantMessage));
+            const message = this.messageBuilder.formatAssistantMessage(assistantMessage);
+            messages.push(message);
         }
 
         // Add tool results as user messages for the next iteration
         for (const result of toolResults) {
-            const toolResultMessage = this.formatToolResultMessage(result);
-            messages.push(new Message("user", toolResultMessage));
+            const toolResultMessage = this.formatToolResultAsString(result);
+            // Use MessageBuilder to create properly formatted user message
+            const message = this.messageBuilder.formatUserMessage(toolResultMessage);
+            messages.push(message);
             
             tracingLogger.info("[ReasonActLoop] Added tool result to conversation", {
                 success: result.success,
@@ -354,9 +414,9 @@ export class ReasonActLoop {
     }
 
     /**
-     * Format a tool result for inclusion in the conversation
+     * Format a tool result as a string for inclusion in the conversation
      */
-    private formatToolResultMessage(result: ToolExecutionResult): string {
+    private formatToolResultAsString(result: ToolExecutionResult): string {
         if (result.success) {
             // Format the output as a string
             const output = result.output;
@@ -535,6 +595,46 @@ export class ReasonActLoop {
             phase: context.phase,
             tools: tools?.map((t) => t.name).join(", "),
         });
+    }
+
+    /**
+     * Publish a single deferred terminal event
+     */
+    private async publishDeferredTerminalEvent(
+        deferredEvent: any,
+        tracingLogger: TracingLogger,
+        context: ExecutionContext
+    ): Promise<void> {
+        tracingLogger.info("[ReasonActLoop] Publishing deferred terminal event", {
+            type: deferredEvent.type,
+            eventCount: deferredEvent.type === 'delegate' ? deferredEvent.events?.length : 1
+        });
+        
+        const { NDKEvent } = await import("@nostr-dev-kit/ndk");
+        const { getNDK } = await import("@/nostr/ndkClient");
+        const ndk = getNDK();
+        
+        if (deferredEvent.type === 'delegate' && deferredEvent.events) {
+            // Publish delegation events
+            for (const serializedEvent of deferredEvent.events) {
+                const event = new NDKEvent(ndk, serializedEvent);
+                await event.publish();
+                
+                tracingLogger.info("[ReasonActLoop] Published deferred delegation event", {
+                    eventId: event.id,
+                    kind: event.kind,
+                });
+            }
+        } else if (deferredEvent.type === 'complete' && deferredEvent.event) {
+            // Publish completion event
+            const event = new NDKEvent(ndk, deferredEvent.event);
+            await event.publish();
+            
+            tracingLogger.info("[ReasonActLoop] Published deferred completion event", {
+                eventId: event.id,
+                kind: event.kind,
+            });
+        }
     }
 
     private extractAndLogReasoning(content: string, context?: ExecutionContext, stateManager?: StreamStateManager): void {

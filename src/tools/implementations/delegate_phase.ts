@@ -179,6 +179,8 @@ After delegating:
                 phase: phase,
                 recipientPubkeys: delegationResult.recipientPubkeys,
                 taskIds: delegationResult.taskIds,
+                serializedEvents: delegationResult.serializedEvents,
+                toolType: 'delegate_phase'
             });
         } catch (error) {
             logger.error("Failed to execute phase delegation", {

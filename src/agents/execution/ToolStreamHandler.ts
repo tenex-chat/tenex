@@ -231,9 +231,22 @@ export class ToolStreamHandler {
         }
 
         const output = result.output as Record<string, unknown>;
-        // Both complete and delegate are terminal tools
-        // Note: delegate no longer uses serializedEvents, it has taskIds instead
-        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds));
+        // Check for new deferred event format
+        if (output.toolType === 'complete' || output.toolType === 'delegate' || output.toolType === 'delegate_phase') {
+            return true;
+        }
+        
+        // Legacy check for backwards compatibility
+        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds) && !output.serializedEvents);
+    }
+
+    /**
+     * Check if a tool is terminal by name (before execution)
+     * This allows us to skip subsequent tools if a terminal tool is queued
+     */
+    isTerminalTool(toolName: string): boolean {
+        const terminalTools = ['complete', 'delegate', 'delegate_phase'];
+        return terminalTools.includes(toolName.toLowerCase());
     }
 
     /**

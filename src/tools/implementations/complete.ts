@@ -60,7 +60,7 @@ REMEMBER:
     execute: async (input, context) => {
         const { response, summary } = input.value;
 
-        // Use the shared completion handler to publish the completion event immediately
+        // Use the shared completion handler to create the completion event
         const { completion, event } = await handleAgentCompletion({
             response,
             summary,
@@ -71,20 +71,23 @@ REMEMBER:
             conversationManager: context.conversationManager,
         });
 
-        // Publish the event immediately instead of deferring
+        // Sign the event but DON'T publish it yet
         await event.sign(context.agent.signer);
-        await event.publish();
         
         // Debug logging
         const { logger } = await import("@/utils/logger");
-        logger.debug("[complete() tool] Published completion event immediately", {
+        logger.debug("[complete() tool] Created completion event (deferred publishing)", {
             agent: context.agent.name,
             eventId: event.id,
             contentLength: event.content?.length || 0,
             tagCount: event.tags?.length || 0,
         });
 
-        // Return just the completion without serialized event
-        return success(completion);
+        // Return the completion with the serialized event for RAL to handle
+        return success({
+            ...completion,
+            serializedEvent: event.rawEvent(),
+            toolType: 'complete'
+        });
     },
 });

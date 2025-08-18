@@ -74,6 +74,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
         
         try {
             // Use DelegationService to handle all delegation logic
+            // But we'll need to modify it to return events instead of publishing
             const result = await DelegationService.createDelegationTasks(
                 {
                     recipients,
@@ -94,6 +95,8 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
                 success: true,
                 recipientPubkeys: result.recipientPubkeys,
                 taskIds: result.taskIds,
+                serializedEvents: result.serializedEvents,
+                toolType: 'delegate'
             });
         } catch (error) {
             logger.error("Failed to create delegation tasks", {
