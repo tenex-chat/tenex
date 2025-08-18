@@ -1,9 +1,9 @@
-import { NDKTask, NDKUser } from "@nostr-dev-kit/ndk";
+import { NDKTask, NDKUser, type NDKEvent } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/ProjectContext";
 import { EventTagger } from "@/nostr/EventTagger";
 import { logger } from "@/utils/logger";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationManager, Conversation } from "@/conversations/ConversationManager";
 import type { AgentInstance } from "@/agents/types";
 
 export interface DelegationRequest {
@@ -29,6 +29,67 @@ export interface DelegationResult {
  * Centralizes delegation logic used by both delegate and delegate_phase tools
  */
 export class DelegationService {
+    /**
+     * Find the parent conversation ID for a task-related event.
+     * This resolves the task hierarchy to find where delegation state lives.
+     * 
+     * @param event The event (e.g., kind 1111 replying to a task)
+     * @param conversation The conversation the event belongs to
+     * @returns The parent conversation ID, or null if not found
+     */
+    static findParentConversationId(
+        event: NDKEvent,
+        conversation: Conversation
+    ): string | null {
+        // If this is a reply to a task (K=1934), find the task in conversation history
+        if (event.tagValue("K") === "1934") {
+            const taskId = event.tagValue("E");
+            if (!taskId) {
+                logger.debug("No E tag found in K=1934 event");
+                return null;
+            }
+            
+            // Find the task event in the conversation history
+            const taskEvent = conversation.history?.find(e => e.id === taskId);
+            if (!taskEvent) {
+                logger.debug("Task event not found in conversation history", { 
+                    taskId: taskId.substring(0, 8),
+                    historyLength: conversation.history?.length || 0
+                });
+                return null;
+            }
+            
+            // Find the root conversation tag in the task
+            const rootTag = taskEvent.tags.find(t => t[0] === "e" && t[3] === "root");
+            if (!rootTag || !rootTag[1]) {
+                logger.debug("No root tag found in task event", {
+                    taskId: taskId.substring(0, 8)
+                });
+                return null;
+            }
+            
+            logger.debug("Found parent conversation ID from task root tag", {
+                taskId: taskId.substring(0, 8),
+                parentConversationId: rootTag[1].substring(0, 8)
+            });
+            
+            return rootTag[1];
+        }
+        
+        // If this IS a task (kind 1934), check its own root tag
+        if (event.kind === 1934) {
+            const rootTag = event.tags.find(t => t[0] === "e" && t[3] === "root");
+            if (rootTag && rootTag[1]) {
+                logger.debug("Found parent conversation ID from task's own root tag", {
+                    taskId: event.id?.substring(0, 8),
+                    parentConversationId: rootTag[1].substring(0, 8)
+                });
+                return rootTag[1];
+            }
+        }
+        
+        return null;
+    }
     /**
      * Resolve a recipient string to a pubkey
      * @param recipient - Agent slug, name, npub, or hex pubkey

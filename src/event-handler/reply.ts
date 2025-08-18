@@ -6,6 +6,7 @@ import type { ExecutionContext } from "../agents/execution/types";
 import type { ConversationManager, Conversation, AgentState } from "../conversations";
 import { NostrPublisher } from "../nostr";
 import { getProjectContext } from "../services";
+import { DelegationService } from "../services/DelegationService";
 import type { AgentInstance } from "../agents/types";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
@@ -232,25 +233,24 @@ async function processTaskCompletion(
         return { shouldReactivate: false };
     }
 
-    // Check if this is a task conversation and we need to look at the root conversation
+    // Use DelegationService to find the parent conversation where delegation state lives
     let conversationToCheck = conversation;
-    const rootTag = event.tags.find(t => t[0] === "e" && t[3] === "root");
+    const parentConversationId = DelegationService.findParentConversationId(event, conversation);
     
-    console.log(`[processTaskCompletion] Conversation check`, {
-        conversationId: conversation.id.substring(0, 8),
-        hasRootTag: !!rootTag,
-        rootTagValue: rootTag?.[1]?.substring(0, 8),
-        isSameAsConversation: rootTag?.[1] === conversation.id,
+    console.log(`[processTaskCompletion] Delegation context resolution`, {
+        currentConversationId: conversation.id.substring(0, 8),
+        parentConversationId: parentConversationId?.substring(0, 8) || 'none',
+        willLoadParent: !!parentConversationId && parentConversationId !== conversation.id,
     });
     
-    if (rootTag && rootTag[1] !== conversation.id) {
-        console.log('📍 [processTaskCompletion] This is a task conversation, loading root conversation:', rootTag[1].substring(0, 8));
-        const rootConversation = await conversationManager.getConversation(rootTag[1]);
-        if (rootConversation) {
-            conversationToCheck = rootConversation;
-            console.log('✅ [processTaskCompletion] Successfully loaded root conversation');
+    if (parentConversationId && parentConversationId !== conversation.id) {
+        console.log('📍 [processTaskCompletion] Loading parent conversation for delegation state:', parentConversationId.substring(0, 8));
+        const parentConversation = conversationManager.getConversation(parentConversationId);
+        if (parentConversation) {
+            conversationToCheck = parentConversation;
+            console.log('✅ [processTaskCompletion] Successfully loaded parent conversation');
         } else {
-            console.log('❌ [processTaskCompletion] Failed to load root conversation');
+            console.log('❌ [processTaskCompletion] Failed to load parent conversation');
         }
     }
 
