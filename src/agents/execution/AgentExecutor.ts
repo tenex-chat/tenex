@@ -353,27 +353,14 @@ Be completely transparent about your internal process. If you made a mistake or 
         messages: Message[],
         _tracingContext: TracingContext
     ): Promise<void> {
-        // Special case: If this is a task completion reactivation, ONLY provide the complete() tool
-        // This prevents the agent from calling other tools like delegate() after completion
-        let allTools: string[];
-        
-        if (context.isTaskCompletionReactivation) {
-            // CRITICAL: Only allow complete() tool during task completion reactivation
-            allTools = ["complete"];
-            logger.info("[AgentExecutor] Task completion mode - limiting tools to complete() only", {
-                agent: context.agent.name,
-                originalTools: context.agent.tools?.length || 0,
-            });
-        } else {
-            // Normal case: Get tools for response processing - use agent's configured tools
-            const tools = context.agent.tools || [];
+        // Get tools for response processing - use agent's configured tools
+        const tools = context.agent.tools || [];
 
-            // Add MCP tools if available and agent has MCP access
-            allTools = tools;
-            if (context.agent.mcp !== false) {
-                const mcpTools = mcpService.getCachedTools();
-                allTools = [...tools, ...mcpTools];
-            }
+        // Add MCP tools if available and agent has MCP access
+        let allTools = tools;
+        if (context.agent.mcp !== false) {
+            const mcpTools = mcpService.getCachedTools();
+            allTools = [...tools, ...mcpTools];
         }
 
         // Add claude_code tool for agents that explicitly have it in their tools list
