@@ -278,19 +278,23 @@ export class AgentExecutor {
             });
             
             const taskCompletionInstruction = `
-=== TASK COMPLETION NOTIFICATION ===
+=== CRITICAL: TASK COMPLETION NOTIFICATION ===
 
-You previously delegated a task to another agent, and that task has now been completed.
-The response from the delegated agent is in the conversation history above.
+STOP! A delegated task has JUST BEEN COMPLETED. The response is in the conversation above.
 
-Your job now is to:
-1. Review the completed task response in the conversation
-2. Use the complete() tool to finalize this interaction and pass the result back
+YOU MUST:
+1. Use ONLY the complete() tool to pass the result back to the user
+2. Do NOT use ANY other tools
+3. Do NOT delegate again - the task is ALREADY DONE
 
-Do NOT re-delegate the same task - it has already been completed.
-Simply acknowledge the completion and use the complete() tool with the result.
+THE TASK IS COMPLETE. DO NOT REPEAT IT.
 
-=== END NOTIFICATION ===`;
+Use EXACTLY ONE tool call: complete() with the result from the conversation above.
+
+DO NOT use delegate(), delegate_phase(), or any other tool.
+ONLY use complete().
+
+=== END CRITICAL NOTIFICATION ===`;
             
             messages.push(new Message("system", taskCompletionInstruction));
             logger.info(`[AgentExecutor] Task completion reactivation mode for ${context.agent.name}`, {
@@ -349,14 +353,27 @@ Be completely transparent about your internal process. If you made a mistake or 
         messages: Message[],
         _tracingContext: TracingContext
     ): Promise<void> {
-        // Get tools for response processing - use agent's configured tools
-        const tools = context.agent.tools || [];
+        // Special case: If this is a task completion reactivation, ONLY provide the complete() tool
+        // This prevents the agent from calling other tools like delegate() after completion
+        let allTools: string[];
+        
+        if (context.isTaskCompletionReactivation) {
+            // CRITICAL: Only allow complete() tool during task completion reactivation
+            allTools = ["complete"];
+            logger.info("[AgentExecutor] Task completion mode - limiting tools to complete() only", {
+                agent: context.agent.name,
+                originalTools: context.agent.tools?.length || 0,
+            });
+        } else {
+            // Normal case: Get tools for response processing - use agent's configured tools
+            const tools = context.agent.tools || [];
 
-        // Add MCP tools if available and agent has MCP access
-        let allTools = tools;
-        if (context.agent.mcp !== false) {
-            const mcpTools = mcpService.getCachedTools();
-            allTools = [...tools, ...mcpTools];
+            // Add MCP tools if available and agent has MCP access
+            allTools = tools;
+            if (context.agent.mcp !== false) {
+                const mcpTools = mcpService.getCachedTools();
+                allTools = [...tools, ...mcpTools];
+            }
         }
 
         // Add claude_code tool for agents that explicitly have it in their tools list

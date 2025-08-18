@@ -242,6 +242,15 @@ export class ReasonActLoop {
                     break;
 
                 case "tool_start":
+                    // Skip tool execution if we've already detected a terminal tool
+                    if (isTerminal) {
+                        tracingLogger.warn("[processIterationStream] Ignoring tool_start after terminal tool", {
+                            ignoredTool: event.tool,
+                            args: event.args,
+                        });
+                        break;
+                    }
+                    
                     hasToolCalls = true;
                     
                     // Check for repetitive tool calls
@@ -291,7 +300,14 @@ export class ReasonActLoop {
                 case "done":
                     if (event.response) {
                         stateManager.setFinalResponse(event.response);
-                        this.handleDoneEvent(event, tracingLogger);
+                        // Log LLM metadata for debugging
+                        tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
+                            hasResponse: !!event.response,
+                            model: event.response.model,
+                            hasUsage: !!event.response.usage,
+                            promptTokens: event.response.usage?.prompt_tokens,
+                            completionTokens: event.response.usage?.completion_tokens,
+                        });
                     }
                     break;
 
@@ -360,24 +376,6 @@ export class ReasonActLoop {
     /**
      * Handle the done event with metadata processing
      */
-    private handleDoneEvent(
-        event: { response?: any },
-        tracingLogger: TracingLogger
-    ): void {
-        tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
-            hasResponse: !!event.response,
-            model: event.response?.model,
-            hasUsage: !!event.response?.usage,
-            promptTokens: event.response?.usage?.prompt_tokens,
-            completionTokens: event.response?.usage?.completion_tokens,
-            cost: event.response?.usage?.total_cost_usd,
-        });
-        
-        // Note: Both complete() and delegate() tools now publish events immediately,
-        // no deferred event processing needed
-    }
-
-
 
     private handleContentEvent(
         event: { content: string },
