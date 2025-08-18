@@ -310,16 +310,24 @@ export class ReasonActLoop {
                             
                             // Handle delegate/delegate_phase tools (highest priority)
                             if ((output.toolType === 'delegate' || output.toolType === 'delegate_phase') && output.serializedEvents) {
-                                tracingLogger.info("[ReasonActLoop] Delegation tool detected - deferring events", {
-                                    tool: event.tool,
-                                    eventCount: output.serializedEvents.length
-                                });
-                                // Delegation always overwrites any previous deferred event
-                                deferredTerminalEvent = {
-                                    type: 'delegate',
-                                    events: output.serializedEvents
-                                };
-                                isTerminal = true;
+                                // Only accept the FIRST delegation - ignore subsequent ones
+                                if (!deferredTerminalEvent || deferredTerminalEvent.type !== 'delegate') {
+                                    tracingLogger.info("[ReasonActLoop] Delegation tool detected - deferring events", {
+                                        tool: event.tool,
+                                        eventCount: output.serializedEvents.length
+                                    });
+                                    deferredTerminalEvent = {
+                                        type: 'delegate',
+                                        events: output.serializedEvents
+                                    };
+                                    isTerminal = true;
+                                } else {
+                                    tracingLogger.warning("[ReasonActLoop] Additional delegation detected but ignoring (only first delegation is used)", {
+                                        tool: event.tool,
+                                        ignoredEventCount: output.serializedEvents.length
+                                    });
+                                    isTerminal = true;
+                                }
                             }
                             // Handle complete tool (only if we don't already have a delegation)
                             else if (output.toolType === 'complete' && output.serializedEvent) {
