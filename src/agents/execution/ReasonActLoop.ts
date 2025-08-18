@@ -244,7 +244,7 @@ export class ReasonActLoop {
                 case "tool_start":
                     // Skip tool execution if we've already detected a terminal tool
                     if (isTerminal) {
-                        tracingLogger.warn("[processIterationStream] Ignoring tool_start after terminal tool", {
+                        tracingLogger.warning("[processIterationStream] Ignoring tool_start after terminal tool", {
                             ignoredTool: event.tool,
                             args: event.args,
                         });
