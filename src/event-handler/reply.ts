@@ -98,9 +98,23 @@ async function findConversationForReply(
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
     if (!conversation && event.tagValue("K") === "1934") {
         const taskId = event.tagValue("E");
+        console.log(`[DEBUG] Checking task mapping for K=1934 event`, {
+            hasConversation: !!conversation,
+            taskId: taskId?.substring(0, 8),
+            eventKind: event.kind,
+            hasTool: event.tagValue("tool"),
+            hasStatus: event.tagValue("status"),
+        });
+        
         if (taskId) {
             // First check if we have a task mapping for this task
             const taskMapping = conversationManager.getTaskMapping(taskId);
+            console.log(`[DEBUG] Task mapping lookup result`, {
+                taskId: taskId.substring(0, 8),
+                hasMapping: !!taskMapping,
+                mappedConversationId: taskMapping?.conversationId?.substring(0, 8),
+            });
+            
             if (taskMapping) {
                 conversation = conversationManager.getConversation(taskMapping.conversationId);
                 mappedClaudeSessionId = taskMapping.claudeSessionId;
@@ -109,8 +123,14 @@ async function findConversationForReply(
                     logInfo(chalk.gray("Found conversation via task mapping: ") + 
                            chalk.cyan(taskMapping.conversationId) + 
                            (mappedClaudeSessionId ? chalk.gray(" with session: ") + chalk.cyan(mappedClaudeSessionId) : ""));
+                } else {
+                    console.log(`[ERROR] Task mapping points to non-existent conversation`, {
+                        taskId: taskId.substring(0, 8),
+                        mappedConversationId: taskMapping.conversationId,
+                    });
                 }
             } else {
+                console.log(`[DEBUG] No task mapping found, falling back to task as conversation root`);
                 // Fallback: The task itself might be the conversation root
                 conversation = conversationManager.getConversation(taskId);
                 
@@ -215,6 +235,13 @@ async function processTaskCompletion(
     // Check if this is a task conversation and we need to look at the root conversation
     let conversationToCheck = conversation;
     const rootTag = event.tags.find(t => t[0] === "e" && t[3] === "root");
+    
+    console.log(`[processTaskCompletion] Conversation check`, {
+        conversationId: conversation.id.substring(0, 8),
+        hasRootTag: !!rootTag,
+        rootTagValue: rootTag?.[1]?.substring(0, 8),
+        isSameAsConversation: rootTag?.[1] === conversation.id,
+    });
     
     if (rootTag && rootTag[1] !== conversation.id) {
         console.log('📍 [processTaskCompletion] This is a task conversation, loading root conversation:', rootTag[1].substring(0, 8));
