@@ -14,6 +14,7 @@ export interface ExecutionContext {
     phase: Phase;
     projectPath: string;
     triggeringEvent: NDKEvent;
+    replyTarget?: NDKEvent;  // Optional: what to reply to (if different from trigger)
     publisher: NostrPublisher;
     conversationManager: ConversationManager;
     previousPhase?: Phase;
@@ -22,7 +23,7 @@ export interface ExecutionContext {
     agentExecutor?: AgentExecutor;
     tracingContext?: TracingContext;
     streamPublisher?: StreamPublisher;
-    setStreamPublisher?: (streamPublisher: StreamPublisher) => void;
+    isTaskCompletionReactivation?: boolean;  // True when agent is reactivated after delegated task completion
 }
 
 export interface AgentExecutionResult {

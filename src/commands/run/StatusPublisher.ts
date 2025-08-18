@@ -1,6 +1,7 @@
 import { STATUS_INTERVAL_MS, STATUS_KIND } from "@/commands/run/constants";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
+import { mcpService } from "@/services/mcp/MCPService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -58,6 +59,7 @@ export class StatusPublisher {
 
             await this.addAgentPubkeys(event, projectPath);
             await this.addModelTags(event, projectPath);
+            await this.addToolTags(event);
 
             // Sign the event with the project's signer
             await event.sign(projectCtx.signer);
@@ -114,6 +116,64 @@ export class StatusPublisher {
             }
         } catch (err) {
             logWarning(`Could not load LLM information for status event model tags: ${formatAnyError(err)}`);
+        }
+    }
+
+    private async addToolTags(event: NDKEvent): Promise<void> {
+        try {
+            if (!isProjectContextInitialized()) {
+                logWarning("ProjectContext not initialized for tool tags");
+                return;
+            }
+
+            const projectCtx = getProjectContext();
+            const toolAgentMap = new Map<string, Set<string>>();
+
+            // Build a map of tool name -> set of agent slugs that have access
+            for (const [agentSlug, agent] of projectCtx.agents) {
+                // Get the agent's configured tools
+                const agentTools = agent.tools || [];
+                
+                for (const tool of agentTools) {
+                    const toolName = tool.name;
+                    if (!toolAgentMap.has(toolName)) {
+                        toolAgentMap.set(toolName, new Set());
+                    }
+                    const toolAgents = toolAgentMap.get(toolName);
+                    if (toolAgents) {
+                        toolAgents.add(agentSlug);
+                    }
+                }
+
+                // If agent has MCP access, add all MCP tools
+                if (agent.mcp) {
+                    try {
+                        const mcpTools = mcpService.getCachedTools();
+                        for (const mcpTool of mcpTools) {
+                            const toolName = mcpTool.name;
+                            if (!toolAgentMap.has(toolName)) {
+                                toolAgentMap.set(toolName, new Set());
+                            }
+                            const toolAgents = toolAgentMap.get(toolName);
+                            if (toolAgents) {
+                                toolAgents.add(agentSlug);
+                            }
+                        }
+                    } catch (err) {
+                        // MCP tools might not be available yet, that's okay
+                        logWarning(`Could not get MCP tools for status event: ${formatAnyError(err)}`);
+                    }
+                }
+            }
+
+            // Convert the map to tool tags
+            for (const [toolName, agentSlugs] of toolAgentMap) {
+                // Create a tool tag with format: ["tool", "<tool-name>", "agent1", "agent2", ...]
+                const agentArray = Array.from(agentSlugs).sort(); // Sort for consistency
+                event.tags.push(["tool", toolName, ...agentArray]);
+            }
+        } catch (err) {
+            logWarning(`Could not add tool tags to status event: ${formatAnyError(err)}`);
         }
     }
 }

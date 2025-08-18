@@ -13,17 +13,11 @@ import { createExecutionLogger, type ExecutionLogger } from "@/logging/Execution
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolStreamHandler } from "./ToolStreamHandler";
 import { TerminationHandler } from "./TerminationHandler";
+import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
 import type { ToolExecutionResult } from "@/tools/executor";
 
 // Maximum iterations to prevent infinite loops
 const MAX_ITERATIONS = 20;
-
-// Track recent tool calls to detect repetition
-interface ToolCallRecord {
-    tool: string;
-    args: string; // JSON stringified for comparison
-    timestamp: number;
-}
 
 /**
  * ReasonActLoop implementation that properly implements the Reason-Act-Observe pattern.
@@ -31,15 +25,13 @@ interface ToolCallRecord {
  */
 export class ReasonActLoop {
     private executionLogger?: ExecutionLogger;
-    private streamingBuffer: Map<string, string> = new Map();
-    private lastLoggedChunk: Map<string, string> = new Map();
-    private recentToolCalls: ToolCallRecord[] = [];
-    private readonly MAX_TOOL_HISTORY = 10;
-    private readonly REPETITION_THRESHOLD = 3;
+    private repetitionDetector: ToolRepetitionDetector;
 
     constructor(
         private llmService: LLMService
-    ) {}
+    ) {
+        this.repetitionDetector = new ToolRepetitionDetector();
+    }
 
     /**
      * ExecutionBackend interface implementation
@@ -89,6 +81,9 @@ export class ReasonActLoop {
         const conversationMessages = [...messages];
         let iterations = 0;
         let isComplete = false;
+        
+        // Create a single StreamPublisher for the entire execution
+        const streamPublisher = this.createStreamPublisher(publisher);
 
         try {
             // Main Reason-Act-Observe loop
@@ -100,16 +95,9 @@ export class ReasonActLoop {
                     messageCount: conversationMessages.length,
                     lastMessage: conversationMessages[conversationMessages.length-1].content.substring(0, 100)
                 });
-
-                // Create and process stream for this iteration
-                const streamPublisher = this.createStreamPublisher(publisher);
-                
-                if (streamPublisher) {
-                    stateManager.setStreamPublisher(streamPublisher);
-                }
                 
                 // Create stream with streamPublisher in context
-                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, stateManager);
+                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, streamPublisher);
 
                 // Process stream events for this iteration
                 const iterationResult = await this.processIterationStream(
@@ -168,12 +156,10 @@ export class ReasonActLoop {
                 // Finalize stream for this iteration
                 // Skip finalization if a terminal tool already published its response
                 if (!iterationResult.isTerminal) {
-                    // Get the current StreamPublisher from stateManager (may have been updated by tools)
-                    const currentStreamPublisher = stateManager.getStreamPublisher() || streamPublisher;
+                    // Finalize the stream (single stable StreamPublisher)
                     await this.finalizeStream(
-                        currentStreamPublisher,
+                        streamPublisher,
                         stateManager,
-                        context,
                         conversationMessages
                     );
                 }
@@ -201,7 +187,7 @@ export class ReasonActLoop {
             yield this.createFinalEvent(stateManager);
 
         } catch (error) {
-            yield* this.handleError(error, publisher, stateManager, tracingLogger, context);
+            yield* this.handleError(error, publisher, tracingLogger, context, streamPublisher);
             throw error;
         }
     }
@@ -230,11 +216,7 @@ export class ReasonActLoop {
         let hasToolCalls = false;
         const toolResults: ToolExecutionResult[] = [];
         let assistantMessage = "";
-        let streamPublisher = initialStreamPublisher;
-        
-        // Initialize streaming buffer for this agent
-        const agentKey = `${context.agent.name}`;
-        this.streamingBuffer.set(agentKey, "");
+        const streamPublisher = initialStreamPublisher;
         
         for await (const event of stream) {
             tracingLogger.debug("[processIterationStream]", {
@@ -263,11 +245,13 @@ export class ReasonActLoop {
                     hasToolCalls = true;
                     
                     // Check for repetitive tool calls
-                    this.checkToolRepetition(
+                    const warningMessage = this.repetitionDetector.checkRepetition(
                         event.tool, 
-                        event.args,
-                        messages
+                        event.args
                     );
+                    if (warningMessage) {
+                        messages.push(new Message("system", warningMessage));
+                    }
                     
                     await toolHandler.handleToolStartEvent(
                         streamPublisher,
@@ -277,8 +261,6 @@ export class ReasonActLoop {
                         tracingLogger,
                         context
                     );
-                    // Update streamPublisher reference if a new one was created
-                    streamPublisher = stateManager.getStreamPublisher() || streamPublisher;
                     break;
 
                 case "tool_complete": {
@@ -309,27 +291,16 @@ export class ReasonActLoop {
                 case "done":
                     if (event.response) {
                         stateManager.setFinalResponse(event.response);
-                        this.handleDoneEvent(event, stateManager, publisher, tracingLogger, context, messages);
+                        this.handleDoneEvent(event, tracingLogger);
                     }
-                    // Clear the streaming line for this agent
-                    this.clearStreamingLog(agentKey);
                     break;
 
                 case "error":
-                    this.handleErrorEvent(event, stateManager, streamPublisher, tracingLogger, context);
-                    // Clear the streaming line for this agent
-                    this.clearStreamingLog(agentKey);
+                    this.handleErrorEvent(event, stateManager, streamPublisher, tracingLogger);
                     break;
             }
         }
 
-        // Only output buffered content to stdout if no terminal tool was used
-        // Terminal tools handle their own output
-        if (!isTerminal && assistantMessage.trim()) {
-            // Output the accumulated content that wasn't part of a terminal tool
-            process.stdout.write(assistantMessage);
-            process.stdout.write('\n');
-        }
         
         return {
             events,
@@ -391,11 +362,7 @@ export class ReasonActLoop {
      */
     private handleDoneEvent(
         event: { response?: any },
-        stateManager: StreamStateManager,
-        publisher: NostrPublisher | undefined,
-        tracingLogger: TracingLogger,
-        context: ExecutionContext,
-        messages: Message[]
+        tracingLogger: TracingLogger
     ): void {
         tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
             hasResponse: !!event.response,
@@ -423,18 +390,15 @@ export class ReasonActLoop {
         // Extract and log reasoning if present
         this.extractAndLogReasoning(stateManager.getFullContent(), context, stateManager);
         
-        // Always use the current StreamPublisher from stateManager
-        // It may have been updated by tool execution
-        const currentStreamPublisher = stateManager.getStreamPublisher() || streamPublisher;
-        currentStreamPublisher?.addContent(event.content);
+        // Add content to the StreamPublisher (single stable instance)
+        streamPublisher?.addContent(event.content);
     }
 
     private handleErrorEvent(
         event: { error: string },
         stateManager: StreamStateManager,
         streamPublisher: StreamPublisher | undefined,
-        tracingLogger: TracingLogger,
-        context?: ExecutionContext
+        tracingLogger: TracingLogger
     ): void {
         tracingLogger.error("Stream error", { error: event.error });
         stateManager.appendContent(`\n\nError: ${event.error}`);
@@ -445,7 +409,6 @@ export class ReasonActLoop {
     private async finalizeStream(
         streamPublisher: StreamPublisher | undefined,
         stateManager: StreamStateManager,
-        context: ExecutionContext,
         messages: Message[]
     ): Promise<void> {
         if (!streamPublisher || streamPublisher.isFinalized()) return;
@@ -474,10 +437,10 @@ export class ReasonActLoop {
         messages: Message[],
         tools?: Tool[],
         publisher?: NostrPublisher,
-        stateManager?: StreamStateManager
+        streamPublisher?: StreamPublisher
     ): ReturnType<LLMService["stream"]> {
         // Log what we're sending to the LLM
-        logger.info("[ReasonActLoop] Calling LLM stream", {
+        logger.debug("[ReasonActLoop] Calling LLM stream", {
             agent: context.agent.name,
             phase: context.phase,
             messageCount: messages.length,
@@ -508,8 +471,7 @@ export class ReasonActLoop {
                 ...context,
                 publisher: publisher || context.publisher,
                 conversationManager: context.conversationManager,
-                streamPublisher: stateManager?.getStreamPublisher(),
-                setStreamPublisher: stateManager ? (sp) => stateManager.setStreamPublisher(sp) : undefined,
+                streamPublisher: streamPublisher,
             },
         });
     }
@@ -538,16 +500,15 @@ export class ReasonActLoop {
     private async *handleError(
         error: unknown,
         publisher: NostrPublisher | undefined,
-        stateManager: StreamStateManager,
         tracingLogger: TracingLogger,
-        context: ExecutionContext
+        context: ExecutionContext,
+        streamPublisher?: StreamPublisher
     ): AsyncGenerator<StreamEvent> {
         tracingLogger.error("Streaming error", {
             error: formatAnyError(error),
             agent: context.agent.name,
         });
 
-        const streamPublisher = stateManager.getStreamPublisher();
         if (streamPublisher && !streamPublisher.isFinalized()) {
             try {
                 await streamPublisher.finalize({});
@@ -604,63 +565,4 @@ export class ReasonActLoop {
         });
     }
 
-    private updateStreamingLog(agentKey: string, content: string): void {
-        // Buffer content for later decision on whether to output
-        // Terminal tools will handle their own output
-        const currentBuffer = this.streamingBuffer.get(agentKey) || "";
-        this.streamingBuffer.set(agentKey, currentBuffer + content);
-    }
-    
-    private clearStreamingLog(agentKey: string): void {
-        // Just clean up and add a newline
-        if (this.streamingBuffer.has(agentKey)) {
-            // Add a newline to separate from next output
-            process.stdout.write('\n');
-            this.streamingBuffer.delete(agentKey);
-            this.lastLoggedChunk.delete(agentKey);
-        }
-    }
-    
-    /**
-     * Check if a tool call is being repeated excessively
-     * Adds a warning message to the conversation if repetition is detected
-     */
-    private checkToolRepetition(
-        tool: string, 
-        args: any,
-        messages: Message[]
-    ): string | null {
-        const argsStr = JSON.stringify(args);
-        const now = Date.now();
-        
-        // Add current call to history
-        this.recentToolCalls.push({ tool, args: argsStr, timestamp: now });
-        
-        // Keep history size limited
-        if (this.recentToolCalls.length > this.MAX_TOOL_HISTORY) {
-            this.recentToolCalls.shift();
-        }
-        
-        // Count similar recent calls (same tool and args within last 10 calls)
-        const similarCalls = this.recentToolCalls.filter(
-            call => call.tool === tool && call.args === argsStr
-        );
-        
-        if (similarCalls.length >= this.REPETITION_THRESHOLD) {
-            // Add a system message to help the agent understand it's stuck
-            const warningMessage = `⚠️ SYSTEM: You have called the '${tool}' tool ${similarCalls.length} times with identical parameters. ` +
-                                 `The tool is working correctly and returning results. ` +
-                                 `Please process the tool output and continue with your task, or try a different approach. ` +
-                                 `Do not call this tool again with the same parameters.`;
-            
-            messages.push(new Message("system", warningMessage));
-            
-            // Don't clear history - keep tracking to detect persistent loops
-            // this.recentToolCalls = [];
-            
-            return warningMessage;
-        }
-        
-        return null;
-    }
 }

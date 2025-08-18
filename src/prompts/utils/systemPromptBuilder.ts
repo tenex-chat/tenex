@@ -128,6 +128,15 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
         projectOwnerPubkey: project.pubkey,
     });
     
+    // Check if this is a delegated task (NDKTask kind 1934)
+    const isDelegatedTask = triggeringEvent?.kind === 1934;
+    if (isDelegatedTask) {
+        // Add special instructions for delegated tasks
+        systemPromptBuilder.add("delegated-task-context", {
+            taskDescription: triggeringEvent?.content || "Complete the assigned task",
+        });
+    }
+    
     // Add available agents for specialists
     systemPromptBuilder.add("specialist-available-agents", {
         agents: availableAgents,

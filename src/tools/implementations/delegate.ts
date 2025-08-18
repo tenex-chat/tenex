@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
-import { getProjectContext } from "@/services/ProjectContext";
+import { DelegationService } from "@/services/DelegationService";
 import { logger } from "@/utils/logger";
-import { NDKTask, NDKUser } from "@nostr-dev-kit/ndk";
-import { getNDK } from "@/nostr/ndkClient";
 
 const delegateSchema = z.object({
     recipients: z
@@ -16,50 +14,6 @@ const delegateSchema = z.object({
         .string()
         .describe("The complete request or question to delegate to the recipient agent(s)"),
 });
-
-/**
- * Resolve a recipient string to a pubkey
- * @param recipient - Agent slug or npub/hex pubkey
- * @returns Pubkey hex string or null if not found
- */
-function resolveRecipientToPubkey(recipient: string): string | null {
-    // Trim whitespace
-    recipient = recipient.trim();
-    
-    // Check if it's an npub
-    if (recipient.startsWith("npub")) {
-        try {
-            return new NDKUser({ npub: recipient }).pubkey;
-        } catch (error) {
-            logger.debug("Failed to decode npub", { recipient, error });
-        }
-    }
-    
-    // Check if it's a hex pubkey (64 characters)
-    if (/^[0-9a-f]{64}$/i.test(recipient)) {
-        return recipient.toLowerCase();
-    }
-    
-    // Try to resolve as agent slug or name (case-insensitive)
-    try {
-        const projectContext = getProjectContext();
-        
-        // Check project agents with case-insensitive matching for both slug and name
-        const recipientLower = recipient.toLowerCase();
-        for (const [slug, agent] of projectContext.agents.entries()) {
-            if (slug.toLowerCase() === recipientLower || 
-                agent.name.toLowerCase() === recipientLower) {
-                return agent.pubkey;
-            }
-        }
-        
-        logger.debug("Agent slug or name not found", { recipient });
-        return null;
-    } catch (error) {
-        logger.debug("Failed to resolve agent slug or name", { recipient, error });
-        return null;
-    }
-}
 
 /**
  * Delegate tool - enables agents to communicate with each other by publishing NDKTask events
@@ -118,113 +72,31 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
             });
         }
         
-        // Resolve all recipients to pubkeys
-        const resolvedPubkeys: string[] = [];
-        const failedRecipients: string[] = [];
-
-        console.log('tool delegate', { ...input.value, recipients })
-        
-        for (const recipient of recipients) {
-            const pubkey = resolveRecipientToPubkey(recipient);
-            if (pubkey) {
-                resolvedPubkeys.push(pubkey);
-            } else {
-                failedRecipients.push(recipient);
-            }
-        }
-        
-        // If any recipients failed to resolve, return error
-        if (failedRecipients.length > 0) {
-            return failure({
-                kind: "execution",
-                tool: "delegate",
-                message: `Cannot resolve recipient(s) to pubkey: ${failedRecipients.join(", ")}. Must be valid agent slug(s), npub(s), or hex pubkey(s).`,
-            });
-        }
-        
-        // If no valid recipients, return error
-        if (resolvedPubkeys.length === 0) {
-            return failure({
-                kind: "execution",
-                tool: "delegate",
-                message: "No valid recipients provided.",
-            });
-        }
-        
         try {
-            // Create and publish NDKTask events for each recipient immediately
-            const taskIds: string[] = [];
-            const tasks = new Map<string, { recipientPubkey: string; status: string }>();
-            
-            for (const recipientPubkey of resolvedPubkeys) {
-                // Create a new NDKTask for this specific recipient
-                const task = new NDKTask(getNDK());
-                task.content = fullRequest;
-                task.tags = [
-                    ["p", recipientPubkey],  // Assign to this agent
-                    ["e", context.conversationId, "", "root"],  // Link to conversation (conversation ID is the root event ID)
-                    ["title", title],  // Task title for better organization
-                ];
-                
-                // Sign and publish immediately
-                await task.sign(context.agent.signer);
-                await task.publish();
-                
-                // Track this task
-                taskIds.push(task.id);
-                tasks.set(task.id, {
-                    recipientPubkey,
-                    status: "pending"
-                });
-                
-                logger.debug("Published NDKTask immediately", {
-                    taskId: task.id,
-                    fromAgent: context.agent.slug,
-                    toAgent: recipientPubkey,
-                });
-            }
-            
-            // Update agent's state to track pending delegation with task IDs
-            if (context.conversationManager) {
-                await context.conversationManager.updateAgentState(
-                    context.conversationId,
-                    context.agent.slug,
-                    {
-                        pendingDelegation: {
-                            taskIds: taskIds,
-                            tasks: tasks,
-                            originalRequest: fullRequest,
-                            timestamp: Date.now(),
-                        }
-                    }
-                );
-                
-                logger.info("Delegation state set - agent waiting for task completions", {
-                    fromAgent: context.agent.slug,
-                    waitingForTasks: taskIds.length,
-                    taskIds: taskIds,
-                });
-            }
-            
-            logger.info("NDKTask events published immediately", {
-                fromAgent: context.agent.slug,
-                toRecipients: recipients,
-                toPubkeys: resolvedPubkeys,
-                taskCount: taskIds.length,
-                requestLength: fullRequest.length,
-            });
+            // Use DelegationService to handle all delegation logic
+            const result = await DelegationService.createDelegationTasks(
+                {
+                    recipients,
+                    title,
+                    fullRequest
+                },
+                {
+                    agent: context.agent,
+                    conversationId: context.conversationId,
+                    conversationManager: context.conversationManager
+                }
+            );
             
             // The agent will be reactivated when all tasks complete.
             // This is handled in the event handler when task completion events arrive.
             
-            // Return success without serialized events since we published immediately
             return success({
                 success: true,
-                recipientPubkeys: resolvedPubkeys,
-                taskIds: taskIds,
+                recipientPubkeys: result.recipientPubkeys,
+                taskIds: result.taskIds,
             });
         } catch (error) {
-            logger.error("Failed to publish NDKTask events", {
+            logger.error("Failed to create delegation tasks", {
                 fromAgent: context.agent.slug,
                 toRecipients: recipients,
                 error,
@@ -233,7 +105,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
             return failure({
                 kind: "execution",
                 tool: "delegate",
-                message: `Failed to publish NDKTask events: ${error instanceof Error ? error.message : String(error)}`,
+                message: error instanceof Error ? error.message : String(error),
             });
         }
     },

@@ -4,7 +4,6 @@
 
 import type { Tool, ToolError, Validated } from "./core";
 import type { ExecutionContext } from "./types";
-import type { StreamPublisher } from "@/nostr/NostrPublisher";
 import { logger } from "@/utils/logger";
 import { formatAnyError } from "@/utils/error-formatter";
 
@@ -37,13 +36,6 @@ export interface ToolExecutionResult<T = unknown> {
  */
 export class ToolExecutor {
     constructor(private readonly context: ExecutionContext) {}
-
-    /**
-     * Set or update the StreamPublisher in the context
-     */
-    setStreamPublisher(streamPublisher: StreamPublisher | undefined): void {
-        this.context.streamPublisher = streamPublisher;
-    }
 
     /**
      * Execute a tool with the given input

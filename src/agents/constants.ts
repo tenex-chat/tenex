@@ -5,6 +5,7 @@ import { readPathTool } from "../tools/implementations/readPath";
 import { completeTool } from "../tools/implementations/complete";
 import { delegateTool } from "../tools/implementations/delegate";
 import { PROJECT_MANAGER_AGENT_DEFINITION } from "./built-in/project-manager";
+import { claudeCode } from "@/tools/implementations/claude_code";
 
 // Agent slug constants
 export const PROJECT_MANAGER_AGENT = "project-manager" as const;
@@ -18,17 +19,24 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     const tools = [
         readPathTool.name, 
         lessonLearnTool.name, 
-        analyze.name,
+        // analyze.name,
+        claudeCode.name,
         completeTool.name,  // All agents can complete tasks
         delegateTool.name    // All agents can delegate to others
     ];
 
-    // Special handling for project manager - ADD to defaults, don't replace
-    if (agent.slug === PROJECT_MANAGER_AGENT && PROJECT_MANAGER_AGENT_DEFINITION.tools) {
+    // Special handling for project manager - ADD PM-specific tools
+    if (agent.slug === PROJECT_MANAGER_AGENT) {
         // Add PM-specific tools to the base set
-        const pmSpecificTools = PROJECT_MANAGER_AGENT_DEFINITION.tools.filter(
-            tool => !tools.includes(tool)
-        );
+        const pmSpecificTools = [
+            "write_context_file",
+            "shell",
+            "discover_capabilities",
+            "agents_hire",
+            "agents_discover",
+            "nostr_projects",
+            "delegate_phase", // EXCLUSIVE to PM - combines phase switching with delegation
+        ].filter(tool => !tools.includes(tool));
         tools.push(...pmSpecificTools);
     }
 

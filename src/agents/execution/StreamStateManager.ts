@@ -1,6 +1,5 @@
 import type { ToolExecutionResult, Complete } from "@/tools/types";
 import type { CompletionResponse } from "@/llm/types";
-import type { StreamPublisher } from "@/nostr/NostrPublisher";
 
 /**
  * Represents the mutable state during stream processing
@@ -10,7 +9,6 @@ export interface StreamingState {
     termination: Complete | undefined;
     finalResponse: CompletionResponse | undefined;
     fullContent: string;
-    streamPublisher: StreamPublisher | undefined;
     startedTools: Set<string>;
     loggedThinkingBlocks: Set<string>;
 }
@@ -35,7 +33,6 @@ export class StreamStateManager {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
             startedTools: new Set<string>(),
             loggedThinkingBlocks: new Set<string>(),
         };
@@ -128,19 +125,6 @@ export class StreamStateManager {
         return this.state.finalResponse;
     }
 
-    /**
-     * Set the stream publisher
-     */
-    setStreamPublisher(publisher: StreamPublisher): void {
-        this.state.streamPublisher = publisher;
-    }
-
-    /**
-     * Get the stream publisher
-     */
-    getStreamPublisher(): StreamPublisher | undefined {
-        return this.state.streamPublisher;
-    }
 
     /**
      * Mark a tool as started

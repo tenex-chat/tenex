@@ -5,7 +5,8 @@ import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema } from "../types";
-import { NDKArticle, NDKUser } from "@nostr-dev-kit/ndk";
+import { NDKArticle, NDKUser, NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKProjectStatus } from "@/events/NDKProjectStatus";
 
 // Define schema that gracefully handles no arguments, empty strings, or optional pubkey
 // This handles cases where LLMs send "", {}, or {pubkey: "..."} 
@@ -131,7 +132,7 @@ Use this to understand what projects exist for a given user or the current proje
                 // Fetch 24010 events (project status - online agents)
                 // Only get status events from the last minute to determine if online
                 ndk.fetchEvents({
-                    kinds: [24010 as any],  // Cast to any since NDKKind doesn't include 24010 yet
+                    kinds: [NDKProjectStatus.kind],
                     "#p": [targetPubkey],
                     since: oneMinuteAgo,
                 }),
@@ -142,32 +143,31 @@ Use this to understand what projects exist for a given user or the current proje
             
             // Process status events to find online agents
             Array.from(statusEvents).forEach(event => {
-                // Get the project reference from the "a" tag (this identifies which project the status is for)
-                const projectTagId = event.tagValue("a");
+                // Convert to NDKProjectStatus for type safety
+                const statusEvent = NDKProjectStatus.from(event);
+                
+                // Get the project reference
+                const projectTagId = statusEvent.projectReference;
                 if (projectTagId) {
-                    // Get agent tags from the 24010 event
-                    const agentTags = event.tags.filter(tag => tag[0] === "agent");
-                    const agents: Record<string, string> = {};
+                    // Get agents from the status event
+                    const agents = statusEvent.agents;
+                    const agentsMap: Record<string, string> = {};
                     
-                    agentTags.forEach(tag => {
-                        // agent tag format: ["agent", "<pubkey>", "<slug>"]
-                        if (tag.length >= 3) {
-                            const [, agentPubkey, agentSlug] = tag;
-                            // Convert pubkey to npub format
-                            const agentUser = new NDKUser({ pubkey: agentPubkey });
-                            agents[agentSlug] = agentUser.npub;
-                        }
+                    agents.forEach(({ pubkey, slug }) => {
+                        // Convert pubkey to npub format
+                        const agentUser = new NDKUser({ pubkey });
+                        agentsMap[slug] = agentUser.npub;
                     });
                     
                     // Store agents for this specific project using its tagId as the key
-                    if (Object.keys(agents).length > 0) {
-                        onlineAgentsByProject.set(projectTagId, agents);
+                    if (Object.keys(agentsMap).length > 0) {
+                        onlineAgentsByProject.set(projectTagId, agentsMap);
                     }
                 }
             });
 
             // Once we have the list of projects, fetch spec documents that tag them
-            let specArticles: any[] = [];
+            let specArticles: NDKEvent[] = [];
             if (projectEvents.size > 0) {
                 // Create array of project tag IDs for fetching articles
                 const projectTagIds = Array.from(projectEvents).map(projectEvent => {

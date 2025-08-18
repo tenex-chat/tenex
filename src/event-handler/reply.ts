@@ -1,4 +1,4 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKTask, type NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ExecutionConfig } from "../agents/execution/constants";
@@ -20,6 +20,7 @@ interface EventHandlerContext {
 interface TaskCompletionResult {
     shouldReactivate: boolean;
     targetAgent?: AgentInstance;
+    replyTarget?: NDKEvent;
 }
 
 /**
@@ -74,6 +75,26 @@ async function findConversationForReply(
     let conversation = convRoot ? conversationManager.getConversationByEvent(convRoot) : undefined;
     let mappedClaudeSessionId: string | undefined;
 
+    // Check if this is a task completion that should route to parent conversation
+    if (event.tagValue("K") === "1934" && 
+        event.tagValue("status") === "complete" && 
+        event.tagValue("tool") === "complete") {
+        const taskId = event.tagValue("E");
+        if (taskId) {
+            // Check if we have a task mapping to route to parent conversation
+            const taskMapping = conversationManager.getTaskMapping(taskId);
+            if (taskMapping) {
+                const parentConversation = conversationManager.getConversation(taskMapping.conversationId);
+                if (parentConversation) {
+                    conversation = parentConversation;
+                    mappedClaudeSessionId = taskMapping.claudeSessionId;
+                    logInfo(chalk.cyan("Task completion routed to parent conversation: ") + 
+                           chalk.yellow(taskMapping.conversationId.substring(0, 8)));
+                }
+            }
+        }
+    }
+    
     // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
     if (!conversation && event.tagValue("K") === "1934") {
         const taskId = event.tagValue("E");
@@ -183,57 +204,154 @@ async function processTaskCompletion(
     conversation: Conversation,
     conversationManager: ConversationManager
 ): Promise<TaskCompletionResult> {
-    const taskId = event.tags.find(tag => tag[0] === "e" && tag[3] === "reply")?.[1];
+    const taskId = event.tagValue("E");
+    console.log('🔍 [processTaskCompletion] Task ID from E tag:', taskId?.substring(0, 8) || 'NONE');
     
     if (!taskId) {
+        console.log('❌ [processTaskCompletion] No task ID found in E tag - aborting');
         return { shouldReactivate: false };
     }
 
-    const projectCtx = getProjectContext();
+    // Check if this is a task conversation and we need to look at the root conversation
+    let conversationToCheck = conversation;
+    const rootTag = event.tags.find(t => t[0] === "e" && t[3] === "root");
+    
+    if (rootTag && rootTag[1] !== conversation.id) {
+        console.log('📍 [processTaskCompletion] This is a task conversation, loading root conversation:', rootTag[1].substring(0, 8));
+        const rootConversation = await conversationManager.getConversation(rootTag[1]);
+        if (rootConversation) {
+            conversationToCheck = rootConversation;
+            console.log('✅ [processTaskCompletion] Successfully loaded root conversation');
+        } else {
+            console.log('❌ [processTaskCompletion] Failed to load root conversation');
+        }
+    }
+
+    // Log what delegations exist in the conversation we're checking
+    const delegationInfo = Array.from(conversationToCheck.agentStates.entries())
+        .filter(([_, state]) => state.pendingDelegation)
+        .map(([agentSlug, state]) => ({
+            agent: agentSlug,
+            taskCount: state.pendingDelegation?.taskIds?.length || 0,
+            taskIds: state.pendingDelegation?.taskIds?.map(id => id.substring(0, 8)) || [],
+            fullTaskIds: state.pendingDelegation?.taskIds || []
+        }));
+    
+    console.log('🔍 [processTaskCompletion] Active delegations found:', delegationInfo.length);
+    if (delegationInfo.length > 0) {
+        console.log('📋 Active delegation details:', JSON.stringify(delegationInfo, null, 2));
+        logInfo(chalk.cyan(`Processing task completion ${taskId.substring(0, 8)} for conversation ${conversationToCheck.id.substring(0, 8)}`));
+        logInfo(chalk.cyan(`Active delegations:`), delegationInfo);
+    } else {
+        console.log('⚠️ [processTaskCompletion] NO active delegations found in conversation');
+    }
     
     // Check all agents for pending delegations that include this task
-    for (const [agentSlug, agentState] of conversation.agentStates.entries()) {
-        if (!agentState.pendingDelegation?.taskIds?.includes(taskId)) {
+    let foundMatchingAgent = false;
+    for (const [agentSlug, agentState] of conversationToCheck.agentStates.entries()) {
+        if (!agentState.pendingDelegation) {
+            console.log(`  ↳ No pending delegation for ${agentSlug}`);
+            continue;
+        }
+        
+        console.log(`  ↳ ${agentSlug} has pending delegation with ${agentState.pendingDelegation.taskIds?.length || 0} tasks`);
+        console.log(`  ↳ Task IDs:`, agentState.pendingDelegation.taskIds?.map(id => id.substring(0, 8)));
+        
+        const taskIncluded = agentState.pendingDelegation.taskIds?.includes(taskId);
+        console.log(`  ↳ Does ${agentSlug} include task ${taskId.substring(0, 8)}? ${taskIncluded}`);
+        
+        if (!taskIncluded) {
             continue;
         }
 
+        foundMatchingAgent = true;
+        console.log(`✅ [processTaskCompletion] Found matching agent: ${agentSlug}`);
+
         // Update the task status
         const task = agentState.pendingDelegation.tasks?.get(taskId);
+        console.log(`🔍 [processTaskCompletion] Task object exists in Map?`, task !== undefined);
+        
         if (task) {
+            console.log(`  ↳ Previous status: ${task.status}`);
             task.status = "complete";
             task.response = event.content;
+            console.log(`  ↳ Updated status to: complete`);
+        } else {
+            console.log(`⚠️ Task ${taskId.substring(0, 8)} not found in tasks Map for ${agentSlug}`);
         }
         
         // Check if all tasks are complete
+        console.log(`🔍 [processTaskCompletion] Checking if all tasks are complete for ${agentSlug}...`);
+        const taskStatusDetails = agentState.pendingDelegation.taskIds.map(tid => {
+            const t = agentState.pendingDelegation?.tasks?.get(tid);
+            return {
+                id: tid.substring(0, 8),
+                status: t?.status || 'NOT_FOUND',
+                hasTask: t !== undefined
+            };
+        });
+        console.log(`  ↳ Task status details:`, JSON.stringify(taskStatusDetails, null, 2));
+        
         const allComplete = agentState.pendingDelegation.taskIds.every(tid => {
             const t = agentState.pendingDelegation?.tasks?.get(tid);
-            return t?.status === "complete";
+            const isComplete = t?.status === "complete";
+            console.log(`    - Task ${tid.substring(0, 8)}: ${isComplete ? 'COMPLETE' : `INCOMPLETE (status: ${t?.status || 'NOT_FOUND'})`}`);
+            return isComplete;
         });
         
+        console.log(`📊 [processTaskCompletion] All tasks complete for ${agentSlug}? ${allComplete}`);
+        
         if (allComplete) {
+            console.log(`🎉 [processTaskCompletion] All tasks complete! Calling synthesizeAndReactivate for ${agentSlug}`);
             // Clear delegation state - no need to reactivate since
             // the complete() tool now properly tags the main conversation
             const result = await synthesizeAndReactivate(
                 agentState,
                 agentSlug,
-                conversation,
-                conversationManager,
-                event,
-                projectCtx
+                conversationToCheck,  // Use the root conversation, not the task conversation
+                conversationManager
             );
+            console.log(`🔍 [processTaskCompletion] synthesizeAndReactivate returned:`, {
+                shouldReactivate: result.shouldReactivate,
+                targetAgent: result.targetAgent ? {
+                    name: result.targetAgent.name,
+                    pubkey: result.targetAgent.pubkey
+                } : undefined,
+                replyTarget: result.replyTarget?.id?.substring(0, 8)
+            });
             return result;
         } else {
-            // Log progress
+            // Log progress with detailed task information
             const completedCount = agentState.pendingDelegation.taskIds.filter(tid => 
                 agentState.pendingDelegation?.tasks?.get(tid)?.status === "complete"
             ).length;
             const remainingCount = agentState.pendingDelegation.taskIds.length - completedCount;
             
-            logInfo(chalk.gray(`Task ${taskId} completed. Waiting for ${remainingCount} more tasks.`));
+            console.log(`⏳ [processTaskCompletion] Progress: ${completedCount}/${agentState.pendingDelegation.taskIds.length} tasks complete`);
+            
+            // Show detailed task status
+            const taskStatuses = agentState.pendingDelegation.taskIds.map(tid => {
+                const task = agentState.pendingDelegation?.tasks?.get(tid);
+                return {
+                    id: tid.substring(0, 8),
+                    status: task?.status || 'unknown',
+                    delegatedTo: task?.delegatedAgent || 'unknown'
+                };
+            });
+            
+            logInfo(chalk.gray(`Task ${taskId.substring(0, 8)} completed. Waiting for ${remainingCount} more tasks.`));
+            logInfo(chalk.gray(`Task statuses for ${agentSlug}:`), taskStatuses);
+            
             return { shouldReactivate: false };
         }
     }
+    
+    if (!foundMatchingAgent) {
+        console.log(`❌ [processTaskCompletion] No agent found with task ${taskId.substring(0, 8)} in their pending delegation`);
+    }
 
+
+    
     return { shouldReactivate: false };
 }
 
@@ -244,24 +362,66 @@ async function synthesizeAndReactivate(
     agentState: AgentState,
     agentSlug: string,
     conversation: Conversation,
-    conversationManager: ConversationManager,
-    event: NDKEvent,
-    projectCtx: ReturnType<typeof getProjectContext>
+    conversationManager: ConversationManager
 ): Promise<TaskCompletionResult> {
+    console.log(`🔍 [synthesizeAndReactivate] START for agent ${agentSlug}`);
+    
     if (!agentState.pendingDelegation) {
+        console.log(`⚠️ [synthesizeAndReactivate] No pending delegation for ${agentSlug} - returning false`);
         return { shouldReactivate: false };
     }
     
+    console.log(`📋 [synthesizeAndReactivate] Delegation details before clearing:`, {
+        agent: agentSlug,
+        taskCount: agentState.pendingDelegation.taskIds?.length,
+        taskIds: agentState.pendingDelegation.taskIds?.map(id => id.substring(0, 8))
+    });
+    
     // Clear the pending delegation
     delete agentState.pendingDelegation;
-    await conversationManager.updateAgentState(conversation.id, agentSlug, agentState);
+    console.log(`✅ [synthesizeAndReactivate] Cleared pending delegation from agent state`);
     
-    // No need for synthetic events anymore - the complete() tool now properly
-    // tags both the task and the root conversation, so the delegating agent
-    // will naturally see the completion in the main thread
+    await conversationManager.updateAgentState(conversation.id, agentSlug, agentState);
+    console.log(`✅ [synthesizeAndReactivate] Updated agent state in conversation manager`);
+    
+    // Find the original user request to use as reply target
+    const projectCtx = getProjectContext();
+    const agentPubkeys = new Set(
+        Array.from(projectCtx.agents.values()).map(a => a.pubkey)
+    );
+    
+    // Also exclude the project pubkey (which may not be in agents list)
+    agentPubkeys.add(projectCtx.pubkey);
+    
+    // Find first non-agent event (the original user request)
+    const originalUserEvent = conversation.history?.find(
+        e => !agentPubkeys.has(e.pubkey)
+    );
+    
+    if (originalUserEvent) {
+        console.log(`📍 [synthesizeAndReactivate] Found original user event to reply to:`, {
+            eventId: originalUserEvent.id?.substring(0, 8),
+            userPubkey: originalUserEvent.pubkey?.substring(0, 8),
+            content: originalUserEvent.content?.substring(0, 50)
+        });
+    } else {
+        console.log(`⚠️ [synthesizeAndReactivate] No original user event found in conversation`, {
+            conversationId: conversation.id.substring(0, 8),
+            eventCount: conversation.history?.length || 0,
+            agentPubkeys: Array.from(agentPubkeys).map(p => p.substring(0, 8))
+        });
+    }
+    
+    const targetAgent = projectCtx.getAgent(agentSlug);
+    
     logInfo(chalk.green(`All tasks completed for ${agentSlug}. Delegation cleared.`));
     
-    return { shouldReactivate: false };
+    console.log(`🔍 [synthesizeAndReactivate] Returning shouldReactivate: true with reply target`);
+    return { 
+        shouldReactivate: true,
+        targetAgent,
+        replyTarget: originalUserEvent
+    };
 }
 
 /**
@@ -372,7 +532,7 @@ async function handleReplyLogic(
 
     // Determine which agent should handle this event
     let targetAgent = determineTargetAgent(event, mentionedPubkeys, projectManager);
-    let processedEvent = event;
+    const processedEvent = event;
 
     // Skip if the target agent is the same as the sender (prevent self-reply loops)
     if (targetAgent.pubkey === event.pubkey) {
@@ -389,19 +549,36 @@ async function handleReplyLogic(
     }
 
     // Check if this is a task completion event
-    const isTaskCompletion = event.tagValue("status") === "complete" && 
-                             event.tags.some(tag => tag[0] === "e" && tag[3] === "reply");
+    const isTaskCompletion = (
+        event.tagValue("status") === "complete" && 
+        event.tags.some(tag => tag[0] === "e" && tag[3] === "reply")
+    ) || (
+        // if it's an event p-tagging the author of the root event and the root event is a task
+        event.tagValue("K") === NDKTask.kind.toString() && event.tagValue("P") === event.tagValue("p")
+    )
+
+    console.log({ isTaskCompletion });
+    console.log(event.inspect);
+    
+    let replyTarget: NDKEvent | undefined;
+    let taskCompletionResult: TaskCompletionResult | undefined;
     
     if (isTaskCompletion) {
-        const result = await processTaskCompletion(event, conversation, conversationManager);
+        taskCompletionResult = await processTaskCompletion(event, conversation, conversationManager);
         
-        if (!result.shouldReactivate) {
+        if (!taskCompletionResult.shouldReactivate) {
+            console.log("Still waiting for more completions or all complete", taskCompletionResult);
             // Still waiting for more completions or all complete
             return;
         }
         
-        if (result.targetAgent) {
-            targetAgent = result.targetAgent;
+        if (taskCompletionResult.targetAgent) {
+            targetAgent = taskCompletionResult.targetAgent;
+        }
+        
+        if (taskCompletionResult.replyTarget) {
+            replyTarget = taskCompletionResult.replyTarget;
+            logInfo(chalk.cyan(`Task completion will reply to original user event: ${replyTarget.id?.substring(0, 8)}`));
         }
     }
     
@@ -422,15 +599,19 @@ async function handleReplyLogic(
         phase: conversation.phase,
         projectPath: process.cwd(),
         triggeringEvent: processedEvent,
+        replyTarget: replyTarget,  // Pass the reply target if we have one
         publisher: new NostrPublisher({
             conversationId: conversation.id,
             agent: targetAgent,
-            triggeringEvent: processedEvent,
+            triggeringEvent: processedEvent,  // Keep the actual triggering event
+            replyTarget: replyTarget,  // Pass the reply target separately
             conversationManager,
         }),
         conversationManager,
         claudeSessionId,
         agentExecutor, // Pass the executor so continue() can use it
+        // Add flag to indicate this is a reactivation after task completion
+        isTaskCompletionReactivation: isTaskCompletion && taskCompletionResult?.shouldReactivate,
     };
 
     // Add handoff if available

@@ -103,9 +103,6 @@ export class ToolStreamHandler {
                 tool: toolName,
                 hasPublisher: !!publisher,
             });
-            
-            // Note: We no longer publish typing indicators here since ToolPlugin.execute()
-            // handles all tool announcements via streamPublisher.toolUse()
         }
     }
 

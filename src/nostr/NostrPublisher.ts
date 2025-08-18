@@ -19,6 +19,7 @@ export interface NostrPublisherContext {
     conversationId: string;
     agent: AgentInstance;
     triggeringEvent: NDKEvent;
+    replyTarget?: NDKEvent;  // Optional: what to reply to (if different from trigger)
     conversationManager: ConversationManager;
 }
 
@@ -103,9 +104,10 @@ export class NostrPublisher {
             });
 
             // Add p-tags for destination pubkeys if provided
-            // If no destination pubkeys provided, default to the triggering event's author
-            // This ensures agents respond to whoever triggered them (user or another agent)
-            const destinationPubkeys = options.destinationPubkeys || [this.context.triggeringEvent.pubkey];
+            // If no destination pubkeys provided, default to the reply target's author (if available)
+            // or the triggering event's author. This ensures agents respond to the right person.
+            const defaultPubkey = this.context.replyTarget?.pubkey || this.context.triggeringEvent.pubkey;
+            const destinationPubkeys = options.destinationPubkeys || [defaultPubkey];
             
             for (const pubkey of destinationPubkeys) {
                 reply.tag(["p", pubkey]);
@@ -281,15 +283,18 @@ export class NostrPublisher {
 
     // Public helper methods (made public for handleAgentCompletion)
     public createBaseReply(): NDKEvent {
-        const reply = this.context.triggeringEvent.reply();
+        // Use replyTarget if available, otherwise use triggeringEvent
+        const eventToReplyTo = this.context.replyTarget || this.context.triggeringEvent;
+        const reply = eventToReplyTo.reply();
 
-        // When the triggering event has E tag, replace e tag with E tag value
-        const ETag = this.context.triggeringEvent.tagValue("E");
+        // When the event to reply to has E tag, replace e tag with E tag value
+        const ETag = eventToReplyTo.tagValue("E");
         if (ETag) {
             reply.removeTag("e");
             reply.tags.push(["e", ETag]);
         }
 
+        // Still tag the actual triggering event for debugging
         reply.tags.push(["triggering-event-id", this.context.triggeringEvent.id]);
         reply.tags.push([
             "triggering-event-content",
@@ -306,7 +311,7 @@ export class NostrPublisher {
 
         // Always add project tag
         const { project } = getProjectContext();
-        event.tag(project);
+        event.tag(project.tagReference());
 
         // Always add current phase tag from the single source of truth
         const currentPhase = conversation.phase;
@@ -347,7 +352,7 @@ export class NostrPublisher {
         });
 
         event.tag(["llm-model", metadata.model]);
-        event.tag(["llm-cost-usd", metadata.cost.toString()]);
+        event.tag(["llm-cost-usd", metadata.cost.toFixed(8)]);
         event.tag(["llm-prompt-tokens", metadata.promptTokens.toString()]);
         event.tag(["llm-completion-tokens", metadata.completionTokens.toString()]);
         event.tag(["llm-total-tokens", metadata.totalTokens.toString()]);
@@ -491,10 +496,11 @@ export class StreamPublisher {
     }
 
     async finalize(metadata: FinalizeMetadata): Promise<NDKEvent | undefined> {
+        const accumulatedContent = this.getAccumulatedContent();
         logger.info("[DEBUG StreamPublisher.finalize] Called", {
             hasFinalized: this.hasFinalized,
-            accumulatedContent: this.accumulatedContent.substring(0, 200),
-            accumulatedContentLength: this.accumulatedContent.length,
+            accumulatedContent: accumulatedContent.substring(0, 200),
+            accumulatedContentLength: accumulatedContent.length,
             pendingContent: this.pendingContent.substring(0, 100),
             pendingContentLength: this.pendingContent.length,
             scheduledContent: this.scheduledContent.substring(0, 100),
@@ -597,7 +603,7 @@ export class StreamPublisher {
      */
     async toolUse(message?: string): Promise<void> {
         const currentContent = this.currentSegment.getContent();
-        logger.info("[StreamPublisher.toolUse] Tool about to execute", {
+        logger.debug("[StreamPublisher.toolUse] Tool about to execute", {
             message: message || "(no message - tool use event skipped)",
             hasCurrentSegmentContent: this.currentSegment.hasContent(),
             isFinalized: this.hasFinalized,

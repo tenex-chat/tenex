@@ -216,7 +216,7 @@ export class TaskPublisher {
         }
 
         // Add project tag
-        progressUpdate.tag(projectCtx.project);
+        progressUpdate.tag(projectCtx.project.tagReference());
 
         // Sign with the agent's signer
         await progressUpdate.sign(this.agent.signer);

@@ -19,7 +19,7 @@ export function isEventFromAgent(event: NDKEvent): boolean {
     }
 
     // Check if it's from any of the registered agents
-    for (const [_, agent] of projectCtx.agents) {
+    for (const agent of projectCtx.agents.values()) {
         if (agent.pubkey === event.pubkey) {
             return true;
         }
@@ -100,7 +100,7 @@ export function addConversationTags(
  */
 export function addLLMMetadataTags(event: NDKEvent, metadata: LLMMetadata): void {
     event.tag([LLM_TAGS.MODEL, metadata.model]);
-    event.tag([LLM_TAGS.COST_USD, metadata.cost.toString()]);
+    event.tag([LLM_TAGS.COST_USD, metadata.cost.toFixed(8)]);
     event.tag([LLM_TAGS.PROMPT_TOKENS, metadata.promptTokens.toString()]);
     event.tag([LLM_TAGS.COMPLETION_TOKENS, metadata.completionTokens.toString()]);
     event.tag([LLM_TAGS.TOTAL_TOKENS, metadata.totalTokens.toString()]);

@@ -266,6 +266,39 @@ export class AgentExecutor {
             ));
         }
 
+        // Add special instruction if this is a reactivation after task completion
+        if (context.isTaskCompletionReactivation) {
+            logger.info("[AgentExecutor] Agent reactivated after task completion", {
+                agent: context.agent.name,
+                hasReplyTarget: !!context.replyTarget,
+                replyTargetId: context.replyTarget?.id?.substring(0, 8),
+                replyTargetPubkey: context.replyTarget?.pubkey?.substring(0, 8),
+                triggeringEventId: context.triggeringEvent?.id?.substring(0, 8),
+                triggeringEventPubkey: context.triggeringEvent?.pubkey?.substring(0, 8),
+            });
+            
+            const taskCompletionInstruction = `
+=== TASK COMPLETION NOTIFICATION ===
+
+You previously delegated a task to another agent, and that task has now been completed.
+The response from the delegated agent is in the conversation history above.
+
+Your job now is to:
+1. Review the completed task response in the conversation
+2. Use the complete() tool to finalize this interaction and pass the result back
+
+Do NOT re-delegate the same task - it has already been completed.
+Simply acknowledge the completion and use the complete() tool with the result.
+
+=== END NOTIFICATION ===`;
+            
+            messages.push(new Message("system", taskCompletionInstruction));
+            logger.info(`[AgentExecutor] Task completion reactivation mode for ${context.agent.name}`, {
+                conversationId: context.conversationId,
+                agentSlug: context.agent.slug
+            });
+        }
+
         // Check for #debug flag in triggering event content
         const hasDebugFlag = context.triggeringEvent?.content?.includes("#debug");
         if (hasDebugFlag) {

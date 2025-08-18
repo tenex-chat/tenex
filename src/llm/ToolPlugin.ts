@@ -205,18 +205,10 @@ export class ToolPlugin extends Plugin {
                     ? this.getToolDescription(this.tool.name, normalizedParameters as Record<string, unknown>)
                     : undefined;
                     
-                const newStreamPublisher = await this.tenexContext.streamPublisher.toolUse(toolMessage);
+                // Call toolUse to finalize current segment and start a new one
+                await this.tenexContext.streamPublisher.toolUse(toolMessage);
                 
-                // Update the context with the new StreamPublisher
-                this.tenexContext.streamPublisher = newStreamPublisher;
-                this.executor.setStreamPublisher(newStreamPublisher);
-                
-                // Also update via callback if available
-                if (this.tenexContext.setStreamPublisher) {
-                    this.tenexContext.setStreamPublisher(newStreamPublisher);
-                }
-                
-                logger.debug(`[ToolPlugin] StreamPublisher updated after toolUse`, {
+                logger.debug(`[ToolPlugin] StreamPublisher segment switched after toolUse`, {
                     tool: this.tool.name,
                     message: toolMessage,
                     shouldPublishToolUse,

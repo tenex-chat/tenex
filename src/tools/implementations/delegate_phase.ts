@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
-import { getProjectContext } from "@/services/ProjectContext";
+import { DelegationService } from "@/services/DelegationService";
 import { logger } from "@/utils/logger";
-import { NDKTask, NDKUser } from "@nostr-dev-kit/ndk";
-import { getNDK } from "@/nostr/ndkClient";
 import { PHASES, type Phase } from "@/conversations/phases";
 
 const delegatePhaseSchema = z.object({
@@ -26,50 +24,6 @@ const delegatePhaseSchema = z.object({
         .string()
         .describe("The complete request or question to delegate - this becomes the phase reason and delegation content"),
 });
-
-/**
- * Resolve a recipient string to a pubkey
- * @param recipient - Agent slug or npub/hex pubkey
- * @returns Pubkey hex string or null if not found
- */
-function resolveRecipientToPubkey(recipient: string): string | null {
-    // Trim whitespace
-    recipient = recipient.trim();
-    
-    // Check if it's an npub
-    if (recipient.startsWith("npub")) {
-        try {
-            return new NDKUser({ npub: recipient }).pubkey;
-        } catch (error) {
-            logger.debug("Failed to decode npub", { recipient, error });
-        }
-    }
-    
-    // Check if it's a hex pubkey (64 characters)
-    if (/^[0-9a-f]{64}$/i.test(recipient)) {
-        return recipient.toLowerCase();
-    }
-    
-    // Try to resolve as agent slug or name (case-insensitive)
-    try {
-        const projectContext = getProjectContext();
-        
-        // Check project agents with case-insensitive matching for both slug and name
-        const recipientLower = recipient.toLowerCase();
-        for (const [slug, agent] of projectContext.agents.entries()) {
-            if (slug.toLowerCase() === recipientLower || 
-                agent.name.toLowerCase() === recipientLower) {
-                return agent.pubkey;
-            }
-        }
-        
-        logger.debug("Agent slug or name not found", { recipient });
-        return null;
-    } catch (error) {
-        logger.debug("Failed to resolve agent slug or name", { recipient, error });
-        return null;
-    }
-}
 
 /**
  * Delegate Phase tool - enables the Project Manager to atomically switch phases and delegate work
@@ -156,39 +110,6 @@ After delegating:
             });
         }
         
-        // Resolve all recipients to pubkeys
-        const resolvedPubkeys: string[] = [];
-        const failedRecipients: string[] = [];
-
-        console.log('tool delegate_phase', { ...input.value, recipients })
-        
-        for (const recipient of recipients) {
-            const pubkey = resolveRecipientToPubkey(recipient);
-            if (pubkey) {
-                resolvedPubkeys.push(pubkey);
-            } else {
-                failedRecipients.push(recipient);
-            }
-        }
-        
-        // If any recipients failed to resolve, return error
-        if (failedRecipients.length > 0) {
-            return failure({
-                kind: "execution",
-                tool: "delegate_phase",
-                message: `Cannot resolve recipient(s) to pubkey: ${failedRecipients.join(", ")}. Must be valid agent slug(s), npub(s), or hex pubkey(s).`,
-            });
-        }
-        
-        // If no valid recipients, return error
-        if (resolvedPubkeys.length === 0) {
-            return failure({
-                kind: "execution",
-                tool: "delegate_phase",
-                message: "No valid recipients provided.",
-            });
-        }
-        
         try {
             // Step 1: Switch the phase
             logger.info("[delegate_phase] PM switching phase", {
@@ -218,69 +139,34 @@ After delegating:
                 });
             }
             
-            // Step 2: Create and publish NDKTask events for each recipient
-            const taskIds: string[] = [];
-            const tasks = new Map<string, { recipientPubkey: string; status: string }>();
+            // Step 2: Use DelegationService to create and publish tasks
+            const delegationResult = await DelegationService.createDelegationTasks(
+                {
+                    recipients,
+                    title,
+                    fullRequest,
+                    phase  // Pass phase for tagging
+                },
+                {
+                    agent: context.agent,
+                    conversationId: context.conversationId,
+                    conversationManager: context.conversationManager
+                }
+            );
             
-            for (const recipientPubkey of resolvedPubkeys) {
-                // Create a new NDKTask for this specific recipient
-                const task = new NDKTask(getNDK());
-                task.content = fullRequest;
-                task.tags = [
-                    ["p", recipientPubkey],  // Assign to this agent
-                    ["e", context.conversationId, "", "root"],  // Link to conversation (conversation ID is the root event ID)
-                    ["title", title],  // Task title for better organization
-                    ["phase", phase],  // Include phase context
-                ];
-                
-                // Sign and publish immediately
-                await task.sign(context.agent.signer);
-                await task.publish();
-                
-                // Track this task
-                taskIds.push(task.id);
-                tasks.set(task.id, {
-                    recipientPubkey,
-                    status: "pending"
-                });
-                
-                logger.debug("Published NDKTask in phase context", {
-                    taskId: task.id,
-                    phase: phase,
-                    fromAgent: context.agent.slug,
-                    toAgent: recipientPubkey,
-                });
-            }
-            
-            // Step 3: Update agent's state to track pending delegation with task IDs
-            if (context.conversationManager) {
-                await context.conversationManager.updateAgentState(
-                    context.conversationId,
-                    context.agent.slug,
-                    {
-                        pendingDelegation: {
-                            taskIds: taskIds,
-                            tasks: tasks,
-                            originalRequest: fullRequest,
-                            timestamp: Date.now(),
-                        }
-                    }
-                );
-                
-                logger.info("Phase delegation complete - PM waiting for task completions", {
-                    phase: phase,
-                    fromAgent: context.agent.slug,
-                    waitingForTasks: taskIds.length,
-                    taskIds: taskIds,
-                });
-            }
+            logger.info("Phase delegation complete - PM waiting for task completions", {
+                phase: phase,
+                fromAgent: context.agent.slug,
+                waitingForTasks: delegationResult.taskIds.length,
+                taskIds: delegationResult.taskIds,
+            });
             
             logger.info("Phase switch and delegation complete", {
                 phase: phase,
                 fromAgent: context.agent.slug,
                 toRecipients: recipients,
-                toPubkeys: resolvedPubkeys,
-                taskCount: taskIds.length,
+                toPubkeys: delegationResult.recipientPubkeys,
+                taskCount: delegationResult.taskIds.length,
                 requestLength: fullRequest.length,
             });
             
@@ -291,8 +177,8 @@ After delegating:
             return success({
                 success: true,
                 phase: phase,
-                recipientPubkeys: resolvedPubkeys,
-                taskIds: taskIds,
+                recipientPubkeys: delegationResult.recipientPubkeys,
+                taskIds: delegationResult.taskIds,
             });
         } catch (error) {
             logger.error("Failed to execute phase delegation", {
