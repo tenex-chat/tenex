@@ -69,6 +69,9 @@ Comprehensive analysis of the distributed learning infrastructure. Enables agent
 #### 17. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
 Comprehensive execution flow tracking, debugging capabilities, and structured logging. Implements hierarchical context propagation for detailed insight into system behavior and performance.
 
+#### 18. [Execution Queue Mutex System](./execution-queue-mutex-system.md)
+Project-wide synchronization mechanism ensuring only one conversation per project can execute at a time. Prevents resource conflicts, maintains state consistency, and provides fair queuing with transparent wait times.
+
 ## Architecture Principles
 
 ### Core Design Philosophy

@@ -1,4 +1,4 @@
-import { Message } from "multi-llm-ts";
+import { Message, LlmRole } from "multi-llm-ts";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Phase } from "./phases";
 import { MessageBuilder } from "./MessageBuilder";
@@ -285,30 +285,46 @@ export class AgentConversationContext {
      * Restore from persistence
      */
     static fromJSON(data: unknown, messageBuilder?: MessageBuilder): AgentConversationContext {
+        // Type guard to ensure data is an object
+        if (typeof data !== 'object' || data === null) {
+            throw new Error('Invalid data format for AgentConversationContext');
+        }
+        
+        const jsonData = data as {
+            conversationId: string;
+            agentSlug: string;
+            messages?: unknown[];
+            processedEventIds?: string[];
+            lastProcessedIndex?: number;
+            claudeSessionId?: string;
+            currentPhase?: string;
+        };
+        
         const context = new AgentConversationContext(
-            data.conversationId,
-            data.agentSlug,
+            jsonData.conversationId,
+            jsonData.agentSlug,
             messageBuilder
         );
         
         // Restore messages
-        if (data.messages && Array.isArray(data.messages)) {
-            context.messages = data.messages.map((m: unknown) => {
+        if (jsonData.messages && Array.isArray(jsonData.messages)) {
+            context.messages = jsonData.messages.map((m: unknown) => {
                 if (typeof m === 'object' && m !== null && 'role' in m && 'content' in m) {
-                    return new Message((m as { role: string }).role, (m as { content: string }).content);
+                    const msg = m as { role: string; content: string };
+                    return new Message(msg.role as LlmRole, msg.content);
                 }
                 throw new Error('Invalid message format in data');
             });
         }
         
         // Restore processed event IDs
-        if (data.processedEventIds && Array.isArray(data.processedEventIds)) {
-            context.processedEventIds = new Set(data.processedEventIds);
+        if (jsonData.processedEventIds && Array.isArray(jsonData.processedEventIds)) {
+            context.processedEventIds = new Set(jsonData.processedEventIds);
         }
         
-        context.lastProcessedIndex = data.lastProcessedIndex || 0;
-        context.claudeSessionId = data.claudeSessionId;
-        context.currentPhase = data.currentPhase;
+        context.lastProcessedIndex = jsonData.lastProcessedIndex || 0;
+        context.claudeSessionId = jsonData.claudeSessionId;
+        context.currentPhase = jsonData.currentPhase;
         
         return context;
     }

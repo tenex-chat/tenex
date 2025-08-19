@@ -48,20 +48,31 @@ import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
 import { getTotalExecutionTimeSeconds } from "@/conversations/executionTime";
 
+type MockLesson = {
+    title: string | undefined;
+    lesson: string | undefined;
+    agent: string | undefined;
+    tags: string[][];
+    id: string;
+    tag: ReturnType<typeof mock>;
+    sign: ReturnType<typeof mock>;
+    publish: ReturnType<typeof mock>;
+};
+
 describe("Learn Tool", () => {
     let mockContext: ExecutionContext;
     let mockAgent: AgentInstance;
     let mockConversation: Conversation;
     let mockNDK: NDK;
-    let mockLesson: any;
+    let mockLesson: MockLesson;
 
     beforeEach(() => {
         // Reset all mocks
-        (logger.info as any).mockReset();
-        (logger.warn as any).mockReset();
-        (logger.error as any).mockReset();
-        (getNDK as any).mockReset();
-        (getProjectContext as any).mockReset();
+        (logger.info as ReturnType<typeof mock>).mockReset();
+        (logger.warn as ReturnType<typeof mock>).mockReset();
+        (logger.error as ReturnType<typeof mock>).mockReset();
+        (getNDK as ReturnType<typeof mock>).mockReset();
+        (getProjectContext as ReturnType<typeof mock>).mockReset();
 
         // Setup mock agent
         mockAgent = {
@@ -95,10 +106,10 @@ describe("Learn Tool", () => {
             }),
         } as unknown as NDK;
 
-        (getNDK as any).mockReturnValue(mockNDK);
+        (getNDK as ReturnType<typeof mock>).mockReturnValue(mockNDK);
 
         // Setup project context mock
-        (getProjectContext as any).mockReturnValue({
+        (getProjectContext as ReturnType<typeof mock>).mockReturnValue({
             project: { id: "mock-project-id" },
         });
 

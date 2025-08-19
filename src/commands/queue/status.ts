@@ -11,6 +11,26 @@ interface StatusOptions {
   watch?: boolean;
 }
 
+interface QueueStatus {
+  lock?: {
+    conversationId: string;
+    agentPubkey: string;
+    timestamp: number;
+    maxDuration: number;
+  };
+  queue: {
+    totalWaiting: number;
+    estimatedWait: number;
+    queue: Array<{
+      conversationId: string;
+      agentPubkey: string;
+      timestamp: number;
+      retryCount: number;
+    }>;
+  };
+  activeTimeouts?: string[];
+}
+
 export async function showQueueStatus(options: StatusOptions = {}): Promise<void> {
   try {
     // Initialize project context first
@@ -57,17 +77,19 @@ export async function showQueueStatus(options: StatusOptions = {}): Promise<void
 function displayQueueStatus(status: unknown, detailed?: boolean): void {
   console.log(chalk.bold('\n🚦 Execution Queue Status\n'));
 
+  const typedStatus = status as QueueStatus;
+  
   // Display lock status
-  if (status.lock) {
+  if (typedStatus.lock) {
     console.log(chalk.green('Lock Status: 🔒 LOCKED'));
-    console.log(chalk.white(`Current Execution: ${status.lock.conversationId}`));
+    console.log(chalk.white(`Current Execution: ${typedStatus.lock.conversationId}`));
     
     if (detailed) {
-      console.log(chalk.gray(`  Agent: ${status.lock.agentPubkey}`));
-      const startTime = new Date(status.lock.timestamp);
+      console.log(chalk.gray(`  Agent: ${typedStatus.lock.agentPubkey}`));
+      const startTime = new Date(typedStatus.lock.timestamp);
       console.log(chalk.gray(`  Started: ${startTime.toLocaleString()} (${formatDistanceToNow(startTime, { addSuffix: true })})`));
       
-      const timeoutTime = new Date(status.lock.timestamp + status.lock.maxDuration);
+      const timeoutTime = new Date(typedStatus.lock.timestamp + typedStatus.lock.maxDuration);
       console.log(chalk.gray(`  Timeout: ${timeoutTime.toLocaleString()} (${formatDistanceToNow(timeoutTime, { addSuffix: true })})`));
     }
   } else {
@@ -78,13 +100,13 @@ function displayQueueStatus(status: unknown, detailed?: boolean): void {
   console.log();
 
   // Display queue information
-  const queueLength = status.queue.totalWaiting;
+  const queueLength = typedStatus.queue.totalWaiting;
   
   if (queueLength > 0) {
     console.log(chalk.cyan(`Queue: ${queueLength} conversation(s) waiting`));
     
-    if (status.queue.estimatedWait > 0) {
-      const waitMinutes = Math.ceil(status.queue.estimatedWait / 60);
+    if (typedStatus.queue.estimatedWait > 0) {
+      const waitMinutes = Math.ceil(typedStatus.queue.estimatedWait / 60);
       console.log(chalk.gray(`  Estimated wait for new requests: ~${waitMinutes} minutes`));
     }
     
@@ -93,10 +115,10 @@ function displayQueueStatus(status: unknown, detailed?: boolean): void {
       console.log(chalk.bold('Queue Order:'));
       
       const maxDisplay = detailed ? 10 : 3;
-      const displayCount = Math.min(maxDisplay, status.queue.queue.length);
+      const displayCount = Math.min(maxDisplay, typedStatus.queue.queue.length);
       
       for (let i = 0; i < displayCount; i++) {
-        const entry = status.queue.queue[i];
+        const entry = typedStatus.queue.queue[i];
         const queueTime = new Date(entry.timestamp);
         console.log(chalk.white(`  ${i + 1}. ${entry.conversationId}`));
         console.log(chalk.gray(`     Queued: ${formatDistanceToNow(queueTime, { addSuffix: true })}`));
@@ -106,8 +128,8 @@ function displayQueueStatus(status: unknown, detailed?: boolean): void {
         }
       }
       
-      if (status.queue.queue.length > displayCount) {
-        console.log(chalk.gray(`  ... and ${status.queue.queue.length - displayCount} more`));
+      if (typedStatus.queue.queue.length > displayCount) {
+        console.log(chalk.gray(`  ... and ${typedStatus.queue.queue.length - displayCount} more`));
       }
     }
   } else {
@@ -116,10 +138,11 @@ function displayQueueStatus(status: unknown, detailed?: boolean): void {
   }
 
   // Display active timeouts if detailed
-  if (detailed && status.activeTimeouts?.length > 0) {
+  const anyStatus = status as any;
+  if (detailed && anyStatus.activeTimeouts?.length > 0) {
     console.log();
     console.log(chalk.bold('Active Timeouts:'));
-    for (const conversationId of status.activeTimeouts) {
+    for (const conversationId of anyStatus.activeTimeouts) {
       console.log(chalk.yellow(`  - ${conversationId}`));
     }
   }

@@ -6,23 +6,49 @@ import type { AgentInstance } from "@/agents/types";
 import * as services from "@/services";
 import { logger } from "@/utils/logger";
 
+// Define mock types for better type safety
+type MockProject = {
+    pubkey: string;
+    name: string;
+    kind: number;
+};
+
+type MockReplyEvent = {
+    content: string;
+    tags: string[][];
+    tag: ReturnType<typeof mock>;
+    sign: ReturnType<typeof mock>;
+    publish: ReturnType<typeof mock>;
+};
+
+type MockTask = {
+    title: string;
+    content: string;
+    tags: string[][];
+    id: string;
+    tag: ReturnType<typeof mock>;
+    sign: ReturnType<typeof mock>;
+    publish: ReturnType<typeof mock>;
+    reply: ReturnType<typeof mock>;
+};
+
 // Create a factory for mock tasks
-const createMockTask = (): any => {
-    const task = {
+const createMockTask = (): MockTask => {
+    const task: MockTask = {
         title: "",
         content: "",
         tags: [] as string[][],
         id: "mock-task-id",
-        tag: mock((project: any) => {
+        tag: mock((project: MockProject) => {
             task.tags.push(["a", `30311:${project.pubkey}:${project.name}`]);
         }),
         sign: mock(() => Promise.resolve()),
         publish: mock(() => Promise.resolve()),
         reply: mock(() => {
-            const replyEvent = {
+            const replyEvent: MockReplyEvent = {
                 content: "",
                 tags: [] as string[][],
-                tag: mock((project: any) => {
+                tag: mock((project: MockProject) => {
                     replyEvent.tags.push(["a", `30311:${project.pubkey}:${project.name}`]);
                 }),
                 sign: mock(() => Promise.resolve()),
@@ -51,8 +77,8 @@ describe("TaskPublisher", () => {
     let taskPublisher: TaskPublisher;
     let mockNDK: NDK;
     let mockAgent: AgentInstance;
-    let mockProjectContext: any;
-    let loggerDebugSpy: any;
+    let mockProjectContext: { project: MockProject };
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Reset the current mock task before each test
@@ -67,7 +93,7 @@ describe("TaskPublisher", () => {
                 sign: mock(() => Promise.resolve("mock-signature")),
                 pubkey: mock(() => "mock-agent-pubkey"),
             },
-        } as unknown as Agent;
+        } as unknown as AgentInstance;
 
         mockProjectContext = {
             project: {
