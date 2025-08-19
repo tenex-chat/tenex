@@ -15,30 +15,33 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * All agents now have access to delegate for peer-to-peer collaboration
  */
 export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
-    // Base tools for all agents
-    const tools = [
-        readPathTool.name, 
-        lessonLearnTool.name, 
-        // analyze.name,
-        claudeCode.name,
-        completeTool.name,  // All agents can complete tasks
-        delegateTool.name    // All agents can delegate to others
-    ];
-
-    // Special handling for project manager - ADD PM-specific tools
+    // Special handling for project manager - different tool set
     if (agent.slug === PROJECT_MANAGER_AGENT) {
-        // Add PM-specific tools to the base set
-        const pmSpecificTools = [
+        // PM has delegate_phase instead of delegate
+        return [
+            readPathTool.name,
+            lessonLearnTool.name,
+            claudeCode.name,
+            completeTool.name,
             "write_context_file",
             "shell",
             "discover_capabilities",
             "agents_hire",
             "agents_discover",
             "nostr_projects",
-            "delegate_phase", // EXCLUSIVE to PM - combines phase switching with delegation
-        ].filter(tool => !tools.includes(tool));
-        tools.push(...pmSpecificTools);
+            "delegate_phase", // PM uses delegate_phase instead of delegate
+        ];
     }
+
+    // Base tools for all other agents
+    const tools = [
+        readPathTool.name, 
+        lessonLearnTool.name, 
+        // analyze.name,
+        claudeCode.name,
+        completeTool.name,  // All agents can complete tasks
+        delegateTool.name    // Non-PM agents use regular delegate
+    ];
 
     return tools;
 }

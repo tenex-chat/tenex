@@ -96,6 +96,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
                 recipientPubkeys: result.recipientPubkeys,
                 taskIds: result.taskIds,
                 serializedEvents: result.serializedEvents,
+                delegationState: result.delegationState,
                 toolType: 'delegate'
             });
         } catch (error) {

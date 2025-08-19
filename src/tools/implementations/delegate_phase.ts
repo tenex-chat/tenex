@@ -180,6 +180,7 @@ After delegating:
                 recipientPubkeys: delegationResult.recipientPubkeys,
                 taskIds: delegationResult.taskIds,
                 serializedEvents: delegationResult.serializedEvents,
+                delegationState: delegationResult.delegationState,
                 toolType: 'delegate_phase'
             });
         } catch (error) {

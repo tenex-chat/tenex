@@ -23,6 +23,12 @@ export interface DelegationResult {
     recipientPubkeys: string[];
     taskIds: string[];
     serializedEvents?: any[];  // Serialized NDKTask events for deferred publishing
+    delegationState?: {  // State to apply when events are published
+        taskIds: string[];
+        tasks: Map<string, any>;
+        originalRequest: string;
+        timestamp: number;
+    };
 }
 
 /**
@@ -222,41 +228,22 @@ export class DelegationService {
             });
         }
         
-        // STEP 2: Update agent's state BEFORE publishing
-        // This ensures the state is ready when completions arrive
-        await conversationManager.updateAgentState(
-            conversationId,
-            agent.slug,
-            {
-                pendingDelegation: {
-                    taskIds: taskIds,
-                    tasks: tasks,
-                    originalRequest: fullRequest,
-                    timestamp: Date.now(),
-                }
-            }
-        );
+        // STEP 2: Prepare delegation state for deferred application
+        // State will be applied when events are actually published
+        const delegationState = {
+            taskIds: taskIds,
+            tasks: tasks,
+            originalRequest: fullRequest,
+            timestamp: Date.now(),
+        };
         
-        logger.debug("Agent delegation state updated", {
+        logger.debug("Delegation state prepared (deferred)", {
             agent: agent.slug,
             taskCount: taskIds.length,
             taskIds: taskIds.map(id => id.substring(0, 8))
         });
         
-        // STEP 3: Register all task mappings BEFORE publishing
-        for (const taskId of taskIds) {
-            await conversationManager.registerTaskMapping(
-                taskId,
-                conversationId
-            );
-        }
-        
-        logger.debug("Task mappings registered", {
-            taskCount: taskIds.length,
-            conversationId
-        });
-        
-        // STEP 4: Collect serialized events for deferred publishing
+        // STEP 3: Collect serialized events for deferred publishing
         const serializedEvents = signedTasks.map(({ task }) => task.rawEvent());
         
         logger.info("Delegation prepared - deferring task publication", {
@@ -270,6 +257,7 @@ export class DelegationService {
             recipientPubkeys: resolvedPubkeys,
             taskIds: taskIds,
             serializedEvents: serializedEvents,
+            delegationState: delegationState,
         };
     }
 }

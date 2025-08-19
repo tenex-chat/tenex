@@ -110,7 +110,8 @@ export class NostrPublisher {
             const destinationPubkeys = options.destinationPubkeys || [defaultPubkey];
             
             for (const pubkey of destinationPubkeys) {
-                reply.tag(["p", pubkey]);
+                console.log("skipping adding p tag for", pubkey, "since this isnt a complete tool use")
+                // reply.tag(["p", pubkey]);
             }
 
             // Add any additional tags

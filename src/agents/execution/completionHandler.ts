@@ -4,6 +4,7 @@ import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ConversationManager } from "@/conversations/ConversationManager";
+import { EventTagger } from "@/nostr/EventTagger";
 
 /**
  * Shared completion logic used by both the complete() tool and ClaudeBackend
@@ -29,6 +30,7 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
 
     const projectContext = getProjectContext();
     const { logger } = await import("@/utils/logger");
+    const eventTagger = new EventTagger(projectContext.project);
     
     // Check if this is completing a sub-task (NDKTask kind 1934)
     const isTaskCompletion = triggeringEvent?.kind === 1934;
@@ -46,21 +48,13 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
         // Build completion reply to the task
         const reply = publisher.createBaseReply();
         reply.content = response;
-        reply.tag(["e", triggeringEvent.id, "", "reply"]);  // Reply to the task
         
-        // Also tag the root conversation so this appears in the main thread
-        // const rootConversation = triggeringEvent.tagValue("e");
-        // if (rootConversation) {
-        //     reply.tag(["e", rootConversation, "", "root"]);  // Tag the main conversation
-        //     logger.debug("[handleAgentCompletion] Adding root conversation tag", {
-        //         taskId: triggeringEvent.id,
-        //         rootConversation: rootConversation,
-        //     });
-        // }
-        
-        reply.tag(["p", delegatorPubkey]);  // Notify the delegator
-        reply.tag(["status", "complete"]);
-        reply.tag(["tool", "complete"]);
+        // Use EventTagger for task completion tagging (includes tool tag)
+        eventTagger.tagForCompletion(reply, {
+            originalTaskId: triggeringEvent.id,
+            originalTaskPubkey: delegatorPubkey,
+            status: 'completed'
+        });
         
         if (summary) {
             reply.tag(["summary", summary]);
@@ -102,6 +96,9 @@ export async function handleAgentCompletion(options: CompletionOptions): Promise
         // Build the event but don't publish
         const reply = publisher.createBaseReply();
         reply.content = response;
+        
+        // For regular conversation completion, we need to manually add the p-tag
+        // since EventTagger's methods don't cover this specific case
         reply.tag(["p", respondToPubkey]);
         reply.tag(["tool", "complete"]);
         

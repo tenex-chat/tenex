@@ -195,26 +195,36 @@ async function handleOrphanedReply(
  * Determine which agent should handle the event
  */
 function determineTargetAgent(
-    _event: NDKEvent,
+    event: NDKEvent,
     mentionedPubkeys: string[],
     projectManager: AgentInstance
-): AgentInstance {
-    let targetAgent = projectManager; // Default to PM for coordination
+): AgentInstance | null {
+    const projectCtx = getProjectContext();
+    
+    // Check if the event author is an agent in the system
+    const isAuthorAnAgent = Array.from(projectCtx.agents.values()).some(
+        (agent) => agent.pubkey === event.pubkey
+    );
 
     // Check for p-tagged agents regardless of sender
     if (mentionedPubkeys.length > 0) {
-        const projectCtx = getProjectContext();
         // Find the first p-tagged system agent
         for (const pubkey of mentionedPubkeys) {
             const agent = Array.from(projectCtx.agents.values()).find((a) => a.pubkey === pubkey);
             if (agent) {
-                targetAgent = agent;
-                break;
+                return agent;
             }
         }
     }
 
-    return targetAgent;
+    // If no p-tags and the author is an agent, don't route it anywhere
+    if (mentionedPubkeys.length === 0 && isAuthorAnAgent) {
+        logInfo(chalk.gray(`Agent event from ${event.pubkey.substring(0, 8)} without p-tags - not routing`));
+        return null;
+    }
+
+    // Default to PM for coordination only if it's from a user (not an agent)
+    return projectManager;
 }
 
 /**
@@ -560,6 +570,11 @@ async function handleReplyLogic(
     // Determine which agent should handle this event
     let targetAgent = determineTargetAgent(event, mentionedPubkeys, projectManager);
     const processedEvent = event;
+
+    // If no target agent (e.g., agent event without p-tags), skip processing
+    if (!targetAgent) {
+        return;
+    }
 
     // Skip if the target agent is the same as the sender (prevent self-reply loops)
     if (targetAgent.pubkey === event.pubkey) {

@@ -58,7 +58,7 @@ export class EventTagger {
 
     /**
      * Tags an event as a COMPLETION of a previously delegated task.
-     * Focuses only on completion-specific tags.
+     * Includes all tags needed for proper completion handling.
      */
     tagForCompletion(
         event: NDKEvent,
@@ -75,6 +75,9 @@ export class EventTagger {
         
         // Add completion status
         event.tag(["status", status]);
+        
+        // Mark this as a completion tool event
+        event.tag(["tool", "complete"]);
         
         // Route back to delegator (the author of the original task)
         event.tag(["p", originalTaskPubkey]);

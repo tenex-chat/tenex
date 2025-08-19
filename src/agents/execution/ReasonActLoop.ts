@@ -121,7 +121,7 @@ export class ReasonActLoop {
 
                 // Check if we should continue iterating
                 if (iterationResult.isTerminal) {
-                    tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
+                    tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
                         iteration: iterations,
                         willExitLoop: true,
                         hasDeferredEvent: !!iterationResult.deferredTerminalEvent,
@@ -138,10 +138,6 @@ export class ReasonActLoop {
                     }
                     
                     isComplete = true;
-                    tracingLogger.info("[ReasonActLoop] isComplete set to true, loop should exit", {
-                        isComplete,
-                        iterations,
-                    });
                 } else if (iterationResult.hasToolCalls) {
                     // Add tool results to conversation for next iteration
                     this.addToolResultsToConversation(
@@ -180,7 +176,7 @@ export class ReasonActLoop {
                 }
             }
             
-            tracingLogger.info("[ReasonActLoop] Exited main loop", {
+            tracingLogger.debug("[ReasonActLoop] Exited main loop", {
                 iterations,
                 isComplete,
                 reason: isComplete ? "completed" : "max iterations",
@@ -318,7 +314,10 @@ export class ReasonActLoop {
                                     });
                                     deferredTerminalEvent = {
                                         type: 'delegate',
-                                        events: output.serializedEvents
+                                        events: output.serializedEvents,
+                                        delegationState: output.delegationState,
+                                        conversationId: context.conversationId,
+                                        agentSlug: context.agent.slug
                                     };
                                     isTerminal = true;
                                 } else {
@@ -623,6 +622,30 @@ export class ReasonActLoop {
         const ndk = getNDK();
         
         if (deferredEvent.type === 'delegate' && deferredEvent.events) {
+            // Apply delegation state before publishing
+            if (deferredEvent.delegationState && deferredEvent.conversationId && deferredEvent.agentSlug) {
+                await context.conversationManager.updateAgentState(
+                    deferredEvent.conversationId,
+                    deferredEvent.agentSlug,
+                    {
+                        pendingDelegation: deferredEvent.delegationState
+                    }
+                );
+                
+                // Register task mappings
+                for (const taskId of deferredEvent.delegationState.taskIds) {
+                    await context.conversationManager.registerTaskMapping(
+                        taskId,
+                        deferredEvent.conversationId
+                    );
+                }
+                
+                tracingLogger.info("[ReasonActLoop] Applied deferred delegation state", {
+                    agentSlug: deferredEvent.agentSlug,
+                    taskCount: deferredEvent.delegationState.taskIds.length
+                });
+            }
+            
             // Publish delegation events
             for (const serializedEvent of deferredEvent.events) {
                 const event = new NDKEvent(ndk, serializedEvent);
