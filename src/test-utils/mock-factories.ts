@@ -65,7 +65,7 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
     const mockSigner = {
         privateKey: "mock-private-key",
         sign: async () => "mock-signature"
-    } as any;
+    } as unknown;
     
     return {
         name: "MockAgent",
@@ -120,13 +120,13 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
         publishReply: async () => mockEvent,
         publishToolCall: async () => mockEvent,
         publishAgentThinking: async () => mockEvent
-    } as any;
+    } as unknown;
     
     const mockConversationCoordinator = {
         getConversation: async () => createMockConversation(),
         updateConversation: async () => {},
         transitionPhase: async () => {}
-    } as any;
+    } as unknown;
     
     return {
         agent,

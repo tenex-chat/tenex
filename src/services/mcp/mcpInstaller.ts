@@ -23,7 +23,7 @@ export async function installMCPServerFromEvent(
 
     // Build server config with event ID
     const serverConfig: MCPServerConfig = {
-        command: cmd!,
+        command: cmd || '',
         args,
         description: mcpTool.description,
         eventId: mcpTool.id, // Track the event ID

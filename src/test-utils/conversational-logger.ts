@@ -70,7 +70,7 @@ export class ConversationalLogger {
 
     logAgentResponse(agentName: string, response: {
         content?: string;
-        toolCalls?: any[];
+        toolCalls?: unknown[];
         phase?: string;
         reason?: string;
     }): void {
@@ -110,7 +110,7 @@ export class ConversationalLogger {
         }
     }
 
-    logToolExecution(agentName: string, toolName: string, toolCall: any): void {
+    logToolExecution(agentName: string, toolName: string, toolCall: unknown): void {
         const formattedAgent = this.formatAgentName(agentName);
         const timeStamp = this.formatTime();
         
@@ -187,9 +187,10 @@ export class ConversationalLogger {
                 }
                 break;
             
-            default:
+            default: {
                 const message = `${formattedAgent}: "Using ${toolName} tool"`;
                 console.log(this.formatLogLine(agentName, '🔧', timeStamp, message));
+            }
         }
     }
 
@@ -220,7 +221,7 @@ export class ConversationalLogger {
         console.log(`🏁 [${timeStamp}] Test completed: ${status} ${testName || ''}`);
     }
 
-    logMatchedResponse(mockResponse: any): void {
+    logMatchedResponse(mockResponse: unknown): void {
         const timeStamp = this.formatTime();
         const trigger = mockResponse.trigger;
         const agentName = trigger.agentName || this.currentAgent;
@@ -247,7 +248,7 @@ export class ConversationalLogger {
         
         // Log tool calls if present
         if (mockResponse.response.toolCalls && mockResponse.response.toolCalls.length > 0) {
-            const toolNames = mockResponse.response.toolCalls.map((tc: any) => {
+            const toolNames = mockResponse.response.toolCalls.map((tc: unknown) => {
                 const toolName = tc.function?.name || tc.name || 'unknown';
                 return toolName;
             });

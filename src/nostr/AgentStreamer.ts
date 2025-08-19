@@ -5,7 +5,7 @@ import type { EventContext, StreamingIntent } from "./AgentEventEncoder";
 
 export interface StreamHandle {
     addContent: (content: string) => Promise<void>;
-    finalize: (metadata?: any) => Promise<NDKEvent>;
+    finalize: (metadata?: unknown) => Promise<NDKEvent>;
 }
 
 interface StreamState {
@@ -48,7 +48,7 @@ export class AgentStreamer {
 
         return {
             addContent: (content: string) => this.addStreamContent(streamId, content),
-            finalize: (metadata?: any) => this.finalizeStream(streamId, metadata)
+            finalize: (metadata?: unknown) => this.finalizeStream(streamId, metadata)
         };
     }
 
@@ -129,7 +129,7 @@ export class AgentStreamer {
     /**
      * Finalize a stream and publish the complete response.
      */
-    private async finalizeStream(streamId: string, metadata?: any): Promise<NDKEvent> {
+    private async finalizeStream(streamId: string, metadata?: unknown): Promise<NDKEvent> {
         const state = this.activeStreams.get(streamId);
         if (!state) {
             throw new Error(`Stream ${streamId} not found`);

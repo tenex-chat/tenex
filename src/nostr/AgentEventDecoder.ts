@@ -10,8 +10,8 @@ import { getProjectContext } from "@/services";
  * and determining their types, targets, and relationships.
  */
 
-// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
-export  class AgentEventDecoder {
+// biome-ignore lint/complexity/noStaticOnlyClass: Static utility class for decoding event semantics
+export class AgentEventDecoder {
     /**
      * Check if an event is directed to the system (project or agents)
      */
@@ -187,7 +187,7 @@ export  class AgentEventDecoder {
     /**
      * Get all tool tags from event
      */
-    static getToolTags(event: NDKEvent): Array<{ name: string; args?: any }> {
+    static getToolTags(event: NDKEvent): Array<{ name: string; args?: unknown }> {
         return event.tags
             .filter(tag => tag[0] === "tool")
             .map(tag => ({

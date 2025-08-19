@@ -34,9 +34,9 @@ import type { AgentInstance } from "@/agents/types";
  */
 export class StatusPublisher {
     private statusInterval?: NodeJS.Timeout;
-    private executionQueueManager?: any; // Using any to avoid circular dependency
+    private executionQueueManager?: unknown; // Using unknown to avoid circular dependency
 
-    constructor(executionQueueManager?: any) {
+    constructor(executionQueueManager?: unknown) {
         this.executionQueueManager = executionQueueManager;
     }
 

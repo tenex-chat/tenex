@@ -103,7 +103,7 @@ export function mockFileSystem(files: Map<string, string>): Map<string, string> 
             files.set(path, content);
         }),
         ensureDirectory: mock(() => {}),
-        writeJsonFile: mock((path: string, data: any) => {
+        writeJsonFile: mock((path: string, data: unknown) => {
             files.set(path, JSON.stringify(data, null, 2));
         })
     }));
@@ -124,11 +124,11 @@ export class ConsoleCapture {
         this.originalLog = console.log;
         this.originalError = console.error;
         
-        console.log = (...args: any[]) => {
+        console.log = (...args: unknown[]) => {
             this.logs.push(args.map(String).join(' '));
         };
         
-        console.error = (...args: any[]) => {
+        console.error = (...args: unknown[]) => {
             this.errors.push(args.map(String).join(' '));
         };
     }
@@ -160,7 +160,7 @@ export const assertions = {
      * Assert that an async function throws an error
      */
     async toThrowAsync(
-        fn: () => Promise<any>,
+        fn: () => Promise<unknown>,
         expectedError?: string | RegExp | Error
     ): Promise<void> {
         try {
@@ -188,7 +188,7 @@ export const assertions = {
     ): void {
         const found = array.some(item => {
             return Object.entries(partial).every(([key, value]) => {
-                return (item as any)[key] === value;
+                return (item as Record<string, unknown>)[key] === value;
             });
         });
         

@@ -62,7 +62,7 @@ export class MockLLMService implements LLMService {
         const toolCallsInfo = response.toolCalls ? response.toolCalls.map(tc => {
             // Convert our mock format to LlmToolCallInfo format
             let functionName: string;
-            let args: any = {};
+            let args: Record<string, unknown> = {};
             
             if (typeof tc === 'object' && 'function' in tc) {
                 // Format with function as string
@@ -115,7 +115,7 @@ export class MockLLMService implements LLMService {
             for (const word of words) {
                 yield { type: 'content', content: word + ' ' };
                 if (response.streamDelay) {
-                    await new Promise(resolve => setTimeout(resolve, response.streamDelay! / words.length));
+                    await new Promise(resolve => setTimeout(resolve, (response.streamDelay || 0) / words.length));
                 }
             }
         }
@@ -153,11 +153,25 @@ export class MockLLMService implements LLMService {
     private findMatchingResponse(messages: Message[]): MockLLMResponse['response'] {
         const systemMessage = messages.find(m => m.role === 'system');
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+        
+        // Extract tool calls from messages that have them
+        interface MessageWithToolCalls extends Message {
+            tool_calls?: Array<{
+                function: string | { name: string };
+            }>;
+        }
+        
         const toolCalls = messages
-            .filter(m => (m as any).tool_calls && (m as any).tool_calls.length > 0)
-            .flatMap(m => (m as any).tool_calls!.map((tc: any) => 
-                typeof tc.function === 'string' ? tc.function : tc.function.name
-            ));
+            .filter((m): m is MessageWithToolCalls => {
+                const msg = m as MessageWithToolCalls;
+                return Boolean(msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0);
+            })
+            .flatMap(m => {
+                return (m.tool_calls || []).map(tc => {
+                    return typeof tc.function === 'string' ? tc.function : tc.function?.name;
+                });
+            })
+            .filter((name): name is string => typeof name === 'string');
         
         // Extract agent name and phase from system prompt
         const agentName = this.extractAgentName(systemMessage?.content || '');
@@ -171,8 +185,9 @@ export class MockLLMService implements LLMService {
         if (!context.agentIterations.has(agentName)) {
             context.agentIterations.set(agentName, 0);
         }
-        context.agentIterations.set(agentName, context.agentIterations.get(agentName)! + 1);
-        const agentIteration = context.agentIterations.get(agentName)!;
+        const currentIteration = context.agentIterations.get(agentName) || 0;
+        context.agentIterations.set(agentName, currentIteration + 1);
+        const agentIteration = context.agentIterations.get(agentName) || 0;
         
         if (this.config.debug) {
             conversationalLogger.logAgentThinking(agentName, {
@@ -189,9 +204,10 @@ export class MockLLMService implements LLMService {
             
             // Check all trigger conditions
             if (trigger.systemPrompt && systemMessage) {
+                if (!systemMessage.content) continue;
                 const matches = trigger.systemPrompt instanceof RegExp
-                    ? trigger.systemPrompt.test(systemMessage.content!)
-                    : systemMessage.content!.includes(trigger.systemPrompt);
+                    ? trigger.systemPrompt.test(systemMessage.content)
+                    : systemMessage.content.includes(trigger.systemPrompt);
                 if (!matches) continue;
             }
             
@@ -200,8 +216,8 @@ export class MockLLMService implements LLMService {
                     continue; // No user message, but trigger expects one
                 }
                 const matches = trigger.userMessage instanceof RegExp
-                    ? trigger.userMessage.test(lastUserMessage.content!)
-                    : lastUserMessage.content!.includes(trigger.userMessage);
+                    ? trigger.userMessage.test(lastUserMessage.content)
+                    : lastUserMessage.content.includes(trigger.userMessage);
                 if (!matches) continue;
             }
             
@@ -385,7 +401,11 @@ export class MockLLMService implements LLMService {
                 agentIterations: new Map()
             });
         }
-        return this.conversationContext.get(conversationId)!;
+        const context = this.conversationContext.get(conversationId);
+        if (!context) {
+            throw new Error(`Conversation context not found for ${conversationId}`);
+        }
+        return context;
     }
     
     private extractConversationId(): string {

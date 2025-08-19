@@ -9,7 +9,7 @@ import type { PromptFragment } from "../core/types";
  */
 interface PhaseContextArgs {
     phase: Phase;
-    phaseMetadata?: Record<string, any>;
+    phaseMetadata?: Record<string, unknown>;
     conversation?: Conversation;
 }
 

@@ -190,7 +190,7 @@ export class LLMConfigUI {
 
     async promptConfigurationSettings(
         defaultConfigName: string,
-        existingConfigs: Record<string, any>,
+        existingConfigs: Record<string, unknown>,
         supportsCaching: boolean,
         provider: LLMProvider,
         model: string
@@ -229,12 +229,16 @@ export class LLMConfigUI {
             });
         }
 
-        const responses = await inquirer.prompt(basePrompts as any);
+        const responses = await inquirer.prompt<{
+            configName: string;
+            enableCaching?: boolean;
+            setAsDefault: boolean;
+        }>(basePrompts);
 
         return {
-            configName: responses.configName as string,
-            enableCaching: "enableCaching" in responses ? (responses.enableCaching as boolean) : supportsCaching,
-            setAsDefault: responses.setAsDefault as boolean,
+            configName: responses.configName,
+            enableCaching: responses.enableCaching ?? supportsCaching,
+            setAsDefault: responses.setAsDefault,
         };
     }
 
@@ -303,7 +307,7 @@ export class LLMConfigUI {
         return enableCaching;
     }
 
-    async promptNewConfigName(currentName: string, existingConfigs: Record<string, any>): Promise<string> {
+    async promptNewConfigName(currentName: string, existingConfigs: Record<string, unknown>): Promise<string> {
         const { newName } = await inquirer.prompt([
             {
                 type: "input",

@@ -73,7 +73,7 @@ export interface EventContext {
     triggeringEvent: NDKEvent;
     conversationEvent?: NDKEvent; // Optional - not all events belong to conversations
     delegatingAgentPubkey?: string; // For task completions
-    toolCalls?: Array<{ name: string; arguments: any }>;
+    toolCalls?: Array<{ name: string; arguments: unknown }>;
     executionTime?: number;
     model?: string;
     usage?: {
@@ -89,8 +89,8 @@ export interface EventContext {
  * All tagging logic is centralized here for consistency and testability.
  */
 
-// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
-export  class AgentEventEncoder {
+// biome-ignore lint/complexity/noStaticOnlyClass: Static utility class for encoding event semantics
+export class AgentEventEncoder {
     /**
      * Add conversation tags consistently to any event.
      * Centralizes conversation tagging logic for all agent events.
