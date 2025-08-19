@@ -7,6 +7,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentStreamer } from "@/nostr/AgentStreamer";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
@@ -55,7 +56,7 @@ export class ReasonActLoop {
         this.executionLogger = createExecutionLogger(tracingContext, "agent");
         
         // Initialize AgentPublisher and AgentStreamer with the agent from context
-        this.agentPublisher = new AgentPublisher(context.agent, context.conversationManager);
+        this.agentPublisher = new AgentPublisher(context.agent);
         this.agentStreamer = new AgentStreamer(this.agentPublisher);
 
         // Execute the streaming loop
@@ -466,7 +467,10 @@ export class ReasonActLoop {
 
         if (llmMetadata) {
             metadata.model = llmMetadata.model;
-            metadata.usage = llmMetadata.usage;
+            metadata.cost = llmMetadata.cost;
+            metadata.promptTokens = llmMetadata.promptTokens;
+            metadata.completionTokens = llmMetadata.completionTokens;
+            metadata.totalTokens = llmMetadata.totalTokens;
             
             // Get tool calls from tool results
             const toolResults = stateManager.getToolResults();
@@ -636,13 +640,14 @@ export class ReasonActLoop {
         });
         
         if (context.triggeringEvent.kind === 1934) { // NDKTask.kind
-            const delegationContext = context.conversationManager.getDelegationContext(context.triggeringEvent.id);
+            const registry = DelegationRegistry.getInstance();
+            const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
             if (delegationContext) {
                 delegatingAgentPubkey = delegationContext.delegatingAgent.pubkey;
                 tracingLogger.debug("[ReasonActLoop] Found delegation context", {
                     taskId: context.triggeringEvent.id.substring(0, 8),
                     delegatingAgent: delegationContext.delegatingAgent.slug,
-                    delegatingAgentPubkey: delegatingAgentPubkey.substring(0, 16),
+                    delegatingAgentPubkey: delegatingAgentPubkey?.substring(0, 16),
                     batchId: delegationContext.delegationBatchId
                 });
             } else {
@@ -660,6 +665,7 @@ export class ReasonActLoop {
         // Get conversation for the event context
         const conversation = context.conversationManager.getConversation(context.conversationId);
         
+        const responseUsage = stateManager.getFinalResponse()?.usage;
         const eventContext: EventContext = {
             triggeringEvent: context.triggeringEvent,
             conversationEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
@@ -667,7 +673,11 @@ export class ReasonActLoop {
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             executionTime: this.startTime ? Date.now() - this.startTime : undefined,
             model: stateManager.getFinalResponse()?.model,
-            usage: stateManager.getFinalResponse()?.usage,
+            usage: responseUsage ? {
+                prompt_tokens: responseUsage.prompt_tokens,
+                completion_tokens: responseUsage.completion_tokens,
+                total_tokens: responseUsage.prompt_tokens + responseUsage.completion_tokens
+            } : undefined,
             phase: context.phase
         };
         

@@ -109,6 +109,9 @@ const PersistedDataSchema = z.object({
 });
 
 export class DelegationRegistry {
+  private static instance: DelegationRegistry;
+  private static isInitialized = false;
+  
   // Primary storage: task ID -> full record
   private delegations: Map<string, DelegationRecord> = new Map();
   
@@ -128,34 +131,53 @@ export class DelegationRegistry {
   private cleanupTimer?: NodeJS.Interval;
   private isDirty = false;
   private isShuttingDown = false;
-  private isInitialized = false;
   
-  constructor() {
+  private constructor() {
     this.persistencePath = path.join(process.cwd(), '.tenex', 'delegations.json');
     this.backupPath = path.join(process.cwd(), '.tenex', 'delegations.backup.json');
   }
   
-  async initialize(): Promise<void> {
+  /**
+   * Initialize the singleton instance.
+   * Must be called once at app startup before using getInstance().
+   */
+  static async initialize(): Promise<void> {
     if (this.isInitialized) return;
     
-    logger.debug("Initializing DelegationRegistry");
+    logger.debug("Initializing DelegationRegistry singleton");
     
-    // Restore data synchronously
-    await this.restore();
+    // Create instance if it doesn't exist
+    if (!this.instance) {
+      this.instance = new DelegationRegistry();
+    }
+    
+    // Restore data
+    await this.instance.restore();
     
     // Set up periodic cleanup (every hour)
-    this.cleanupTimer = setInterval(() => {
-      this.cleanupOldDelegations();
-      if (this.isDirty) {
-        this.schedulePersistence();
+    this.instance.cleanupTimer = setInterval(() => {
+      this.instance.cleanupOldDelegations();
+      if (this.instance.isDirty) {
+        this.instance.schedulePersistence();
       }
     }, 60 * 60 * 1000);
     
     // Set up graceful shutdown
-    this.setupGracefulShutdown();
+    this.instance.setupGracefulShutdown();
     
     this.isInitialized = true;
-    logger.debug("DelegationRegistry initialized successfully");
+    logger.debug("DelegationRegistry singleton initialized successfully");
+  }
+  
+  /**
+   * Get the singleton instance.
+   * Throws if initialize() hasn't been called.
+   */
+  static getInstance(): DelegationRegistry {
+    if (!this.isInitialized || !this.instance) {
+      throw new Error("DelegationRegistry not initialized. Call DelegationRegistry.initialize() at app startup.");
+    }
+    return this.instance;
   }
   
   /**

@@ -8,6 +8,7 @@ import { ExecutionQueueManager } from "../conversations/executionQueue";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
 import { getProjectContext } from "../services";
+import { DelegationRegistry } from "../services/DelegationRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
@@ -53,6 +54,9 @@ export class EventHandler {
             // ExecutionQueueManager is optional, continue without it
             logger.warn("Could not create ExecutionQueueManager:", err);
         }
+
+        // Initialize DelegationRegistry singleton first
+        await DelegationRegistry.initialize();
 
         // Initialize components directly
         this.conversationManager = new ConversationCoordinator(

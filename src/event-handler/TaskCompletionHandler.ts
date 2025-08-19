@@ -1,6 +1,7 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import type { AgentInstance } from "@/agents/types";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
@@ -36,8 +37,9 @@ export class TaskCompletionHandler {
             return { shouldReactivate: false };
         }
 
-        // Use ConversationCoordinator to get context directly
-        const delegationContext = conversationManager.getDelegationContext(taskId);
+        // Use DelegationRegistry to get context directly
+        const registry = DelegationRegistry.getInstance();
+        const delegationContext = registry.getDelegationContext(taskId);
         
         if (!delegationContext) {
             logger.warn('[TaskCompletionHandler] No delegation context found for task', { 
@@ -53,9 +55,9 @@ export class TaskCompletionHandler {
             batchId: delegationContext.delegationBatchId
         });
         
-        // Record the completion in the conversation coordinator
+        // Record the completion in the registry
         try {
-            const result = await conversationManager.recordTaskCompletion({
+            const result = await registry.recordTaskCompletion({
                 taskId,
                 completionEventId: event.id,
                 response: event.content,
