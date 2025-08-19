@@ -1,12 +1,12 @@
 import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { 
-    AgentEventEncoder, 
-    AgentEventDecoder,
+    AgentEventEncoder,
     type CompletionIntent,
     type DelegationIntent,
     type ConversationIntent,
     type EventContext
 } from "../AgentEventEncoder";
+import { AgentEventDecoder } from "../AgentEventDecoder";
 import { EVENT_KINDS } from "@/llm/types";
 import type { AgentInstance } from "@/agents/types";
 
@@ -98,8 +98,45 @@ describe("AgentEventEncoder", () => {
             
             const toolTags = event.getMatchingTags('tool');
             expect(toolTags).toHaveLength(1);
-            expect(toolTags[0][1]).toBe('search');
-            expect(JSON.parse(toolTags[0][2])).toEqual({ query: "test" });
+            expect(toolTags[0]).toEqual(['tool', 'search']); // Now only 2 elements
+            expect(toolTags[0]).toHaveLength(2);
+        });
+
+        it("should format complete tool tags correctly without arguments", () => {
+            const contextWithCompleteTool: EventContext = {
+                ...baseContext,
+                toolCalls: [
+                    { name: "complete", arguments: { response: "Task completed successfully" } }
+                ]
+            };
+
+            const intent: CompletionIntent = {
+                type: 'completion',
+                content: "Task completed successfully"
+            };
+
+            const event = AgentEventEncoder.encodeCompletion(intent, contextWithCompleteTool);
+            
+            const toolTags = event.getMatchingTags('tool');
+            expect(toolTags).toHaveLength(1);
+            expect(toolTags[0]).toEqual(['tool', 'complete']); // Should only have 2 elements, no arguments
+            expect(toolTags[0]).toHaveLength(2); // Explicitly check length
+        });
+
+        it("should include phase information when provided", () => {
+            const contextWithPhase: EventContext = {
+                ...baseContext,
+                phase: "implementation"
+            };
+
+            const intent: CompletionIntent = {
+                type: 'completion',
+                content: "Implementation completed"
+            };
+
+            const event = AgentEventEncoder.encodeCompletion(intent, contextWithPhase);
+            
+            expect(event.tagValue('phase')).toBe('implementation');
         });
     });
 
@@ -131,15 +168,19 @@ describe("AgentEventEncoder", () => {
         });
 
         it("should include phase information when provided", () => {
+            const contextWithPhase: EventContext = {
+                ...baseContext,
+                phase: "implementation"
+            };
+
             const intent: DelegationIntent = {
                 type: 'delegation',
                 recipients: ['reviewer'],
                 title: "Phase 2 Review",
-                request: "Review implementation",
-                phase: "implementation"
+                request: "Review implementation"
             };
 
-            const tasks = AgentEventEncoder.encodeDelegation(intent, baseContext);
+            const tasks = AgentEventEncoder.encodeDelegation(intent, contextWithPhase);
 
             expect(tasks[0].tagValue('phase')).toBe('implementation');
         });

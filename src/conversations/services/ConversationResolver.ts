@@ -32,7 +32,7 @@ export class ConversationResolver {
      */
     async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
         // Try standard conversation resolution first
-        let result = await this.findConversationForReply(event);
+        const result = await this.findConversationForReply(event);
         
         // If no conversation found and this could be an orphaned reply, try to create one
         if (!result.conversation && AgentEventDecoder.isOrphanedReply(event)) {

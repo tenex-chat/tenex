@@ -3,7 +3,6 @@ import type NDK from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { Conversation } from "@/conversations/types";
-import type { Phase } from "@/conversations/phases";
 import { PHASES } from "@/conversations/phases";
 import type { ToolCall } from "@/llm/types";
 import { EVENT_KINDS } from "@/llm/types";

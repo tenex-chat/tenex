@@ -69,7 +69,7 @@ REMEMBER:
 
         // Debug logging
         const { logger } = await import("@/utils/logger");
-        logger.debug("[complete() tool] Returning completion intent", {
+        logger.info("[complete() tool] Returning completion intent", {
             agent: context.agent.name,
             contentLength: response.length,
             hasSummary: !!summary

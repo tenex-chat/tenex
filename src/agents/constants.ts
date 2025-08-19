@@ -1,10 +1,8 @@
 import type { AgentInstance } from "./types";
-import { analyze } from "../tools/implementations/analyze";
 import { lessonLearnTool } from "../tools/implementations/learn";
 import { readPathTool } from "../tools/implementations/readPath";
 import { completeTool } from "../tools/implementations/complete";
 import { delegateTool } from "../tools/implementations/delegate";
-import { PROJECT_MANAGER_AGENT_DEFINITION } from "./built-in/project-manager";
 import { claudeCode } from "@/tools/implementations/claude_code";
 
 // Agent slug constants

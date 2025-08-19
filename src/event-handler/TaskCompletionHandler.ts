@@ -78,8 +78,6 @@ export class TaskCompletionHandler {
                     batchId: result.batchId
                 });
                 
-                // Get all completions for synthesis
-                const completions = registry.getBatchCompletions(result.batchId);
                 
                 // Find the target agent
                 const targetAgent = getProjectContext().getAgent(result.delegatingAgentSlug);

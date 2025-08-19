@@ -8,6 +8,8 @@ import { ExecutionConfig } from "./constants";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import { isComplete } from "./control-flow-types";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 
 /**
  * Handles tool-related events in the LLM stream.
@@ -66,7 +68,7 @@ export class ToolStreamHandler {
         this.logToolComplete(toolResult, event.tool, context);
 
         // Publish error if tool failed
-        await this.publishToolError(toolResult, event.tool, tracingLogger);
+        await this.publishToolError(toolResult, event.tool, tracingLogger, context);
 
         // Process the tool result (update state with continue/termination)
         this.processToolResult(toolResult, tracingLogger, context);
@@ -148,7 +150,8 @@ export class ToolStreamHandler {
     private async publishToolError(
         toolResult: ToolExecutionResult,
         toolName: string,
-        tracingLogger: TracingLogger
+        tracingLogger: TracingLogger,
+        context: ExecutionContext
     ): Promise<void> {
         if (!toolResult.success && toolResult.error) {
             try {
@@ -165,9 +168,22 @@ export class ToolStreamHandler {
                     errorMessage = JSON.stringify(toolResult.error);
                 }
 
-                // TODO: Need to refactor to use AgentPublisher.error() instead
-                // await publisher.publishError(`Tool "${toolName}" failed: ${errorMessage}`);
-                tracingLogger.info("Tool error occurred (not published)", {
+                // Use AgentPublisher.error() instead of legacy approach
+                const agentPublisher = new AgentPublisher(context.agent);
+                const errorIntent: ErrorIntent = {
+                    type: 'error',
+                    message: `Tool "${toolName}" failed: ${errorMessage}`,
+                    errorType: 'tool_execution'
+                };
+
+                const eventContext: EventContext = {
+                    triggeringEvent: context.triggeringEvent,
+                    conversationEvent: context.triggeringEvent, // Use triggering event as conversation context
+                };
+
+                await agentPublisher.error(errorIntent, eventContext);
+                
+                tracingLogger.info("Tool error published", {
                     tool: toolName,
                     error: errorMessage,
                 });
@@ -203,14 +219,7 @@ export class ToolStreamHandler {
         if (isComplete(output)) {
             // Mark as terminated
             this.stateManager.setTermination(output);
-            
-            tracingLogger.info("[ToolStreamHandler] Complete tool executed", {
-                hasTermination: true,
-            });
         }
-        
-        // Note: Both complete and delegate tools now publish events immediately,
-        // no deferred processing needed
     }
 
     /**
@@ -222,8 +231,8 @@ export class ToolStreamHandler {
         }
 
         const output = result.output as Record<string, unknown>;
-        // Check for terminal tool types
-        return output.toolType === 'complete' || output.toolType === 'delegate' || output.toolType === 'delegate_phase';
+        // Check for terminal intent types (new format)
+        return output.type === 'completion' || output.type === 'delegation';
     }
 
     /**

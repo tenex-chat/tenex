@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
-import { PHASES, type Phase } from "@/conversations/phases";
+import { PHASES } from "@/conversations/phases";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 
 const delegatePhaseSchema = z.object({

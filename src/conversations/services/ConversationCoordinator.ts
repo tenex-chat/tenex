@@ -1,5 +1,4 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { getNDK } from "@/nostr/ndkClient";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
 import type { 

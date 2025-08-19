@@ -1,9 +1,7 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "./AgentPublisher";
-import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import type { EventContext, StreamingIntent } from "./AgentEventEncoder";
-import { getNDK } from "./ndkClient";
 
 export interface StreamHandle {
     addContent: (content: string) => Promise<void>;

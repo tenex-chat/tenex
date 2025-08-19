@@ -129,7 +129,7 @@ export class ReasonActLoop {
 
                 // Check if we should continue iterating
                 if (iterationResult.isTerminal) {
-                    tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
+                    tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
                         iteration: iterations,
                         willExitLoop: true,
                         hasDeferredEvent: !!iterationResult.deferredTerminalEvent,
@@ -185,7 +185,7 @@ export class ReasonActLoop {
                 }
             }
             
-            tracingLogger.debug("[ReasonActLoop] Exited main loop", {
+            tracingLogger.info("[ReasonActLoop] Exited main loop", {
                 iterations,
                 isComplete,
                 reason: isComplete ? "completed" : "max iterations",
@@ -245,12 +245,12 @@ export class ReasonActLoop {
             })
             events.push(event);
             
-            // If we've already detected a terminal tool, skip processing remaining events
+            // If we've already detected a terminal tool, break out of stream processing
             if (isTerminal) {
-                tracingLogger.debug("[processIterationStream] Skipping event after terminal tool", {
+                tracingLogger.debug("[processIterationStream] Breaking stream processing after terminal tool", {
                     eventType: event.type,
                 });
-                continue;
+                break;
             }
 
             switch (event.type) {
@@ -262,15 +262,6 @@ export class ReasonActLoop {
                     break;
 
                 case "tool_start": {
-                    // Skip tool execution if we've already detected a terminal tool
-                    if (isTerminal) {
-                        tracingLogger.warning("[processIterationStream] Ignoring tool_start after terminal tool", {
-                            ignoredTool: event.tool,
-                            args: event.args,
-                        });
-                        break;
-                    }
-                    
                     hasToolCalls = true;
                     
                     // Check for repetitive tool calls
@@ -319,18 +310,26 @@ export class ReasonActLoop {
                                 isTerminal = true;
                                 deferredTerminalEvent = {
                                     type: output.type,
-                                    intent: output
+                                    intent: output as unknown as CompletionIntent | DelegationIntent
                                 };
                             }
                         }
                     }
 
-                    if (isTerminalTool && !deferredTerminalEvent) {
-                        // Terminal tool executed but didn't produce expected deferred event
-                        tracingLogger.warn("[ReasonActLoop] Terminal tool didn't produce deferred event", {
-                            tool: event.tool,
-                        });
+                    // If the tool handler detected this as a terminal tool, mark as terminal
+                    if (isTerminalTool) {
                         isTerminal = true;
+                        
+                        // If no deferred event was created, create a basic one
+                        if (!deferredTerminalEvent && toolResult?.success && toolResult?.output) {
+                            const output = toolResult.output as { type?: string; [key: string]: unknown };
+                            if (output.type === 'completion' || output.type === 'delegation') {
+                                deferredTerminalEvent = {
+                                    type: output.type,
+                                    intent: output as unknown as CompletionIntent | DelegationIntent
+                                };
+                            }
+                        }
                     }
                     break;
                 }
@@ -582,7 +581,7 @@ export class ReasonActLoop {
             };
             await this.agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
         } catch (typingError) {
-            tracingLogger.warn("Failed to stop typing indicator", { error: formatAnyError(typingError) });
+            tracingLogger.warning("Failed to stop typing indicator", { error: formatAnyError(typingError) });
         }
 
         yield {
@@ -629,6 +628,14 @@ export class ReasonActLoop {
         
         // Check if this is completing a delegated task using DelegationRegistry
         let delegatingAgentPubkey: string | undefined;
+        
+        tracingLogger.debug("[ReasonActLoop] Checking for delegation context", {
+            triggeringEventKind: context.triggeringEvent.kind,
+            triggeringEventId: context.triggeringEvent.id?.substring(0, 8),
+            fullTriggeringEventId: context.triggeringEvent.id,
+            isNDKTask: context.triggeringEvent.kind === 1934
+        });
+        
         if (context.triggeringEvent.kind === 1934) { // NDKTask.kind
             const registry = DelegationRegistry.getInstance();
             const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
@@ -637,23 +644,33 @@ export class ReasonActLoop {
                 tracingLogger.debug("[ReasonActLoop] Found delegation context", {
                     taskId: context.triggeringEvent.id.substring(0, 8),
                     delegatingAgent: delegationContext.delegatingAgent.slug,
-                    delegatingAgentPubkey: delegatingAgentPubkey.substring(0, 8)
+                    delegatingAgentPubkey: delegatingAgentPubkey.substring(0, 16),
+                    batchId: delegationContext.delegationBatchId
+                });
+            } else {
+                tracingLogger.warning("[ReasonActLoop] No delegation context found for NDKTask", {
+                    taskId: context.triggeringEvent.id?.substring(0, 8),
+                    fullTaskId: context.triggeringEvent.id
                 });
             }
+        } else {
+            tracingLogger.debug("[ReasonActLoop] Not an NDKTask, skipping delegation lookup", {
+                eventKind: context.triggeringEvent.kind
+            });
         }
         
         // Get conversation for the event context
         const conversation = context.conversationManager.getConversation(context.conversationId);
         
         const eventContext: EventContext = {
-            agent: context.agent,
             triggeringEvent: context.triggeringEvent,
             conversationEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
             delegatingAgentPubkey,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             executionTime: this.startTime ? Date.now() - this.startTime : undefined,
             model: stateManager.getFinalResponse()?.model,
-            usage: stateManager.getFinalResponse()?.usage
+            usage: stateManager.getFinalResponse()?.usage,
+            phase: context.phase
         };
         
         // Publish based on intent type

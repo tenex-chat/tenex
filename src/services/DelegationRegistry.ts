@@ -110,6 +110,7 @@ const PersistedDataSchema = z.object({
 
 export class DelegationRegistry {
   private static instance: DelegationRegistry;
+  private static initializationPromise: Promise<DelegationRegistry> | null = null;
   
   // Primary storage: task ID -> full record
   private delegations: Map<string, DelegationRecord> = new Map();
@@ -130,15 +131,20 @@ export class DelegationRegistry {
   private cleanupTimer?: NodeJS.Interval;
   private isDirty = false;
   private isShuttingDown = false;
+  private isInitialized = false;
   
   private constructor() {
     this.persistencePath = path.join(process.cwd(), '.tenex', 'delegations.json');
     this.backupPath = path.join(process.cwd(), '.tenex', 'delegations.backup.json');
+  }
+  
+  private async initialize(): Promise<void> {
+    if (this.isInitialized) return;
     
-    // Restore data on startup
-    this.restore().catch(err => 
-      logger.error("Failed to restore delegation registry", { error: err })
-    );
+    logger.debug("Initializing DelegationRegistry");
+    
+    // Restore data synchronously
+    await this.restore();
     
     // Set up periodic cleanup (every hour)
     this.cleanupTimer = setInterval(() => {
@@ -150,11 +156,33 @@ export class DelegationRegistry {
     
     // Set up graceful shutdown
     this.setupGracefulShutdown();
+    
+    this.isInitialized = true;
+    logger.debug("DelegationRegistry initialized successfully");
   }
   
-  static getInstance(): DelegationRegistry {
-    if (!this.instance) {
-      this.instance = new DelegationRegistry();
+  static async getInstance(): Promise<DelegationRegistry> {
+    if (this.instance && this.instance.isInitialized) {
+      return this.instance;
+    }
+    
+    if (!this.initializationPromise) {
+      this.initializationPromise = (async () => {
+        if (!this.instance) {
+          this.instance = new DelegationRegistry();
+        }
+        await this.instance.initialize();
+        return this.instance;
+      })();
+    }
+    
+    return this.initializationPromise;
+  }
+  
+  // Synchronous version for backwards compatibility - will throw if not initialized
+  static getInstanceSync(): DelegationRegistry {
+    if (!this.instance || !this.instance.isInitialized) {
+      throw new Error("DelegationRegistry not initialized. Use getInstance() instead.");
     }
     return this.instance;
   }
@@ -225,8 +253,22 @@ export class DelegationRegistry {
       batchId,
       taskCount: params.tasks.length,
       delegatingAgent: params.delegatingAgent.slug,
-      conversationId: params.conversationId.substring(0, 8)
+      delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
+      conversationId: params.conversationId.substring(0, 8),
+      taskIds: params.tasks.map(t => ({ id: t.taskId.substring(0, 8), assignedTo: t.assignedToPubkey.substring(0, 16) }))
     });
+    
+    // Debug: Log each individual task registration
+    for (const task of params.tasks) {
+      logger.debug("Registered individual delegation task", {
+        taskId: task.taskId.substring(0, 8),
+        fullTaskId: task.taskId,
+        delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
+        assignedToPubkey: task.assignedToPubkey.substring(0, 16),
+        title: task.title,
+        phase: task.phase
+      });
+    }
     
     return batchId;
   }
@@ -310,7 +352,32 @@ export class DelegationRegistry {
    * This is the KEY improvement - no conversation lookup needed
    */
   getDelegationContext(taskId: string): DelegationRecord | undefined {
-    return this.delegations.get(taskId);
+    logger.debug("Looking up delegation context", {
+      taskId: taskId.substring(0, 8),
+      fullTaskId: taskId,
+      totalDelegations: this.delegations.size,
+      hasRecord: this.delegations.has(taskId)
+    });
+    
+    const record = this.delegations.get(taskId);
+    
+    if (record) {
+      logger.debug("Found delegation context", {
+        taskId: taskId.substring(0, 8),
+        delegatingAgentSlug: record.delegatingAgent.slug,
+        delegatingAgentPubkey: record.delegatingAgent.pubkey.substring(0, 16),
+        status: record.status,
+        batchId: record.delegationBatchId
+      });
+    } else {
+      logger.warn("No delegation context found", {
+        taskId: taskId.substring(0, 8),
+        fullTaskId: taskId,
+        availableTaskIds: Array.from(this.delegations.keys()).map(id => id.substring(0, 8))
+      });
+    }
+    
+    return record;
   }
   
   /**

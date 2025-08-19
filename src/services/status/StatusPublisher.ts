@@ -1,4 +1,3 @@
-import { EVENT_KINDS } from "@/llm/types";
 
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds

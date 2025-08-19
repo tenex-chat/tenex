@@ -7,7 +7,6 @@ import {
 } from "@/commands/run/processedEventTracking";
 import type { EventHandler } from "@/event-handler";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";

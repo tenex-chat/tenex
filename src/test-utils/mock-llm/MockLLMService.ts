@@ -44,7 +44,7 @@ export class MockLLMService implements LLMService {
         const messages = request.messages;
         const model = request.options?.configName || 'mock-model';
         
-        const response = this.findMatchingResponse(messages, model);
+        const response = this.findMatchingResponse(messages);
         
         this.recordRequest(messages, model, response);
         
@@ -100,7 +100,7 @@ export class MockLLMService implements LLMService {
         const messages = request.messages;
         const model = request.options?.configName || 'mock-model';
         
-        const response = this.findMatchingResponse(messages, model);
+        const response = this.findMatchingResponse(messages);
         
         this.recordRequest(messages, model, response);
         
@@ -150,7 +150,7 @@ export class MockLLMService implements LLMService {
         };
     }
 
-    private findMatchingResponse(messages: Message[], model: string): MockLLMResponse['response'] {
+    private findMatchingResponse(messages: Message[]): MockLLMResponse['response'] {
         const systemMessage = messages.find(m => m.role === 'system');
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
         const toolCalls = messages
@@ -164,7 +164,7 @@ export class MockLLMService implements LLMService {
         const phase = this.extractPhase(systemMessage?.content || '');
         
         // Get conversation context
-        const conversationId = this.extractConversationId(messages);
+        const conversationId = this.extractConversationId();
         const context = this.getOrCreateContext(conversationId);
         
         // Update agent iteration count
@@ -388,7 +388,7 @@ export class MockLLMService implements LLMService {
         return this.conversationContext.get(conversationId)!;
     }
     
-    private extractConversationId(messages: Message[]): string {
+    private extractConversationId(): string {
         // Try to extract conversation ID from messages
         // For now, use a default ID
         return 'default';

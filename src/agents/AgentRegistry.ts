@@ -5,7 +5,6 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { AgentInstance, AgentConfig, AgentConfigOptionalNsec, StoredAgentData } from "@/agents/types";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { getNDK } from "@/nostr";
 import { configService } from "@/services";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
