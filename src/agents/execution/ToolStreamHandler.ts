@@ -237,7 +237,7 @@ export class ToolStreamHandler {
         }
         
         // Legacy check for backwards compatibility
-        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds) && !output.serializedEvents);
+        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds));
     }
 
     /**

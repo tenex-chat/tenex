@@ -65,19 +65,8 @@ export class TaskPublisher {
         // Store the task instance for future operations
         this.currentTask = task;
 
-        // Register task mapping if conversation manager is provided
-        if (options.conversationManager && options.conversationRootEventId && task.id) {
-            await options.conversationManager.registerTaskMapping(
-                task.id,
-                options.conversationRootEventId,
-                options.claudeSessionId
-            );
-            logger.debug("Registered task mapping for conversation", {
-                taskId: task.id,
-                conversationId: options.conversationRootEventId,
-                claudeSessionId: options.claudeSessionId
-            });
-        }
+        // Task mapping is now handled by DelegationRegistry when tasks are created
+        // No need to register here anymore
 
         return task;
     }

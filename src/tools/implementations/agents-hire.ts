@@ -53,6 +53,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
             }
 
             // Fetch the NDKAgentDefinition from the network
+            // fetchAgentDefinition handles both hex and nevent formats
             const ndk = getNDK();
             const agentDefinition = await fetchAgentDefinition(eventId, ndk);
 
@@ -78,7 +79,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
             // Check if agent already exists
             const existingAgent = registry.getAgent(agentSlug);
             if (existingAgent) {
-                if (existingAgent.eventId === eventId) {
+                if (existingAgent.eventId === agentDefinition.id) {
                     return success({
                         success: true,
                         message: `Agent "${agentDefinition.title}" is already installed in the project`,
@@ -103,13 +104,13 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
                 description: agentDefinition.description,
                 instructions: agentDefinition.instructions,
                 useCriteria: agentDefinition.useCriteria,
-                eventId: eventId, // Link to the original NDKAgentDefinition event
+                eventId: agentDefinition.id, // Use the hex ID from the fetched event
             };
 
             // Add the agent to the project
             const agent = await registry.ensureAgent(agentSlug, agentConfig, projectContext.project);
 
-            logger.info(`Successfully hired NDKAgentDefinition "${agentDefinition.title}" (${eventId})`);
+            logger.info(`Successfully hired NDKAgentDefinition "${agentDefinition.title}" (${agentDefinition.id})`);
             logger.info(`  Slug: ${agentSlug}`);
             logger.info(`  Pubkey: ${agent.pubkey}`);
 
@@ -121,7 +122,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
                     name: agent.name,
                     role: agent.role,
                     pubkey: agent.pubkey,
-                    eventId: eventId,
+                    eventId: agentDefinition.id,
                 },
             });
         } catch (error) {

@@ -179,8 +179,7 @@ After delegating:
                 phase: phase,
                 recipientPubkeys: delegationResult.recipientPubkeys,
                 taskIds: delegationResult.taskIds,
-                serializedEvents: delegationResult.serializedEvents,
-                delegationState: delegationResult.delegationState,
+                batchId: delegationResult.batchId,
                 toolType: 'delegate_phase'
             });
         } catch (error) {

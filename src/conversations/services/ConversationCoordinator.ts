@@ -294,56 +294,8 @@ export class ConversationCoordinator {
             agentState.lastSeenPhase = conversation.phase;
         }
 
-        // Handle delegation responses if pending
-        if (agentState.pendingDelegation && triggeringEvent) {
-            // Check if this is a task completion event for one of our pending tasks
-            const taskId = triggeringEvent.tagValue("e"); // Task completion events reference the task
-            
-            if (taskId && agentState.pendingDelegation.taskIds.includes(taskId)) {
-                // Update task status
-                const taskInfo = agentState.pendingDelegation.tasks.get(taskId);
-                if (taskInfo) {
-                    taskInfo.status = "completed";
-                    taskInfo.response = triggeringEvent.content;
-                }
-                
-                // Check if all tasks are completed
-                const completedTasks = Array.from(agentState.pendingDelegation.tasks.values())
-                    .filter(t => t.status === "completed");
-                
-                if (completedTasks.length < agentState.pendingDelegation.taskIds.length) {
-                    context.addMessage(new Message("system", 
-                        `Waiting for delegate responses: ${completedTasks.length}/${agentState.pendingDelegation.taskIds.length} received.`
-                    ));
-                    
-                    await this.persistence.save(conversation);
-                    
-                    return {
-                        messages: context.getMessages(),
-                        claudeSessionId: context.getClaudeSessionId() || agentState.claudeSessionId
-                    };
-                }
-                
-                // All tasks completed - prepare responses for the agent
-                const responsesMap = new Map<string, NDKEvent>();
-                for (const [_taskId, taskInfo] of agentState.pendingDelegation.tasks) {
-                    if (taskInfo.response) {
-                        // Create a synthetic event for the response
-                        const responseEvent = new NDKEvent(getNDK());
-                        responseEvent.content = taskInfo.response;
-                        responseEvent.pubkey = taskInfo.recipientPubkey;
-                        responsesMap.set(taskInfo.recipientPubkey, responseEvent);
-                    }
-                }
-                
-                context.addDelegationResponses(
-                    responsesMap,
-                    agentState.pendingDelegation.originalRequest
-                );
-                
-                agentState.pendingDelegation = undefined;
-            }
-        }
+        // Delegation responses are now handled by DelegationRegistry in reply.ts
+        // This old code path is no longer used
         
         // Add handoff if present
         if (handoff) {
@@ -410,7 +362,7 @@ export class ConversationCoordinator {
      * agents won't be reactivated until all their delegated tasks complete
      */
     isCurrentTurnComplete(_conversationId: string): boolean {
-        return true; // PM-centric routing with NDKTask handles this via pendingDelegation
+        return true; // PM-centric routing with NDKTask handles this via DelegationRegistry
     }
 
     /**

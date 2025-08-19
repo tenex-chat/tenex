@@ -305,28 +305,14 @@ export class ReasonActLoop {
                             const output = toolResult.output as any;
                             
                             // Handle delegate/delegate_phase tools (highest priority)
-                            if ((output.toolType === 'delegate' || output.toolType === 'delegate_phase') && output.serializedEvents) {
-                                // Only accept the FIRST delegation - ignore subsequent ones
-                                if (!deferredTerminalEvent || deferredTerminalEvent.type !== 'delegate') {
-                                    tracingLogger.info("[ReasonActLoop] Delegation tool detected - deferring events", {
-                                        tool: event.tool,
-                                        eventCount: output.serializedEvents.length
-                                    });
-                                    deferredTerminalEvent = {
-                                        type: 'delegate',
-                                        events: output.serializedEvents,
-                                        delegationState: output.delegationState,
-                                        conversationId: context.conversationId,
-                                        agentSlug: context.agent.slug
-                                    };
-                                    isTerminal = true;
-                                } else {
-                                    tracingLogger.warning("[ReasonActLoop] Additional delegation detected but ignoring (only first delegation is used)", {
-                                        tool: event.tool,
-                                        ignoredEventCount: output.serializedEvents.length
-                                    });
-                                    isTerminal = true;
-                                }
+                            if ((output.toolType === 'delegate' || output.toolType === 'delegate_phase')) {
+                                // Tasks are now published immediately by DelegationService
+                                // Just mark as terminal to end the loop
+                                tracingLogger.info("[ReasonActLoop] Delegation tool detected - tasks already published", {
+                                    tool: event.tool,
+                                    batchId: output.batchId
+                                });
+                                isTerminal = true;
                             }
                             // Handle complete tool (only if we don't already have a delegation)
                             else if (output.toolType === 'complete' && output.serializedEvent) {
@@ -621,42 +607,9 @@ export class ReasonActLoop {
         const { getNDK } = await import("@/nostr/ndkClient");
         const ndk = getNDK();
         
-        if (deferredEvent.type === 'delegate' && deferredEvent.events) {
-            // Apply delegation state before publishing
-            if (deferredEvent.delegationState && deferredEvent.conversationId && deferredEvent.agentSlug) {
-                await context.conversationManager.updateAgentState(
-                    deferredEvent.conversationId,
-                    deferredEvent.agentSlug,
-                    {
-                        pendingDelegation: deferredEvent.delegationState
-                    }
-                );
-                
-                // Register task mappings
-                for (const taskId of deferredEvent.delegationState.taskIds) {
-                    await context.conversationManager.registerTaskMapping(
-                        taskId,
-                        deferredEvent.conversationId
-                    );
-                }
-                
-                tracingLogger.info("[ReasonActLoop] Applied deferred delegation state", {
-                    agentSlug: deferredEvent.agentSlug,
-                    taskCount: deferredEvent.delegationState.taskIds.length
-                });
-            }
-            
-            // Publish delegation events
-            for (const serializedEvent of deferredEvent.events) {
-                const event = new NDKEvent(ndk, serializedEvent);
-                await event.publish();
-                
-                tracingLogger.info("[ReasonActLoop] Published deferred delegation event", {
-                    eventId: event.id,
-                    kind: event.kind,
-                });
-            }
-        } else if (deferredEvent.type === 'complete' && deferredEvent.event) {
+        // Delegation events are now published immediately by DelegationService
+        // Only handle completion events here
+        if (deferredEvent.type === 'complete' && deferredEvent.event) {
             // Publish completion event
             const event = new NDKEvent(ndk, deferredEvent.event);
             await event.publish();

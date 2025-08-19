@@ -6,18 +6,6 @@ export interface AgentState {
     lastProcessedMessageIndex: number; // Index into Conversation.history
     claudeSessionId?: string; // Claude Code session ID (if per-agent per-conversation)
     lastSeenPhase?: Phase; // Track the last phase this agent operated in
-    
-    // Delegation tracking - when agent is waiting for task completions from other agents
-    pendingDelegation?: {
-        taskIds: string[];           // NDKTask IDs we're waiting for
-        tasks: Map<string, {         // Task details keyed by task ID (runtime only)
-            recipientPubkey: string;
-            status: string;
-            response?: string;
-        }>;
-        originalRequest: string;     // What we asked them
-        timestamp: number;           // When delegation started
-    };
 }
 
 export interface Conversation {

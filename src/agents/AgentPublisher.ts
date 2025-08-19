@@ -46,9 +46,17 @@ export class AgentPublisher {
             // Properly tag the project event (creates an "a" tag for kind:31933)
             profileEvent.tag(projectEvent);
             
-            // Add e-tag for the agent definition event if it exists
-            if (agentDefinitionEventId) {
-                profileEvent.tags.push(["e", agentDefinitionEventId, "", "agent-definition"]);
+            // Add e-tag for the agent definition event if it exists and is valid
+            if (agentDefinitionEventId && agentDefinitionEventId.trim() !== "") {
+                // Validate that it's a proper hex event ID (64 characters)
+                const trimmedId = agentDefinitionEventId.trim();
+                if (/^[a-f0-9]{64}$/i.test(trimmedId)) {
+                    profileEvent.tags.push(["e", trimmedId, "", "agent-definition"]);
+                } else {
+                    logger.warn("Invalid event ID format for agent definition, skipping e-tag", {
+                        eventId: agentDefinitionEventId,
+                    });
+                }
             }
 
             await profileEvent.sign(signer);
@@ -83,9 +91,17 @@ export class AgentPublisher {
 
             const tags: string[][] = [];
 
-            // Only add e-tag if this agent was created from an NDKAgentDefinition event
-            if (ndkAgentEventId) {
-                tags.push(["e", ndkAgentEventId, "", "agent-definition"]);
+            // Only add e-tag if this agent was created from an NDKAgentDefinition event and is valid
+            if (ndkAgentEventId && ndkAgentEventId.trim() !== "") {
+                // Validate that it's a proper hex event ID (64 characters)
+                const trimmedId = ndkAgentEventId.trim();
+                if (/^[a-f0-9]{64}$/i.test(trimmedId)) {
+                    tags.push(["e", trimmedId, "", "agent-definition"]);
+                } else {
+                    logger.warn("Invalid event ID format for agent definition in request, skipping e-tag", {
+                        eventId: ndkAgentEventId,
+                    });
+                }
             }
 
             // Add agent metadata tags

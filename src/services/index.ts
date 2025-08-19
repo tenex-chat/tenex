@@ -9,3 +9,5 @@ export {
     setProjectContext,
     isProjectContextInitialized,
 } from "./ProjectContext";
+export { DelegationService } from "./DelegationService";
+export { DelegationRegistry } from "./DelegationRegistry";
