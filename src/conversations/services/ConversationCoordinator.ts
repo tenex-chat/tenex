@@ -22,6 +22,11 @@ import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/phaseInstructionsBuilder";
 import { logger } from "@/utils/logger";
 import { ensureExecutionTimeInitialized } from "../executionTime";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import type { DelegationRecord } from "@/services/DelegationRegistry";
+
+// Re-export DelegationRecord for consumers
+export type { DelegationRecord } from "@/services/DelegationRegistry";
 
 /**
  * Coordinates between all conversation services.
@@ -33,6 +38,7 @@ export class ConversationCoordinator {
     private phaseManager: PhaseManager;
     private eventProcessor: ConversationEventProcessor;
     private messageBuilder: MessageBuilder;
+    private delegationRegistry: DelegationRegistry;
     
     // Context management
     private conversationContexts: Map<string, TracingContext> = new Map();
@@ -51,6 +57,7 @@ export class ConversationCoordinator {
         this.phaseManager = phaseManager;
         this.eventProcessor = eventProcessor;
         this.messageBuilder = new MessageBuilder();
+        this.delegationRegistry = new DelegationRegistry();
 
         // Setup queue listeners if available
         if (executionQueueManager) {
@@ -63,6 +70,7 @@ export class ConversationCoordinator {
      */
     async initialize(): Promise<void> {
         await this.persistence.initialize();
+        await this.delegationRegistry.initialize();
         await this.loadConversations();
         logger.info("[ConversationCoordinator] Initialized");
     }
@@ -408,6 +416,79 @@ export class ConversationCoordinator {
     setExecutionQueueManager(manager: ExecutionQueueManager): void {
         this.phaseManager['executionQueueManager'] = manager;
         this.setupQueueListeners();
+    }
+
+    // ===== Delegation Management =====
+
+    /**
+     * Register a new delegation batch
+     */
+    async registerDelegationBatch(params: {
+        tasks: Array<{
+            taskId: string;
+            assignedToPubkey: string;
+            title: string;
+            fullRequest: string;
+            phase?: string;
+        }>;
+        delegatingAgent: AgentInstance;
+        conversationId: string;
+        originalRequest: string;
+    }): Promise<string> {
+        return this.delegationRegistry.registerDelegationBatch(params);
+    }
+
+    /**
+     * Record task completion
+     */
+    async recordTaskCompletion(params: {
+        taskId: string;
+        completionEventId: string;
+        response: string;
+        summary?: string;
+        completedBy: string;
+    }): Promise<{
+        batchComplete: boolean;
+        batchId: string;
+        delegatingAgent: string;
+        delegatingAgentSlug: string;
+        remainingTasks: number;
+        conversationId: string;
+    }> {
+        return this.delegationRegistry.recordTaskCompletion(params);
+    }
+
+    /**
+     * Get delegation context from task ID
+     */
+    getDelegationContext(taskId: string): DelegationRecord | undefined {
+        return this.delegationRegistry.getDelegationContext(taskId);
+    }
+
+    /**
+     * Get all completions for a batch
+     */
+    getBatchCompletions(batchId: string): Array<{
+        taskId: string;
+        response: string;
+        summary?: string;
+        assignedTo: string;
+    }> {
+        return this.delegationRegistry.getBatchCompletions(batchId);
+    }
+
+    /**
+     * Get active delegations for an agent
+     */
+    getAgentActiveDelegations(agentPubkey: string): DelegationRecord[] {
+        return this.delegationRegistry.getAgentActiveDelegations(agentPubkey);
+    }
+
+    /**
+     * Get all tasks for a conversation
+     */
+    getConversationTasks(conversationId: string): DelegationRecord[] {
+        return this.delegationRegistry.getConversationTasks(conversationId);
     }
 
     /**

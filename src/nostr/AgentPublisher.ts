@@ -14,8 +14,8 @@ import {
 } from "./AgentEventEncoder";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { AgentConfig, AgentInstance } from "@/agents/types";
+import type { ConversationCoordinator } from "@/conversations/services/ConversationCoordinator";
 
 /**
  * Comprehensive publisher for all agent-related Nostr events.
@@ -23,9 +23,11 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
  */
 export class AgentPublisher {
     private agent: AgentInstance;
+    private conversationCoordinator: ConversationCoordinator;
 
-    constructor(agent: AgentInstance) {
+    constructor(agent: AgentInstance, conversationCoordinator: ConversationCoordinator) {
         this.agent = agent;
+        this.conversationCoordinator = conversationCoordinator;
     }
 
     /**
@@ -94,9 +96,8 @@ export class AgentPublisher {
             });
         }
 
-        // Register with DelegationRegistry
-        const registry = await DelegationRegistry.getInstance();
-        const batchId = await registry.registerDelegationBatch({
+        // Register with ConversationCoordinator
+        const batchId = await this.conversationCoordinator.registerDelegationBatch({
             tasks: tasks.map((task, index) => ({
                 taskId: task.id,
                 assignedToPubkey: intent.recipients[index],

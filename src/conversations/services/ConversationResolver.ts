@@ -1,6 +1,5 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ConversationCoordinator, Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
@@ -21,8 +20,7 @@ export interface ConversationResolutionResult {
  */
 export class ConversationResolver {
     constructor(
-        private conversationManager: ConversationCoordinator,
-        private delegationRegistry: DelegationRegistry
+        private conversationManager: ConversationCoordinator
     ) {}
 
     /**
@@ -64,7 +62,7 @@ export class ConversationResolver {
             const taskId = AgentEventDecoder.getTaskId(event);
             if (taskId) {
                 // Use DelegationRegistry to find the parent conversation
-                const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
+                const delegationContext = this.conversationManager.getDelegationContext(taskId);
                 if (delegationContext) {
                     const parentConversation = this.conversationManager.getConversation(
                         delegationContext.delegatingAgent.conversationId
@@ -91,7 +89,7 @@ export class ConversationResolver {
             
             if (taskId) {
                 // Use DelegationRegistry to find the parent conversation
-                const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
+                const delegationContext = this.conversationManager.getDelegationContext(taskId);
                 
                 if (delegationContext) {
                     conversation = this.conversationManager.getConversation(

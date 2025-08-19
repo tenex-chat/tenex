@@ -1,4 +1,3 @@
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 
@@ -10,8 +9,7 @@ import { logger } from "@/utils/logger";
 export function getRootConversationId(context: ExecutionContext): string {
     // Check if this is a delegated task (kind 1934)
     if (context.triggeringEvent.kind === 1934) {
-        const registry = DelegationRegistry.getInstance();
-        const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
+        const delegationContext = context.conversationManager.getDelegationContext(context.triggeringEvent.id);
         
         if (delegationContext) {
             logger.debug("[getRootConversationId] Found delegation context, using parent conversation", {

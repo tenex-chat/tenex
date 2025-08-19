@@ -4,7 +4,6 @@ import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { ConversationCoordinator, Conversation } from "../conversations";
 import { getProjectContext } from "../services";
-import { DelegationRegistry } from "../services/DelegationRegistry";
 import type { AgentInstance } from "../agents/types";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
@@ -119,8 +118,7 @@ async function handleReplyLogic(
 
     // 1. Resolve conversation context
     const conversationResolver = new ConversationResolver(
-        conversationManager,
-        DelegationRegistry.getInstance()
+        conversationManager
     );
     const { conversation, claudeSessionId: mappedClaudeSessionId, isNew } = await conversationResolver.resolveConversationForEvent(event);
 

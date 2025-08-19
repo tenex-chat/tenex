@@ -7,7 +7,6 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentStreamer } from "@/nostr/AgentStreamer";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
@@ -56,7 +55,7 @@ export class ReasonActLoop {
         this.executionLogger = createExecutionLogger(tracingContext, "agent");
         
         // Initialize AgentPublisher and AgentStreamer with the agent from context
-        this.agentPublisher = new AgentPublisher(context.agent);
+        this.agentPublisher = new AgentPublisher(context.agent, context.conversationManager);
         this.agentStreamer = new AgentStreamer(this.agentPublisher);
 
         // Execute the streaming loop
@@ -637,8 +636,7 @@ export class ReasonActLoop {
         });
         
         if (context.triggeringEvent.kind === 1934) { // NDKTask.kind
-            const registry = DelegationRegistry.getInstance();
-            const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
+            const delegationContext = context.conversationManager.getDelegationContext(context.triggeringEvent.id);
             if (delegationContext) {
                 delegatingAgentPubkey = delegationContext.delegatingAgent.pubkey;
                 tracingLogger.debug("[ReasonActLoop] Found delegation context", {

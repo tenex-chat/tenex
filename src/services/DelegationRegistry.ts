@@ -109,9 +109,6 @@ const PersistedDataSchema = z.object({
 });
 
 export class DelegationRegistry {
-  private static instance: DelegationRegistry;
-  private static initializationPromise: Promise<DelegationRegistry> | null = null;
-  
   // Primary storage: task ID -> full record
   private delegations: Map<string, DelegationRecord> = new Map();
   
@@ -133,12 +130,12 @@ export class DelegationRegistry {
   private isShuttingDown = false;
   private isInitialized = false;
   
-  private constructor() {
+  constructor() {
     this.persistencePath = path.join(process.cwd(), '.tenex', 'delegations.json');
     this.backupPath = path.join(process.cwd(), '.tenex', 'delegations.backup.json');
   }
   
-  private async initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     if (this.isInitialized) return;
     
     logger.debug("Initializing DelegationRegistry");
@@ -159,32 +156,6 @@ export class DelegationRegistry {
     
     this.isInitialized = true;
     logger.debug("DelegationRegistry initialized successfully");
-  }
-  
-  static async getInstance(): Promise<DelegationRegistry> {
-    if (this.instance && this.instance.isInitialized) {
-      return this.instance;
-    }
-    
-    if (!this.initializationPromise) {
-      this.initializationPromise = (async () => {
-        if (!this.instance) {
-          this.instance = new DelegationRegistry();
-        }
-        await this.instance.initialize();
-        return this.instance;
-      })();
-    }
-    
-    return this.initializationPromise;
-  }
-  
-  // Synchronous version for backwards compatibility - will throw if not initialized
-  static getInstanceSync(): DelegationRegistry {
-    if (!this.instance || !this.instance.isInitialized) {
-      throw new Error("DelegationRegistry not initialized. Use getInstance() instead.");
-    }
-    return this.instance;
   }
   
   /**
