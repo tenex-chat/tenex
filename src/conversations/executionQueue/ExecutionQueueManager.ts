@@ -2,13 +2,10 @@ import { EventEmitter } from 'events';
 import { LockManager } from './LockManager';
 import { QueueManager } from './QueueManager';
 import { TimeoutManager } from './TimeoutManager';
-import { ExecutionEventPublisher } from './ExecutionEventPublisher';
-import { NostrEventService } from '../../nostr/NostrEventService';
 import {
   ExecutionPermission,
   ExecutionQueueConfig,
   DEFAULT_EXECUTION_QUEUE_CONFIG,
-  ForceReleaseRequest,
   ExecutionHistory,
   ExecutionLock,
   QueueStatus
@@ -27,15 +24,13 @@ export class ExecutionQueueManager extends EventEmitter {
   private lockManager: LockManager;
   private queueManager: QueueManager;
   private timeoutManager: TimeoutManager;
-  private eventPublisher?: ExecutionEventPublisher;
   private config: ExecutionQueueConfig;
   private initialized = false;
 
   constructor(
     projectPath: string,
-    private projectPubkey?: string,
-    projectIdentifier?: string,
-    nostrService?: NostrEventService,
+    _projectPubkey?: string,
+    _projectIdentifier?: string,
     config: Partial<ExecutionQueueConfig> = {}
   ) {
     super();
@@ -45,15 +40,6 @@ export class ExecutionQueueManager extends EventEmitter {
     this.lockManager = new LockManager(projectPath, config);
     this.queueManager = new QueueManager(projectPath, config);
     this.timeoutManager = new TimeoutManager(config);
-
-    // Set up event publisher if Nostr service is available
-    if (nostrService && projectPubkey && projectIdentifier) {
-      this.eventPublisher = new ExecutionEventPublisher(
-        nostrService,
-        projectPubkey,
-        projectIdentifier
-      );
-    }
 
     // Set up timeout event handlers
     this.setupTimeoutHandlers();
@@ -66,9 +52,6 @@ export class ExecutionQueueManager extends EventEmitter {
 
     this.timeoutManager.on('warning', async (conversationId, remainingMs) => {
       this.emit('timeout-warning', conversationId, remainingMs);
-      if (this.eventPublisher) {
-        await this.eventPublisher.publishTimeoutWarning(conversationId, remainingMs);
-      }
     });
   }
 
@@ -122,19 +105,6 @@ export class ExecutionQueueManager extends EventEmitter {
     // Emit queue joined event
     this.emit('queue-joined', conversationId, position);
 
-    // Publish status update
-    await this.publishStatusUpdate();
-
-    // Publish queue event
-    if (this.eventPublisher) {
-      await this.eventPublisher.publishQueueEvent(
-        'queue_joined',
-        conversationId,
-        agentPubkey,
-        { position, estimatedWait }
-      );
-    }
-
     return {
       granted: false,
       waitTime: estimatedWait,
@@ -153,24 +123,8 @@ export class ExecutionQueueManager extends EventEmitter {
     // Start timeout timer
     this.timeoutManager.startTimeout(conversationId, this.config.maxExecutionDuration);
 
-    // Record execution start
-    const startTime = Date.now();
-
     // Emit lock acquired event
     this.emit('lock-acquired', conversationId, agentPubkey);
-
-    // Publish status update
-    await this.publishStatusUpdate();
-
-    // Publish lock acquired event
-    if (this.eventPublisher) {
-      await this.eventPublisher.publishQueueEvent(
-        'lock_acquired',
-        conversationId,
-        agentPubkey,
-        { timestamp: startTime }
-      );
-    }
 
     return {
       granted: true,
@@ -211,21 +165,8 @@ export class ExecutionQueueManager extends EventEmitter {
     // Emit lock released event
     this.emit('lock-released', conversationId, reason);
 
-    // Publish lock released event
-    if (this.eventPublisher) {
-      await this.eventPublisher.publishQueueEvent(
-        'lock_released',
-        conversationId,
-        currentLock.agentPubkey,
-        { reason, duration: endTime - currentLock.timestamp }
-      );
-    }
-
     // Process next in queue
     await this.processNextInQueue();
-
-    // Publish updated status
-    await this.publishStatusUpdate();
   }
 
   private async processNextInQueue(): Promise<void> {
@@ -252,7 +193,7 @@ export class ExecutionQueueManager extends EventEmitter {
     }
   }
 
-  async forceRelease(conversationId: string, reason: string): Promise<void> {
+  async forceRelease(conversationId: string, _reason: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
     }
@@ -262,19 +203,6 @@ export class ExecutionQueueManager extends EventEmitter {
     if (!currentLock || currentLock.conversationId !== conversationId) {
       // Not locked by this conversation
       return;
-    }
-
-    // Create force release request
-    const request: ForceReleaseRequest = {
-      conversationId,
-      reason,
-      releasedBy: this.projectPubkey || 'system',
-      timestamp: Date.now()
-    };
-
-    // Publish force release event
-    if (this.eventPublisher) {
-      await this.eventPublisher.publishForceReleaseEvent(request);
     }
 
     // Release the lock
@@ -315,16 +243,6 @@ export class ExecutionQueueManager extends EventEmitter {
     
     if (removed) {
       this.emit('queue-left', conversationId);
-      
-      // Publish queue left event
-      if (this.eventPublisher) {
-        await this.eventPublisher.publishQueueEvent(
-          'queue_left',
-          conversationId
-        );
-      }
-
-      await this.publishStatusUpdate();
     }
 
     return removed;
@@ -344,6 +262,27 @@ export class ExecutionQueueManager extends EventEmitter {
     }
 
     return this.queueManager.getQueueStatus();
+  }
+
+  /**
+   * Get the execution queue state for status publishing.
+   * Returns the active conversation (if any) and the queued conversations in order.
+   */
+  async getExecutionQueueState(): Promise<{
+    active: string | null;
+    queued: string[];
+  }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const currentLock = await this.lockManager.getCurrentLock();
+    const queueStatus = this.queueManager.getQueueStatus();
+
+    return {
+      active: currentLock?.conversationId || null,
+      queued: queueStatus.queue.map(entry => entry.conversationId)
+    };
   }
 
   async getQueuePosition(conversationId: string): Promise<number> {
@@ -367,20 +306,6 @@ export class ExecutionQueueManager extends EventEmitter {
     return this.queueManager.isInQueue(conversationId);
   }
 
-  private async publishStatusUpdate(): Promise<void> {
-    if (!this.eventPublisher) {
-      return;
-    }
-
-    const currentLock = await this.lockManager.getCurrentLock();
-    const queueStatus = this.queueManager.getQueueStatus();
-
-    await this.eventPublisher.publishStatusUpdate(
-      currentLock,
-      queueStatus.queue,
-      queueStatus.estimatedWait
-    );
-  }
 
   private formatWaitTime(seconds: number): string {
     if (seconds < 60) {
@@ -424,9 +349,6 @@ export class ExecutionQueueManager extends EventEmitter {
 
     // Clear the queue
     this.queueManager.clearQueue();
-
-    // Publish updated status
-    await this.publishStatusUpdate();
   }
 
   // Override EventEmitter methods for type safety

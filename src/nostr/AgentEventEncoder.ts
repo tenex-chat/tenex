@@ -1,8 +1,9 @@
-import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKTask, NDKKind } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { getNDK } from "@/nostr/ndkClient";
+import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -15,7 +16,6 @@ export interface CompletionIntent {
     type: 'completion';
     content: string;
     summary?: string;
-    nextAgent?: string;
 }
 
 export interface DelegationIntent {
@@ -31,14 +31,54 @@ export interface ConversationIntent {
     content: string;
 }
 
-export type AgentIntent = CompletionIntent | DelegationIntent | ConversationIntent;
+export interface ErrorIntent {
+    type: 'error';
+    message: string;
+    errorType?: string;
+}
+
+export interface TypingIntent {
+    type: 'typing';
+    state: 'start' | 'stop';
+    message?: string;
+}
+
+export interface StreamingIntent {
+    type: 'streaming';
+    content: string;
+    sequence: number;
+}
+
+export interface StatusIntent {
+    type: 'status';
+    agents: Array<{ pubkey: string; slug: string }>;
+    models: Array<{ slug: string; agents: string[] }>;
+    tools: Array<{ name: string; agents: string[] }>;
+    queue?: string[];
+}
+
+export interface LessonIntent {
+    type: 'lesson';
+    title: string;
+    lesson: string;
+    detailed?: string;
+    category?: string;
+    hashtags?: string[];
+}
+
+export interface AgentStateUpdateIntent {
+    type: 'agent_state_update';
+    updates: Record<string, any>;
+}
+
+export type AgentIntent = CompletionIntent | DelegationIntent | ConversationIntent | ErrorIntent | TypingIntent | StreamingIntent | StatusIntent | LessonIntent | AgentStateUpdateIntent;
 
 // Execution context provided by RAL
 export interface EventContext {
     agent: AgentInstance;
     triggeringEvent: NDKEvent;
-    conversationId: string;
-    projectId?: string;
+    conversationEvent?: NDKEvent; // Optional - not all events belong to conversations
+    delegatingAgentPubkey?: string; // For task completions
     toolCalls?: Array<{ name: string; arguments: any }>;
     executionTime?: number;
     model?: string;
@@ -53,29 +93,50 @@ export interface EventContext {
  * Encodes agent intents into properly tagged Nostr events.
  * All tagging logic is centralized here for consistency and testability.
  */
-export class AgentEventEncoder {
+
+// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
+export  class AgentEventEncoder {
+    /**
+     * Add conversation tags consistently to any event.
+     * Centralizes conversation tagging logic for all agent events.
+     */
+    private static addConversationTags(event: NDKEvent, context: EventContext): void {
+        if (!context.conversationEvent || !context.conversationEvent.id) {
+            throw new Error('EventContext is missing required conversationEvent - this event type requires conversation context');
+        }
+        if (!context.triggeringEvent || !context.triggeringEvent.id) {
+            throw new Error('EventContext is missing required triggeringEvent with id');
+        }
+        
+        // Add conversation root tag (E tag) - using the conversation event's ID
+        event.tag(['E', context.conversationEvent.id]);
+        
+        // Add reply to triggering event (e tag)
+        event.tag(['e', context.triggeringEvent.id]);
+    }
     /**
      * Encode a completion intent into a tagged event.
      * Completion events mark the end of a flow branch with specific E-tag semantics.
      */
     static encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = EVENT_KINDS.AGENT_RESPONSE;
+        event.kind = NDKKind.GenericReply;
         event.content = intent.content;
 
-        // Core flow tags - mark E-tags as completed
-        const eTags = context.triggeringEvent.getMatchingTags('e');
-        for (const eTag of eTags) {
-            event.tag(['e', eTag[1], eTag[2] || '', 'completed']);
-        }
-
+        // Add conversation tags
+        this.addConversationTags(event, context);
+        
+        // Mark this as a completion with tool tag
+        event.tag(['tool', 'complete']);
 
         // Completion metadata
         if (intent.summary) {
             event.tag(['summary', intent.summary]);
         }
-        if (intent.nextAgent) {
-            event.tag(['next-agent', intent.nextAgent]);
+
+        // If this is a task completion, p-tag the delegating agent
+        if (context.delegatingAgentPubkey) {
+            event.tag(['p', context.delegatingAgentPubkey]);
         }
 
         // Add standard metadata
@@ -83,9 +144,9 @@ export class AgentEventEncoder {
         
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            hasCompletedTags: eTags.length > 0,
+            hasCompletedTags: true,
             summary: intent.summary,
-            nextAgent: intent.nextAgent
+            hasDelegatingAgent: !!context.delegatingAgentPubkey
         });
 
         return event;
@@ -104,21 +165,18 @@ export class AgentEventEncoder {
             task.title = intent.title;
 
             // Core delegation tags
-            task.tag(['p', recipientPubkey, '', 'agent']);
-            
+            task.tag(['p', recipientPubkey]);
 
             // Phase information for multi-phase flows
             if (intent.phase) {
                 task.tag(['phase', intent.phase]);
             }
 
-            // Link to triggering event for context
-            task.tag(['e', context.triggeringEvent.id, '', 'delegation-trigger']);
-
-            // Project context
-            if (context.projectId) {
-                task.tag(['project', context.projectId]);
-            }
+            // Add conversation tags for context
+            this.addConversationTags(task, context);
+            
+            // Mark this as a delegation with tool tag
+            task.tag(['tool', 'delegate']);
 
             // Add standard metadata
             this.addStandardTags(task, context);
@@ -141,14 +199,11 @@ export class AgentEventEncoder {
      */
     static encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = EVENT_KINDS.AGENT_RESPONSE;
+        event.kind = NDKKind.GenericReply;
         event.content = intent.content;
 
-        // Simple reply tags without completion semantics
-        const eTags = context.triggeringEvent.getMatchingTags('e');
-        for (const eTag of eTags) {
-            event.tag(['e', eTag[1], eTag[2] || '', 'reply']);
-        }
+        // Add conversation tags
+        this.addConversationTags(event, context);
 
 
         // Add standard metadata
@@ -162,12 +217,7 @@ export class AgentEventEncoder {
      * Centralizes common tagging logic.
      */
     private static addStandardTags(event: NDKEvent, context: EventContext): void {
-        // Agent identification
-        event.tag(['p', context.agent.pubkey, '', 'agent']);
-        event.tag(['agent-name', context.agent.name]);
-
-        // Conversation context
-        event.tag(['conversation-id', context.conversationId]);
+        // Note: conversation-id is already in the E tag, no need to duplicate
 
         // Tool usage metadata
         if (context.toolCalls && context.toolCalls.length > 0) {
@@ -188,9 +238,147 @@ export class AgentEventEncoder {
         if (context.executionTime) {
             event.tag(['execution-time', context.executionTime.toString()]);
         }
+    }
 
-        // Timestamp
-        event.created_at = Math.floor(Date.now() / 1000);
+    /**
+     * Encode an error intent into an error event.
+     */
+    static encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.GenericReply;
+        event.content = intent.message;
+        
+        // Add conversation tags
+        this.addConversationTags(event, context);
+        
+        // Mark as error
+        event.tag(['error', intent.errorType || 'system']);
+        
+        // Add standard metadata
+        this.addStandardTags(event, context);
+        
+        return event;
+    }
+
+    /**
+     * Encode a typing indicator intent.
+     */
+    static encodeTypingIndicator(intent: TypingIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = EVENT_KINDS.TYPING_INDICATOR;
+        
+        // Content based on state
+        if (intent.state === 'start') {
+            event.content = intent.message || `${context.agent.name} is typing`;
+        } else {
+            event.content = '';
+        }
+        
+        // Add typing indicator tag
+        event.tag(['typing-indicator', intent.state]);
+        
+        // Add conversation reference (not full conversation tags) if available
+        if (context.conversationEvent && context.conversationEvent.id) {
+            event.tag(['e', context.conversationEvent.id]);
+        }
+        
+        // Add project tag
+        const { getProjectContext } = require('@/services');
+        const projectCtx = getProjectContext();
+        event.tag(projectCtx.project);
+        
+        return event;
+    }
+
+    /**
+     * Encode a streaming progress intent.
+     */
+    static encodeStreamingProgress(intent: StreamingIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = EVENT_KINDS.STREAMING_RESPONSE;
+        event.content = intent.content;
+        
+        // Tag the conversation
+        event.tag(['e', context.triggeringEvent.id]);
+        event.tag(['streaming', 'true']);
+        event.tag(['sequence', intent.sequence.toString()]);
+        
+        // Add agent info
+        event.tag(['p', context.agent.pubkey]);
+        
+        return event;
+    }
+
+    /**
+     * Encode a project status intent.
+     */
+    static encodeProjectStatus(intent: StatusIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = EVENT_KINDS.PROJECT_STATUS;
+        event.content = '';
+        
+        // Add project tag
+        const { getProjectContext } = require('@/services');
+        const projectCtx = getProjectContext();
+        event.tag(projectCtx.project);
+        
+        // Add agent pubkeys
+        for (const agent of intent.agents) {
+            event.tag(['agent', agent.pubkey, agent.slug]);
+        }
+        
+        // Add model access tags
+        for (const model of intent.models) {
+            event.tag(['model', model.slug, ...model.agents]);
+        }
+        
+        // Add tool access tags
+        for (const tool of intent.tools) {
+            event.tag(['tool', tool.name, ...tool.agents]);
+        }
+        
+        // Add queue tags if present
+        if (intent.queue) {
+            for (const conversationId of intent.queue) {
+                event.tag(['queue', conversationId]);
+            }
+        }
+        
+        return event;
+    }
+
+    /**
+     * Encode a lesson learned intent.
+     */
+    static encodeLesson(intent: LessonIntent, context: EventContext): NDKAgentLesson {
+        const lessonEvent = new NDKAgentLesson(getNDK());
+        
+        // Set core properties
+        lessonEvent.title = intent.title;
+        lessonEvent.lesson = intent.lesson;
+        
+        // Set optional properties
+        if (intent.detailed) {
+            lessonEvent.detailed = intent.detailed;
+        }
+        if (intent.category) {
+            lessonEvent.category = intent.category;
+        }
+        if (intent.hashtags && intent.hashtags.length > 0) {
+            lessonEvent.hashtags = intent.hashtags;
+        }
+        
+        // Add reference to the agent event if available
+        if (context.agent.eventId) {
+            lessonEvent.agentDefinitionId = context.agent.eventId;
+        }
+        
+        // Add project tag
+        const { getProjectContext } = require('@/services');
+        const projectCtx = getProjectContext();
+        lessonEvent.tag(projectCtx.project);
+        
+        return lessonEvent;
     }
 }
 
@@ -203,9 +391,8 @@ export class AgentEventDecoder {
      * Determine if an event represents a completion.
      */
     static isCompletionEvent(event: NDKEvent): boolean {
-        // Check for completed E-tags
-        const eTags = event.getMatchingTags('e');
-        return eTags.some(tag => tag[3] === 'completed');
+        // Check for tool=complete tag
+        return event.tagValue('tool') === 'complete';
     }
 
     /**
@@ -219,8 +406,7 @@ export class AgentEventDecoder {
         return {
             type: 'completion',
             content: event.content,
-            summary: event.tagValue('summary'),
-            nextAgent: event.tagValue('next-agent')
+            summary: event.tagValue('summary')
         };
     }
 
@@ -229,7 +415,7 @@ export class AgentEventDecoder {
      */
     static isDelegationEvent(event: NDKEvent): boolean {
         return event.kind === EVENT_KINDS.TASK && 
-               event.getMatchingTags('p').some(tag => tag[3] === 'agent');
+               event.tagValue('tool') === 'delegate';
     }
 
     /**
@@ -241,12 +427,19 @@ export class AgentEventDecoder {
         }
 
         const task = event as NDKTask;
-        const recipientTag = event.getMatchingTags('p').find(tag => tag[3] === 'agent');
+        const recipientTag = event.getMatchingTags('p')[0]; // Just get the first p-tag
+        
+        if (!task.title) {
+            throw new Error(`Delegation task ${event.id} is missing required title`);
+        }
+        if (!task.content) {
+            throw new Error(`Delegation task ${event.id} is missing required content`);
+        }
         
         return {
             type: 'delegation',
             recipients: recipientTag ? [recipientTag[1]] : [],
-            title: task.title || '',
+            title: task.title,
             request: task.content,
             phase: event.tagValue('phase')
         };
@@ -255,11 +448,14 @@ export class AgentEventDecoder {
     /**
      * Extract execution context from an event.
      * Useful for understanding how an event was created.
+     * Note: This returns a partial context - the conversationEvent would need to be fetched separately if needed.
      */
     static extractContext(event: NDKEvent): Partial<EventContext> {
+        const conversationId = event.tagValue('E');
+        
         const context: Partial<EventContext> = {
-            conversationId: event.tagValue('conversation-id') || '',
-            projectId: event.tagValue('project'),
+            // Note: We can't reconstruct the full conversation event from tags alone
+            // Caller would need to fetch it using the conversationId if needed
             model: event.tagValue('llm-model'),
             executionTime: event.tagValue('execution-time') 
                 ? parseInt(event.tagValue('execution-time')!) 
@@ -282,7 +478,9 @@ export class AgentEventDecoder {
             context.usage = {
                 prompt_tokens: parseInt(promptTokens),
                 completion_tokens: parseInt(completionTokens),
-                total_tokens: parseInt(event.tagValue('llm-total-tokens') || '0')
+                total_tokens: event.tagValue('llm-total-tokens') 
+                    ? parseInt(event.tagValue('llm-total-tokens')!)
+                    : (parseInt(promptTokens) + parseInt(completionTokens))
             };
         }
 

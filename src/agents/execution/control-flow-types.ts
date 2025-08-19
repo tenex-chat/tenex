@@ -20,9 +20,7 @@ export function isCompletionSummary(completion: unknown): completion is Completi
         "response" in completion &&
         typeof completion.response === "string" &&
         "summary" in completion &&
-        typeof completion.summary === "string" &&
-        "nextAgent" in completion &&
-        typeof completion.nextAgent === "string"
+        typeof completion.summary === "string"
     );
 }
 

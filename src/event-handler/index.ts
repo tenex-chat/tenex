@@ -4,6 +4,7 @@ import type NDK from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationManager } from "../conversations/ConversationManager";
+import { ExecutionQueueManager } from "../conversations/executionQueue";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
 import { getProjectContext } from "../services";
@@ -26,6 +27,7 @@ const IGNORED_EVENT_KINDS = [
 export class EventHandler {
     private conversationManager!: ConversationManager;
     private agentExecutor!: AgentExecutor;
+    private executionQueueManager?: ExecutionQueueManager;
     private isUpdatingProject = false;
 
     constructor(
@@ -35,12 +37,37 @@ export class EventHandler {
     ) {}
 
     async initialize(): Promise<void> {
+        // Create ExecutionQueueManager if we have project context
+        try {
+            const projectCtx = getProjectContext();
+            if (projectCtx && projectCtx.pubkey) {
+                const projectIdentifier = projectCtx.project.tagValue("d") || projectCtx.project.id;
+                this.executionQueueManager = new ExecutionQueueManager(
+                    this.projectPath,
+                    projectCtx.pubkey,
+                    projectIdentifier
+                );
+                await this.executionQueueManager.initialize();
+            }
+        } catch (err) {
+            // ExecutionQueueManager is optional, continue without it
+            logger.warn("Could not create ExecutionQueueManager:", err);
+        }
+
         // Initialize components directly
-        this.conversationManager = new ConversationManager(this.projectPath);
+        this.conversationManager = new ConversationManager(
+            this.projectPath,
+            undefined, // default persistence
+            this.executionQueueManager
+        );
         this.agentExecutor = new AgentExecutor(this.llmService, this.conversationManager);
 
         // Initialize components
         await this.conversationManager.initialize();
+    }
+
+    getExecutionQueueManager(): ExecutionQueueManager | undefined {
+        return this.executionQueueManager;
     }
 
     async handleEvent(event: NDKEvent): Promise<void> {
@@ -59,7 +86,7 @@ export class EventHandler {
                 });
                 break;
 
-            case EVENT_KINDS.NEW_CONVERSATION:
+            case NDKKind.Thread:
                 await handleNewConversation(event, {
                     conversationManager: this.conversationManager,
                     agentExecutor: this.agentExecutor,

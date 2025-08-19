@@ -9,6 +9,7 @@ import { AgentStreamer } from "@/nostr/AgentStreamer";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
 import { getProjectContext } from "@/services/ProjectContext";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
@@ -41,6 +42,7 @@ export class ReasonActLoop {
     ) {
         this.repetitionDetector = new ToolRepetitionDetector();
         this.messageBuilder = new MessageBuilder();
+        // AgentPublisher will be initialized in execute() when we have the agent context
         this.agentPublisher = new AgentPublisher();
         this.agentStreamer = new AgentStreamer(this.agentPublisher);
     }
@@ -57,6 +59,10 @@ export class ReasonActLoop {
         this.startTime = Date.now();
         const tracingContext = createTracingContext(context.conversationId);
         this.executionLogger = createExecutionLogger(tracingContext, "agent");
+        
+        // Initialize AgentPublisher with the agent from context
+        this.agentPublisher = new AgentPublisher(context.agent);
+        this.agentStreamer = new AgentStreamer(this.agentPublisher);
 
         // Execute the streaming loop
         const generator = this.executeStreamingInternal(
@@ -276,11 +282,6 @@ export class ReasonActLoop {
                     
                     hasToolCalls = true;
                     
-                    // Store tool call information for later use
-                    const toolCallsState = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
-                    toolCallsState.push({ name: event.tool, arguments: event.args });
-                    stateManager.setState('toolCalls', toolCallsState);
-                    
                     // Check for repetitive tool calls
                     const warningMessage = this.repetitionDetector.checkRepetition(
                         event.tool, 
@@ -479,8 +480,12 @@ export class ReasonActLoop {
             metadata.model = llmMetadata.model;
             metadata.usage = llmMetadata.usage;
             
-            // Get tool calls from state manager
-            const toolCalls = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
+            // Get tool calls from tool results
+            const toolResults = stateManager.getToolResults();
+            const toolCalls = toolResults.map(result => ({
+                name: result.toolName,
+                arguments: result.toolArgs
+            }));
             metadata.toolCalls = toolCalls.length > 0 ? toolCalls : undefined;
             metadata.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
         }
@@ -538,8 +543,7 @@ export class ReasonActLoop {
         const eventContext: EventContext = {
             agent: context.agent,
             triggeringEvent: context.triggeringEvent,
-            conversationId: context.conversationId,
-            projectId: getProjectContext().project?.id
+            conversationId: context.conversationId
         };
         
         return this.agentStreamer.createStreamHandle(eventContext);
@@ -616,18 +620,37 @@ export class ReasonActLoop {
             type: deferredEvent.type
         });
         
-        const agentPublisher = new AgentPublisher();
+        const agentPublisher = new AgentPublisher(context.agent);
         const intent = deferredEvent.intent;
         
         // Build event context with execution metadata
-        // Get tool calls from state manager
-        const toolCalls = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
+        // Get tool calls from tool results
+        const toolResults = stateManager.getToolResults();
+        const toolCalls = toolResults.map(result => ({
+            name: result.toolName,
+            arguments: result.toolArgs
+        }));
+        
+        // Check if this is completing a delegated task using DelegationRegistry
+        let delegatingAgentPubkey: string | undefined;
+        if (context.triggeringEvent.kind === 1934) { // NDKTask.kind
+            const registry = DelegationRegistry.getInstance();
+            const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
+            if (delegationContext) {
+                delegatingAgentPubkey = delegationContext.delegatingAgent.pubkey;
+                tracingLogger.debug("[ReasonActLoop] Found delegation context", {
+                    taskId: context.triggeringEvent.id.substring(0, 8),
+                    delegatingAgent: delegationContext.delegatingAgent.slug,
+                    delegatingAgentPubkey: delegatingAgentPubkey.substring(0, 8)
+                });
+            }
+        }
         
         const eventContext: EventContext = {
             agent: context.agent,
             triggeringEvent: context.triggeringEvent,
             conversationId: context.conversationId,
-            projectId: getProjectContext().project?.id,
+            delegatingAgentPubkey,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             executionTime: this.startTime ? Date.now() - this.startTime : undefined,
             model: stateManager.getFinalResponse()?.model,

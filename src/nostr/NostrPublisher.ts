@@ -12,6 +12,8 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { TypingIndicatorManager } from "./TypingIndicatorManager";
+import { AgentPublisher } from "./AgentPublisher";
+import type { TypingIntent, EventContext } from "./AgentEventEncoder";
 
 
 // Context passed to publisher on creation
@@ -23,14 +25,6 @@ export interface NostrPublisherContext {
     conversationManager: ConversationManager;
 }
 
-// Options for publishing responses
-export interface ResponseOptions {
-    content: string;
-    llmMetadata?: LLMMetadata;
-    completeMetadata?: Complete;
-    additionalTags?: string[][];
-    destinationPubkeys?: string[];
-}
 
 // TENEX logging types
 interface TenexLogData {
@@ -40,11 +34,6 @@ interface TenexLogData {
     timestamp?: number;
 }
 
-// Metadata for finalizing stream
-interface FinalizeMetadata {
-    llmMetadata?: LLMMetadata;
-    completeMetadata?: Complete;
-}
 
 export class NostrPublisher {
     private typingIndicatorManager: TypingIndicatorManager;
@@ -74,151 +63,6 @@ export class NostrPublisher {
         return conversation;
     }
 
-    /**
-     * Publishes an agent's response to Nostr and updates the conversation state.
-     *
-     * IMPORTANT: This method follows a save-then-publish pattern for transactional integrity:
-     * 1. First updates the conversation state in memory
-     * 2. Then saves the conversation to persistent storage
-     * 3. Only after successful save does it publish to Nostr
-     *
-     * This ensures that we never have events on the network that aren't reflected
-     * in our local state, preventing state inconsistencies.
-     */
-    async publishResponse(options: ResponseOptions): Promise<NDKEvent> {
-        try {
-            const reply = this.createBaseReply();
-
-            // Just use the content provided by the caller
-            reply.content = options.content;
-
-            // Add metadata tags
-            this.addLLMMetadata(reply, options.llmMetadata);
-
-            // Debug logging for metadata
-            logger.debug("Adding metadata to response", {
-                hasLLMMetadata: !!options.llmMetadata,
-                llmModel: options.llmMetadata?.model,
-                llmCost: options.llmMetadata?.cost,
-                hasCompleteMetadata: !!options.completeMetadata,
-            });
-
-            // Add p-tags for destination pubkeys if provided
-            // If no destination pubkeys provided, default to the reply target's author (if available)
-            // or the triggering event's author. This ensures agents respond to the right person.
-            const defaultPubkey = this.context.replyTarget?.pubkey || this.context.triggeringEvent.pubkey;
-            const destinationPubkeys = options.destinationPubkeys || [defaultPubkey];
-            
-            for (const pubkey of destinationPubkeys) {
-                console.log("skipping adding p tag for", pubkey, "since this isnt a complete tool use")
-                // reply.tag(["p", pubkey]);
-            }
-
-            // Add any additional tags
-            if (options.additionalTags) {
-                for (const tag of options.additionalTags) {
-                    reply.tag(tag);
-                }
-            }
-
-            // With the new simplified system, we don't need to manually add messages to context
-            // The conversation history (NDKEvents) is the source of truth
-            // Just save the conversation state BEFORE publishing
-            await this.context.conversationManager.saveConversation(this.context.conversationId);
-
-            // Sign and publish only after local state is successfully updated
-            await reply.sign(this.context.agent.signer);
-            await reply.publish();
-
-            const conversation = this.getConversation();
-            logger.debug("Published agent response", {
-                eventId: reply.id,
-                contentLength: options.content.length,
-                agent: this.context.agent.name,
-                phase: conversation.phase,
-            });
-
-            return reply;
-        } catch (error) {
-            logger.error("Failed to publish response", {
-                agent: this.context.agent.name,
-                error: formatAnyError(error),
-            });
-            throw error;
-        }
-    }
-
-    async publishError(message: string): Promise<NDKEvent> {
-        try {
-            const reply = this.createBaseReply();
-            reply.content = message;
-            reply.tag(["error", "system"]);
-
-            await reply.sign(this.context.agent.signer);
-            await reply.publish();
-
-            logger.debug("Published error notification", {
-                eventId: reply.id,
-                error: message,
-                agent: this.context.agent.name,
-            });
-
-            return reply;
-        } catch (error) {
-            logger.error("Failed to publish error", {
-                agent: this.context.agent.name,
-                error: formatAnyError(error),
-            });
-            throw error;
-        }
-    }
-
-    async publishTenexLog(logData: TenexLogData): Promise<NDKEvent> {
-        try {
-            const event = new NDKEvent(getNDK());
-            event.kind = EVENT_KINDS.TENEX_LOG;
-            
-            // Set timestamp
-            const timestamp = logData.timestamp || Math.floor(Date.now() / 1000);
-            event.created_at = timestamp;
-            
-            // Create structured content
-            event.content = JSON.stringify({
-                event: logData.event,
-                agent: logData.agent,
-                details: logData.details,
-                timestamp,
-            });
-            
-            // Add base tags
-            this.addBaseTags(event);
-            
-            // Add conversation reference
-            event.tag(["e", this.context.conversationId]);
-            
-            // Add TENEX-specific tags
-            event.tag(["tenex-event", logData.event]);
-            event.tag(["tenex-agent", logData.agent]);
-            
-            await event.sign(this.context.agent.signer);
-            await event.publish();
-            
-            logger.debug("Published TENEX log", {
-                eventId: event.id,
-                tenexEvent: logData.event,
-                agent: logData.agent,
-            });
-            
-            return event;
-        } catch (error) {
-            logger.error("Failed to publish TENEX log", {
-                agent: this.context.agent.name,
-                tenexEvent: logData.event,
-                error: formatAnyError(error),
-            });
-            throw error;
-        }
-    }
 
     async publishTypingIndicator(state: "start" | "stop", message?: string): Promise<NDKEvent | void> {
         // Use the typing indicator manager for start calls
@@ -239,27 +83,23 @@ export class NostrPublisher {
         try {
             const { agent } = this.context;
 
-            const event = new NDKEvent(getNDK());
-            event.kind =
-                state === "stop"
-                    ? EVENT_KINDS.TYPING_INDICATOR_STOP
-                    : EVENT_KINDS.TYPING_INDICATOR;
+            // Create typing intent
+            const intent: TypingIntent = {
+                type: 'typing',
+                state,
+                message: state === "start" ? (message || `${agent.name} is typing`) : undefined
+            };
 
-            // Use provided message or default
-            if (state === "start") {
-                event.content = message || `${agent.name} is typing`;
-            } else {
-                event.content = "";
-            }
+            // Create event context
+            const eventContext: EventContext = {
+                agent: this.context.agent,
+                triggeringEvent: this.context.triggeringEvent,
+                conversationId: this.context.conversationId
+            };
 
-            // Add base tags (project, phase)
-            this.addBaseTags(event);
-
-            // Add conversation references
-            event.tag(["e", this.context.conversationId]);
-
-            await event.sign(this.context.agent.signer);
-            event.publish();
+            // Use AgentPublisher to create and publish the event
+            const agentPublisher = new AgentPublisher(this.context.agent);
+            const event = await agentPublisher.typing(intent, eventContext);
 
             logger.debug(`Published typing indicator ${state}`, {
                 conversationId: this.context.conversationId,

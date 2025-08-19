@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
-import { DelegationService } from "@/services/DelegationService";
+import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { PHASES, type Phase } from "@/conversations/phases";
-import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
+import type { DelegationIntent, PhaseUpdateIntent } from "@/nostr/AgentEventEncoder";
 
 const delegatePhaseSchema = z.object({
     phase: z.enum([
@@ -53,7 +53,13 @@ const delegatePhaseSchema = z.object({
  * - Tracks status (pending/complete)
  * - Enables parallel execution of sub-tasks
  */
-export const delegatePhaseTool = createToolDefinition<z.input<typeof delegatePhaseSchema>, DelegationIntent>({
+
+interface DelegatePhaseOutput {
+    delegation: DelegationIntent;
+    phaseUpdate: PhaseUpdateIntent;
+}
+
+export const delegatePhaseTool = createToolDefinition<z.input<typeof delegatePhaseSchema>, DelegatePhaseOutput>({
     name: "delegate_phase",
     description: "Switch conversation phase and delegate work to specialist agents atomically. Only available to the Project Manager.",
     promptFragment: `DELEGATE PHASE TOOL:
@@ -107,36 +113,17 @@ After delegating:
         }
         
         try {
-            // Step 1: Switch the phase
-            logger.info("[delegate_phase] PM switching phase", {
+            // Step 1: Log the phase switch intention
+            logger.info("[delegate_phase] PM intending to switch phase", {
                 fromPhase: context.phase,
                 toPhase: phase,
                 reason: fullRequest,
                 agent: context.agent.name,
                 conversationId: context.conversationId
             });
-
-            // Update conversation phase through ConversationManager
-            const updateResult = await context.conversationManager.updatePhase(
-                context.conversationId,
-                phase,
-                fullRequest, // The delegation request becomes the phase transition message
-                context.agent.pubkey,
-                context.agent.name,
-                fullRequest, // Also store as the reason
-                `Switching to ${phase} phase: ${title}` // Summary for history
-            );
-
-            if (!updateResult) {
-                return failure({
-                    kind: "execution",
-                    tool: "delegate_phase",
-                    message: `Failed to switch to ${phase} phase`
-                });
-            }
             
             // Step 2: Resolve recipient to pubkey
-            const pubkey = DelegationService.resolveRecipientToPubkey(recipient);
+            const pubkey = resolveRecipientToPubkey(recipient);
             if (!pubkey) {
                 return failure({
                     kind: "execution",
@@ -145,8 +132,16 @@ After delegating:
                 });
             }
             
-            // Return delegation intent for RAL to handle
-            const intent: DelegationIntent = {
+            // Create phase update intent
+            const phaseUpdate: PhaseUpdateIntent = {
+                type: 'phase_update',
+                phase: phase,
+                reason: fullRequest,
+                summary: `Switching to ${phase} phase: ${title}`
+            };
+            
+            // Create delegation intent
+            const delegation: DelegationIntent = {
                 type: 'delegation',
                 recipients: [pubkey],
                 title: title,
@@ -154,14 +149,18 @@ After delegating:
                 phase: phase  // Include phase in the intent
             };
             
-            logger.debug("[delegate_phase() tool] Returning delegation intent with phase", {
+            logger.debug("[delegate_phase() tool] Returning intents for phase update and delegation", {
                 fromAgent: context.agent.slug,
                 toRecipient: recipient,
                 toPubkey: pubkey,
                 phase: phase
             });
             
-            return success(intent);
+            // Return both intents
+            return success({
+                delegation,
+                phaseUpdate
+            });
         } catch (error) {
             logger.error("Failed to execute phase delegation", {
                 phase: phase,

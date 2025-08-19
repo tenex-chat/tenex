@@ -172,8 +172,9 @@ export class ToolStreamHandler {
                     errorMessage = JSON.stringify(toolResult.error);
                 }
 
-                await publisher.publishError(`Tool "${toolName}" failed: ${errorMessage}`);
-                tracingLogger.info("Published tool error to conversation", {
+                // TODO: Need to refactor to use AgentPublisher.error() instead
+                // await publisher.publishError(`Tool "${toolName}" failed: ${errorMessage}`);
+                tracingLogger.info("Tool error occurred (not published)", {
                     tool: toolName,
                     error: errorMessage,
                 });

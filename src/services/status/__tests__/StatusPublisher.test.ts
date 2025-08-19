@@ -1,6 +1,9 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { StatusPublisher } from "../StatusPublisher";
-import { STATUS_INTERVAL_MS, STATUS_KIND } from "../constants";
+import { EVENT_KINDS } from "@/llm/types";
+
+// Status publishing interval
+const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 // Mock dependencies
 const mockPublish = mock(async () => {});
@@ -205,7 +208,7 @@ describe("StatusPublisher", () => {
             await publisher.startPublishing("/test/project");
 
             const eventInstance = mockNDKEvent.mock.results[0].value;
-            expect(eventInstance.kind).toBe(STATUS_KIND);
+            expect(eventInstance.kind).toBe(EVENT_KINDS.PROJECT_STATUS);
         });
 
         it("should handle errors gracefully", async () => {

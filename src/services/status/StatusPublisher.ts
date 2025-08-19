@@ -1,10 +1,15 @@
-import { STATUS_INTERVAL_MS, STATUS_KIND } from "@/commands/run/constants";
+import { EVENT_KINDS } from "@/llm/types";
+
+// Status publishing interval
+const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { StatusIntent, EventContext } from "@/nostr/AgentEventEncoder";
 
 /**
  * StatusPublisher handles periodic publishing of status events to Nostr.
@@ -29,6 +34,11 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class StatusPublisher {
     private statusInterval?: NodeJS.Timeout;
+    private executionQueueManager?: any; // Using any to avoid circular dependency
+
+    constructor(executionQueueManager?: any) {
+        this.executionQueueManager = executionQueueManager;
+    }
 
     async startPublishing(projectPath: string): Promise<void> {
         await this.publishStatusEvent(projectPath);
@@ -47,50 +57,71 @@ export class StatusPublisher {
 
     private async publishStatusEvent(projectPath: string): Promise<void> {
         try {
-            const ndk = getNDK();
-            const event = new NDKEvent(ndk);
-            event.kind = STATUS_KIND;
-
-            event.content = "";
-
-            // Tag the project event properly
             const projectCtx = getProjectContext();
-            event.tag(projectCtx.project);
-
-            await this.addAgentPubkeys(event, projectPath);
-            await this.addModelTags(event, projectPath);
-            await this.addToolTags(event);
-
-            // Sign the event with the project's signer
-            await event.sign(projectCtx.signer);
-            await event.publish();
+            
+            // Build status intent
+            const intent: StatusIntent = {
+                type: 'status',
+                agents: [],
+                models: [],
+                tools: [],
+                queue: []
+            };
+            
+            // Gather agent info
+            if (isProjectContextInitialized()) {
+                for (const [agentSlug, agent] of projectCtx.agents) {
+                    intent.agents.push({
+                        pubkey: agent.pubkey,
+                        slug: agentSlug
+                    });
+                }
+            }
+            
+            // Gather model info
+            await this.gatherModelInfo(intent, projectPath);
+            
+            // Gather tool info
+            await this.gatherToolInfo(intent);
+            
+            // Gather queue info
+            await this.gatherQueueInfo(intent);
+            
+            // Create a minimal event context for status publishing
+            // Status events are published by the project itself
+            // Note: No conversationEvent since status events are system-level, not part of conversations
+            const context: EventContext = {
+                agent: {
+                    pubkey: projectCtx.signer.pubkey,
+                    signer: projectCtx.signer,
+                    name: 'Project',
+                    role: 'System',
+                    tools: [],
+                    llm: null,
+                    isGlobal: false
+                },
+                triggeringEvent: new NDKEvent(getNDK(), {
+                    id: projectCtx.project.dTag,
+                    pubkey: projectCtx.signer.pubkey,
+                    created_at: Math.floor(Date.now() / 1000),
+                    kind: 0,
+                    tags: [],
+                    content: ''
+                })
+                // conversationEvent is intentionally omitted - status events don't belong to conversations
+            };
+            
+            // Use AgentPublisher to create and publish the event
+            // Pass the agent from the context, which is a minimal project agent
+            const agentPublisher = new AgentPublisher(context.agent);
+            await agentPublisher.status(intent, context);
         } catch (err) {
             const errorMessage = formatAnyError(err);
             logWarning(`Failed to publish status event: ${errorMessage}`);
         }
     }
 
-    private async addAgentPubkeys(event: NDKEvent, _projectPath: string): Promise<void> {
-        try {
-            if (isProjectContextInitialized()) {
-                const projectCtx = getProjectContext();
-                for (const [agentSlug, agent] of projectCtx.agents) {
-                    // Add "global" as fourth element for global agents
-                    if (agent.isGlobal) {
-                        event.tags.push(["agent", agent.pubkey, agentSlug, "global"]);
-                    } else {
-                        event.tags.push(["agent", agent.pubkey, agentSlug]);
-                    }
-                }
-            } else {
-                logWarning("ProjectContext not initialized for status event");
-            }
-        } catch (err) {
-            logWarning(`Could not load agent information for status event: ${formatAnyError(err)}`);
-        }
-    }
-
-    private async addModelTags(event: NDKEvent, projectPath: string): Promise<void> {
+    private async gatherModelInfo(intent: StatusIntent, projectPath: string): Promise<void> {
         try {
             const { llms } = await configService.loadConfig(projectPath);
 
@@ -127,18 +158,20 @@ export class StatusPublisher {
                 }
             }
 
-            // Add model tags in the format: ["model", "<config-slug>", ...agent-slugs-using-it]
+            // Add models to intent
             for (const [configSlug, agentSet] of configToAgents) {
                 const agentSlugs = Array.from(agentSet).sort(); // Sort for consistency
-                // Always publish the model configuration, even if no agents use it
-                event.tags.push(["model", configSlug, ...agentSlugs]);
+                intent.models.push({
+                    slug: configSlug,
+                    agents: agentSlugs
+                });
             }
         } catch (err) {
             logWarning(`Could not load LLM information for status event model tags: ${formatAnyError(err)}`);
         }
     }
 
-    private async addToolTags(event: NDKEvent): Promise<void> {
+    private async gatherToolInfo(intent: StatusIntent): Promise<void> {
         try {
             if (!isProjectContextInitialized()) {
                 logWarning("ProjectContext not initialized for tool tags");
@@ -185,14 +218,44 @@ export class StatusPublisher {
                 }
             }
 
-            // Convert the map to tool tags
+            // Convert the map to tool entries
             for (const [toolName, agentSlugs] of toolAgentMap) {
-                // Create a tool tag with format: ["tool", "<tool-name>", "agent1", "agent2", ...]
                 const agentArray = Array.from(agentSlugs).sort(); // Sort for consistency
-                event.tags.push(["tool", toolName, ...agentArray]);
+                intent.tools.push({
+                    name: toolName,
+                    agents: agentArray
+                });
             }
         } catch (err) {
             logWarning(`Could not add tool tags to status event: ${formatAnyError(err)}`);
         }
     }
+
+    private async gatherQueueInfo(intent: StatusIntent): Promise<void> {
+        try {
+            if (!this.executionQueueManager) {
+                // No queue manager available, skip queue tags
+                return;
+            }
+
+            // Get the execution queue state
+            const queueState = await this.executionQueueManager.getExecutionQueueState();
+
+            // Add queue entries in order
+            // First: the active conversation (if any)
+            if (queueState.active) {
+                intent.queue = intent.queue || [];
+                intent.queue.push(queueState.active);
+            }
+
+            // Then: all queued conversations in order
+            for (const conversationId of queueState.queued) {
+                intent.queue = intent.queue || [];
+                intent.queue.push(conversationId);
+            }
+        } catch (err) {
+            logWarning(`Could not add queue tags to status event: ${formatAnyError(err)}`);
+        }
+    }
+
 }

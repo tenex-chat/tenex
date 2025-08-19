@@ -5,6 +5,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
+import type { AgentStateUpdateIntent } from "@/nostr/AgentEventEncoder";
 
 /**
  * Strips thinking blocks from content.
@@ -30,7 +31,7 @@ const claudeCodeSchema = z.object({
         .describe("Optional branch name for the task"),
 });
 
-interface ClaudeCodeOutput {
+interface ClaudeCodeOutput extends AgentStateUpdateIntent {
     sessionId?: string;
     totalCost: number;
     messageCount: number;
@@ -113,16 +114,6 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
                 });
             }
 
-            // Update the Claude session ID in the conversation's agent state
-            if (result.sessionId) {
-                await context.conversationManager.updateAgentState(
-                    context.conversationId,
-                    context.agent.slug,
-                    { claudeSessionId: result.sessionId }
-                );
-                logger.info(`[claude_code] Stored Claude session ID for agent ${context.agent.slug}: ${result.sessionId}`);
-            }
-
             // Return the result
             const response = result.finalResponse || result.task.content || "Task completed successfully";
             
@@ -133,13 +124,18 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
                 duration: result.duration,
             });
 
-            return success({
+            // Return success with agent state update intent
+            const output: ClaudeCodeOutput = {
+                type: 'agent_state_update',
+                updates: result.sessionId ? { claudeSessionId: result.sessionId } : {},
                 sessionId: result.sessionId,
                 totalCost: result.totalCost,
                 messageCount: result.messageCount,
                 duration: result.duration,
                 response,
-            });
+            };
+
+            return success(output);
         } catch (error) {
             logger.error("Claude Code tool failed", { error });
 

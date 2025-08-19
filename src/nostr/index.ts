@@ -2,7 +2,6 @@
 export { NostrPublisher } from "./NostrPublisher";
 export type {
     NostrPublisherContext,
-    ResponseOptions,
 } from "./NostrPublisher";
 
 // Agent event system

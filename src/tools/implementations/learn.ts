@@ -1,6 +1,5 @@
-import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { getNDK } from "@/nostr";
-import { getProjectContext } from "@/services/ProjectContext";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { LessonIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -86,73 +85,27 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
       conversationId: context.conversationId,
     });
 
-    const agentSigner = context.agent.signer;
-    if (!agentSigner) {
-      const error = "Agent signer not available";
-      logger.error("❌ Learn tool failed", {
-        error,
-        agent: context.agent.name,
-        agentPubkey: context.agent.pubkey,
-        title,
-        phase: context.phase,
-        conversationId: context.conversationId,
-      });
-      return failure({
-        kind: "execution" as const,
-        tool: "lesson_learn",
-        message: error,
-      });
-    }
-
-    const ndk = getNDK();
-    if (!ndk) {
-      const error = "NDK instance not available";
-      logger.error("❌ Learn tool failed", {
-        error,
-        agent: context.agent.name,
-        agentPubkey: context.agent.pubkey,
-        title,
-        phase: context.phase,
-        conversationId: context.conversationId,
-      });
-      return failure({
-        kind: "execution" as const,
-        tool: "lesson_learn",
-        message: error,
-      });
-    }
-
-    const projectCtx = getProjectContext();
-
     try {
-      // Create the lesson event
-      const lessonEvent = new NDKAgentLesson(ndk);
-      lessonEvent.title = title;
-      lessonEvent.lesson = lesson;
+      // Create lesson intent
+      const intent: LessonIntent = {
+        type: 'lesson',
+        title,
+        lesson,
+        detailed,
+        category,
+        hashtags
+      };
 
-      // Add optional fields if provided
-      if (detailed) {
-        lessonEvent.detailed = detailed;
-      }
-      if (category) {
-        lessonEvent.category = category;
-      }
-      if (hashtags && hashtags.length > 0) {
-        lessonEvent.hashtags = hashtags;
-      }
+      // Create event context
+      const eventContext: EventContext = {
+        agent: context.agent,
+        triggeringEvent: context.triggeringEvent,
+        conversationId: context.conversationId
+      };
 
-      // Add reference to the agent event if available
-      const agentEventId = context.agent.eventId;
-      if (agentEventId) {
-        lessonEvent.agentDefinitionId = agentEventId;
-      }
-
-      // Add project tag for scoping
-      lessonEvent.tag(projectCtx.project);
-
-      // Sign and publish the event
-      await lessonEvent.sign(agentSigner);
-      lessonEvent.publish();
+      // Use AgentPublisher to create and publish the lesson
+      const agentPublisher = new AgentPublisher(context.agent);
+      const lessonEvent = await agentPublisher.lesson(intent, eventContext);
 
       const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 

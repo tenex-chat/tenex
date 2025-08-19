@@ -1,4 +1,4 @@
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { 
     AgentEventEncoder, 
     AgentEventDecoder,
@@ -42,7 +42,7 @@ describe("AgentEventEncoder", () => {
 
             const event = AgentEventEncoder.encodeCompletion(intent, baseContext);
 
-            expect(event.kind).toBe(EVENT_KINDS.AGENT_RESPONSE);
+            expect(event.kind).toBe(NDKKind.GenericReply);
             expect(event.content).toBe("Task completed successfully");
             
             // Check E-tags are marked as completed
@@ -57,14 +57,12 @@ describe("AgentEventEncoder", () => {
             const intent: CompletionIntent = {
                 type: 'completion',
                 content: "Analysis complete",
-                summary: "Found 3 issues",
-                nextAgent: "reviewer"
+                summary: "Found 3 issues"
             };
 
             const event = AgentEventEncoder.encodeCompletion(intent, baseContext);
 
             expect(event.tagValue('summary')).toBe("Found 3 issues");
-            expect(event.tagValue('next-agent')).toBe("reviewer");
         });
 
         it("should include execution metadata when provided", () => {
@@ -167,7 +165,7 @@ describe("AgentEventEncoder", () => {
 
             const event = AgentEventEncoder.encodeConversation(intent, baseContext);
 
-            expect(event.kind).toBe(EVENT_KINDS.AGENT_RESPONSE);
+            expect(event.kind).toBe(NDKKind.GenericReply);
             expect(event.content).toBe("I'm still working on this...");
             
             // Check E-tags are marked as reply, not completed
@@ -206,8 +204,7 @@ describe("AgentEventDecoder", () => {
             event.content = "Task finished";
             event.tags = [
                 ['e', 'event123', '', 'completed'],
-                ['summary', 'All tests passed'],
-                ['next-agent', 'deployer']
+                ['summary', 'All tests passed']
             ];
 
             const intent = AgentEventDecoder.decodeCompletion(event);
@@ -215,8 +212,7 @@ describe("AgentEventDecoder", () => {
             expect(intent).toEqual({
                 type: 'completion',
                 content: 'Task finished',
-                summary: 'All tests passed',
-                nextAgent: 'deployer'
+                summary: 'All tests passed'
             });
         });
 

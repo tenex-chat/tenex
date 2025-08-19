@@ -122,7 +122,6 @@ export type LLMProvider = (typeof LLM_PROVIDERS)[number];
  */
 export const EVENT_KINDS = {
     METADATA: 0,
-    NEW_CONVERSATION: 11,
     GENERIC_REPLY: NDKKind.GenericReply,
     PROJECT: NDKProject.kind,
     AGENT_CONFIG: NDKAgentDefinition.kind,
@@ -132,7 +131,6 @@ export const EVENT_KINDS = {
     TYPING_INDICATOR: 24111,
     TYPING_INDICATOR_STOP: 24112,
     STREAMING_RESPONSE: 21111,
-    TENEX_LOG: 24015,
     FORCE_RELEASE: 24019,
     LLM_CONFIG_CHANGE: 24020,
 } as const;

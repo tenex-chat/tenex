@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
-import { StatusPublisher } from "@/commands/run/StatusPublisher";
+import { StatusPublisher } from "@/services/status";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
 import { loadLLMRouter } from "@/llm";
@@ -64,8 +64,9 @@ async function runProjectListener(projectPath: string, ndk: NDK): Promise<void> 
         const subscriptionManager = new SubscriptionManager(eventHandler, projectPath);
         await subscriptionManager.start();
 
-        // Start status publisher
-        const statusPublisher = new StatusPublisher();
+        // Start status publisher with ExecutionQueueManager from event handler
+        const executionQueueManager = eventHandler.getExecutionQueueManager();
+        const statusPublisher = new StatusPublisher(executionQueueManager);
         await statusPublisher.startPublishing(projectPath);
 
         // Set up graceful shutdown

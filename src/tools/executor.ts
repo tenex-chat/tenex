@@ -27,6 +27,10 @@ export interface ToolExecutionResult<T = unknown> {
     output?: T;
     error?: ToolError;
     duration: number;
+    /** The name of the tool that was executed */
+    toolName: string;
+    /** The arguments that were passed to the tool */
+    toolArgs: Record<string, unknown>;
     /** Optional metadata for UI/logging purposes */
     metadata?: ToolExecutionMetadata;
 }
@@ -62,6 +66,8 @@ export class ToolExecutor {
                         success: false,
                         error: validationResult.error,
                         duration: Date.now() - startTime,
+                        toolName: tool.name,
+                        toolArgs: input as Record<string, unknown>,
                     };
                 }
                 validatedInput = validationResult.value;
@@ -75,6 +81,8 @@ export class ToolExecutor {
                     success: true,
                     output: result.value,
                     duration: Date.now() - startTime,
+                    toolName: tool.name,
+                    toolArgs: input as Record<string, unknown>,
                     metadata: result.metadata, // Pass through metadata if present
                 };
             } else {
@@ -82,6 +90,8 @@ export class ToolExecutor {
                     success: false,
                     error: result.error,
                     duration: Date.now() - startTime,
+                    toolName: tool.name,
+                    toolArgs: input as Record<string, unknown>,
                 };
             }
         } catch (error) {
@@ -98,6 +108,8 @@ export class ToolExecutor {
                     stack: error instanceof Error ? error.stack : undefined,
                 },
                 duration: Date.now() - startTime,
+                toolName: tool.name,
+                toolArgs: input as Record<string, unknown>,
             };
         }
     }

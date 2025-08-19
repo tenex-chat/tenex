@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
-import { DelegationService } from "@/services/DelegationService";
+import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 
@@ -79,7 +79,7 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
             const failedRecipients: string[] = [];
             
             for (const recipient of recipients) {
-                const pubkey = DelegationService.resolveRecipientToPubkey(recipient);
+                const pubkey = resolveRecipientToPubkey(recipient);
                 if (pubkey) {
                     resolvedPubkeys.push(pubkey);
                 } else {

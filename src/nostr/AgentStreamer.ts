@@ -2,7 +2,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "./AgentPublisher";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
-import type { EventContext } from "./AgentEventEncoder";
+import type { EventContext, StreamingIntent } from "./AgentEventEncoder";
 import { getNDK } from "./ndkClient";
 
 export interface StreamHandle {
@@ -112,24 +112,15 @@ export class AgentStreamer {
 
     /**
      * Publish a streaming event (kind:21111).
-     * Uses raw event creation since this is ephemeral content.
      */
     private async publishStreamingEvent(state: StreamState): Promise<void> {
-        const event = new NDKEvent(getNDK());
-        event.kind = EVENT_KINDS.STREAMING_RESPONSE;
-        event.content = state.accumulatedContent;
+        const intent: StreamingIntent = {
+            type: 'streaming',
+            content: state.accumulatedContent,
+            sequence: ++state.sequenceNumber
+        };
 
-        // Tag the conversation
-        event.tag(['e', state.context.triggeringEvent.id]);
-        event.tag(['streaming', 'true']);
-        event.tag(['sequence', (++state.sequenceNumber).toString()]);
-
-        // Add agent info
-        event.tag(['p', state.context.agent.pubkey, '', 'agent']);
-
-        // Sign and publish
-        await event.sign(state.context.agent.signer);
-        await event.publish();
+        await this.agentPublisher.streaming(intent, state.context);
 
         logger.debug("Published streaming event", {
             sequence: state.sequenceNumber,

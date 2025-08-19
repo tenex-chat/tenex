@@ -16,6 +16,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logDebug, logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr/ndkClient";
 import chalk from "chalk";
 import { v4 as uuidv4 } from "uuid";
 import { debugLog, debugError, debugInfo, debugSection } from "./utils";
@@ -131,7 +132,7 @@ export async function runDebugChat(
             logDebug("Processing single message:", "general", "debug", options.message);
 
             // Create a mock NDKEvent for the debug session
-            const mockEvent = new NDKEvent();
+            const mockEvent = new NDKEvent(getNDK());
             mockEvent.kind = 9000; // Tenex conversation event kind
             mockEvent.content = options.message;
             mockEvent.pubkey = agent.pubkey;
@@ -243,7 +244,7 @@ export async function runDebugChat(
                 messages.push({ role: "user", content: input });
 
                 // Create a mock NDKEvent for the user message
-                const mockEvent = new NDKEvent();
+                const mockEvent = new NDKEvent(getNDK());
                 mockEvent.kind = 9000; // Tenex conversation event kind
                 mockEvent.content = input;
                 mockEvent.pubkey = agent.pubkey;

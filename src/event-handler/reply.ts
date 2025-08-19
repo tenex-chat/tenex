@@ -382,15 +382,22 @@ async function executeAgent(
             ? "⚠️ Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
             : "⚠️ Unable to process your request due to an error. Please try again later.";
 
-        // Create NostrPublisher to publish error
-        const publisher = new NostrPublisher({
-            conversationId: conversation.id,
-            agent: projectManager,
-            triggeringEvent: event,
-            conversationManager,
-        });
-
-        await publisher.publishError(displayMessage);
+        // Use AgentPublisher to publish error
+        const { AgentPublisher } = await import("@/nostr/AgentPublisher");
+        const agentPublisher = new AgentPublisher(projectManager);
+        
+        await agentPublisher.error(
+            {
+                type: 'error',
+                message: displayMessage,
+                errorType: isCreditsError ? 'insufficient_credits' : 'execution_error'
+            },
+            {
+                agent: projectManager,
+                triggeringEvent: event,
+                conversationId: conversation.id
+            }
+        );
 
         logger.error(
             isCreditsError

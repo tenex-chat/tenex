@@ -15,6 +15,12 @@ export interface SerializedToolResult {
 
     /** Tool execution duration in milliseconds */
     duration: number;
+    
+    /** The name of the tool that was executed */
+    toolName: string;
+    
+    /** The arguments that were passed to the tool */
+    toolArgs: Record<string, unknown>;
 
     /** The actual result data */
     data: {
@@ -33,6 +39,8 @@ export function serializeToolResult(result: ToolExecutionResult): SerializedTool
     return {
         success: result.success,
         duration: result.duration,
+        toolName: result.toolName,
+        toolArgs: result.toolArgs,
         data: {
             output: result.output,
             error: result.error
@@ -54,9 +62,13 @@ export function isSerializedToolResult(obj: unknown): obj is SerializedToolResul
         obj !== null &&
         "success" in obj &&
         "duration" in obj &&
+        "toolName" in obj &&
+        "toolArgs" in obj &&
         "data" in obj &&
         typeof obj.success === "boolean" &&
-        typeof obj.duration === "number"
+        typeof obj.duration === "number" &&
+        typeof obj.toolName === "string" &&
+        typeof obj.toolArgs === "object"
     );
 }
 
@@ -100,6 +112,8 @@ export function deserializeToolResult(serialized: SerializedToolResult): ToolExe
     return {
         success: serialized.success,
         duration: serialized.duration,
+        toolName: serialized.toolName,
+        toolArgs: serialized.toolArgs,
         output: serialized.data.output,
         error: deserializeToolError(serialized.data.error),
     };

@@ -174,13 +174,11 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: a
                         const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
                         
                         if (toolName === 'complete') {
-                            // For complete tool, call the completion handler
-                            const { handleAgentCompletion } = await import('@/agents/execution/completionHandler');
-                            await handleAgentCompletion(
-                                toolArgs.summary || 'Task completed',
-                                context,
-                                publisher
-                            );
+                            // For complete tool, simulate completion
+                            // The complete tool now publishes events directly,
+                            // so we don't need to call a separate handler
+                            // Just log that completion was requested
+                            console.log('Complete tool called with args:', toolArgs);
                         }
                         // Add other tools as needed
                     }

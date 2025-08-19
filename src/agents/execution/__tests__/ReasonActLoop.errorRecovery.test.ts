@@ -65,7 +65,7 @@ describe("ReasonActLoop - Error Recovery", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
             startedTools: new Set<string>(),
         };
 
@@ -111,7 +111,7 @@ describe("ReasonActLoop - Error Recovery", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
             startedTools: new Set<string>(),
         };
 
@@ -220,7 +220,7 @@ describe("ReasonActLoop - Error Recovery", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
             startedTools: new Set<string>(),
         };
 
@@ -265,7 +265,7 @@ describe("ReasonActLoop - Error Recovery", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
             startedTools: new Set<string>(),
         };
 

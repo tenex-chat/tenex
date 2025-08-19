@@ -45,7 +45,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
         };
 
         const context = {
@@ -105,7 +105,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
             termination: undefined,
             finalResponse: undefined,
             fullContent: "",
-            streamPublisher: undefined,
+            streamHandle: undefined,
         };
 
         const context = {

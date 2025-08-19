@@ -1,4 +1,5 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { getNDK } from "./ndkClient";
 
 /**
  * Create an NDK event with standard fields
@@ -9,7 +10,7 @@ export function createNDKEvent(
     pubkey?: string,
     tags: string[][] = []
 ): NDKEvent {
-    const event = new NDKEvent();
+    const event = new NDKEvent(getNDK());
     event.kind = kind;
     event.content = content;
     event.tags = tags;

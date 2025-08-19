@@ -614,8 +614,8 @@ export class AgentRegistry {
 
             const ndk = getNDK();
 
-            // Create agent publisher
-            const publisher = new AgentPublisher(ndk);
+            // Create agent publisher - no agent passed since we're creating agents
+            const publisher = new AgentPublisher(undefined, ndk);
 
             // Publish agent profile (kind:0) and request event
             await publisher.publishAgentCreation(
@@ -952,7 +952,7 @@ export class AgentRegistry {
         }
 
         const ndk = getNDK();
-        const publisher = new AgentPublisher(ndk);
+        const publisher = new AgentPublisher(undefined, ndk);
 
         // Republish kind:0 for each agent
         for (const [slug, agent] of Array.from(this.agents.entries())) {

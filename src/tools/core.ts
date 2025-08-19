@@ -62,7 +62,6 @@ export interface Complete {
 export interface CompletionSummary {
     readonly response: string;
     readonly summary: string;
-    readonly nextAgent: string;
 }
 
 export interface ConversationResult {

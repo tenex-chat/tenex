@@ -350,28 +350,6 @@ export class ConversationCoordinator {
         await this.persistence.save(conversation);
     }
 
-    /**
-     * Start a new orchestrator turn
-     * @param agents Array of agent pubkeys for consistent identification
-     */
-
-
-    /**
-     * Check if the current turn is complete
-     * With NDKTask-based delegation, this always returns true since
-     * agents won't be reactivated until all their delegated tasks complete
-     */
-    isCurrentTurnComplete(_conversationId: string): boolean {
-        return true; // PM-centric routing with NDKTask handles this via DelegationRegistry
-    }
-
-    /**
-     * Get the current turn for a conversation
-     * With PM-centric routing, there are no explicit turns to track
-     */
-    getCurrentTurn(_conversationId: string): null {
-        return null; // No turn tracking in PM-centric routing
-    }
 
     /**
      * Archive a conversation
