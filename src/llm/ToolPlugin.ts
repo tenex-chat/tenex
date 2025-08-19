@@ -195,27 +195,8 @@ export class ToolPlugin extends Plugin {
                 phase: this.tenexContext.phase,
             });
 
-            // CRITICAL: Before executing the tool, handle stream finalization
-            // This ensures any buffered content is published as kind:1111 before the tool runs
-            if (this.tenexContext.streamPublisher) {
-                // Determine if this tool should publish a tool use event
-                const shouldPublishToolUse = !this.shouldSkipToolUseEvent(this.tool.name);
-                
-                const toolMessage = shouldPublishToolUse 
-                    ? this.getToolDescription(this.tool.name, normalizedParameters as Record<string, unknown>)
-                    : undefined;
-                    
-                // Call toolUse to finalize current segment and start a new one
-                await this.tenexContext.streamPublisher.toolUse(toolMessage);
-                
-                logger.debug(`[ToolPlugin] StreamPublisher segment switched after toolUse`, {
-                    tool: this.tool.name,
-                    message: toolMessage,
-                    shouldPublishToolUse,
-                });
-            } else {
-                logger.warn(`[ToolPlugin] No StreamPublisher available for tool: ${this.tool.name}`);
-            }
+            // Note: Stream handling is now done by AgentStreamer at a higher level
+            // Tools no longer need to manage streaming directly
 
             // Execute the tool using the type-safe executor
             const result = await this.executor.execute(this.tool, normalizedParameters);

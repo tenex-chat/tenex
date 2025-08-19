@@ -3,11 +3,11 @@ import { logger } from "@/utils/logger";
 import type { LLMService, Tool } from "@/llm/types";
 import type { StreamEvent } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import { StreamPublisher } from "@/nostr/NostrPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentStreamer } from "@/nostr/AgentStreamer";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import type { StreamHandle } from "@/nostr/AgentStreamer";
 import { getProjectContext } from "@/services/ProjectContext";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
@@ -33,12 +33,16 @@ export class ReasonActLoop {
     private repetitionDetector: ToolRepetitionDetector;
     private messageBuilder: MessageBuilder;
     private startTime?: number;
+    private agentPublisher: AgentPublisher;
+    private agentStreamer: AgentStreamer;
 
     constructor(
         private llmService: LLMService
     ) {
         this.repetitionDetector = new ToolRepetitionDetector();
         this.messageBuilder = new MessageBuilder();
+        this.agentPublisher = new AgentPublisher();
+        this.agentStreamer = new AgentStreamer(this.agentPublisher);
     }
 
     /**
@@ -91,8 +95,8 @@ export class ReasonActLoop {
         let iterations = 0;
         let isComplete = false;
         
-        // Create a single StreamPublisher for the entire execution
-        const streamPublisher = this.createStreamPublisher(publisher);
+        // Create a stream handle for the entire execution
+        const streamHandle = this.createStreamHandle(context);
 
         try {
             // Main Reason-Act-Observe loop
@@ -105,15 +109,15 @@ export class ReasonActLoop {
                     lastMessage: conversationMessages[conversationMessages.length-1].content.substring(0, 100)
                 });
                 
-                // Create stream with streamPublisher in context
-                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, streamPublisher);
+                // Create stream with streamHandle in context
+                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, streamHandle);
 
                 // Process stream events for this iteration
                 const iterationResult = await this.processIterationStream(
                     stream,
                     stateManager,
                     toolHandler,
-                    streamPublisher,
+                    streamHandle,
                     publisher,
                     tracingLogger,
                     context,
@@ -174,9 +178,9 @@ export class ReasonActLoop {
                 // Finalize stream for this iteration
                 // Skip finalization if a terminal tool already published its response
                 if (!iterationResult.isTerminal) {
-                    // Finalize the stream (single stable StreamPublisher)
+                    // Finalize the stream (single stable StreamHandle)
                     await this.finalizeStream(
-                        streamPublisher,
+                        streamHandle,
                         stateManager,
                         conversationMessages
                     );
@@ -205,7 +209,7 @@ export class ReasonActLoop {
             yield this.createFinalEvent(stateManager);
 
         } catch (error) {
-            yield* this.handleError(error, publisher, tracingLogger, context, streamPublisher);
+            yield* this.handleError(error, publisher, tracingLogger, context, streamHandle);
             throw error;
         }
     }
@@ -217,7 +221,7 @@ export class ReasonActLoop {
         stream: AsyncIterable<StreamEvent>,
         stateManager: StreamStateManager,
         toolHandler: ToolStreamHandler,
-        initialStreamPublisher: StreamPublisher | undefined,
+        streamHandle: StreamHandle | undefined,
         publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext,
@@ -235,7 +239,6 @@ export class ReasonActLoop {
         let hasToolCalls = false;
         const toolResults: ToolExecutionResult[] = [];
         let assistantMessage = "";
-        const streamPublisher = initialStreamPublisher;
         let deferredTerminalEvent: any = null;
         
         for await (const event of stream) {
@@ -255,7 +258,7 @@ export class ReasonActLoop {
 
             switch (event.type) {
                 case "content":
-                    this.handleContentEvent(event, stateManager, streamPublisher, context);
+                    this.handleContentEvent(event, stateManager, streamHandle, context);
                     // Buffer content instead of streaming immediately
                     // We'll decide whether to output it after processing all events
                     assistantMessage += event.content;
@@ -284,7 +287,7 @@ export class ReasonActLoop {
                     }
                     
                     await toolHandler.handleToolStartEvent(
-                        streamPublisher,
+                        streamHandle,
                         publisher,
                         event.tool,
                         event.args,
@@ -296,7 +299,7 @@ export class ReasonActLoop {
                 case "tool_complete": {
                     const isTerminalTool = await toolHandler.handleToolCompleteEvent(
                         event,
-                        streamPublisher,
+                        streamHandle,
                         publisher,
                         tracingLogger,
                         context
@@ -351,7 +354,7 @@ export class ReasonActLoop {
                     break;
 
                 case "error":
-                    this.handleErrorEvent(event, stateManager, streamPublisher, tracingLogger);
+                    this.handleErrorEvent(event, stateManager, streamHandle, tracingLogger);
                     break;
             }
         }
@@ -423,7 +426,7 @@ export class ReasonActLoop {
     private handleContentEvent(
         event: { content: string },
         stateManager: StreamStateManager,
-        streamPublisher?: StreamPublisher,
+        streamHandle?: StreamHandle,
         context?: ExecutionContext
     ): void {
         stateManager.appendContent(event.content);
@@ -431,28 +434,28 @@ export class ReasonActLoop {
         // Extract and log reasoning if present
         this.extractAndLogReasoning(stateManager.getFullContent(), context, stateManager);
         
-        // Add content to the StreamPublisher (single stable instance)
-        streamPublisher?.addContent(event.content);
+        // Add content to the stream handle
+        streamHandle?.addContent(event.content);
     }
 
     private handleErrorEvent(
         event: { error: string },
         stateManager: StreamStateManager,
-        streamPublisher: StreamPublisher | undefined,
+        streamHandle: StreamHandle | undefined,
         tracingLogger: TracingLogger
     ): void {
         tracingLogger.error("Stream error", { error: event.error });
         stateManager.appendContent(`\n\nError: ${event.error}`);
         
-        streamPublisher?.addContent(`\n\nError: ${event.error}`);
+        streamHandle?.addContent(`\n\nError: ${event.error}`);
     }
 
     private async finalizeStream(
-        streamPublisher: StreamPublisher | undefined,
+        streamHandle: StreamHandle | undefined,
         stateManager: StreamStateManager,
         messages: Message[]
     ): Promise<void> {
-        if (!streamPublisher || streamPublisher.isFinalized()) return;
+        if (!streamHandle) return;
 
         const finalResponse = stateManager.getFinalResponse();
         const llmMetadata = finalResponse
@@ -467,10 +470,14 @@ export class ReasonActLoop {
             metadata.completeMetadata = termination;
         }
 
-        await streamPublisher.finalize({
-            llmMetadata,
-            ...metadata,
-        });
+        if (llmMetadata) {
+            metadata.model = llmMetadata.model;
+            metadata.usage = llmMetadata.usage;
+            metadata.toolCalls = stateManager.getToolCalls();
+            metadata.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
+        }
+
+        await streamHandle.finalize(metadata);
     }
 
     private createLLMStream(
@@ -478,7 +485,7 @@ export class ReasonActLoop {
         messages: Message[],
         tools?: Tool[],
         publisher?: NostrPublisher,
-        streamPublisher?: StreamPublisher
+        streamHandle?: StreamHandle
     ): ReturnType<LLMService["stream"]> {
         // Log what we're sending to the LLM
         logger.debug("[ReasonActLoop] Calling LLM stream", {
@@ -512,14 +519,22 @@ export class ReasonActLoop {
                 ...context,
                 publisher: publisher || context.publisher,
                 conversationManager: context.conversationManager,
-                streamPublisher: streamPublisher,
             },
         });
     }
 
-    private createStreamPublisher(publisher: NostrPublisher | undefined): StreamPublisher | undefined {
-        if (!publisher) return undefined;
-        return new StreamPublisher(publisher);
+    private createStreamHandle(context: ExecutionContext): StreamHandle | undefined {
+        if (!context.publisher) return undefined;
+        
+        // Build event context for streaming
+        const eventContext: EventContext = {
+            agent: context.agent,
+            triggeringEvent: context.triggeringEvent,
+            conversationId: context.conversationId,
+            projectId: getProjectContext().project?.id
+        };
+        
+        return this.agentStreamer.createStreamHandle(eventContext);
     }
 
     private createFinalEvent(stateManager: StreamStateManager): StreamEvent {
@@ -543,16 +558,16 @@ export class ReasonActLoop {
         publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext,
-        streamPublisher?: StreamPublisher
+        streamHandle?: StreamHandle
     ): AsyncGenerator<StreamEvent> {
         tracingLogger.error("Streaming error", {
             error: formatAnyError(error),
             agent: context.agent.name,
         });
 
-        if (streamPublisher && !streamPublisher.isFinalized()) {
+        if (streamHandle) {
             try {
-                await streamPublisher.finalize({});
+                await streamHandle.finalize({});
             } catch (finalizeError) {
                 tracingLogger.error("Failed to finalize stream on error", {
                     error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),

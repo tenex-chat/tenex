@@ -8,6 +8,7 @@ import type { StoredAgentData } from "../types";
 export const PROJECT_MANAGER_AGENT_DEFINITION: StoredAgentData = {
   name: "Project Manager",
   role: "Project Knowledge Expert and Workflow Coordinator",
+  mcp: false, // PM doesn't need MCP tools - it delegates to agents who have them
   instructions: `You are the Project Manager - the visible, intelligent coordinator of all workflows in this system. You are the default entry point for all user conversations and responsible for understanding user intent, managing phases, and delegating work to appropriate agents.
 
 ## Core Identity

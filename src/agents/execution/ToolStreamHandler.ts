@@ -1,5 +1,5 @@
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import { StreamPublisher } from "@/nostr/NostrPublisher";
+import type { StreamHandle } from "@/nostr/AgentStreamer";
 import type { TracingLogger } from "@/tracing";
 import type { ExecutionContext } from "./types";
 import type { ExecutionLogger } from "@/logging/ExecutionLogger";
@@ -26,7 +26,7 @@ export class ToolStreamHandler {
      * Handle a tool_start event
      */
     async handleToolStartEvent(
-        streamPublisher: StreamPublisher | undefined,
+        streamHandle: StreamHandle | undefined,
         publisher: NostrPublisher | undefined,
         toolName: string,
         toolArgs: Record<string, unknown>,
@@ -42,10 +42,8 @@ export class ToolStreamHandler {
             this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
         }
         
-        // Just flush any pending content if streamPublisher exists
-        if (streamPublisher && !streamPublisher.isFinalized()) {
-            await streamPublisher.flush();
-        }
+        // Note: StreamHandle doesn't have a flush method - it handles buffering internally
+        // No action needed here for streaming
     }
 
     /**
@@ -54,7 +52,7 @@ export class ToolStreamHandler {
      */
     async handleToolCompleteEvent(
         event: { tool: string; result: unknown },
-        streamPublisher: StreamPublisher | undefined,
+        streamHandle: StreamHandle | undefined,
         publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext
@@ -77,8 +75,7 @@ export class ToolStreamHandler {
         // Process the tool result (update state with continue/termination)
         this.processToolResult(toolResult, tracingLogger, context);
 
-        // Flush stream and stop typing indicator
-        await streamPublisher?.flush();
+        // Note: StreamHandle handles buffering internally
         await publisher?.publishTypingIndicator("stop");
 
         // Check if this is a terminal tool

@@ -124,14 +124,8 @@ describe("Voice Mode Tag Propagation", () => {
         // Verify that the triggering event has voice mode
         expect(mockTriggeringEvent.tagValue("mode")).toBe("voice");
         
-        // Create stream publisher - it will inherit the voice mode from context
-        const streamPublisher = publisher.createStreamPublisher();
-        
-        // Verify the stream publisher has access to voice mode context
-        expect(streamPublisher).toBeDefined();
-        
-        // The actual streaming event publication would include the voice mode tag
-        // based on the context.triggeringEvent.tagValue("mode") check
+        // Note: Streaming is now handled by AgentStreamer which inherits voice mode
+        // from the EventContext passed to it
     });
 
     it("should propagate voice mode tag to error events", async () => {

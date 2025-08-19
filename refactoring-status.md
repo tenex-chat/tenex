@@ -36,18 +36,21 @@
    - Deleted `EventTagger.ts` - logic moved to AgentEventEncoder
    - Deleted `completionHandler.ts` - no longer needed with intent system
 
+7. **Integrated AgentStreamer**
+   - Replaced StreamPublisher with AgentStreamer in ReasonActLoop
+   - Updated ToolStreamHandler to use StreamHandle instead of StreamPublisher
+   - Removed StreamPublisher class from NostrPublisher.ts
+   - Removed streamPublisher from ExecutionContext type
+   - Updated ToolPlugin to remove StreamPublisher references
+   - Fixed test files that referenced StreamPublisher
+
 ## In Progress 🚧
 
 None currently.
 
 ## TODO 📋
 
-1. **Streaming Architecture Decision**
-   - Decide whether to keep StreamPublisher or replace with AgentStreamer
-   - Current state: StreamPublisher handles low-level streaming in RAL
-   - AgentStreamer created but not yet integrated
-
-2. **Update Tests**
+1. **Update Tests**
    - RAL tests need updating for new intent-based flow
    - E2E tests need validation of new event structure
    - Tool tests should verify intent returns

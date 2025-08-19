@@ -94,50 +94,44 @@ export class StatusPublisher {
         try {
             const { llms } = await configService.loadConfig(projectPath);
 
-            if (!llms) return;
+            if (!llms || !llms.configurations) return;
 
-            // Build a map of models to agents that use them
-            const modelToAgents = new Map<string, Set<string>>();
+            // Build a map of configuration slugs to agents that use them
+            const configToAgents = new Map<string, Set<string>>();
 
-            // Process agent-specific defaults
-            if (llms.defaults) {
-                for (const [agentSlug, configName] of Object.entries(llms.defaults)) {
-                    if (!configName || agentSlug === "agents" || agentSlug === "routing") continue;
+            // First, add ALL configured models (even if not used by any agent)
+            for (const configSlug of Object.keys(llms.configurations)) {
+                configToAgents.set(configSlug, new Set());
+            }
 
-                    const config = llms.configurations[configName];
-                    if (config?.model) {
-                        if (!modelToAgents.has(config.model)) {
-                            modelToAgents.set(config.model, new Set());
-                        }
-                        modelToAgents.get(config.model)!.add(agentSlug);
+            // Process agent-specific defaults to map agents to their configurations
+            if (llms.defaults && isProjectContextInitialized()) {
+                const projectCtx = getProjectContext();
+                
+                // Get the global default configuration if it exists
+                const globalDefault = llms.defaults?.agents || llms.defaults?.routing;
+                
+                // Map each agent to its configuration
+                for (const [agentSlug] of projectCtx.agents) {
+                    // Check if this agent has a specific configuration
+                    const specificConfig = llms.defaults[agentSlug];
+                    
+                    if (specificConfig && llms.configurations[specificConfig]) {
+                        // Agent has a specific configuration
+                        configToAgents.get(specificConfig)?.add(agentSlug);
+                    } else if (globalDefault && llms.configurations[globalDefault]) {
+                        // Agent uses the global default
+                        configToAgents.get(globalDefault)?.add(agentSlug);
                     }
+                    // If neither specific nor global default, agent doesn't get mapped to any config
                 }
             }
 
-            // If there's a global default, apply it to all agents that don't have specific configs
-            const globalDefault = llms.defaults?.agents || llms.defaults?.routing;
-            if (globalDefault && llms.configurations[globalDefault]) {
-                const config = llms.configurations[globalDefault];
-                if (config?.model && isProjectContextInitialized()) {
-                    const projectCtx = getProjectContext();
-                    if (!modelToAgents.has(config.model)) {
-                        modelToAgents.set(config.model, new Set());
-                    }
-                    // Add all agents that don't have specific model configs
-                    for (const [agentSlug] of projectCtx.agents) {
-                        if (!llms.defaults?.[agentSlug]) {
-                            modelToAgents.get(config.model)!.add(agentSlug);
-                        }
-                    }
-                }
-            }
-
-            // Add model tags in the new format: ["model", "<model-slug>", ...agent-slugs]
-            for (const [modelSlug, agentSet] of modelToAgents) {
-                const agentSlugs = Array.from(agentSet);
-                if (agentSlugs.length > 0) {
-                    event.tags.push(["model", modelSlug, ...agentSlugs]);
-                }
+            // Add model tags in the format: ["model", "<config-slug>", ...agent-slugs-using-it]
+            for (const [configSlug, agentSet] of configToAgents) {
+                const agentSlugs = Array.from(agentSet).sort(); // Sort for consistency
+                // Always publish the model configuration, even if no agents use it
+                event.tags.push(["model", configSlug, ...agentSlugs]);
             }
         } catch (err) {
             logWarning(`Could not load LLM information for status event model tags: ${formatAnyError(err)}`);
