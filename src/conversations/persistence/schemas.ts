@@ -14,13 +14,7 @@ export const PhaseTransitionSchema = z.object({
     message: z.string(),
     timestamp: z.number(),
     agentPubkey: z.string(),
-    agentName: z.string(),
-    reason: z.string().optional(),
-    // Enhanced handoff fields
-    summary: z.string().optional(),
-    requirements: z.string().optional(),
-    artifacts: z.any().optional(),
-    goal: z.string().optional(),
+    agentName: z.string()
 });
 
 export const ConversationMetadataSchema = z.record(z.string(), z.unknown());

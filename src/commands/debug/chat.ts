@@ -149,12 +149,6 @@ export async function runDebugChat(
                 phase: PHASES.CHAT,
                 projectPath,
                 triggeringEvent: mockEvent,
-                publisher: new (await import("@/nostr/NostrPublisher")).NostrPublisher({
-                    conversationId: conversation.id,
-                    agent,
-                    triggeringEvent: mockEvent,
-                    conversationManager: _conversationManager,
-                }),
                 conversationManager: _conversationManager,
             };
 
@@ -261,12 +255,6 @@ export async function runDebugChat(
                     phase: PHASES.CHAT,
                     projectPath,
                     triggeringEvent: mockEvent,
-                    publisher: new (await import("@/nostr/NostrPublisher")).NostrPublisher({
-                        conversationId: conversation.id,
-                        agent,
-                        triggeringEvent: mockEvent,
-                        conversationManager: _conversationManager,
-                    }),
                     conversationManager: _conversationManager,
                 };
 

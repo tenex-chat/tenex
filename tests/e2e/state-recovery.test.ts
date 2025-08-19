@@ -37,13 +37,6 @@ describe("State Recovery E2E Tests", () => {
         
         // Mock Nostr publisher to prevent network calls
         mock.module("@/nostr", () => ({
-            NostrPublisher: class {
-                cleanup() {}
-                async publishResponse() { return Promise.resolve(); }
-                async publishError() { return Promise.resolve(); }
-                async publishTypingIndicator() { return Promise.resolve(); }
-                async stopTypingIndicator() { return Promise.resolve(); }
-            },
             getNDK: () => ({
                 connect: async () => {},
                 signer: { privateKey: () => "mock-private-key" },

@@ -293,11 +293,3 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     return systemPromptBuilder.build();
 }
 
-/**
- * Legacy function that returns a single concatenated system prompt string.
- * @deprecated Use buildSystemPromptMessages instead for better caching support
- */
-export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
-    const messages = buildSystemPromptMessages(options);
-    return messages.map(m => m.message.content).join("\n\n");
-}

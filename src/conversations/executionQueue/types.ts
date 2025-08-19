@@ -57,7 +57,7 @@ export interface ExecutionQueueEvent {
   conversationId: string;
   agentPubkey?: string;
   timestamp: number;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 export interface ExecutionQueueConfig {

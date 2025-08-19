@@ -82,8 +82,7 @@ describe("PhaseManager", () => {
         const context = {
             agentPubkey: "pubkey123",
             agentName: "Test Agent",
-            message: "Transitioning phase",
-            reason: "User request"
+            message: "Transitioning phase"
         };
 
         it("should allow same-phase handoff", async () => {

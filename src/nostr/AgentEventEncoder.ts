@@ -3,6 +3,7 @@ import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { getNDK } from "@/nostr/ndkClient";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { getProjectContext } from "@/services";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -211,7 +212,6 @@ export  class AgentEventEncoder {
      */
     private static addStandardTags(event: NDKEvent, context: EventContext): void {
         // Add project tag - ALL agent events should reference their project
-        const { getProjectContext } = require('@/services');
         const projectCtx = getProjectContext();
         event.tag(projectCtx.project);
 
@@ -278,7 +278,6 @@ export  class AgentEventEncoder {
         }
         
         // Add project tag
-        const { getProjectContext } = require('@/services');
         const projectCtx = getProjectContext();
         event.tag(projectCtx.project);
         
@@ -313,7 +312,6 @@ export  class AgentEventEncoder {
         event.content = '';
         
         // Add project tag
-        const { getProjectContext } = require('@/services');
         const projectCtx = getProjectContext();
         event.tag(projectCtx.project);
         
@@ -369,7 +367,6 @@ export  class AgentEventEncoder {
         }
         
         // Add project tag
-        const { getProjectContext } = require('@/services');
         const projectCtx = getProjectContext();
         lessonEvent.tag(projectCtx.project);
         
@@ -377,108 +374,3 @@ export  class AgentEventEncoder {
     }
 }
 
-/**
- * Decodes Nostr events back into agent intents.
- * Used for interpreting events and understanding their semantic meaning.
- */
-export class AgentEventDecoder {
-    /**
-     * Determine if an event represents a completion.
-     */
-    static isCompletionEvent(event: NDKEvent): boolean {
-        // Check for tool=complete tag
-        return event.tagValue('tool') === 'complete';
-    }
-
-    /**
-     * Decode a completion event back into its intent.
-     */
-    static decodeCompletion(event: NDKEvent): CompletionIntent | null {
-        if (!this.isCompletionEvent(event)) {
-            return null;
-        }
-
-        return {
-            type: 'completion',
-            content: event.content,
-            summary: event.tagValue('summary')
-        };
-    }
-
-    /**
-     * Determine if an event is a delegation task.
-     */
-    static isDelegationEvent(event: NDKEvent): boolean {
-        return event.kind === EVENT_KINDS.TASK && 
-               event.tagValue('tool') === 'delegate';
-    }
-
-    /**
-     * Decode a delegation task back into its intent.
-     */
-    static decodeDelegation(event: NDKEvent): DelegationIntent | null {
-        if (!this.isDelegationEvent(event)) {
-            return null;
-        }
-
-        const task = event as NDKTask;
-        const recipientTag = event.getMatchingTags('p')[0]; // Just get the first p-tag
-        
-        if (!task.title) {
-            throw new Error(`Delegation task ${event.id} is missing required title`);
-        }
-        if (!task.content) {
-            throw new Error(`Delegation task ${event.id} is missing required content`);
-        }
-        
-        return {
-            type: 'delegation',
-            recipients: recipientTag ? [recipientTag[1]] : [],
-            title: task.title,
-            request: task.content,
-            phase: event.tagValue('phase')
-        };
-    }
-
-    /**
-     * Extract execution context from an event.
-     * Useful for understanding how an event was created.
-     * Note: This returns a partial context - the conversationEvent would need to be fetched separately if needed.
-     */
-    static extractContext(event: NDKEvent): Partial<EventContext> {
-        const conversationId = event.tagValue('E');
-        
-        const context: Partial<EventContext> = {
-            // Note: We can't reconstruct the full conversation event from tags alone
-            // Caller would need to fetch it using the conversationId if needed
-            model: event.tagValue('llm-model'),
-            executionTime: event.tagValue('execution-time') 
-                ? parseInt(event.tagValue('execution-time')!) 
-                : undefined
-        };
-
-        // Extract tool calls
-        const toolTags = event.getMatchingTags('tool');
-        if (toolTags.length > 0) {
-            context.toolCalls = toolTags.map(tag => ({
-                name: tag[1],
-                arguments: tag[2] ? JSON.parse(tag[2]) : {}
-            }));
-        }
-
-        // Extract usage stats
-        const promptTokens = event.tagValue('llm-prompt-tokens');
-        const completionTokens = event.tagValue('llm-completion-tokens');
-        if (promptTokens && completionTokens) {
-            context.usage = {
-                prompt_tokens: parseInt(promptTokens),
-                completion_tokens: parseInt(completionTokens),
-                total_tokens: event.tagValue('llm-total-tokens') 
-                    ? parseInt(event.tagValue('llm-total-tokens')!)
-                    : (parseInt(promptTokens) + parseInt(completionTokens))
-            };
-        }
-
-        return context;
-    }
-}

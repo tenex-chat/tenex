@@ -31,12 +31,7 @@ export const analyze = createToolDefinition<z.infer<typeof analyzeSchema>, Analy
 
         logger.info("Running analyze tool", { prompt, targetDirectory });
 
-        // Publish custom typing indicator
-        try {
-            await context.publisher.publishTypingIndicator("start");
-        } catch (error) {
-            logger.warn("Failed to publish typing indicator", { error });
-        }
+        // Typing indicators are handled by the agent execution layer
 
         let repomixResult;
         try {
@@ -81,12 +76,7 @@ Provide a clear, structured response focused on the specific question asked.`;
 
             logger.info("Analysis completed successfully");
 
-            // Stop typing indicator
-            try {
-                await context.publisher.publishTypingIndicator("stop");
-            } catch (error) {
-                logger.warn("Failed to stop typing indicator", { error });
-            }
+            // Typing indicators are handled by the agent execution layer
 
             return {
                 ok: true,
@@ -98,12 +88,7 @@ Provide a clear, structured response focused on the specific question asked.`;
         } catch (error) {
             logger.error("Analyze tool failed", { error });
 
-            // Stop typing indicator on error
-            try {
-                await context.publisher.publishTypingIndicator("stop");
-            } catch (error) {
-                logger.warn("Failed to stop typing indicator", { error });
-            }
+            // Typing indicators are handled by the agent execution layer
 
             return {
                 ok: false,

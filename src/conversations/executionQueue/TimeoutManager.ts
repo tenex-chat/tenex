@@ -24,7 +24,7 @@ export class TimeoutManager extends EventEmitter {
 
     this.clearTimeout(conversationId);
 
-    const timeoutDuration = duration || this.config.maxExecutionDuration!;
+    const timeoutDuration = duration || this.config.maxExecutionDuration || DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
 
     // Set up warning timeout (5 minutes before expiry)
     if (timeoutDuration > this.WARNING_THRESHOLD) {
@@ -76,7 +76,8 @@ export class TimeoutManager extends EventEmitter {
     this.clearTimeout(conversationId);
 
     // Start new timeout with extended duration
-    this.startTimeout(conversationId, this.config.maxExecutionDuration! + additionalMs);
+    const maxDuration = this.config.maxExecutionDuration || DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+    this.startTimeout(conversationId, maxDuration + additionalMs);
   }
 
   getRemainingTime(conversationId: string): number | null {
@@ -88,10 +89,11 @@ export class TimeoutManager extends EventEmitter {
     // Node.js timeout objects have a _idleStart property we can use
     // This is a bit hacky but works for our purposes
     // In production, we might want to track start times separately
-    const timeoutObj = timeout as any;
+    const timeoutObj = timeout as NodeJS.Timeout & { _idleStart?: number };
     if (timeoutObj._idleStart) {
       const elapsed = Date.now() - timeoutObj._idleStart;
-      const remaining = this.config.maxExecutionDuration! - elapsed;
+      const maxDuration = this.config.maxExecutionDuration || DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+      const remaining = maxDuration - elapsed;
       return Math.max(0, remaining);
     }
 
@@ -134,8 +136,8 @@ export class TimeoutManager extends EventEmitter {
       activeTimeouts: Array.from(this.timeouts.keys()),
       activeWarnings: Array.from(this.warnings.keys()),
       config: {
-        enableAutoTimeout: this.config.enableAutoTimeout!,
-        maxExecutionDuration: this.config.maxExecutionDuration!,
+        enableAutoTimeout: this.config.enableAutoTimeout ?? DEFAULT_EXECUTION_QUEUE_CONFIG.enableAutoTimeout,
+        maxExecutionDuration: this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration,
         warningThreshold: this.WARNING_THRESHOLD
       }
     };

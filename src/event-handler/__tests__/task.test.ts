@@ -13,7 +13,6 @@ describe("handleTask", () => {
     let mockOrchestratorAgent: AgentInstance;
     let mockProjectContext: any;
     let mockEvent: NDKTask;
-    let mockPublisher: any;
 
     beforeEach(() => {
         // Reset mocks
@@ -47,13 +46,6 @@ describe("handleTask", () => {
             getProjectContext: () => mockProjectContext
         }));
 
-        // Mock NostrPublisher
-        mockPublisher = {
-            publish: mock(() => Promise.resolve())
-        };
-        mock.module("@/nostr/NostrPublisher", () => ({
-            NostrPublisher: mock(() => mockPublisher)
-        }));
 
         // Create mock conversation manager
         mockConversationCoordinator = {
@@ -228,32 +220,5 @@ describe("handleTask", () => {
         // Should still process normally
         expect(mockConversationCoordinator.createConversation).toHaveBeenCalled();
         expect(mockAgentExecutor.execute).toHaveBeenCalled();
-    });
-
-    it("should create NostrPublisher with correct parameters", async () => {
-        // Track NostrPublisher constructor calls
-        const constructorCalls: any[] = [];
-        const MockNostrPublisher = function(params: any) {
-            constructorCalls.push(params);
-            return mockPublisher;
-        };
-        
-        mock.module("@/nostr/NostrPublisher", () => ({
-            NostrPublisher: MockNostrPublisher
-        }));
-
-        await handleTask(mockEvent, {
-            conversationManager: mockConversationCoordinator,
-            agentExecutor: mockAgentExecutor
-        });
-
-        // Verify NostrPublisher was created with correct params
-        expect(constructorCalls).toHaveLength(1);
-        expect(constructorCalls[0]).toEqual({
-            conversationId: "test-conversation-id",
-            agent: mockOrchestratorAgent,
-            triggeringEvent: mockEvent,
-            conversationManager: mockConversationCoordinator
-        });
     });
 });

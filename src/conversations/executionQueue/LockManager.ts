@@ -62,7 +62,7 @@ export class LockManager {
       conversationId,
       agentPubkey,
       timestamp: Date.now(),
-      maxDuration: this.config.maxExecutionDuration!
+      maxDuration: this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration
     };
 
     this.currentLock = lock;
@@ -193,7 +193,7 @@ export class LockManager {
       }
 
       return lock;
-    } catch (error: any) {
+    } catch (error) {
       if (!(await fileExists(this.lockFile))) {
         return null; // No lock file exists
       }
@@ -205,8 +205,8 @@ export class LockManager {
   private async deleteLockFromDisk(): Promise<void> {
     try {
       await fs.unlink(this.lockFile);
-    } catch (error: any) {
-      if (error.code !== 'ENOENT') {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         handlePersistenceError('delete lock file', error);
       }
       // Don't throw - allow operation to continue

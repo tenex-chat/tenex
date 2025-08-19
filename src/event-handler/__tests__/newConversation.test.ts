@@ -118,11 +118,7 @@ describe("handleNewConversation", () => {
         }));
         
         mock.module("@/nostr", () => ({
-            getNDK: () => ({}),
-            NostrPublisher: class {
-                async publishResponse() {}
-                async publishError() {}
-            }
+            getNDK: () => ({})
         }));
         
         mock.module("@/utils/logger", () => ({

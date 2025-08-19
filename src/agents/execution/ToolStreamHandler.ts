@@ -1,4 +1,3 @@
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
 import type { TracingLogger } from "@/tracing";
 import type { ExecutionContext } from "./types";
@@ -9,12 +8,11 @@ import { ExecutionConfig } from "./constants";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import { isComplete } from "./control-flow-types";
-import type { ToolName } from "@/tools/registry";
 
 /**
  * Handles tool-related events in the LLM stream.
  * Responsible for processing tool_start and tool_complete events,
- * managing tool descriptions, publishing typing indicators, and error handling.
+ * managing tool descriptions, and error handling.
  */
 export class ToolStreamHandler {
     constructor(
@@ -27,7 +25,6 @@ export class ToolStreamHandler {
      */
     async handleToolStartEvent(
         streamHandle: StreamHandle | undefined,
-        publisher: NostrPublisher | undefined,
         toolName: string,
         toolArgs: Record<string, unknown>,
         tracingLogger: TracingLogger,
@@ -53,7 +50,6 @@ export class ToolStreamHandler {
     async handleToolCompleteEvent(
         event: { tool: string; result: unknown },
         streamHandle: StreamHandle | undefined,
-        publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext
     ): Promise<boolean> {
@@ -61,7 +57,7 @@ export class ToolStreamHandler {
         const toolResult = this.parseToolResult(event);
         
         // Check if this tool never sent a tool_start event
-        await this.handleMissingToolStart(event.tool, toolResult, publisher, tracingLogger, context);
+        await this.handleMissingToolStart(event.tool, toolResult, tracingLogger, context);
 
         // Add result to state
         this.stateManager.addToolResult(toolResult);
@@ -70,13 +66,13 @@ export class ToolStreamHandler {
         this.logToolComplete(toolResult, event.tool, context);
 
         // Publish error if tool failed
-        await this.publishToolError(toolResult, event.tool, publisher, tracingLogger);
+        await this.publishToolError(toolResult, event.tool, tracingLogger);
 
         // Process the tool result (update state with continue/termination)
         this.processToolResult(toolResult, tracingLogger, context);
 
         // Note: StreamHandle handles buffering internally
-        await publisher?.publishTypingIndicator("stop");
+        // Typing indicator is managed by ReasonActLoop, not needed here
 
         // Check if this is a terminal tool
         return this.isTerminalResult(toolResult);
@@ -88,7 +84,6 @@ export class ToolStreamHandler {
     private async handleMissingToolStart(
         toolName: string,
         toolResult: ToolExecutionResult,
-        publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         _context: ExecutionContext
     ): Promise<void> {
@@ -98,7 +93,6 @@ export class ToolStreamHandler {
         if (!hasStarted) {
             tracingLogger.debug("Tool completed without corresponding tool_start event", {
                 tool: toolName,
-                hasPublisher: !!publisher,
             });
         }
     }
@@ -154,10 +148,9 @@ export class ToolStreamHandler {
     private async publishToolError(
         toolResult: ToolExecutionResult,
         toolName: string,
-        publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger
     ): Promise<void> {
-        if (!toolResult.success && toolResult.error && publisher) {
+        if (!toolResult.success && toolResult.error) {
             try {
                 let errorMessage: string;
                 if (typeof toolResult.error === "string") {
@@ -240,69 +233,5 @@ export class ToolStreamHandler {
     isTerminalTool(toolName: string): boolean {
         const terminalTools = ['complete', 'delegate', 'delegate_phase'];
         return terminalTools.includes(toolName.toLowerCase());
-    }
-
-    /**
-     * Check if a tool should skip publishing tool use events
-     * Some tools handle their own event publishing or shouldn't show indicators
-     */
-    private shouldSkipToolUseEvent(toolName: string): boolean {
-        const skipTools = [
-            'claude_code',  // Handles its own event publishing
-            // Add other tools here that shouldn't publish tool use events
-        ];
-        return skipTools.includes(toolName.toLowerCase());
-    }
-
-    /**
-     * Get human-readable description for a tool
-     */
-    private getToolDescription(toolName: string, args: Record<string, unknown>): string {
-        // Skip generating description for tools that don't publish events
-        if (this.shouldSkipToolUseEvent(toolName)) {
-            return '';
-        }
-        
-        const descriptions = this.getToolDescriptions();
-        const normalizedName = toolName.toLowerCase();
-        const descFn = descriptions[normalizedName as keyof typeof descriptions] || descriptions.default;
-        return descFn ? descFn(args) : `🛠️ Using ${toolName}`;
-    }
-
-    /**
-     * Tool description generators
-     */
-    private getToolDescriptions(): Partial<Record<ToolName | 'default', (args: Record<string, unknown>) => string>> {
-        return {
-            // Core tool operations
-            read_path: (args) => `📖 Reading ${args.path || "file"}`,
-            write_context_file: (args) => `✏️ Writing context to ${args.filePath || "file"}`,
-            shell: (args) => `🖥️ Executing shell command: ${(args.command as string || "").substring(0, 50)}${(args.command as string || "").length > 50 ? "..." : ""}`,
-            analyze: (args) => `🔬 Analyzing code with prompt: "${(args.prompt as string || "").substring(0, 50)}..."`,
-            generate_inventory: () => `📃 Generating inventory`,
-            lesson_learn: (args) => `🎓 Learning lesson: ${args.title || "new lesson"}`,
-            lesson_get: (args) => `📖 Getting lesson: ${args.id || "lesson"}`,
-            agents_discover: () => `🔍 Discovering available agents`,
-            agents_hire: (args) => `🤖 Hiring agent: ${args.agentId || "agent"}`,
-            discover_capabilities: () => `🔌 Discovering MCP capabilities`,
-            delegate: (args) => `🔄 Delegating task: ${args.description || "task"}`,
-            nostr_projects: () => `📡 Managing Nostr projects`,
-            
-            // Control flow
-            complete: () => `✅ Completing task and returning control`,
-            
-            // MCP tools
-            default: (args) => {
-                // For MCP tools, try to create a descriptive message
-                const toolName = args.toolName as string || "tool";
-                if (toolName.startsWith("mcp__")) {
-                    const parts = toolName.split("__");
-                    const provider = parts[1] || "mcp";
-                    const action = parts[2] || "action";
-                    return `🔌 Using ${provider} to ${action.replace(/_/g, " ")}`;
-                }
-                return `🛠️ Using ${toolName}`;
-            }
-        };
     }
 }

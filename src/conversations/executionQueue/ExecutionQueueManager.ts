@@ -186,7 +186,7 @@ export class ExecutionQueueManager extends EventEmitter {
       // The conversation manager will be notified via events
       // and can transition the conversation to EXECUTE phase
     } catch (error) {
-      console.error('Failed to process next in queue:', error);
+      logger.error('Failed to process next in queue:', error);
       
       // If acquisition failed, try the next one
       await this.processNextInQueue();
@@ -225,7 +225,7 @@ export class ExecutionQueueManager extends EventEmitter {
   }
 
   private async handleTimeout(conversationId: string): Promise<void> {
-    console.log(`Execution timeout for conversation ${conversationId}`);
+    logger.info(`Execution timeout for conversation ${conversationId}`);
     
     // Force release due to timeout
     await this.forceRelease(conversationId, 'timeout');

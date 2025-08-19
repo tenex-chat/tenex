@@ -1,7 +1,8 @@
 import { formatAnyError } from "@/utils/error-formatter";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMService } from "@/llm/types";
-import { NostrPublisher } from "@/nostr";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { buildSystemPromptMessages, buildStandaloneSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
@@ -84,19 +85,14 @@ export class AgentExecutor {
         // Build full context with additional properties
         const fullContext: ExecutionContext = {
             ...context,
-            publisher:
-                context.publisher ||
-                new NostrPublisher({
-                    conversationId: context.conversationId,
-                    agent: context.agent,
-                    triggeringEvent: context.triggeringEvent,
-                    conversationManager: this.conversationManager,
-                }),
             conversationManager: context.conversationManager || this.conversationManager,
             agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
             claudeSessionId, // Pass the determined session ID
         };
 
+        // Create AgentPublisher for typing indicators
+        const agentPublisher = new AgentPublisher(context.agent);
+        
         try {
             // Get fresh conversation data for execution time tracking
             const conversation = context.conversationManager.getConversation(
@@ -118,8 +114,12 @@ export class AgentExecutor {
                 narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`
             });
 
-            // Publish typing indicator start
-            await fullContext.publisher.publishTypingIndicator("start");
+            // Publish typing indicator start using AgentPublisher
+            const eventContext: EventContext = {
+                triggeringEvent: context.triggeringEvent,
+                conversationEvent: conversation.history[0] // Root event is first in history
+            };
+            await agentPublisher.typing({ type: 'typing', state: 'start' }, eventContext);
 
             await this.executeWithStreaming(fullContext, messages, tracingContext);
             
@@ -134,12 +134,7 @@ export class AgentExecutor {
             });
 
             // Stop typing indicator after successful execution
-            await fullContext.publisher.publishTypingIndicator("stop");
-            
-            // Clean up the publisher resources
-            await fullContext.publisher.cleanup();
-
-            // Conversation updates are now handled by NostrPublisher
+            await agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
         } catch (error) {
             // Log execution flow failure
             executionLogger.logEvent({
@@ -158,13 +153,17 @@ export class AgentExecutor {
                 stopExecutionTime(conversation);
             }
 
-            // Conversation saving is now handled by NostrPublisher
-
             // Ensure typing indicator is stopped even on error
-            await fullContext.publisher.publishTypingIndicator("stop");
+            try {
+                const eventContext: EventContext = {
+                    triggeringEvent: context.triggeringEvent,
+                    conversationEvent: conversation ? conversation.history[0] : undefined
+                };
+                await agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
+            } catch (typingError) {
+                logger.warn("Failed to stop typing indicator", { error: formatAnyError(typingError) });
+            }
             
-            // Clean up the publisher resources
-            await fullContext.publisher.cleanup();
 
             throw error;
         }
@@ -335,8 +334,7 @@ Be completely transparent about your internal process. If you made a mistake or 
         const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
             context.conversationId,
             context.agent,
-            context.triggeringEvent,
-            context.handoff
+            context.triggeringEvent
         );
 
         // Add the agent's messages
@@ -370,6 +368,6 @@ Be completely transparent about your internal process. If you made a mistake or 
         const backend = this.getBackend();
 
         // Execute using the backend - all backends now use the same interface
-        await backend.execute(messages, allTools, context, context.publisher);
+        await backend.execute(messages, allTools, context);
     }
 }

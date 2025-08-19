@@ -50,7 +50,7 @@ export class ConversationCoordinator extends BaseConversationCoordinator {
     }
 
     setExecutionQueueManager(manager: ExecutionQueueManager): void {
-        this.phaseManager.setExecutionQueueManager(manager);
-        this.setupQueueListeners();
+        // Call the parent's setExecutionQueueManager method
+        super.setExecutionQueueManager(manager);
     }
 }

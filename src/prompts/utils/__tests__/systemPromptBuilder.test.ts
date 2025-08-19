@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildSystemPrompt, buildSystemPromptMessages } from "../systemPromptBuilder";
+import { buildSystemPromptMessages } from "../systemPromptBuilder";
 import type { AgentInstance } from "@/agents/types";
 import { PHASES } from "@/conversations/phases";
 // Import all required fragments
@@ -8,10 +8,8 @@ import "@/prompts/fragments/30-project-md";
 import "@/prompts/fragments/20-phase-constraints";
 import "@/prompts/fragments/24-retrieved-lessons";
 import "@/prompts/fragments/01-specialist-identity";
-import "@/prompts/fragments/01-orchestrator-identity";
 import "@/prompts/fragments/25-specialist-tools";
 import "@/prompts/fragments/85-specialist-reasoning";
-import "@/prompts/fragments/25-orchestrator-routing";
 
 describe("systemPromptBuilder", () => {
     const baseAgent: AgentInstance = {
@@ -32,11 +30,12 @@ describe("systemPromptBuilder", () => {
     };
 
     it("should NOT include phase-specific completion guidance in base prompt", () => {
-        const systemPrompt = buildSystemPrompt({
+        const messages = buildSystemPromptMessages({
             agent: { ...baseAgent, isOrchestrator: false },
             phase: PHASES.EXECUTE,
             project: mockProject as any,
         });
+        const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
         // Completion guidance is now injected dynamically with phase transitions
         // so it should NOT be in the base system prompt
@@ -45,11 +44,12 @@ describe("systemPromptBuilder", () => {
     });
 
     it("should NOT include yield-back fragment for orchestrator agents", () => {
-        const systemPrompt = buildSystemPrompt({
+        const messages = buildSystemPromptMessages({
             agent: { ...baseAgent, isOrchestrator: true },
             phase: PHASES.EXECUTE,
             project: mockProject as any,
         });
+        const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
         // Orchestrator should not have the yield-back fragment section
         expect(systemPrompt).not.toContain("When to use complete() tool");
@@ -64,11 +64,12 @@ describe("systemPromptBuilder", () => {
             isOrchestrator: false,
         };
 
-        const systemPrompt = buildSystemPrompt({
+        const messages = buildSystemPromptMessages({
             agent: customAgent,
             phase: PHASES.EXECUTE,
             project: mockProject as any,
         });
+        const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
         // Completion guidance is now injected dynamically with phase transitions
         // so it should NOT be in the base system prompt
@@ -186,21 +187,4 @@ describe("buildSystemPromptMessages", () => {
         expect(inventoryMessage).toBeUndefined();
     });
 
-    it("should maintain backward compatibility with buildSystemPrompt", () => {
-        const messages = buildSystemPromptMessages({
-            agent: { ...baseAgent, isOrchestrator: false },
-            phase: PHASES.EXECUTE,
-            project: mockProject as any,
-        });
-
-        const legacyPrompt = buildSystemPrompt({
-            agent: { ...baseAgent, isOrchestrator: false },
-            phase: PHASES.EXECUTE,
-            project: mockProject as any,
-        });
-
-        // Legacy prompt should be the concatenation of all messages
-        const concatenatedContent = messages.map(m => m.message.content).join("\n\n");
-        expect(legacyPrompt).toBe(concatenatedContent);
-    });
 });

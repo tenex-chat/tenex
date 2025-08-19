@@ -42,8 +42,9 @@ export class QueueManager {
     }
 
     // Check queue size limit
-    if (this.queue.length >= this.config.maxQueueSize!) {
-      throw new Error(`Queue is full (max size: ${this.config.maxQueueSize})`);
+    const maxQueueSize = this.config.maxQueueSize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxQueueSize;
+    if (this.queue.length >= maxQueueSize) {
+      throw new Error(`Queue is full (max size: ${maxQueueSize})`);
     }
 
     const entry: QueueEntry = {
@@ -129,8 +130,9 @@ export class QueueManager {
     this.executionHistory.push(history);
 
     // Trim history if it exceeds max size
-    if (this.executionHistory.length > this.config.maxHistorySize!) {
-      this.executionHistory = this.executionHistory.slice(-this.config.maxHistorySize!);
+    const maxHistorySize = this.config.maxHistorySize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize;
+    if (this.executionHistory.length > maxHistorySize) {
+      this.executionHistory = this.executionHistory.slice(-maxHistorySize);
     }
 
     if (this.config.enablePersistence) {
@@ -198,7 +200,7 @@ export class QueueManager {
         entry.agentPubkey && 
         typeof entry.timestamp === 'number'
       );
-    } catch (error: any) {
+    } catch (error) {
       if (!(await fileExists(this.queueFile))) {
         this.queue = []; // No queue file exists
       } else {
@@ -229,10 +231,11 @@ export class QueueManager {
       );
 
       // Trim to max size
-      if (this.executionHistory.length > this.config.maxHistorySize!) {
-        this.executionHistory = this.executionHistory.slice(-this.config.maxHistorySize!);
+      const maxHistorySize = this.config.maxHistorySize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize;
+      if (this.executionHistory.length > maxHistorySize) {
+        this.executionHistory = this.executionHistory.slice(-maxHistorySize);
       }
-    } catch (error: any) {
+    } catch (error) {
       if (!(await fileExists(this.historyFile))) {
         this.executionHistory = []; // No history file exists
       } else {

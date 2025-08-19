@@ -1,7 +1,6 @@
 import { Message } from "multi-llm-ts";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Phase } from "./phases";
-import { PhaseTransition } from "./types";
 import { MessageBuilder } from "./MessageBuilder";
 import { isEventFromUser, getAgentSlugFromEvent } from "@/nostr/utils";
 import { getProjectContext } from "@/services";
@@ -137,20 +136,6 @@ export class AgentConversationContext {
         }
     }
 
-    /**
-     * Add a handoff message
-     */
-    addHandoff(handoff: PhaseTransition): void {
-        if (handoff.summary) {
-            this.messages.push(new Message("system", 
-                `**Previous context**: ${handoff.summary}`
-            ));
-        }
-        if (handoff.message) {
-            const processed = handoff.message;
-            this.messages.push(new Message("user", processed));
-        }
-    }
 
     /**
      * Add "messages while you were away" block

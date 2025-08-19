@@ -55,9 +55,5 @@ export interface PhaseTransition {
     timestamp: number;
     agentPubkey: string; // Track which agent initiated
     agentName: string; // Human-readable agent name
-    reason?: string; // Brief description (optional)
-
-    // Enhanced handoff fields
-    summary?: string; // State summary for receiving agent
 }
 

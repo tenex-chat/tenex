@@ -5,7 +5,6 @@ import { PHASES } from "../phases";
 import type { 
     Conversation, 
     ConversationMetadata, 
-    PhaseTransition,
     AgentState
 } from "../types";
 import type { AgentInstance } from "@/agents/types";
@@ -154,9 +153,7 @@ export class ConversationCoordinator {
         phase: Phase,
         message: string,
         agentPubkey: string,
-        agentName: string,
-        reason?: string,
-        summary?: string
+        agentName: string
     ): Promise<boolean> {
         const conversation = this.store.get(id);
         if (!conversation) {
@@ -166,9 +163,7 @@ export class ConversationCoordinator {
         const context: PhaseTransitionContext = {
             agentPubkey,
             agentName,
-            message,
-            reason,
-            summary
+            message
         };
 
         const result = await this.phaseManager.transition(conversation, phase, context);
@@ -200,8 +195,7 @@ export class ConversationCoordinator {
                 conversationId: id,
                 agent: agentName,
                 from: previousPhase,
-                to: phase,
-                reason: reason || ""
+                to: phase
             });
 
             await this.persistence.save(conversation);
@@ -228,8 +222,7 @@ export class ConversationCoordinator {
     async buildAgentMessages(
         conversationId: string,
         targetAgent: AgentInstance,
-        triggeringEvent?: NDKEvent,
-        handoff?: PhaseTransition
+        triggeringEvent?: NDKEvent
     ): Promise<{ messages: Message[]; claudeSessionId?: string }> {
         const conversation = this.store.get(conversationId);
         if (!conversation) {
@@ -295,12 +288,6 @@ export class ConversationCoordinator {
         }
 
         // Delegation responses are now handled by DelegationRegistry in reply.ts
-        // This old code path is no longer used
-        
-        // Add handoff if present
-        if (handoff) {
-            context.addHandoff(handoff);
-        }
         
         // Add the triggering event
         if (triggeringEvent) {
@@ -511,8 +498,7 @@ export class ConversationCoordinator {
                         PHASES.CHAT,
                         "Execution timeout reached. The execution lock has been automatically released.",
                         "system",
-                        "system",
-                        "timeout"
+                        "system"
                     );
                 }
             },

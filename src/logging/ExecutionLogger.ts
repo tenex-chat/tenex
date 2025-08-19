@@ -16,7 +16,7 @@ export type LogEvent = {
 } & (
     | { type: "tool_call"; tool: string; args?: Record<string, unknown>; }
     | { type: "tool_result"; tool: string; status: "success" | "error"; result?: unknown; error?: string; duration: number; }
-    | { type: "phase_transition"; from: Phase; to: Phase; reason: string; }
+    | { type: "phase_transition"; from: Phase; to: Phase; }
     | { type: "routing"; targetAgents: string[]; targetPhase?: Phase; reason: string; }
     | { type: "conversation_start"; userMessage: string; eventId?: string; }
     | { type: "conversation_complete"; finalPhase: Phase; success: boolean; duration: number; }
@@ -126,8 +126,7 @@ export class ExecutionLogger {
             '',
             chalk.cyan(`🔄 PHASE TRANSITION [${this.shortId(event.conversationId)}]`),
             chalk.white(`    ├─ ${chalk.red(event.from)} → ${chalk.green(event.to)}`),
-            chalk.white(`    ├─ Agent: ${chalk.bold(event.agent)}`),
-            chalk.gray(`    └─ Reason: ${event.reason}`)
+            chalk.white(`    └─ Agent: ${chalk.bold(event.agent)}`)
         ].join('\n');
         
         logInfo(message, this.module, "normal");

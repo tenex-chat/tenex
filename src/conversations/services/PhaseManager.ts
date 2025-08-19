@@ -8,8 +8,6 @@ export interface PhaseTransitionContext {
     agentPubkey: string;
     agentName: string;
     message: string;
-    reason?: string;
-    summary?: string;
 }
 
 export interface PhaseTransitionResult {
@@ -61,9 +59,7 @@ export class PhaseManager {
                 message: context.message,
                 timestamp: Date.now(),
                 agentPubkey: context.agentPubkey,
-                agentName: context.agentName,
-                reason: context.reason,
-                summary: context.summary
+                agentName: context.agentName
             };
 
             return {
@@ -117,7 +113,7 @@ export class PhaseManager {
         if (from === PHASES.EXECUTE && to !== PHASES.EXECUTE && this.executionQueueManager) {
             await this.executionQueueManager.releaseExecution(
                 conversation.id,
-                context.reason || 'phase_transition'
+                'phase_transition'
             );
         }
 
@@ -128,9 +124,7 @@ export class PhaseManager {
             message: context.message,
             timestamp: Date.now(),
             agentPubkey: context.agentPubkey,
-            agentName: context.agentName,
-            reason: context.reason,
-            summary: context.summary
+            agentName: context.agentName
         };
 
         logger.info(`[PhaseManager] Phase transition`, {

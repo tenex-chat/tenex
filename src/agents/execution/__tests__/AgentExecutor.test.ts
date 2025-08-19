@@ -95,11 +95,9 @@ describe("AgentExecutor", () => {
         }));
         
         mock.module("@/nostr", () => ({
-            NostrPublisher: class {
+            AgentPublisher: class {
                 constructor() {}
-                async publishTypingIndicator() {}
-                async publishResponse() {}
-                cleanup() {}
+                async typing() {}
             }
         }));
         // Create mock LLM service
@@ -182,12 +180,6 @@ describe("AgentExecutor", () => {
             isOrchestrator: false
         };
         
-        // Create mock publisher
-        const mockPublisher = {
-            publishTypingIndicator: mock(async () => {}),
-            publishResponse: mock(async () => {}),
-            cleanup: mock(() => {})
-        };
         
         // Create mock execution context
         mockContext = {
@@ -199,7 +191,6 @@ describe("AgentExecutor", () => {
             tools: [],
             toolContext: {},
             conversationManager: mockConversationCoordinator,
-            publisher: mockPublisher as any,
             onStreamStart: mock(() => {}),
             onStreamToken: mock(() => {}),
             onStreamToolCall: mock(() => {}),

@@ -2,13 +2,11 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { LLMService, Tool } from "@/llm/types";
 import type { StreamEvent } from "@/llm/types";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentStreamer } from "@/nostr/AgentStreamer";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
-import { getProjectContext } from "@/services/ProjectContext";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
@@ -34,8 +32,8 @@ export class ReasonActLoop {
     private repetitionDetector: ToolRepetitionDetector;
     private messageBuilder: MessageBuilder;
     private startTime?: number;
-    private agentPublisher: AgentPublisher;
-    private agentStreamer: AgentStreamer;
+    private agentPublisher!: AgentPublisher;
+    private agentStreamer!: AgentStreamer;
 
     constructor(
         private llmService: LLMService
@@ -51,8 +49,7 @@ export class ReasonActLoop {
     async execute(
         messages: Array<Message>,
         tools: Tool[],
-        context: ExecutionContext,
-        publisher: NostrPublisher
+        context: ExecutionContext
     ): Promise<void> {
         this.startTime = Date.now();
         const tracingContext = createTracingContext(context.conversationId);
@@ -67,7 +64,6 @@ export class ReasonActLoop {
             context,
             messages,
             tracingContext,
-            publisher,
             tools
         );
 
@@ -82,7 +78,6 @@ export class ReasonActLoop {
         context: ExecutionContext,
         messages: Message[],
         tracingContext: TracingContext,
-        publisher?: NostrPublisher,
         tools?: Tool[]
     ): AsyncGenerator<StreamEvent, void, unknown> {
         const tracingLogger = createTracingLogger(tracingContext, "agent");
@@ -114,7 +109,7 @@ export class ReasonActLoop {
                 });
                 
                 // Create stream with streamHandle in context
-                const stream = this.createLLMStream(context, conversationMessages, tools, publisher, streamHandle);
+                const stream = this.createLLMStream(context, conversationMessages, tools);
 
                 // Process stream events for this iteration
                 const iterationResult = await this.processIterationStream(
@@ -122,8 +117,7 @@ export class ReasonActLoop {
                     stateManager,
                     toolHandler,
                     streamHandle,
-                    publisher,
-                    tracingLogger,
+                            tracingLogger,
                     context,
                     conversationMessages
                 );
@@ -213,7 +207,7 @@ export class ReasonActLoop {
             yield this.createFinalEvent(stateManager);
 
         } catch (error) {
-            yield* this.handleError(error, publisher, tracingLogger, context, streamHandle);
+            yield* this.handleError(error, tracingLogger, context, streamHandle);
             throw error;
         }
     }
@@ -226,7 +220,6 @@ export class ReasonActLoop {
         stateManager: StreamStateManager,
         toolHandler: ToolStreamHandler,
         streamHandle: StreamHandle | undefined,
-        publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext,
         messages: Message[]
@@ -236,14 +229,14 @@ export class ReasonActLoop {
         hasToolCalls: boolean;
         toolResults: ToolExecutionResult[];
         assistantMessage: string;
-        deferredTerminalEvent?: any;  // Single deferred event from terminal tool
+        deferredTerminalEvent?: { type: string; intent: CompletionIntent | DelegationIntent };
     }> {
         const events: StreamEvent[] = [];
         let isTerminal = false;
         let hasToolCalls = false;
         const toolResults: ToolExecutionResult[] = [];
         let assistantMessage = "";
-        let deferredTerminalEvent: any = null;
+        let deferredTerminalEvent: { type: string; intent: CompletionIntent | DelegationIntent } | null = null;
         
         for await (const event of stream) {
             tracingLogger.debug("[processIterationStream]", {
@@ -268,7 +261,7 @@ export class ReasonActLoop {
                     assistantMessage += event.content;
                     break;
 
-                case "tool_start":
+                case "tool_start": {
                     // Skip tool execution if we've already detected a terminal tool
                     if (isTerminal) {
                         tracingLogger.warning("[processIterationStream] Ignoring tool_start after terminal tool", {
@@ -292,20 +285,19 @@ export class ReasonActLoop {
                     
                     await toolHandler.handleToolStartEvent(
                         streamHandle,
-                        publisher,
-                        event.tool,
+                                    event.tool,
                         event.args,
                         tracingLogger,
                         context
                     );
                     break;
+                }
 
                 case "tool_complete": {
                     const isTerminalTool = await toolHandler.handleToolCompleteEvent(
                         event,
                         streamHandle,
-                        publisher,
-                        tracingLogger,
+                                    tracingLogger,
                         context
                     );
 
@@ -316,7 +308,7 @@ export class ReasonActLoop {
                         
                         // Check if this tool result contains an intent
                         if (toolResult.success && toolResult.output) {
-                            const output = toolResult.output as any;
+                            const output = toolResult.output as { type?: string; [key: string]: unknown };
                             
                             // Check if output is an intent (has 'type' field)
                             if (output.type === 'completion' || output.type === 'delegation') {
@@ -495,8 +487,6 @@ export class ReasonActLoop {
         context: ExecutionContext,
         messages: Message[],
         tools?: Tool[],
-        publisher?: NostrPublisher,
-        streamHandle?: StreamHandle
     ): ReturnType<LLMService["stream"]> {
         // Log what we're sending to the LLM
         logger.debug("[ReasonActLoop] Calling LLM stream", {
@@ -528,21 +518,17 @@ export class ReasonActLoop {
             tools,
             toolContext: {
                 ...context,
-                publisher: publisher || context.publisher,
                 conversationManager: context.conversationManager,
             },
         });
     }
 
     private createStreamHandle(context: ExecutionContext): StreamHandle | undefined {
-        if (!context.publisher) return undefined;
-        
         // Get conversation for the event context
         const conversation = context.conversationManager.getConversation(context.conversationId);
         
         // Build event context for streaming
         const eventContext: EventContext = {
-            agent: context.agent,
             triggeringEvent: context.triggeringEvent,
             conversationEvent: conversation ? conversation.history[0] : undefined // Root event is first in history
         };
@@ -568,7 +554,6 @@ export class ReasonActLoop {
 
     private async *handleError(
         error: unknown,
-        publisher: NostrPublisher | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext,
         streamHandle?: StreamHandle
@@ -588,7 +573,17 @@ export class ReasonActLoop {
             }
         }
 
-        await publisher?.publishTypingIndicator("stop");
+        // Stop typing indicator using AgentPublisher
+        try {
+            const conversation = context.conversationManager.getConversation(context.conversationId);
+            const eventContext: EventContext = {
+                triggeringEvent: context.triggeringEvent,
+                conversationEvent: conversation ? conversation.history[0] : undefined
+            };
+            await this.agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
+        } catch (typingError) {
+            tracingLogger.warn("Failed to stop typing indicator", { error: formatAnyError(typingError) });
+        }
 
         yield {
             type: "error",
@@ -612,7 +607,7 @@ export class ReasonActLoop {
      * Publish a terminal intent using AgentPublisher
      */
     private async publishTerminalIntent(
-        deferredEvent: any,
+        deferredEvent: { type: string; intent: CompletionIntent | DelegationIntent },
         tracingLogger: TracingLogger,
         context: ExecutionContext,
         stateManager: StreamStateManager

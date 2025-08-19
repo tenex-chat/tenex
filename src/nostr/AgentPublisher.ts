@@ -22,12 +22,10 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
  * Handles agent creation, responses, completions, and delegations.
  */
 export class AgentPublisher {
-    private ndk: NDK;
     private agent: AgentInstance;
 
-    constructor(agent: AgentInstance, ndk?: NDK) {
+    constructor(agent: AgentInstance) {
         this.agent = agent;
-        this.ndk = ndk || getNDK();
     }
 
     /**

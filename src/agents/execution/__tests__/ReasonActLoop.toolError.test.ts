@@ -1,5 +1,4 @@
 import { describe, it, expect, mock } from "bun:test";
-import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { createTracingLogger } from "@/tracing";
 import { ReasonActLoop } from "../ReasonActLoop";
 import { serializeToolResult } from "@/llm/ToolResult";
@@ -9,7 +8,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
         const mockPublisher = {
             publishError: mock(() => Promise.resolve({})),
             publishTypingIndicator: mock(() => Promise.resolve({})),
-        } as any as NostrPublisher;
+        } as any;
 
         const tracingLogger = createTracingLogger(
             { traceId: "test", operationName: "test" },
@@ -73,7 +72,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
         const mockPublisher = {
             publishError: mock(() => Promise.resolve({})),
             publishTypingIndicator: mock(() => Promise.resolve({})),
-        } as any as NostrPublisher;
+        } as any;
 
         const tracingLogger = createTracingLogger(
             { traceId: "test", operationName: "test" },

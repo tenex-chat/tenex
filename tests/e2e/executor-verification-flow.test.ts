@@ -346,9 +346,8 @@ describe("E2E: Executor-Verification Flow", () => {
         // Verify phase transitions are recorded in trace
         expect(trace.phaseTransitions.length).toBeGreaterThan(0);
         
-        // Each transition should have a reason
+        // Each transition should have an agent
         for (const transition of trace.phaseTransitions) {
-            expect(transition.reason).toBeTruthy();
             expect(transition.agent).toBeTruthy();
         }
     });

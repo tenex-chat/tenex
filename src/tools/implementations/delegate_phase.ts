@@ -122,9 +122,7 @@ After delegating:
                 phase,
                 fullRequest, // The delegation request becomes the phase transition message
                 context.agent.pubkey,
-                context.agent.name,
-                fullRequest, // Also store as the reason
-                `Switching to ${phase} phase: ${title}` // Summary for history
+                context.agent.name
             );
 
             if (!updateResult) {

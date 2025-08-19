@@ -328,12 +328,14 @@ export class DelegationRegistry {
     
     return batch.taskIds
       .map(id => this.delegations.get(id))
-      .filter(record => record?.completion)
+      .filter((record): record is DelegationRecord & { completion: NonNullable<DelegationRecord['completion']> } => 
+        record !== undefined && record.completion !== undefined
+      )
       .map(record => ({
-        taskId: record!.taskId,
-        response: record!.completion!.response,
-        summary: record!.completion?.summary,
-        assignedTo: record!.assignedTo.pubkey
+        taskId: record.taskId,
+        response: record.completion.response,
+        summary: record.completion.summary,
+        assignedTo: record.assignedTo.pubkey
       }));
   }
   
@@ -371,16 +373,20 @@ export class DelegationRegistry {
   
   private indexTask(record: DelegationRecord): void {
     // Index by agent
-    if (!this.agentTasks.has(record.delegatingAgent.pubkey)) {
-      this.agentTasks.set(record.delegatingAgent.pubkey, new Set());
+    let agentTaskSet = this.agentTasks.get(record.delegatingAgent.pubkey);
+    if (!agentTaskSet) {
+      agentTaskSet = new Set();
+      this.agentTasks.set(record.delegatingAgent.pubkey, agentTaskSet);
     }
-    this.agentTasks.get(record.delegatingAgent.pubkey)!.add(record.taskId);
+    agentTaskSet.add(record.taskId);
     
     // Index by conversation
-    if (!this.conversationTasks.has(record.delegatingAgent.conversationId)) {
-      this.conversationTasks.set(record.delegatingAgent.conversationId, new Set());
+    let conversationTaskSet = this.conversationTasks.get(record.delegatingAgent.conversationId);
+    if (!conversationTaskSet) {
+      conversationTaskSet = new Set();
+      this.conversationTasks.set(record.delegatingAgent.conversationId, conversationTaskSet);
     }
-    this.conversationTasks.get(record.delegatingAgent.conversationId)!.add(record.taskId);
+    conversationTaskSet.add(record.taskId);
   }
   
   private updateIndexesForCompletion(record: DelegationRecord): void {
@@ -433,7 +439,7 @@ export class DelegationRegistry {
       try {
         await fs.access(this.persistencePath);
         await fs.copyFile(this.persistencePath, this.backupPath);
-      } catch (error) {
+      } catch {
         // File doesn't exist yet, that's ok
       }
       
@@ -459,7 +465,7 @@ export class DelegationRegistry {
   
   private async restore(): Promise<void> {
     let dataLoaded = false;
-    let data: any = null;
+    let data: unknown = null;
     
     // Try to load from main file first
     try {
@@ -467,8 +473,8 @@ export class DelegationRegistry {
       data = JSON.parse(rawData);
       dataLoaded = true;
       logger.debug("Loaded delegation registry from main file");
-    } catch (error: any) {
-      if (error.code !== 'ENOENT') {
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code !== 'ENOENT') {
         logger.warn("Failed to load main delegation registry file", { error });
       }
     }
@@ -480,8 +486,8 @@ export class DelegationRegistry {
         data = JSON.parse(rawData);
         dataLoaded = true;
         logger.info("Loaded delegation registry from backup file");
-      } catch (error: any) {
-        if (error.code !== 'ENOENT') {
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code !== 'ENOENT') {
           logger.warn("Failed to load backup delegation registry file", { error });
         }
       }
@@ -517,7 +523,7 @@ export class DelegationRegistry {
     } catch (error) {
       logger.error("Failed to validate restored delegation data", { 
         error,
-        dataKeys: data ? Object.keys(data) : []
+        dataKeys: data && typeof data === 'object' && data !== null ? Object.keys(data) : []
       });
       
       // If validation fails, start fresh but save the corrupted data for debugging
@@ -583,7 +589,7 @@ export class DelegationRegistry {
    * Set up graceful shutdown handlers
    */
   private setupGracefulShutdown(): void {
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string): Promise<void> => {
       if (this.isShuttingDown) return;
       this.isShuttingDown = true;
       

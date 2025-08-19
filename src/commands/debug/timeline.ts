@@ -11,7 +11,7 @@ import { logInfo, logWarning, logError } from "@/utils/logger";
 
 interface TimelineEvent {
     timestamp: number;
-    type: "conversation_start" | "llm_call" | "tool_call" | "phase_transition" | "message" | "agent_handoff";
+    type: "conversation_start" | "llm_call" | "tool_call" | "phase_transition" | "message";
     agent?: string;
     description: string;
     details?: Record<string, unknown>;
@@ -85,7 +85,6 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
                     agent: transition.agentName,
                     description: `Phase: ${transition.from} → ${transition.to}`,
                     details: {
-                        reason: transition.reason,
                         message: transition.message?.substring(0, 100) + "..."
                     }
                 });
@@ -218,10 +217,6 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
                     case "message":
                         color = chalk.blue;
                         icon = "💬";
-                        break;
-                    case "agent_handoff":
-                        color = chalk.green;
-                        icon = "🤝";
                         break;
                 }
                 

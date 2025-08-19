@@ -120,12 +120,6 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: a
     
     // Mock Nostr publisher
     mock.module("@/nostr", () => ({
-        NostrPublisher: class {
-            async publishResponse() { return Promise.resolve(); }
-            async publishError() { return Promise.resolve(); }
-            async publishTypingIndicator() { return Promise.resolve(); }
-            async stopTypingIndicator() { return Promise.resolve(); }
-        },
         getNDK: () => ({
             connect: async () => {},
             signer: { privateKey: () => "mock-private-key" },

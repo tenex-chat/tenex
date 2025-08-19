@@ -27,7 +27,7 @@ interface AgentsDiscoverOutput {
  */
 function formatAgentsAsMarkdown(agents: Array<{
   id: string;
-  name: string;
+  title: string;
   role: string;
   description?: string;
   useCriteria?: string;
@@ -43,7 +43,7 @@ function formatAgentsAsMarkdown(agents: Array<{
   lines.push(`\nFound **${agents.length}** available agent${agents.length === 1 ? '' : 's'}:\n`);
 
   agents.forEach((agent, index) => {
-    lines.push(`## ${index + 1}. ${agent.name}`);
+    lines.push(`## ${index + 1}. ${agent.title}`);
     lines.push(`nostr:${agent.id}`);
     lines.push(``);
     
@@ -77,16 +77,16 @@ export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDi
             // Format results with bech32 encoded IDs
             let results = agents.map(agent => {
                 // Get bech32 encoded ID from the NDKAgentDefinition event
-                const bech32Id = agent.event.encode();
+                const bech32Id = agent.encode();
                 
                 return {
                     id: bech32Id,
-                    name: agent.name,
-                    role: agent.role,
+                    title: agent.title || "Unnamed Agent",
+                    role: agent.role || "assistant",
                     description: agent.description,
                     useCriteria: agent.useCriteria,
-                    authorPubkey: agent.authorPubkey,
-                    createdAt: agent.createdAt,
+                    authorPubkey: agent.pubkey,
+                    createdAt: agent.created_at,
                 };
             });
 
