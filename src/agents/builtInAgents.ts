@@ -11,6 +11,7 @@ export interface BuiltInAgentDefinition {
     llmConfig?: string;
     useCriteria?: string;
     tools?: string[];
+    mcp?: boolean;
 }
 
 export const PROJECT_MANAGER_BUILT_IN: BuiltInAgentDefinition = {
@@ -21,6 +22,7 @@ export const PROJECT_MANAGER_BUILT_IN: BuiltInAgentDefinition = {
     llmConfig: PROJECT_MANAGER_AGENT_DEFINITION.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
     useCriteria: PROJECT_MANAGER_AGENT_DEFINITION.useCriteria,
     tools: PROJECT_MANAGER_AGENT_DEFINITION.tools,
+    mcp: PROJECT_MANAGER_AGENT_DEFINITION.mcp,
 };
 
 export function getBuiltInAgents(): BuiltInAgentDefinition[] {

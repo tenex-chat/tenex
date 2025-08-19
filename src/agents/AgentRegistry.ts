@@ -251,6 +251,10 @@ export class AgentRegistry {
                         if (!agentDefinition.name) {
                             agentDefinition.name = builtInAgent.name;
                         }
+                        // Apply MCP setting from built-in definition
+                        if (builtInAgent.mcp !== undefined) {
+                            agentDefinition.mcp = builtInAgent.mcp;
+                        }
                     }
                     
                     this.validateAgentDefinition(agentDefinition);
@@ -677,6 +681,10 @@ export class AgentRegistry {
                 if (builtInAgent.tools !== undefined) {
                     agentDefinition.tools = builtInAgent.tools;
                 }
+                // Also apply MCP setting from built-in definition
+                if (builtInAgent.mcp !== undefined) {
+                    agentDefinition.mcp = builtInAgent.mcp;
+                }
             }
             
             this.validateAgentDefinition(agentDefinition);
@@ -901,7 +909,7 @@ export class AgentRegistry {
                         role: def.role,
                         instructions: def.instructions || "",
                         llmConfig: def.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                        mcp: true, // Default: true for all agents
+                        mcp: def.mcp ?? true, // Use agent-specific MCP setting, default to true if not specified
                         tools: def.tools,
                     },
                     ndkProject

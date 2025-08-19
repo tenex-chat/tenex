@@ -276,6 +276,11 @@ export class ReasonActLoop {
                     
                     hasToolCalls = true;
                     
+                    // Store tool call information for later use
+                    const toolCallsState = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
+                    toolCallsState.push({ name: event.tool, arguments: event.args });
+                    stateManager.setState('toolCalls', toolCallsState);
+                    
                     // Check for repetitive tool calls
                     const warningMessage = this.repetitionDetector.checkRepetition(
                         event.tool, 
@@ -473,7 +478,10 @@ export class ReasonActLoop {
         if (llmMetadata) {
             metadata.model = llmMetadata.model;
             metadata.usage = llmMetadata.usage;
-            metadata.toolCalls = stateManager.getToolCalls();
+            
+            // Get tool calls from state manager
+            const toolCalls = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
+            metadata.toolCalls = toolCalls.length > 0 ? toolCalls : undefined;
             metadata.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
         }
 
@@ -612,12 +620,15 @@ export class ReasonActLoop {
         const intent = deferredEvent.intent;
         
         // Build event context with execution metadata
+        // Get tool calls from state manager
+        const toolCalls = stateManager.getState('toolCalls') as Array<{name: string, arguments: any}> || [];
+        
         const eventContext: EventContext = {
             agent: context.agent,
             triggeringEvent: context.triggeringEvent,
             conversationId: context.conversationId,
             projectId: getProjectContext().project?.id,
-            toolCalls: stateManager.getToolCalls(),
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             executionTime: this.startTime ? Date.now() - this.startTime : undefined,
             model: stateManager.getFinalResponse()?.model,
             usage: stateManager.getFinalResponse()?.usage

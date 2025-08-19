@@ -2,6 +2,7 @@ import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
+import { getNDK } from "@/nostr/ndkClient";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -58,7 +59,7 @@ export class AgentEventEncoder {
      * Completion events mark the end of a flow branch with specific E-tag semantics.
      */
     static encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent();
+        const event = new NDKEvent(getNDK());
         event.kind = EVENT_KINDS.AGENT_RESPONSE;
         event.content = intent.content;
 
@@ -98,7 +99,7 @@ export class AgentEventEncoder {
         const tasks: NDKTask[] = [];
 
         for (const recipientPubkey of intent.recipients) {
-            const task = new NDKTask();
+            const task = new NDKTask(getNDK());
             task.content = intent.request;
             task.title = intent.title;
 
@@ -139,7 +140,7 @@ export class AgentEventEncoder {
      * Standard agent response without flow termination semantics.
      */
     static encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent();
+        const event = new NDKEvent(getNDK());
         event.kind = EVENT_KINDS.AGENT_RESPONSE;
         event.content = intent.content;
 

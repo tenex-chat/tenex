@@ -3,6 +3,7 @@ import { AgentPublisher } from "./AgentPublisher";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import type { EventContext } from "./AgentEventEncoder";
+import { getNDK } from "./ndkClient";
 
 export interface StreamHandle {
     addContent: (content: string) => Promise<void>;
@@ -114,7 +115,7 @@ export class AgentStreamer {
      * Uses raw event creation since this is ephemeral content.
      */
     private async publishStreamingEvent(state: StreamState): Promise<void> {
-        const event = new NDKEvent();
+        const event = new NDKEvent(getNDK());
         event.kind = EVENT_KINDS.STREAMING_RESPONSE;
         event.content = state.accumulatedContent;
 
