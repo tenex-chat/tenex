@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { logger } from '@/utils/logger';
 import { LockManager } from './LockManager';
 import { QueueManager } from './QueueManager';
 import { TimeoutManager } from './TimeoutManager';

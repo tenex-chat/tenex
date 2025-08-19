@@ -201,11 +201,14 @@ export class ConversationCoordinator {
             return true;
         } else if (result.queued) {
             // Handle queue status
+            if (!result.queuePosition || !result.estimatedWait || !result.queueMessage) {
+                throw new Error('Invalid queue result - missing required properties');
+            }
             conversation.metadata.queueStatus = {
                 isQueued: true,
-                position: result.queuePosition!,
-                estimatedWait: result.estimatedWait!,
-                message: result.queueMessage!
+                position: result.queuePosition,
+                estimatedWait: result.estimatedWait,
+                message: result.queueMessage
             };
 
             await this.persistence.save(conversation);
@@ -432,7 +435,7 @@ export class ConversationCoordinator {
 
                 // Ensure agentStates is a Map
                 if (!(conversation.agentStates instanceof Map)) {
-                    const statesObj = conversation.agentStates as any;
+                    const statesObj = conversation.agentStates as Record<string, unknown>;
                     conversation.agentStates = new Map(Object.entries(statesObj || {}));
                 }
 

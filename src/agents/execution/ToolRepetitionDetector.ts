@@ -19,7 +19,7 @@ export class ToolRepetitionDetector {
      * Check if a tool call is being repeated excessively
      * Returns a warning message if repetition is detected, null otherwise
      */
-    checkRepetition(tool: string, args: any): string | null {
+    checkRepetition(tool: string, args: unknown): string | null {
         const argsStr = JSON.stringify(args);
         const now = Date.now();
         

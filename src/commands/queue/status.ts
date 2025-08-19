@@ -54,7 +54,7 @@ export async function showQueueStatus(options: StatusOptions = {}): Promise<void
   }
 }
 
-function displayQueueStatus(status: any, detailed?: boolean): void {
+function displayQueueStatus(status: unknown, detailed?: boolean): void {
   console.log(chalk.bold('\n🚦 Execution Queue Status\n'));
 
   // Display lock status
@@ -130,7 +130,7 @@ function displayQueueStatus(status: any, detailed?: boolean): void {
 async function watchQueueStatus(queueManager: ExecutionQueueManager): Promise<void> {
   console.log(chalk.cyan('📡 Watching queue status (Press Ctrl+C to exit)...\n'));
 
-  const displayCurrentStatus = async () => {
+  const displayCurrentStatus = async (): Promise<void> => {
     console.clear();
     const status = await queueManager.getFullStatus();
     displayQueueStatus(status, true);

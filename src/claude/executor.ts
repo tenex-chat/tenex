@@ -2,7 +2,7 @@ import { logger } from "@/utils/logger";
 import { type SDKMessage, query } from "@anthropic-ai/claude-code";
 import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
 import { getLLMLogger } from "@/llm/callLogger";
-import type { CompletionRequest, CompletionResponse } from "@/llm/types";
+import type { CompletionRequest, CompletionResponse, ResolvedLLMConfig } from "@/llm/types";
 import { Message } from "multi-llm-ts";
 
 export interface ClaudeCodeExecutorOptions {
@@ -164,8 +164,8 @@ export class ClaudeCodeExecutor {
                 } as CompletionResponse;
                 
                 // Create a resolved config for logging
-                const config = {
-                    provider: "claude-code",
+                const config: ResolvedLLMConfig = {
+                    provider: "anthropic" as const,
                     model: "claude-code",
                     apiKey: "claude-code-sdk", // Placeholder since it uses SDK
                     enableCaching: false,

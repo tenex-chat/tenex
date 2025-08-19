@@ -184,7 +184,7 @@ export class LLMCallLogger {
             // Add response data if successful
             if (result.response) {
                 // Try to parse response content as JSON if possible
-                let responseContent: any = result.response.content;
+                let responseContent: unknown = result.response.content;
                 if (result.response.content) {
                     try {
                         const parsed = JSON.parse(result.response.content);

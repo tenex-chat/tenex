@@ -10,10 +10,8 @@ import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
-/**
- * Format discovered MCP tools as markdown
- */
-function formatMCPToolsAsMarkdown(tools: Array<{
+// Type definitions
+interface MCPToolInfo {
   id: string;
   name: string;
   description?: string;
@@ -22,7 +20,34 @@ function formatMCPToolsAsMarkdown(tools: Array<{
   slug: string;
   authorPubkey: string;
   createdAt?: number;
-}>): string {
+}
+
+interface LessonData {
+  title: string;
+  lesson: string;
+  detailed?: string;
+  category?: string;
+  hashtags?: string[];
+}
+
+interface LessonResult {
+  title: string;
+  lesson: string;
+  eventId: string | undefined;
+  hasDetailed: boolean;
+}
+
+interface LessonSummary {
+  title: string;
+  lesson: string;
+  category?: string;
+  hashtags?: string[];
+}
+
+/**
+ * Format discovered MCP tools as markdown
+ */
+function formatMCPToolsAsMarkdown(tools: MCPToolInfo[]): string {
   if (tools.length === 0) {
     return "## No MCP tools found\n\nNo tools match your search criteria. Try broadening your search or check back later.";
   }
@@ -103,16 +128,10 @@ class LessonService {
     ) {}
 
     async createLesson(
-        data: { 
-            title: string; 
-            lesson: string;
-            detailed?: string;
-            category?: string;
-            hashtags?: string[];
-        },
+        data: LessonData,
         agentEventId: string,
         signer: NDKSigner
-    ) {
+    ): Promise<LessonResult> {
         const lessonEvent = new NDKAgentLesson(this.ndk);
         lessonEvent.title = data.title;
         lessonEvent.lesson = data.lesson;
@@ -164,9 +183,9 @@ class LessonService {
         };
     }
 
-    async getLessons(filter: { agentPubkey: string }) {
+    async getLessons(filter: { agentPubkey: string }): Promise<LessonSummary[]> {
         const lessons = await this.ndk.fetchEvents({
-            kinds: [4129 as any],  // NDKAgentLesson.kind
+            kinds: [4129],  // NDKAgentLesson.kind
             authors: [filter.agentPubkey],
         });
         
@@ -209,7 +228,7 @@ export const serverCommand = new Command("server")
             });
             
             // Try to load project context if available, but don't fail if not
-            let projectContext: any = null;
+            let projectContext: Awaited<ReturnType<typeof getProjectContext>> | null = null;
             let agents: Map<string, AgentInstance> = new Map();
             let project: NDKEvent | null = null;
             
@@ -220,7 +239,7 @@ export const serverCommand = new Command("server")
                 agents = projectContext.agents;
                 project = projectContext.project;
                 logger.info("Running MCP server with project context");
-            } catch (error: any) {
+            } catch (error) {
                 if (error?.message?.includes("Project configuration missing projectNaddr")) {
                     logger.info("Running MCP server without project context (standalone mode)");
                 } else {
@@ -601,7 +620,7 @@ export const serverCommand = new Command("server")
                             // Fetch 24010 events (project status - online agents)
                             // Only get status events from the last minute to determine if online
                             ndk.fetchEvents({
-                                kinds: [24010 as any],
+                                kinds: [24010],
                                 "#p": [pubkey],
                                 since: oneMinuteAgo,
                             }),
@@ -637,7 +656,7 @@ export const serverCommand = new Command("server")
                         });
 
                         // Once we have the list of projects, fetch spec documents that tag them
-                        let specArticles: any[] = [];
+                        let specArticles: unknown[] = [];
                         if (projectEvents.size > 0) {
                             // Create array of project tag IDs for fetching articles
                             const projectTagIds = Array.from(projectEvents).map(projectEvent => {
@@ -775,7 +794,7 @@ export const serverCommand = new Command("server")
                 await server.close();
                 process.exit(0);
             });
-        } catch (error: any) {
+        } catch (error) {
             logger.error("Failed to start MCP server:", error);
             process.exit(1);
         }

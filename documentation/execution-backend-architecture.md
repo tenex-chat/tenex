@@ -10,7 +10,7 @@ This document provides a comprehensive deep-dive into the internal workings of t
 
 The execution backend system is built on several key principles:
 
-1. **Strategy Pattern**: Different agents can use different execution strategies (ReasonActLoop, RoutingBackend, ClaudeBackend) based on their role and requirements
+1. **Unified Execution Model**: All agents use the ReasonActLoop backend for consistent behavior
 2. **Single Responsibility**: Each component has a clearly defined purpose with minimal overlap
 3. **State Management**: Centralized state management during execution through StreamStateManager
 4. **Event-Driven**: Stream-based processing of LLM responses with real-time event handling
@@ -56,7 +56,7 @@ The `ExecutionContext` (src/agents/execution/types.ts) carries all necessary inf
 
 The `AgentExecutor` (src/agents/execution/AgentExecutor.ts) is the main orchestrator that:
 
-1. **Selects the appropriate backend** based on agent configuration
+1. **Instantiates the ReasonActLoop backend** for all agent executions
 2. **Builds messages** including system prompts and conversation history
 3. **Manages execution lifecycle** including typing indicators and error handling
 4. **Tracks execution time** for performance monitoring
@@ -64,14 +64,14 @@ The `AgentExecutor` (src/agents/execution/AgentExecutor.ts) is the main orchestr
 
 Key responsibilities:
 - Message construction with proper context (system prompts, agent lessons, MCP tools)
-- Backend selection based on agent.backend configuration
+- ReasonActLoop backend instantiation
 - Publisher lifecycle management
 - Execution time tracking
 - Error recovery and cleanup
 
-## Execution Backends
+## Execution Backend
 
-### 1. ReasonActLoop Backend
+### ReasonActLoop - The Unified Backend
 
 The `ReasonActLoop` (src/agents/execution/ReasonActLoop.ts) is the default backend for most agents, implementing a sophisticated streaming execution model:
 
@@ -97,49 +97,6 @@ The ReasonActLoop implements a sophisticated termination enforcement mechanism:
 4. Retries up to MAX_TERMINATION_ATTEMPTS (2) times
 5. Auto-completes if agent still fails to terminate
 
-### 2. RoutingBackend
-
-The `RoutingBackend` (src/agents/execution/RoutingBackend.ts) is used exclusively by the orchestrator agent for intelligent routing decisions:
-
-**Core Responsibilities:**
-1. **LLM-based routing**: Uses the LLM to decide which agents to route to
-2. **Phase management**: Can trigger phase transitions
-3. **Agent validation**: Validates agent names and provides feedback
-4. **Orchestrator turn tracking**: Records routing decisions in conversation history
-5. **Error recovery**: Handles invalid agent names with corrective feedback
-
-**Routing Decision Structure:**
-```json
-{
-    "agents": ["agent-slug-1", "agent-slug-2"],
-    "phase": "implementation",
-    "reason": "Routing to implementation agents to build the feature"
-}
-```
-
-**Key Features:**
-- **JSON-based routing decisions** for structured parsing
-- **Agent name normalization** to handle variations (e.g., "Project Manager" → "project-manager")
-- **Feedback loop** for invalid agent names with available options
-- **Support for END agent** to cleanly terminate conversations
-- **Orchestrator turn management** for tracking routing history
-
-### 3. ClaudeBackend
-
-The `ClaudeBackend` (src/agents/execution/ClaudeBackend.ts) provides direct integration with Claude Code:
-
-**Core Flow:**
-1. Extracts system prompt and user prompt from messages
-2. Creates ClaudeTaskOrchestrator instance
-3. Executes Claude Code with optional session resumption
-4. Stores session ID for future resumption
-5. Uses completionHandler to return control to orchestrator
-
-**Key Features:**
-- **Session persistence**: Stores and resumes Claude sessions
-- **Direct Claude Code execution**: Bypasses streaming for direct execution
-- **Automatic completion**: Always completes back to orchestrator
-- **Error handling**: Wraps Claude errors appropriately
 
 ## Supporting Components
 

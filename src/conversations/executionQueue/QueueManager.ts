@@ -42,7 +42,7 @@ export class QueueManager {
     }
 
     // Check queue size limit
-    const maxQueueSize = this.config.maxQueueSize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxQueueSize;
+    const maxQueueSize = this.config.maxQueueSize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxQueueSize || 10);
     if (this.queue.length >= maxQueueSize) {
       throw new Error(`Queue is full (max size: ${maxQueueSize})`);
     }
@@ -130,7 +130,7 @@ export class QueueManager {
     this.executionHistory.push(history);
 
     // Trim history if it exceeds max size
-    const maxHistorySize = this.config.maxHistorySize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize;
+    const maxHistorySize = this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
     if (this.executionHistory.length > maxHistorySize) {
       this.executionHistory = this.executionHistory.slice(-maxHistorySize);
     }
@@ -231,7 +231,7 @@ export class QueueManager {
       );
 
       // Trim to max size
-      const maxHistorySize = this.config.maxHistorySize ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize;
+      const maxHistorySize = this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
       if (this.executionHistory.length > maxHistorySize) {
         this.executionHistory = this.executionHistory.slice(-maxHistorySize);
       }

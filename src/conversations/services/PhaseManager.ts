@@ -89,9 +89,12 @@ export class PhaseManager {
             );
 
             if (!permission.granted) {
+                if (!permission.queuePosition || !permission.waitTime) {
+                    throw new Error('Invalid permission - missing queue position or wait time');
+                }
                 const queueMessage = this.formatQueueMessage(
-                    permission.queuePosition!,
-                    permission.waitTime!
+                    permission.queuePosition,
+                    permission.waitTime
                 );
 
                 logger.info(`[PhaseManager] Conversation ${conversation.id} queued for execution`, {

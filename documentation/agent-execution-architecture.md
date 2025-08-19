@@ -8,7 +8,7 @@ The Agent Execution Architecture forms the core runtime engine of TENEX, impleme
 
 ### System Overview
 
-The execution system implements a layered, pluggable architecture:
+The execution system implements a layered, streaming-based architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -20,18 +20,18 @@ The execution system implements a layered, pluggable architecture:
 │                  AgentExecutor                           │
 │            (Orchestration & Coordination)                │
 │         • Message building with context                  │
-│         • Backend selection by agent type                │
 │         • Execution time tracking                        │
 │         • Session management                             │
+│         • Claude session continuity                      │
 └─────────────────────┬───────────────────────────────────┘
                       │
-         ┌────────────┼────────────┬──────────────┐
-         ▼            ▼            ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│ReasonActLoop │ │RoutingBackend│ │ClaudeBackend │
-│  (Default)   │ │(Orchestrator)│ │  (Claude)    │
-└──────┬───────┘ └──────────────┘ └──────────────┘
-        │
+┌─────────────────────▼───────────────────────────────────┐
+│                  ReasonActLoop                           │
+│         (Single unified execution backend)               │
+│         • Tool-based reasoning and action                │
+│         • Streaming response handling                    │
+└──────────────────────┬──────────────────────────────────┘
+                      │
 ┌───────▼────────────────────────────────────────────────┐
 │              Stream Processing Pipeline                 │
 │  • StreamStateManager: State tracking                   │
@@ -62,28 +62,20 @@ The execution system implements a layered, pluggable architecture:
 The top-level orchestrator for agent execution, responsible for:
 
 **Core Responsibilities**:
-- **Backend Selection**: Chooses appropriate execution backend based on agent configuration
 - **Message Building**: Constructs conversation context with proper agent perspective
 - **Session Management**: Maintains Claude session continuity across executions
 - **Execution Coordination**: Manages the complete execution lifecycle
 - **Time Tracking**: Records execution duration for performance monitoring
+- **Unified Backend**: Uses ReasonActLoop as the single execution backend for all agents
 
-**Backend Selection Logic**:
+**Backend Implementation**:
 ```typescript
-private getBackend(agent: Agent): ExecutionBackend {
-    const backendType = agent.backend || "reason-act-loop";
-    
-    switch (backendType) {
-        case "claude":      // Direct Claude passthrough
-            return new ClaudeBackend();
-        case "routing":     // Orchestrator routing logic
-            return new RoutingBackend(...);
-        case "reason-act-loop":  // Standard tool-using agents
-        default:
-            return new ReasonActLoop(...);
-    }
+private getBackend(): ReasonActLoop {
+    return new ReasonActLoop(this.llmService);
 }
 ```
+
+All agents now use the unified ReasonActLoop backend which handles tool-based reasoning and action execution.
 
 **Message Building Strategy**:
 

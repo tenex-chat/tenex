@@ -28,9 +28,10 @@ export async function ensureProjectInitialized(projectPath: string): Promise<voi
         // Step 2: Initialize ProjectContext using ProjectManager
         const projectManager = new ProjectManager();
         await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
-    } catch (error: any) {
+    } catch (error) {
         // Check if this is a missing project configuration error
-        if (error?.message?.includes("Project configuration missing projectNaddr")) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("Project configuration missing projectNaddr")) {
             const message = [
                 "\n❌ Not in a TENEX project directory\n",
                 "This command must be run from within a TENEX project.",

@@ -235,6 +235,7 @@ export const ToolSchemas = {
      */
     phase: () => {
         // Import here to avoid circular dependencies
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { ALL_PHASES } = require("@/conversations/phases");
         return z
             .enum(ALL_PHASES as [string, ...string[]])

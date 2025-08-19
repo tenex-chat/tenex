@@ -30,7 +30,7 @@ export default typescript.config(
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_'
       }],
-      'no-console': 'warn',
+      'no-console': 'off',
       'no-debugger': 'error'
     }
   },

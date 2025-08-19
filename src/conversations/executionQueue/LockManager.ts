@@ -62,7 +62,7 @@ export class LockManager {
       conversationId,
       agentPubkey,
       timestamp: Date.now(),
-      maxDuration: this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration
+      maxDuration: this.config.maxExecutionDuration ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration || 300000)
     };
 
     this.currentLock = lock;

@@ -54,7 +54,7 @@ export function setupExecutionLoggerMock(): void {
 export function setupTracingMock(): void {
     mock.module("@/tracing", () => ({
         createTracingContext: () => ({ id: "trace-id" }),
-        createAgentExecutionContext: (parent: any, agentName: string) => ({ 
+        createAgentExecutionContext: (parent: unknown, agentName: string) => ({ 
             id: `trace-${agentName}`,
             parent
         })
@@ -64,7 +64,7 @@ export function setupTracingMock(): void {
 /**
  * Common mock setup for agent utils
  */
-export function setupAgentUtilsMock(tools: any[] = []): void {
+export function setupAgentUtilsMock(tools: unknown[] = []): void {
     mock.module("@/agents/utils", () => ({
         getAvailableTools: () => tools,
         createAgentPrompt: () => "Test agent prompt"

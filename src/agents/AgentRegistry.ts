@@ -13,6 +13,7 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
+import type { ToolName } from "@/tools/registry";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -525,7 +526,18 @@ export class AgentRegistry {
 
         // Update the agent tools in memory
         const { getTools } = await import("@/tools/registry");
-        agent.tools = getTools(newToolNames as any);
+        // Filter to only valid tool names
+        const validToolNames = newToolNames.filter((name): name is ToolName => {
+            // Check if the tool name is valid
+            const validTools: ToolName[] = [
+                "read_path", "write_context_file", "complete", "analyze",
+                "generate_inventory", "lesson_learn", "lesson_get", "shell",
+                "agents_discover", "agents_hire", "discover_capabilities",
+                "delegate", "delegate_phase", "nostr_projects", "claude_code"
+            ];
+            return validTools.includes(name as ToolName);
+        });
+        agent.tools = getTools(validToolNames);
 
         // Find the registry entry by slug
         const registryEntry = this.registry[agent.slug];
@@ -772,8 +784,17 @@ export class AgentRegistry {
 
         // Convert tool names to Tool instances
         const { getTools } = await import("@/tools/registry");
-        // Cast to ToolName[] - tool names from storage are validated at runtime
-        agent.tools = getTools(toolNames as any);
+        // Validate and filter tool names
+        const validToolNames = toolNames.filter((name): name is ToolName => {
+            const validTools: ToolName[] = [
+                "read_path", "write_context_file", "complete", "analyze",
+                "generate_inventory", "lesson_learn", "lesson_get", "shell",
+                "agents_discover", "agents_hire", "discover_capabilities",
+                "delegate", "delegate_phase", "nostr_projects", "claude_code"
+            ];
+            return validTools.includes(name as ToolName);
+        });
+        agent.tools = getTools(validToolNames);
 
         return agent;
     }
@@ -891,7 +912,17 @@ export class AgentRegistry {
                 // FIX: Force update the tools for built-in agents
                 if (def.tools !== undefined) {
                     const { getTools } = await import("@/tools/registry");
-                    existingAgent.tools = getTools(def.tools as any);
+                    // Validate and filter tool names
+                    const validToolNames = def.tools.filter((name): name is ToolName => {
+                        const validTools: ToolName[] = [
+                            "read_path", "write_context_file", "complete", "analyze",
+                            "generate_inventory", "lesson_learn", "lesson_get", "shell",
+                            "agents_discover", "agents_hire", "discover_capabilities",
+                            "delegate", "delegate_phase", "nostr_projects", "claude_code"
+                        ];
+                        return validTools.includes(name as ToolName);
+                    });
+                    existingAgent.tools = getTools(validToolNames);
                 }
                 existingAgent.isBuiltIn = true;
             } else {

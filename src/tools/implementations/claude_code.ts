@@ -62,7 +62,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         if (systemPrompt && cleanedSystemPrompt !== systemPrompt) {
             logger.debug("[claude_code] Stripped thinking blocks from system prompt", {
                 originalLength: systemPrompt.length,
-                cleanedLength: cleanedSystemPrompt!.length,
+                cleanedLength: cleanedSystemPrompt.length,
                 agent: context.agent.name
             });
         }

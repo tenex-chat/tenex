@@ -128,7 +128,7 @@ export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapte
 
         if (criteria.title) {
             results = results.filter(m => 
-                m.title.toLowerCase().includes(criteria.title!.toLowerCase())
+                m.title.toLowerCase().includes(criteria.title.toLowerCase())
             );
         }
 

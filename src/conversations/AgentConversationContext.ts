@@ -284,7 +284,7 @@ export class AgentConversationContext {
     /**
      * Restore from persistence
      */
-    static fromJSON(data: any, messageBuilder?: MessageBuilder): AgentConversationContext {
+    static fromJSON(data: unknown, messageBuilder?: MessageBuilder): AgentConversationContext {
         const context = new AgentConversationContext(
             data.conversationId,
             data.agentSlug,
@@ -293,9 +293,12 @@ export class AgentConversationContext {
         
         // Restore messages
         if (data.messages && Array.isArray(data.messages)) {
-            context.messages = data.messages.map((m: any) => 
-                new Message(m.role, m.content)
-            );
+            context.messages = data.messages.map((m: unknown) => {
+                if (typeof m === 'object' && m !== null && 'role' in m && 'content' in m) {
+                    return new Message((m as { role: string }).role, (m as { content: string }).content);
+                }
+                throw new Error('Invalid message format in data');
+            });
         }
         
         // Restore processed event IDs

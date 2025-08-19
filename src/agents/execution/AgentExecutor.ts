@@ -71,7 +71,7 @@ export class AgentExecutor {
         // Get the Claude session ID from the conversation state
         const conversation = this.conversationManager.getConversation(context.conversationId);
         const agentState = conversation?.agentStates.get(context.agent.slug);
-        const claudeSessionId = context.claudeSessionId || agentState?.claudeSessionId;
+        const claudeSessionId = context.claudeSessionId || agentState?.claudeSessionsByPhase?.[context.phase];
         
         if (claudeSessionId) {
             logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {

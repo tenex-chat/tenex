@@ -1,5 +1,3 @@
-import * as path from "node:path";
-import { TENEX_DIR, CONVERSATIONS_DIR } from "@/constants";
 import { FileSystemAdapter } from "./persistence";
 import type { ConversationPersistenceAdapter } from "./persistence/types";
 import { ExecutionQueueManager } from "./executionQueue";
@@ -16,16 +14,11 @@ import {
  * Main ConversationCoordinator that initializes all services
  */
 export class ConversationCoordinator extends BaseConversationCoordinator {
-    private projectPath: string;
-    private conversationsDir: string;
-
     constructor(
         projectPath: string, 
         persistence?: ConversationPersistenceAdapter,
         executionQueueManager?: ExecutionQueueManager
     ) {
-        const conversationsDir = path.join(projectPath, TENEX_DIR, CONVERSATIONS_DIR);
-        
         // Create services
         const store = new ConversationStore();
         const persistenceService = new ConversationPersistenceService(
@@ -44,9 +37,6 @@ export class ConversationCoordinator extends BaseConversationCoordinator {
             agentResolver,
             executionQueueManager
         );
-        
-        this.projectPath = projectPath;
-        this.conversationsDir = conversationsDir;
     }
 
     setExecutionQueueManager(manager: ExecutionQueueManager): void {

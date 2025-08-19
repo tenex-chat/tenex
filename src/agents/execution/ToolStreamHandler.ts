@@ -26,10 +26,10 @@ export class ToolStreamHandler {
      * Handle a tool_start event
      */
     async handleToolStartEvent(
-        streamHandle: StreamHandle | undefined,
+        _streamHandle: StreamHandle | undefined,
         toolName: string,
         toolArgs: Record<string, unknown>,
-        tracingLogger: TracingLogger,
+        _tracingLogger: TracingLogger,
         context?: ExecutionContext
     ): Promise<void> {
         // Create a unique ID for this tool call
@@ -51,7 +51,7 @@ export class ToolStreamHandler {
      */
     async handleToolCompleteEvent(
         event: { tool: string; result: unknown },
-        streamHandle: StreamHandle | undefined,
+        _streamHandle: StreamHandle | undefined,
         tracingLogger: TracingLogger,
         context: ExecutionContext
     ): Promise<boolean> {
@@ -85,7 +85,7 @@ export class ToolStreamHandler {
      */
     private async handleMissingToolStart(
         toolName: string,
-        toolResult: ToolExecutionResult,
+        _toolResult: ToolExecutionResult,
         tracingLogger: TracingLogger,
         _context: ExecutionContext
     ): Promise<void> {
