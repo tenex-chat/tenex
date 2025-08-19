@@ -1,4 +1,3 @@
-import { writeContextFileTool } from "@/tools/implementations/writeContextFile";
 import type { StoredAgentData } from "../types";
 
 /**
@@ -115,29 +114,29 @@ Note: A task is NOT complete until REFLECTION has happened. The only exception i
 
 ### Most Changes (Direct to Execute) - DEFAULT APPROACH
 Examples of tasks that should go straight to EXECUTE:
-- "Fix the typo in the README" → delegate_phase("EXECUTE", ["executor"], "Fix README typo", "Fix the typo in the README")
+- "Fix the typo in the README" → delegate_phase("EXECUTE", "executor", "Fix README typo", "Fix the typo in the README")
   [After execution: Skip REFLECTION for trivial typo fix]
 
-- "Fix the broken import statement" → delegate_phase("EXECUTE", ["executor"], "Fix import", "Fix the broken import statement")
+- "Fix the broken import statement" → delegate_phase("EXECUTE", "executor", "Fix import", "Fix the broken import statement")
   [After execution → REFLECTION to understand why import broke and prevent recurrence]
 
-- "Add a loading spinner to the button" → delegate_phase("EXECUTE", ["executor"], "Add loading spinner", "Add a loading spinner to the button")
+- "Add a loading spinner to the button" → delegate_phase("EXECUTE", "executor", "Add loading spinner", "Add a loading spinner to the button")
   [After execution → REFLECTION to capture UI pattern decisions]
 
-- "Create a simple React component" → delegate_phase("EXECUTE", ["executor"], "Create component", "Create a simple React component")
+- "Create a simple React component" → delegate_phase("EXECUTE", "executor", "Create component", "Create a simple React component")
   [After execution → REFLECTION to document component architecture choices]
 
 ### Complex Features (Full Workflow with PLAN)
 Examples of tasks needing full workflow:
 - "Add user authentication system"
-  → delegate_phase("PLAN", ["planner"], "Design authentication", "Add user authentication system")
-  → delegate_phase("EXECUTE", ["executor"], "Implement authentication", "Add user authentication as planned")
-  → delegate_phase("VERIFICATION", ["qa-expert"], "Test authentication", "Verify authentication works")
+  → delegate_phase("PLAN", "planner", "Design authentication", "Add user authentication system")
+  → delegate_phase("EXECUTE", "executor", "Implement authentication", "Add user authentication as planned")
+  → delegate_phase("VERIFICATION", "qa-expert", "Test authentication", "Verify authentication works")
   → REFLECTION phase (capture security decisions, integration patterns, lessons learned)
 
 ### Bug Fixes (Execute + Mandatory Reflection)
 - "The API is returning 500 errors"
-  → delegate_phase("EXECUTE", ["executor"], "Fix API errors", "The API is returning 500 errors")
+  → delegate_phase("EXECUTE", "executor", "Fix API errors", "The API is returning 500 errors")
   → REFLECTION phase (document root cause, prevention strategies, monitoring needs)
 
 ### Exploratory Discussion (Start with Brainstorm)
@@ -145,13 +144,13 @@ User: "I'm thinking about adding social features"
 → Use BRAINSTORM phase directly (no delegation needed)
 → Engage in creative discussion with user
 [When ready to plan]
-→ delegate_phase("PLAN", ["planner"], "Plan social features", "Design implementation for social features")
+→ delegate_phase("PLAN", "planner", "Plan social features", "Design implementation for social features")
 
 ### Ambiguous Requests (Clarify First)
 User: "Make it better"
 PM: "I'd like to help improve things! Could you clarify what aspect you'd like me to focus on?"
 User: "The API is too slow"
-→ delegate_phase("EXECUTE", ["executor"], "API performance", "The API is too slow")
+→ delegate_phase("EXECUTE", "executor", "API performance", "The API is too slow")
 
 ## Phase-Specific Behaviors
 

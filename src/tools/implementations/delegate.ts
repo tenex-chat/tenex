@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
 import { DelegationService } from "@/services/DelegationService";
 import { logger } from "@/utils/logger";
+import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 
 const delegateSchema = z.object({
     recipients: z
@@ -41,7 +42,7 @@ const delegateSchema = z.object({
  * - Tracks status (pending/complete)
  * - Enables parallel execution of sub-tasks
  */
-export const delegateTool = createToolDefinition<z.input<typeof delegateSchema>, { success: boolean; recipientPubkeys: string[]; taskIds: string[] }>({
+export const delegateTool = createToolDefinition<z.input<typeof delegateSchema>, DelegationIntent>({
     name: "delegate",
     description: "Delegate a task or question to one or more agents by publishing a reply event with their p-tags",
     promptFragment: `DELEGATE TOOL:
@@ -73,31 +74,44 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
         }
         
         try {
-            // Use DelegationService to handle all delegation logic
-            // But we'll need to modify it to return events instead of publishing
-            const result = await DelegationService.createDelegationTasks(
-                {
-                    recipients,
-                    title,
-                    fullRequest
-                },
-                {
-                    agent: context.agent,
-                    conversationId: context.conversationId,
-                    conversationManager: context.conversationManager
+            // Resolve recipients to pubkeys
+            const resolvedPubkeys: string[] = [];
+            const failedRecipients: string[] = [];
+            
+            for (const recipient of recipients) {
+                const pubkey = DelegationService.resolveRecipientToPubkey(recipient);
+                if (pubkey) {
+                    resolvedPubkeys.push(pubkey);
+                } else {
+                    failedRecipients.push(recipient);
                 }
-            );
+            }
             
-            // The agent will be reactivated when all tasks complete.
-            // This is handled in the event handler when task completion events arrive.
+            if (failedRecipients.length > 0) {
+                logger.warn("Some recipients could not be resolved", {
+                    failed: failedRecipients,
+                    resolved: resolvedPubkeys.length
+                });
+            }
             
-            return success({
-                success: true,
-                recipientPubkeys: result.recipientPubkeys,
-                taskIds: result.taskIds,
-                batchId: result.batchId,
-                toolType: 'delegate'
+            if (resolvedPubkeys.length === 0) {
+                throw new Error("No valid recipients provided.");
+            }
+            
+            // Return delegation intent for RAL to handle
+            const intent: DelegationIntent = {
+                type: 'delegation',
+                recipients: resolvedPubkeys,
+                title: title,
+                request: fullRequest
+            };
+            
+            logger.debug("[delegate() tool] Returning delegation intent", {
+                fromAgent: context.agent.slug,
+                recipientCount: resolvedPubkeys.length
             });
+            
+            return success(intent);
         } catch (error) {
             logger.error("Failed to create delegation tasks", {
                 fromAgent: context.agent.slug,

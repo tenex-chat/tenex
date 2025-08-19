@@ -192,11 +192,13 @@ describe("StatusPublisher", () => {
 
             const eventInstance = mockNDKEvent.mock.results[0].value;
             
-            // Check that model tags were added
+            // Check that model tags were added in new format: ["model", "model-slug", ...agent-slugs]
             const modelTags = eventInstance.tags.filter((tag: string[]) => tag[0] === "model");
             expect(modelTags.length).toBeGreaterThan(0);
-            expect(modelTags).toContainEqual(["model", "gpt-4", "config1"]);
-            expect(modelTags).toContainEqual(["model", "claude-3", "config2"]);
+            
+            // Should have model tags with agents that use them
+            expect(modelTags).toContainEqual(["model", "gpt-4", "agent1"]);
+            expect(modelTags).toContainEqual(["model", "claude-3", "agent2"]);
         });
 
         it("should set correct event kind", async () => {

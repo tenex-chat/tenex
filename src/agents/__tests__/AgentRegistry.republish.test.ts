@@ -1,5 +1,5 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import { AgentPublisher } from "@/agents/AgentPublisher";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK } from "@/nostr";
 import { getProjectContext, isProjectContextInitialized, setProjectContext } from "@/services";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -8,7 +8,7 @@ import type { NDKProject } from "@nostr-dev-kit/ndk";
 // Mock dependencies
 jest.mock("@/nostr");
 jest.mock("@/services");
-jest.mock("@/agents/AgentPublisher");
+jest.mock("@/nostr/AgentPublisher");
 jest.mock("@/utils/logger");
 
 describe("AgentRegistry.republishAllAgentProfiles", () => {

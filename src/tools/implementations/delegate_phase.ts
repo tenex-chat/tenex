@@ -3,6 +3,7 @@ import { createToolDefinition, success, failure } from "../types";
 import { DelegationService } from "@/services/DelegationService";
 import { logger } from "@/utils/logger";
 import { PHASES, type Phase } from "@/conversations/phases";
+import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 
 const delegatePhaseSchema = z.object({
     phase: z.enum([
@@ -14,9 +15,9 @@ const delegatePhaseSchema = z.object({
         PHASES.CHORES,
         PHASES.REFLECTION
     ] as const).describe("The phase to switch to"),
-    recipients: z
-        .array(z.string())
-        .describe("Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) to delegate to in this phase"),
+    recipient: z
+        .string()
+        .describe("Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey to delegate to in this phase"),
     title: z
         .string()
         .describe("Brief title/summary of the task (e.g., 'Design authentication flow', 'Review database schema')"),
@@ -37,14 +38,14 @@ const delegatePhaseSchema = z.object({
  * - Becomes the phase transition reason (context for all agents)
  * - Is the actual task delegated to the specified recipients
  * 
- * Recipients can be:
- * - Agent slugs (e.g., "architect", "planner") - resolved from project agents
- * - Agent names (e.g., "Architect", "Planner") - resolved from project agents
- * - Npubs (e.g., "npub1...") - decoded to hex pubkeys
- * - Hex pubkeys (64 characters) - used directly
+ * Recipient can be:
+ * - Agent slug (e.g., "architect", "planner") - resolved from project agents
+ * - Agent name (e.g., "Architect", "Planner") - resolved from project agents
+ * - Npub (e.g., "npub1...") - decoded to hex pubkeys
+ * - Hex pubkey (64 characters) - used directly
  * 
- * When delegating to multiple recipients, the PM will wait for all task completions
- * before continuing. The PM should NOT call complete() after delegating.
+ * The PM will wait for the task completion before continuing.
+ * The PM should NOT call complete() after delegating.
  * 
  * Each delegation creates a formal NDKTask (Nostr kind 1934) event that:
  * - Is assigned to specific agent(s) via p-tag
@@ -52,12 +53,7 @@ const delegatePhaseSchema = z.object({
  * - Tracks status (pending/complete)
  * - Enables parallel execution of sub-tasks
  */
-export const delegatePhaseTool = createToolDefinition<z.input<typeof delegatePhaseSchema>, { 
-    success: boolean; 
-    phase: Phase;
-    recipientPubkeys: string[]; 
-    taskIds: string[] 
-}>({
+export const delegatePhaseTool = createToolDefinition<z.input<typeof delegatePhaseSchema>, DelegationIntent>({
     name: "delegate_phase",
     description: "Switch conversation phase and delegate work to specialist agents atomically. Only available to the Project Manager.",
     promptFragment: `DELEGATE PHASE TOOL:
@@ -65,14 +61,14 @@ Use this to switch phases AND delegate work to specialist agents in one atomic o
 This ensures proper workflow coordination and phase leadership.
 
 IMPORTANT: 
-- recipients must ALWAYS be an array, even for a single recipient
+- recipient is a single agent string (not an array)
 - The fullRequest serves as both the phase reason AND the delegation content
 - DO NOT call complete() after delegating - wait for agents to respond
 
 Examples:
-- delegate_phase("PLAN", ["planner"], "Design authentication system", "Create implementation plan for user authentication with OAuth2 and JWT")
-- delegate_phase("EXECUTE", ["executor"], "Implement password reset", "Implement the password reset functionality as planned")
-- delegate_phase("VERIFICATION", ["executor", "architect"], "Verify deployment", "Verify the deployment pipeline works correctly")
+- delegate_phase("PLAN", "planner", "Design authentication system", "Create implementation plan for user authentication with OAuth2 and JWT")
+- delegate_phase("EXECUTE", "executor", "Implement password reset", "Implement the password reset functionality as planned")
+- delegate_phase("VERIFICATION", "executor", "Verify deployment", "Verify the deployment pipeline works correctly")
 
 Phase Leadership Pattern:
 - PLAN phase → delegate to planner
@@ -86,7 +82,7 @@ After delegating:
 - Then decide the next phase transition`,
     schema: delegatePhaseSchema as z.ZodType<z.input<typeof delegatePhaseSchema>>,
     execute: async (input, context) => {
-        const { phase, recipients, fullRequest, title } = input.value;
+        const { phase, recipient, fullRequest, title } = input.value;
         
         // Verify this is the PM (belt and suspenders - should already be restricted by toolset)
         if (context.agent.slug !== "project-manager") {
@@ -101,12 +97,12 @@ After delegating:
             });
         }
         
-        // Recipients is always an array due to schema validation
-        if (!Array.isArray(recipients)) {
+        // Validate recipient is a string
+        if (typeof recipient !== 'string' || !recipient.trim()) {
             return failure({
                 kind: "execution", 
                 tool: "delegate_phase",
-                message: "Recipients must be an array of strings",
+                message: "Recipient must be a non-empty string",
             });
         }
         
@@ -139,54 +135,38 @@ After delegating:
                 });
             }
             
-            // Step 2: Use DelegationService to create and publish tasks
-            const delegationResult = await DelegationService.createDelegationTasks(
-                {
-                    recipients,
-                    title,
-                    fullRequest,
-                    phase  // Pass phase for tagging
-                },
-                {
-                    agent: context.agent,
-                    conversationId: context.conversationId,
-                    conversationManager: context.conversationManager
-                }
-            );
+            // Step 2: Resolve recipient to pubkey
+            const pubkey = DelegationService.resolveRecipientToPubkey(recipient);
+            if (!pubkey) {
+                return failure({
+                    kind: "execution",
+                    tool: "delegate_phase",
+                    message: `Cannot resolve recipient to pubkey: ${recipient}. Must be valid agent slug, npub, or hex pubkey.`
+                });
+            }
             
-            logger.info("Phase delegation complete - PM waiting for task completions", {
-                phase: phase,
+            // Return delegation intent for RAL to handle
+            const intent: DelegationIntent = {
+                type: 'delegation',
+                recipients: [pubkey],
+                title: title,
+                request: fullRequest,
+                phase: phase  // Include phase in the intent
+            };
+            
+            logger.debug("[delegate_phase() tool] Returning delegation intent with phase", {
                 fromAgent: context.agent.slug,
-                waitingForTasks: delegationResult.taskIds.length,
-                taskIds: delegationResult.taskIds,
+                toRecipient: recipient,
+                toPubkey: pubkey,
+                phase: phase
             });
             
-            logger.info("Phase switch and delegation complete", {
-                phase: phase,
-                fromAgent: context.agent.slug,
-                toRecipients: recipients,
-                toPubkeys: delegationResult.recipientPubkeys,
-                taskCount: delegationResult.taskIds.length,
-                requestLength: fullRequest.length,
-            });
-            
-            // The PM will be reactivated when all tasks complete.
-            // This is handled in the event handler when task completion events arrive.
-            
-            // Return success with phase and delegation info
-            return success({
-                success: true,
-                phase: phase,
-                recipientPubkeys: delegationResult.recipientPubkeys,
-                taskIds: delegationResult.taskIds,
-                batchId: delegationResult.batchId,
-                toolType: 'delegate_phase'
-            });
+            return success(intent);
         } catch (error) {
             logger.error("Failed to execute phase delegation", {
                 phase: phase,
                 fromAgent: context.agent.slug,
-                toRecipients: recipients,
+                toRecipient: recipient,
                 error,
             });
             

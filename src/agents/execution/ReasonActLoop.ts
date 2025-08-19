@@ -5,6 +5,10 @@ import type { StreamEvent } from "@/llm/types";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
 import { StreamPublisher } from "@/nostr/NostrPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { AgentStreamer } from "@/nostr/AgentStreamer";
+import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import { getProjectContext } from "@/services/ProjectContext";
 import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingLogger, createTracingContext } from "@/tracing";
 import { Message } from "multi-llm-ts";
@@ -28,6 +32,7 @@ export class ReasonActLoop {
     private executionLogger?: ExecutionLogger;
     private repetitionDetector: ToolRepetitionDetector;
     private messageBuilder: MessageBuilder;
+    private startTime?: number;
 
     constructor(
         private llmService: LLMService
@@ -45,6 +50,7 @@ export class ReasonActLoop {
         context: ExecutionContext,
         publisher: NostrPublisher
     ): Promise<void> {
+        this.startTime = Date.now();
         const tracingContext = createTracingContext(context.conversationId);
         this.executionLogger = createExecutionLogger(tracingContext, "agent");
 
@@ -130,10 +136,11 @@ export class ReasonActLoop {
                     
                     // Handle deferred terminal event
                     if (iterationResult.deferredTerminalEvent) {
-                        await this.publishDeferredTerminalEvent(
+                        await this.publishTerminalIntent(
                             iterationResult.deferredTerminalEvent,
                             tracingLogger,
-                            context
+                            context,
+                            stateManager
                         );
                     }
                     
@@ -300,38 +307,21 @@ export class ReasonActLoop {
                     if (toolResult) {
                         toolResults.push(toolResult);
                         
-                        // Check if this tool result contains deferred events
+                        // Check if this tool result contains an intent
                         if (toolResult.success && toolResult.output) {
                             const output = toolResult.output as any;
                             
-                            // Handle delegate/delegate_phase tools (highest priority)
-                            if ((output.toolType === 'delegate' || output.toolType === 'delegate_phase')) {
-                                // Tasks are now published immediately by DelegationService
-                                // Just mark as terminal to end the loop
-                                tracingLogger.info("[ReasonActLoop] Delegation tool detected - tasks already published", {
+                            // Check if output is an intent (has 'type' field)
+                            if (output.type === 'completion' || output.type === 'delegation') {
+                                tracingLogger.info("[ReasonActLoop] Terminal intent detected", {
                                     tool: event.tool,
-                                    batchId: output.batchId
+                                    intentType: output.type
                                 });
                                 isTerminal = true;
-                            }
-                            // Handle complete tool (only if we don't already have a delegation)
-                            else if (output.toolType === 'complete' && output.serializedEvent) {
-                                if (!deferredTerminalEvent || deferredTerminalEvent.type !== 'delegate') {
-                                    tracingLogger.info("[ReasonActLoop] Complete tool detected - deferring event", {
-                                        tool: event.tool,
-                                        overwrites: !!deferredTerminalEvent
-                                    });
-                                    deferredTerminalEvent = {
-                                        type: 'complete',
-                                        event: output.serializedEvent
-                                    };
-                                    isTerminal = true;
-                                } else {
-                                    tracingLogger.info("[ReasonActLoop] Complete tool detected but delegation takes precedence", {
-                                        tool: event.tool
-                                    });
-                                    isTerminal = true;
-                                }
+                                deferredTerminalEvent = {
+                                    type: output.type,
+                                    intent: output
+                                };
                             }
                         }
                     }
@@ -591,32 +581,44 @@ export class ReasonActLoop {
     }
 
     /**
-     * Publish a single deferred terminal event
+     * Publish a terminal intent using AgentPublisher
      */
-    private async publishDeferredTerminalEvent(
+    private async publishTerminalIntent(
         deferredEvent: any,
         tracingLogger: TracingLogger,
-        context: ExecutionContext
+        context: ExecutionContext,
+        stateManager: StreamStateManager
     ): Promise<void> {
-        tracingLogger.info("[ReasonActLoop] Publishing deferred terminal event", {
-            type: deferredEvent.type,
-            eventCount: deferredEvent.type === 'delegate' ? deferredEvent.events?.length : 1
+        tracingLogger.info("[ReasonActLoop] Publishing terminal intent", {
+            type: deferredEvent.type
         });
         
-        const { NDKEvent } = await import("@nostr-dev-kit/ndk");
-        const { getNDK } = await import("@/nostr/ndkClient");
-        const ndk = getNDK();
+        const agentPublisher = new AgentPublisher();
+        const intent = deferredEvent.intent;
         
-        // Delegation events are now published immediately by DelegationService
-        // Only handle completion events here
-        if (deferredEvent.type === 'complete' && deferredEvent.event) {
-            // Publish completion event
-            const event = new NDKEvent(ndk, deferredEvent.event);
-            await event.publish();
-            
-            tracingLogger.info("[ReasonActLoop] Published deferred completion event", {
-                eventId: event.id,
-                kind: event.kind,
+        // Build event context with execution metadata
+        const eventContext: EventContext = {
+            agent: context.agent,
+            triggeringEvent: context.triggeringEvent,
+            conversationId: context.conversationId,
+            projectId: getProjectContext().project?.id,
+            toolCalls: stateManager.getToolCalls(),
+            executionTime: this.startTime ? Date.now() - this.startTime : undefined,
+            model: stateManager.getFinalResponse()?.model,
+            usage: stateManager.getFinalResponse()?.usage
+        };
+        
+        // Publish based on intent type
+        if (intent.type === 'completion') {
+            const event = await agentPublisher.complete(intent as CompletionIntent, eventContext);
+            tracingLogger.info("[ReasonActLoop] Published completion event", {
+                eventId: event.id
+            });
+        } else if (intent.type === 'delegation') {
+            const result = await agentPublisher.delegate(intent as DelegationIntent, eventContext);
+            tracingLogger.info("[ReasonActLoop] Published delegation events", {
+                batchId: result.batchId,
+                taskCount: result.tasks.length
             });
         }
     }

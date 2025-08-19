@@ -96,22 +96,47 @@ export class StatusPublisher {
 
             if (!llms) return;
 
-            // Add model tags for each LLM configuration
-            for (const [configName, config] of Object.entries(llms.configurations)) {
-                if (!config || !config.model) continue;
+            // Build a map of models to agents that use them
+            const modelToAgents = new Map<string, Set<string>>();
 
-                event.tags.push(["model", config.model, configName]);
-            }
-
-            // Also check if there are agent-specific defaults
+            // Process agent-specific defaults
             if (llms.defaults) {
-                for (const [agentName, configName] of Object.entries(llms.defaults)) {
-                    if (!configName || agentName === "agents" || agentName === "routing") continue;
+                for (const [agentSlug, configName] of Object.entries(llms.defaults)) {
+                    if (!configName || agentSlug === "agents" || agentSlug === "routing") continue;
 
                     const config = llms.configurations[configName];
                     if (config?.model) {
-                        event.tags.push(["model", config.model, `${agentName}-default`]);
+                        if (!modelToAgents.has(config.model)) {
+                            modelToAgents.set(config.model, new Set());
+                        }
+                        modelToAgents.get(config.model)!.add(agentSlug);
                     }
+                }
+            }
+
+            // If there's a global default, apply it to all agents that don't have specific configs
+            const globalDefault = llms.defaults?.agents || llms.defaults?.routing;
+            if (globalDefault && llms.configurations[globalDefault]) {
+                const config = llms.configurations[globalDefault];
+                if (config?.model && isProjectContextInitialized()) {
+                    const projectCtx = getProjectContext();
+                    if (!modelToAgents.has(config.model)) {
+                        modelToAgents.set(config.model, new Set());
+                    }
+                    // Add all agents that don't have specific model configs
+                    for (const [agentSlug] of projectCtx.agents) {
+                        if (!llms.defaults?.[agentSlug]) {
+                            modelToAgents.get(config.model)!.add(agentSlug);
+                        }
+                    }
+                }
+            }
+
+            // Add model tags in the new format: ["model", "<model-slug>", ...agent-slugs]
+            for (const [modelSlug, agentSet] of modelToAgents) {
+                const agentSlugs = Array.from(agentSet);
+                if (agentSlugs.length > 0) {
+                    event.tags.push(["model", modelSlug, ...agentSlugs]);
                 }
             }
         } catch (err) {

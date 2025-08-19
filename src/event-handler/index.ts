@@ -100,25 +100,14 @@ export class EventHandler {
 
     private async handleLLMConfigChange(event: NDKEvent): Promise<void> {
         try {
-            // Extract the agent pubkey and new model from the event tags
+            // Extract the agent pubkey from the event tags
             const agentPubkey = event.tagValue("p");
-            const newModel = event.tagValue("model");
-
-            if (!agentPubkey || !newModel) {
-                logger.warn("LLM_CONFIG_CHANGE event missing required tags", {
+            if (!agentPubkey) {
+                logger.warn("LLM_CONFIG_CHANGE event missing agent pubkey", {
                     eventId: event.id,
-                    hasAgentPubkey: !!agentPubkey,
-                    hasModel: !!newModel,
                 });
                 return;
             }
-
-            logger.info(`Received LLM config change request`, {
-                agentPubkey,
-                newModel,
-                eventId: event.id,
-                from: event.pubkey,
-            });
 
             // Get the agent from the project context
             const projectContext = getProjectContext();
@@ -127,38 +116,92 @@ export class EventHandler {
             );
 
             if (!agent) {
-                logger.warn("Agent not found for LLM config change", {
+                logger.warn("Agent not found for config change", {
                     agentPubkey,
                     availableAgents: Array.from(projectContext.agents.keys()),
                 });
                 return;
             }
 
-            // Update the agent's LLM configuration persistently
+            // Load the agent registry for persistent updates
             const { AgentRegistry } = await import("@/agents/AgentRegistry");
             const agentRegistry = new AgentRegistry(this.projectPath, false);
             await agentRegistry.loadFromProject();
-            const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
-            
-            if (updated) {
-                // Also update in memory for immediate effect
-                agent.llmConfig = newModel;
-                logger.info(`Updated and persisted LLM configuration for agent`, {
-                    agentName: agent.name,
-                    agentPubkey: agent.pubkey,
+
+            // Check for model configuration change
+            const newModel = event.tagValue("model");
+            if (newModel) {
+                logger.info(`Received LLM config change request`, {
+                    agentPubkey,
                     newModel,
+                    eventId: event.id,
+                    from: event.pubkey,
                 });
-            } else {
-                // Fallback: at least update in memory for this session
-                agent.llmConfig = newModel;
-                logger.warn(`Updated LLM configuration in memory only (persistence failed)`, {
-                    agentName: agent.name,
-                    agentPubkey: agent.pubkey,
-                    newModel,
+
+                // Update the agent's LLM configuration persistently
+                const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
+                
+                if (updated) {
+                    // Also update in memory for immediate effect
+                    agent.llmConfig = newModel;
+                    logger.info(`Updated and persisted LLM configuration for agent`, {
+                        agentName: agent.name,
+                        agentPubkey: agent.pubkey,
+                        newModel,
+                    });
+                } else {
+                    // Fallback: at least update in memory for this session
+                    agent.llmConfig = newModel;
+                    logger.warn(`Updated LLM configuration in memory only (persistence failed)`, {
+                        agentName: agent.name,
+                        agentPubkey: agent.pubkey,
+                        newModel,
+                    });
+                }
+            }
+
+            // Check for tools configuration change
+            // Extract all tool tags - these represent the exhaustive list of tools the agent should have
+            const toolTags = event.tags.filter(tag => tag[0] === "tool");
+            if (toolTags.length > 0) {
+                // Extract tool names from tags (format: ["tool", "<tool-name>"])
+                const newToolNames = toolTags.map(tag => tag[1]).filter(name => name);
+                
+                logger.info(`Received tools config change request`, {
+                    agentPubkey,
+                    agentSlug: agent.slug,
+                    newTools: newToolNames,
+                    eventId: event.id,
+                    from: event.pubkey,
+                });
+
+                // Update the agent's tools persistently
+                const updated = await agentRegistry.updateAgentTools(agentPubkey, newToolNames);
+                
+                if (updated) {
+                    logger.info(`Updated and persisted tools configuration for agent`, {
+                        agentName: agent.name,
+                        agentPubkey: agent.pubkey,
+                        newTools: newToolNames,
+                    });
+                } else {
+                    logger.warn(`Failed to update tools configuration`, {
+                        agentName: agent.name,
+                        agentPubkey: agent.pubkey,
+                        newTools: newToolNames,
+                    });
+                }
+            }
+
+            // If neither model nor tools were provided, log a warning
+            if (!newModel && toolTags.length === 0) {
+                logger.warn("LLM_CONFIG_CHANGE event has neither model nor tool tags", {
+                    eventId: event.id,
+                    agentPubkey,
                 });
             }
         } catch (error) {
-            logger.error("Failed to handle LLM config change", {
+            logger.error("Failed to handle config change", {
                 eventId: event.id,
                 error: formatAnyError(error),
             });

@@ -1,7 +1,7 @@
 import { formatAnyError } from "@/utils/error-formatter";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { AgentPublisher } from "@/agents/AgentPublisher";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { AgentInstance, AgentConfig, AgentConfigOptionalNsec, StoredAgentData } from "@/agents/types";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
@@ -488,6 +488,89 @@ export class AgentRegistry {
             return true;
         } catch (error) {
             logger.error("Failed to update agent LLM config", {
+                agentSlug: agent.slug,
+                error: formatAnyError(error),
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Update an agent's tools configuration persistently
+     * @param agentPubkey - The public key of the agent to update
+     * @param newToolNames - Array of tool names the agent should have access to
+     * @returns true if successful, false otherwise
+     */
+    async updateAgentTools(agentPubkey: string, newToolNames: string[]): Promise<boolean> {
+        // Find the agent by pubkey
+        const agent = this.agentsByPubkey.get(agentPubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${agentPubkey} not found for tools update`);
+            return false;
+        }
+
+        // Project Manager always keeps its hardcoded tools
+        if (agent.slug === "project-manager") {
+            logger.info("Ignoring tool configuration change for project-manager agent");
+            return false;
+        }
+
+        // Ensure complete() is always present
+        if (!newToolNames.includes("complete")) {
+            newToolNames.push("complete");
+        }
+
+        // Update the agent tools in memory
+        const { getTools } = await import("@/tools/registry");
+        agent.tools = getTools(newToolNames as any);
+
+        // Find the registry entry by slug
+        const registryEntry = this.registry[agent.slug];
+        if (!registryEntry) {
+            logger.warn(`Registry entry not found for agent ${agent.slug}`);
+            return false;
+        }
+
+        // Update the agent definition file
+        try {
+            const definitionPath = path.join(this.agentsDir, registryEntry.file);
+            
+            // Read existing definition
+            let agentDefinition: StoredAgentData;
+            try {
+                const content = await fs.readFile(definitionPath, "utf-8");
+                agentDefinition = JSON.parse(content);
+            } catch (error) {
+                logger.warn("Failed to read agent definition, creating from current state", {
+                    file: registryEntry.file,
+                    error,
+                });
+                // Create definition from current agent state
+                agentDefinition = {
+                    name: agent.name,
+                    role: agent.role,
+                    description: agent.description,
+                    instructions: agent.instructions || "",
+                    useCriteria: agent.useCriteria,
+                    llmConfig: agent.llmConfig,
+                    tools: newToolNames,
+                };
+            }
+
+            // Update the tools
+            agentDefinition.tools = newToolNames;
+
+            // Save the updated definition
+            await writeJsonFile(definitionPath, agentDefinition);
+            
+            logger.info(`Updated tools for agent ${agent.name} (${agent.slug})`, {
+                newTools: newToolNames,
+                file: registryEntry.file,
+            });
+
+            return true;
+        } catch (error) {
+            logger.error("Failed to update agent tools", {
                 agentSlug: agent.slug,
                 error: formatAnyError(error),
             });

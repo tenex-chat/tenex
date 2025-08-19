@@ -1,7 +1,6 @@
-import type { Termination } from "../types";
 import { success, createToolDefinition } from "../types";
 import { z } from "zod";
-import { handleAgentCompletion } from "@/agents/execution/completionHandler";
+import type { CompletionIntent } from "@/nostr/AgentEventEncoder";
 
 const completeSchema = z.object({
     response: z
@@ -29,7 +28,7 @@ const completeSchema = z.object({
  * DO NOT use this for conversational responses - just respond normally for those.
  * YOUR JOB IS NOT DONE UNTIL YOU EXPLICITLY USE THIS TOOL
  */
-export const completeTool = createToolDefinition<z.infer<typeof completeSchema>, Termination>({
+export const completeTool = createToolDefinition<z.infer<typeof completeSchema>, CompletionIntent>({
     name: "complete",
     description:
         "Signal task completion and return control to the delegating agent",
@@ -60,34 +59,22 @@ REMEMBER:
     execute: async (input, context) => {
         const { response, summary } = input.value;
 
-        // Use the shared completion handler to create the completion event
-        const { completion, event } = await handleAgentCompletion({
-            response,
-            summary,
-            agent: context.agent,
-            conversationId: context.conversationId,
-            publisher: context.publisher,
-            triggeringEvent: context.triggeringEvent,
-            conversationManager: context.conversationManager,
-        });
+        // Simply return the completion intent
+        // RAL will handle event creation and publishing
+        const intent: CompletionIntent = {
+            type: 'completion',
+            content: response,
+            summary: summary
+        };
 
-        // Sign the event but DON'T publish it yet
-        await event.sign(context.agent.signer);
-        
         // Debug logging
         const { logger } = await import("@/utils/logger");
-        logger.debug("[complete() tool] Created completion event (deferred publishing)", {
+        logger.debug("[complete() tool] Returning completion intent", {
             agent: context.agent.name,
-            eventId: event.id,
-            contentLength: event.content?.length || 0,
-            tagCount: event.tags?.length || 0,
+            contentLength: response.length,
+            hasSummary: !!summary
         });
 
-        // Return the completion with the serialized event for RAL to handle
-        return success({
-            ...completion,
-            serializedEvent: event.rawEvent(),
-            toolType: 'complete'
-        });
+        return success(intent);
     },
 });

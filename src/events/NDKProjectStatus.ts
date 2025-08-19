@@ -87,32 +87,35 @@ export class NDKProjectStatus extends NDKEvent {
 
     /**
      * Get all model configurations from this status event
-     * Returns an array of {model, configName} objects
+     * Returns an array of {modelSlug, agents} objects where agents is an array of agent slugs
      */
-    get models(): Array<{ model: string; configName: string }> {
+    get models(): Array<{ modelSlug: string; agents: string[] }> {
         const modelTags = this.tags.filter(tag => tag[0] === "model");
         return modelTags.map(tag => ({
-            model: tag[1] || "",
-            configName: tag[2] || ""
+            modelSlug: tag[1] || "",
+            agents: tag.slice(2).filter(a => a) // Get all agent slugs from index 2 onwards
         }));
     }
 
     /**
-     * Add a model configuration to the status
-     * @param model The model identifier (e.g., "gpt-4", "claude-3")
-     * @param configName The configuration name
+     * Add a model with its agent access list
+     * @param modelSlug The model slug identifier (e.g., "gpt-4", "claude-3")
+     * @param agentSlugs Array of agent slugs that use this model
      */
-    addModel(model: string, configName: string): void {
-        this.tags.push(["model", model, configName]);
+    addModel(modelSlug: string, agentSlugs: string[]): void {
+        // Remove existing model tag if it exists
+        this.removeModel(modelSlug);
+        // Add new model tag with all agent slugs
+        this.tags.push(["model", modelSlug, ...agentSlugs]);
     }
 
     /**
-     * Remove a model configuration from the status
-     * @param configName The configuration name to remove
+     * Remove a model from the status
+     * @param modelSlug The model slug to remove
      */
-    removeModel(configName: string): void {
+    removeModel(modelSlug: string): void {
         this.tags = this.tags.filter(tag => 
-            !(tag[0] === "model" && tag[2] === configName)
+            !(tag[0] === "model" && tag[1] === modelSlug)
         );
     }
 
@@ -124,25 +127,46 @@ export class NDKProjectStatus extends NDKEvent {
     }
 
     /**
-     * Check if a specific model configuration exists
-     * @param configName The configuration name
+     * Check if a specific model exists
+     * @param modelSlug The model slug
      */
-    hasModel(configName: string): boolean {
+    hasModel(modelSlug: string): boolean {
         return this.tags.some(tag => 
-            tag[0] === "model" && tag[2] === configName
+            tag[0] === "model" && tag[1] === modelSlug
         );
     }
 
     /**
-     * Get a specific model by config name
-     * @param configName The configuration name
-     * @returns The model name or undefined if not found
+     * Get agents that use a specific model
+     * @param modelSlug The model slug
+     * @returns Array of agent slugs that use this model
      */
-    getModel(configName: string): string | undefined {
+    getModelAgents(modelSlug: string): string[] {
         const modelTag = this.tags.find(tag => 
-            tag[0] === "model" && tag[2] === configName
+            tag[0] === "model" && tag[1] === modelSlug
         );
-        return modelTag?.[1];
+        return modelTag ? modelTag.slice(2).filter(a => a) : [];
+    }
+
+    /**
+     * Check if a specific agent uses a model
+     * @param modelSlug The model slug
+     * @param agentSlug The agent slug
+     */
+    agentUsesModel(modelSlug: string, agentSlug: string): boolean {
+        const agents = this.getModelAgents(modelSlug);
+        return agents.includes(agentSlug);
+    }
+
+    /**
+     * Get all models used by a specific agent
+     * @param agentSlug The agent slug
+     * @returns Array of model slugs used by this agent
+     */
+    getAgentModels(agentSlug: string): string[] {
+        return this.models
+            .filter(model => model.agents.includes(agentSlug))
+            .map(model => model.modelSlug);
     }
 
     /**

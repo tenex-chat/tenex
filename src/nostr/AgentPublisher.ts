@@ -1,14 +1,160 @@
-import type { AgentConfig } from "@/agents/types";
-import { EVENT_KINDS } from "@/llm";
+import { NDKEvent, NDKTask, NDK, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr/ndkClient";
+import { 
+    AgentEventEncoder, 
+    AgentEventDecoder,
+    type CompletionIntent, 
+    type DelegationIntent, 
+    type ConversationIntent,
+    type EventContext 
+} from "./AgentEventEncoder";
+import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent, type NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import type { AgentInstance, AgentConfig } from "@/agents/types";
 
 /**
- * Service for publishing agent-related Nostr events
+ * Comprehensive publisher for all agent-related Nostr events.
+ * Handles agent creation, responses, completions, and delegations.
  */
 export class AgentPublisher {
-    constructor(private ndk: NDK) {}
+    private ndk: NDK;
+
+    constructor(ndk?: NDK) {
+        this.ndk = ndk || getNDK();
+    }
+
+    /**
+     * Publish a completion event.
+     * Creates and publishes a properly tagged completion event.
+     */
+    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
+        logger.info("Dispatching completion", {
+            agent: context.agent.name,
+            contentLength: intent.content.length,
+            summary: intent.summary,
+            nextAgent: intent.nextAgent
+        });
+
+        const event = AgentEventEncoder.encodeCompletion(intent, context);
+        
+        // Sign and publish
+        await event.sign(context.agent.signer);
+        await event.publish();
+
+        logger.info("Completion event published", {
+            eventId: event.id,
+            agent: context.agent.name
+        });
+
+        return event;
+    }
+
+    /**
+     * Publish delegation task events.
+     * Creates and publishes task events for each recipient.
+     */
+    async delegate(intent: DelegationIntent, context: EventContext): Promise<{
+        tasks: NDKTask[];
+        batchId: string;
+    }> {
+        logger.info("Dispatching delegation", {
+            agent: context.agent.name,
+            recipients: intent.recipients.length,
+            phase: intent.phase
+        });
+
+        const tasks = AgentEventEncoder.encodeDelegation(intent, context);
+        
+        // Sign all tasks first
+        for (const task of tasks) {
+            await task.sign(context.agent.signer);
+        }
+
+        // Register with DelegationRegistry
+        const registry = DelegationRegistry.getInstance();
+        const batchId = await registry.registerDelegationBatch({
+            tasks: tasks.map((task, index) => ({
+                taskId: task.id,
+                assignedToPubkey: intent.recipients[index],
+                title: intent.title,
+                fullRequest: intent.request,
+                phase: intent.phase
+            })),
+            delegatingAgent: context.agent,
+            conversationId: context.conversationId,
+            originalRequest: intent.request
+        });
+
+        // Publish all tasks
+        for (const task of tasks) {
+            await task.publish();
+            logger.debug("Published delegation task", {
+                taskId: task.id,
+                assignedTo: task.tagValue('p')
+            });
+        }
+
+        logger.info("Delegation batch published", {
+            batchId,
+            taskCount: tasks.length
+        });
+
+        return { tasks, batchId };
+    }
+
+    /**
+     * Publish a conversation response.
+     * Creates and publishes a standard response event.
+     */
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+        logger.debug("Dispatching conversation response", {
+            agent: context.agent.name,
+            contentLength: intent.content.length
+        });
+
+        const event = AgentEventEncoder.encodeConversation(intent, context);
+        
+        // Sign and publish
+        await event.sign(context.agent.signer);
+        await event.publish();
+
+        return event;
+    }
+
+    /**
+     * Static helper methods for event interpretation.
+     * Delegates to AgentEventDecoder for consistency.
+     */
+    static isCompletionEvent(event: NDKEvent): boolean {
+        return AgentEventDecoder.isCompletionEvent(event);
+    }
+
+    static isDelegationEvent(event: NDKEvent): boolean {
+        return AgentEventDecoder.isDelegationEvent(event);
+    }
+
+    static decodeIntent(event: NDKEvent): CompletionIntent | DelegationIntent | ConversationIntent | null {
+        // Try to decode as completion
+        const completion = AgentEventDecoder.decodeCompletion(event);
+        if (completion) return completion;
+
+        // Try to decode as delegation
+        const delegation = AgentEventDecoder.decodeDelegation(event);
+        if (delegation) return delegation;
+
+        // Default to conversation if it's an agent response
+        if (event.kind === EVENT_KINDS.AGENT_RESPONSE) {
+            return {
+                type: 'conversation',
+                content: event.content
+            };
+        }
+
+        return null;
+    }
+
+    // ===== Agent Creation Events (from src/agents/AgentPublisher.ts) =====
 
     /**
      * Publishes a kind:0 profile event for an agent

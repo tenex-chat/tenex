@@ -4,7 +4,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import { createToolDefinition } from "../types";
+import { createToolDefinition, success, failure } from "../types";
 
 /**
  * Strips thinking blocks from content.
@@ -106,14 +106,11 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
             });
 
             if (!result.success) {
-                return {
-                    ok: false,
-                    error: {
-                        kind: "execution" as const,
-                        tool: "claude_code",
-                        message: `Claude code execution failed: ${result.error || "Unknown error"}`,
-                    },
-                };
+                return failure({
+                    kind: "execution" as const,
+                    tool: "claude_code",
+                    message: `Claude code execution failed: ${result.error || "Unknown error"}`,
+                });
             }
 
             // Update the Claude session ID in the conversation's agent state
@@ -136,28 +133,22 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
                 duration: result.duration,
             });
 
-            return {
-                ok: true,
-                value: {
-                    sessionId: result.sessionId,
-                    totalCost: result.totalCost,
-                    messageCount: result.messageCount,
-                    duration: result.duration,
-                    response,
-                },
-            };
+            return success({
+                sessionId: result.sessionId,
+                totalCost: result.totalCost,
+                messageCount: result.messageCount,
+                duration: result.duration,
+                response,
+            });
         } catch (error) {
             logger.error("Claude Code tool failed", { error });
 
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "claude_code",
-                    message: formatAnyError(error),
-                    cause: error,
-                },
-            };
+            return failure({
+                kind: "execution" as const,
+                tool: "claude_code",
+                message: formatAnyError(error),
+                cause: error,
+            });
         }
     },
 });
