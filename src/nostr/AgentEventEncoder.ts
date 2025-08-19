@@ -1,5 +1,4 @@
 import { NDKEvent, NDKTask, NDKKind } from "@nostr-dev-kit/ndk";
-import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { getNDK } from "@/nostr/ndkClient";
@@ -66,16 +65,10 @@ export interface LessonIntent {
     hashtags?: string[];
 }
 
-export interface AgentStateUpdateIntent {
-    type: 'agent_state_update';
-    updates: Record<string, any>;
-}
-
-export type AgentIntent = CompletionIntent | DelegationIntent | ConversationIntent | ErrorIntent | TypingIntent | StreamingIntent | StatusIntent | LessonIntent | AgentStateUpdateIntent;
+export type AgentIntent = CompletionIntent | DelegationIntent | ConversationIntent | ErrorIntent | TypingIntent | StreamingIntent | StatusIntent | LessonIntent;
 
 // Execution context provided by RAL
 export interface EventContext {
-    agent: AgentInstance;
     triggeringEvent: NDKEvent;
     conversationEvent?: NDKEvent; // Optional - not all events belong to conversations
     delegatingAgentPubkey?: string; // For task completions
@@ -217,7 +210,10 @@ export  class AgentEventEncoder {
      * Centralizes common tagging logic.
      */
     private static addStandardTags(event: NDKEvent, context: EventContext): void {
-        // Note: conversation-id is already in the E tag, no need to duplicate
+        // Add project tag - ALL agent events should reference their project
+        const { getProjectContext } = require('@/services');
+        const projectCtx = getProjectContext();
+        event.tag(projectCtx.project);
 
         // Tool usage metadata
         if (context.toolCalls && context.toolCalls.length > 0) {
@@ -265,17 +261,16 @@ export  class AgentEventEncoder {
      */
     static encodeTypingIndicator(intent: TypingIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = EVENT_KINDS.TYPING_INDICATOR;
         
-        // Content based on state
+        // Use appropriate event kind based on state
         if (intent.state === 'start') {
+            event.kind = EVENT_KINDS.TYPING_INDICATOR;
             event.content = intent.message || `${context.agent.name} is typing`;
         } else {
+            // Stop event uses different kind
+            event.kind = EVENT_KINDS.TYPING_INDICATOR_STOP;
             event.content = '';
         }
-        
-        // Add typing indicator tag
-        event.tag(['typing-indicator', intent.state]);
         
         // Add conversation reference (not full conversation tags) if available
         if (context.conversationEvent && context.conversationEvent.id) {

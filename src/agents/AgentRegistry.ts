@@ -612,13 +612,8 @@ export class AgentRegistry {
                 projectEvent = projectCtx.project;
             }
 
-            const ndk = getNDK();
-
-            // Create agent publisher - no agent passed since we're creating agents
-            const publisher = new AgentPublisher(undefined, ndk);
-
-            // Publish agent profile (kind:0) and request event
-            await publisher.publishAgentCreation(
+            // Publish agent profile (kind:0) and request event using static method
+            await AgentPublisher.publishAgentCreation(
                 signer,
                 config,
                 projectTitle,
@@ -951,13 +946,10 @@ export class AgentRegistry {
             projectEvent = projectCtx.project;
         }
 
-        const ndk = getNDK();
-        const publisher = new AgentPublisher(undefined, ndk);
-
         // Republish kind:0 for each agent
         for (const [slug, agent] of Array.from(this.agents.entries())) {
             try {
-                await publisher.publishAgentProfile(
+                await AgentPublisher.publishAgentProfile(
                     agent.signer,
                     agent.name,
                     agent.role,

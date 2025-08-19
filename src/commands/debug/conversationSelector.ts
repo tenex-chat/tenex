@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { formatDuration } from "@/utils/formatting";
 
 interface ConversationChoice {
@@ -9,7 +9,7 @@ interface ConversationChoice {
     short: string;
 }
 
-export async function selectConversation(conversationManager: ConversationManager): Promise<string | null> {
+export async function selectConversation(conversationManager: ConversationCoordinator): Promise<string | null> {
     const conversations = conversationManager.getAllConversations();
     
     if (conversations.length === 0) {

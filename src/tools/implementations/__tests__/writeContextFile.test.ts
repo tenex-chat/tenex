@@ -83,7 +83,7 @@ describe("writeContextFile tool", () => {
     let testDir: string;
     let context: ToolContext;
     let contextPath: string;
-    let mockConversationManager: any;
+    let mockConversationCoordinator: any;
 
     beforeEach(async () => {
         testDir = await createTempDir();
@@ -113,7 +113,7 @@ describe("writeContextFile tool", () => {
         mockReply.sign = mock(async () => {});
         
         // Create mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             getConversation: mock(() => ({
                 metadata: {
                     readFiles: []
@@ -132,7 +132,7 @@ describe("writeContextFile tool", () => {
                 pubkey: "pubkey123",
                 signer: mock(() => {})
             },
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
         } as any;
     });
 
@@ -184,7 +184,7 @@ describe("writeContextFile tool", () => {
             writeFileSync(filePath, "original content");
 
             // Update mock to include file in readFiles
-            mockConversationManager.getConversation = mock(() => ({
+            mockConversationCoordinator.getConversation = mock(() => ({
                 metadata: {
                     readFiles: [`context/${filename}`]
                 }
@@ -261,7 +261,7 @@ describe("writeContextFile tool", () => {
             writeFileSync(filePath, "original content");
 
             // Mock conversation with no metadata
-            mockConversationManager.getConversation = mock(() => ({
+            mockConversationCoordinator.getConversation = mock(() => ({
                 metadata: undefined
             }));
 
@@ -538,7 +538,7 @@ describe("writeContextFile tool", () => {
         });
 
         it("should handle null conversation", async () => {
-            mockConversationManager.getConversation = mock(() => null);
+            mockConversationCoordinator.getConversation = mock(() => null);
 
             const result = await writeContextFileTool.execute({
                 value: {

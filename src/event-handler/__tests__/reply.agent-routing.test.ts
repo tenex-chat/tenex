@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
-import type { ConversationManager } from "../../conversations";
+import type { ConversationCoordinator } from "../../conversations";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import { getProjectContext } from "../../services";
 
@@ -16,7 +16,7 @@ mock.module("../../utils/logger", () => ({
 }));
 
 describe("Agent Event Routing", () => {
-    let mockConversationManager: ConversationManager;
+    let mockConversationCoordinator: ConversationCoordinator;
     let mockAgentExecutor: AgentExecutor;
     let mockProjectContext: any;
 
@@ -25,7 +25,7 @@ describe("Agent Event Routing", () => {
         mock.restore();
 
         // Create mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             getConversationByEvent: mock(() => undefined),
             getConversation: mock(() => undefined),
             getTaskMapping: mock(() => undefined),
@@ -87,7 +87,7 @@ describe("Agent Event Routing", () => {
 
         // Handle the event
         await handleChatMessage(agentEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
@@ -127,11 +127,11 @@ describe("Agent Event Routing", () => {
         };
 
         // Update mock to return conversation
-        mockConversationManager.getConversationByEvent = mock(() => mockConversation);
+        mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
 
         // Handle the event
         await handleChatMessage(userEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
@@ -178,11 +178,11 @@ describe("Agent Event Routing", () => {
         };
 
         // Update mock to return conversation
-        mockConversationManager.getConversationByEvent = mock(() => mockConversation);
+        mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
 
         // Handle the event
         await handleChatMessage(agentEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 

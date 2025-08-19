@@ -144,8 +144,8 @@ export class ToolPlugin extends Plugin {
                 return `🔌 Discovering MCP capabilities`;
             case "delegate":
                 return `🔄 Delegating task: ${args.description || args.title || "task"}`;
-            case "switch_phase":
-                return `📋 Switching to ${args.phase || "new"} phase`;
+            case "delegate_phase":
+                return `📋 Switching to ${args.phase || "new"} phase and delegating`;
             case "nostr_projects":
                 return `📡 Managing Nostr projects`;
             case "complete":

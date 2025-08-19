@@ -29,7 +29,6 @@ export class ConfigService {
     private static instance: ConfigService;
     private cache = new Map<string, { data: unknown; timestamp: number }>();
     private readonly CACHE_TTL_MS = 5000; // 5 seconds
-    private readonly cacheTTL = this.CACHE_TTL_MS; // Keep for backwards compatibility
 
     private constructor() {}
 

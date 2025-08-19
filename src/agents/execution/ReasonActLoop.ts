@@ -42,9 +42,7 @@ export class ReasonActLoop {
     ) {
         this.repetitionDetector = new ToolRepetitionDetector();
         this.messageBuilder = new MessageBuilder();
-        // AgentPublisher will be initialized in execute() when we have the agent context
-        this.agentPublisher = new AgentPublisher();
-        this.agentStreamer = new AgentStreamer(this.agentPublisher);
+        // AgentPublisher and AgentStreamer will be initialized in execute() when we have the agent
     }
 
     /**
@@ -60,7 +58,7 @@ export class ReasonActLoop {
         const tracingContext = createTracingContext(context.conversationId);
         this.executionLogger = createExecutionLogger(tracingContext, "agent");
         
-        // Initialize AgentPublisher with the agent from context
+        // Initialize AgentPublisher and AgentStreamer with the agent from context
         this.agentPublisher = new AgentPublisher(context.agent);
         this.agentStreamer = new AgentStreamer(this.agentPublisher);
 
@@ -336,8 +334,8 @@ export class ReasonActLoop {
                     }
 
                     if (isTerminalTool && !deferredTerminalEvent) {
-                        // Legacy terminal tool behavior (shouldn't happen with our updates)
-                        tracingLogger.info("[ReasonActLoop] Terminal tool detected (legacy path)", {
+                        // Terminal tool executed but didn't produce expected deferred event
+                        tracingLogger.warn("[ReasonActLoop] Terminal tool didn't produce deferred event", {
                             tool: event.tool,
                         });
                         isTerminal = true;
@@ -539,11 +537,14 @@ export class ReasonActLoop {
     private createStreamHandle(context: ExecutionContext): StreamHandle | undefined {
         if (!context.publisher) return undefined;
         
+        // Get conversation for the event context
+        const conversation = context.conversationManager.getConversation(context.conversationId);
+        
         // Build event context for streaming
         const eventContext: EventContext = {
             agent: context.agent,
             triggeringEvent: context.triggeringEvent,
-            conversationId: context.conversationId
+            conversationEvent: conversation ? conversation.history[0] : undefined // Root event is first in history
         };
         
         return this.agentStreamer.createStreamHandle(eventContext);
@@ -646,10 +647,13 @@ export class ReasonActLoop {
             }
         }
         
+        // Get conversation for the event context
+        const conversation = context.conversationManager.getConversation(context.conversationId);
+        
         const eventContext: EventContext = {
             agent: context.agent,
             triggeringEvent: context.triggeringEvent,
-            conversationId: context.conversationId,
+            conversationEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
             delegatingAgentPubkey,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             executionTime: this.startTime ? Date.now() - this.startTime : undefined,

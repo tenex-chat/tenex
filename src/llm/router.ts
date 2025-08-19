@@ -153,11 +153,6 @@ export class LLMRouter implements LLMService {
             }
 
             // Execute completion with API
-            console.log(
-              "running llm.complete",
-              request.messages.length,
-              request.messages[request.messages.length-1].content.substring(0, 500)
-            );
             response = await llm.complete(model, request.messages, {
                 usage: true,
                 caching: true,
@@ -274,11 +269,6 @@ export class LLMRouter implements LLMService {
             }
 
             // Use generate() for streaming
-            console.log(
-              "running llm.generate",
-              request.messages.length,
-              request.messages[request.messages.length - 1].content.substring(0, 500)
-            );
             const stream = llm.generate(model, request.messages, {
                 usage: true,
                 caching: config.enableCaching ?? true,

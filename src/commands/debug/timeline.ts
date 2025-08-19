@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
 import type { CommandModule } from "yargs";
-import { ConversationManager } from "@/conversations/ConversationManager";
+import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMCallLogEntry } from "@/llm/callLogger";
 import type { ToolCallLogEntry } from "@/tools/toolLogger";
 import { selectConversation } from "./conversationSelector";
@@ -35,7 +35,7 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
             const projectPath = process.cwd();
             
             // Initialize conversation manager
-            const conversationManager = new ConversationManager(projectPath);
+            const conversationManager = new ConversationCoordinator(projectPath);
             await conversationManager.initialize();
             
             // Get conversation ID either from argument or selector

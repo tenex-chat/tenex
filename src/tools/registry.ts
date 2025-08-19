@@ -21,7 +21,6 @@ import { delegateTool } from "./implementations/delegate";
 import { delegatePhaseTool } from "./implementations/delegate_phase";
 import { nostrProjectsTool } from "./implementations/nostr-projects";
 import { claudeCode } from "./implementations/claude_code";
-import { switchPhaseTool } from "./implementations/switch_phase";
 import type { Tool } from "./types";
 
 /**
@@ -43,8 +42,7 @@ export type ToolName =
   | "delegate"
   | "delegate_phase"
   | "nostr_projects"
-  | "claude_code"
-  | "switch_phase";
+  | "claude_code";
 
 /**
  * Registry of all available tools mapped by their canonical names.
@@ -66,7 +64,6 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["delegate_phase", delegatePhaseTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
-  ["switch_phase", switchPhaseTool],
 ]);
 
 /**

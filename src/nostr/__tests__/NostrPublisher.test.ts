@@ -3,7 +3,7 @@ import { NostrPublisher } from "../NostrPublisher";
 import type { NostrPublisherContext, ResponseOptions } from "../NostrPublisher";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 
 // Mock dependencies
 jest.mock("@/nostr", () => ({
@@ -59,7 +59,7 @@ describe("NostrPublisher", () => {
                     title: "Test Conversation",
                     phase: "executing"
                 }))
-            } as unknown as ConversationManager
+            } as unknown as ConversationCoordinator
         };
 
         publisher = new NostrPublisher(mockContext);

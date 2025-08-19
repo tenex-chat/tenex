@@ -3,7 +3,7 @@ import { mock, mockReset } from 'jest-mock-extended';
 import { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import { Agent } from "../../agents/types";
 import { Conversation } from "../../conversations";
-import { ConversationManager } from "../../conversations/ConversationManager";
+import { ConversationCoordinator } from "../../conversations/ConversationCoordinator";
 import { getProjectContext, setProjectContext } from "../../services";
 import { ProjectContext } from "../../services/ProjectContext";
 import { logger } from "../../utils/logger";
@@ -23,14 +23,14 @@ jest.mock('../../utils/logger', () => ({
 jest.mock('../../services/ProjectContext');
 
 describe('handleChatMessage (Reply Logic)', () => {
-    let mockConversationManager: ReturnType<typeof mock<ConversationManager>>;
+    let mockConversationCoordinator: ReturnType<typeof mock<ConversationCoordinator>>;
     let mockAgentExecutor: ReturnType<typeof mock<AgentExecutor>>;
     let mockProjectContext: ReturnType<typeof mock<ProjectContext>>;
     let testAgent: Agent;
 
     beforeEach(() => {
         mockReset(logger.error); // Reset mock before each test
-        mockConversationManager = mock<ConversationManager>();
+        mockConversationCoordinator = mock<ConversationCoordinator>();
         mockAgentExecutor = mock<AgentExecutor>();
         mockProjectContext = mock<ProjectContext>();
 
@@ -72,15 +72,15 @@ describe('handleChatMessage (Reply Logic)', () => {
         
         // Setup mocks
         // 1. No conversation found initially
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
 
         // 2. A new conversation is created
         const newConversation = new Conversation(new NDKEvent(undefined, { id: unknownConvRoot, content: 'synthetic', pubkey: userPubkey }));
-        mockConversationManager.createConversation.mockResolvedValue(newConversation);
+        mockConversationCoordinator.createConversation.mockResolvedValue(newConversation);
 
         // Act
         await handleChatMessage(orphanedReplyEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
@@ -89,17 +89,17 @@ describe('handleChatMessage (Reply Logic)', () => {
         expect(logger.error).not.toHaveBeenCalledWith("No conversation found for reply", expect.any(Object));
 
         // 2. It should have tried to find a conversation
-        expect(mockConversationManager.getConversationByEvent).toHaveBeenCalledWith(unknownConvRoot);
+        expect(mockConversationCoordinator.getConversationByEvent).toHaveBeenCalledWith(unknownConvRoot);
 
         // 3. It should create a new conversation with a synthetic root event
-        expect(mockConversationManager.createConversation).toHaveBeenCalledTimes(1);
-        const createConversationCallArg = mockConversationManager.createConversation.mock.calls[0][0];
+        expect(mockConversationCoordinator.createConversation).toHaveBeenCalledTimes(1);
+        const createConversationCallArg = mockConversationCoordinator.createConversation.mock.calls[0][0];
         expect(createConversationCallArg.id).toBe(unknownConvRoot);
         expect(createConversationCallArg.content).toContain('[Orphaned conversation - original root not found]');
         expect(createConversationCallArg.content).toContain(orphanedReplyEvent.content);
 
         // 4. It should add the original reply to the new conversation
-        expect(mockConversationManager.addEvent).toHaveBeenCalledWith(newConversation.id, orphanedReplyEvent);
+        expect(mockConversationCoordinator.addEvent).toHaveBeenCalledWith(newConversation.id, orphanedReplyEvent);
 
         // 5. It should execute the agent
         expect(mockAgentExecutor.execute).toHaveBeenCalledTimes(1);
@@ -121,17 +121,17 @@ describe('handleChatMessage (Reply Logic)', () => {
             ],
         });
         
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
 
         await handleChatMessage(orphanedReplyEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         // The logic to check if the message is directed to the system runs before handleReplyLogic
         // Since it's not directed to the system, handleReplyLogic is not even called.
-        expect(mockConversationManager.getConversationByEvent).not.toHaveBeenCalled();
-        expect(mockConversationManager.createConversation).not.toHaveBeenCalled();
+        expect(mockConversationCoordinator.getConversationByEvent).not.toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).not.toHaveBeenCalled();
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
 
@@ -146,15 +146,15 @@ describe('handleChatMessage (Reply Logic)', () => {
             ],
         });
 
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
 
         await handleChatMessage(standardReplyEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         expect(logger.error).toHaveBeenCalledWith("No conversation found for reply", expect.any(Object));
-        expect(mockConversationManager.createConversation).not.toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).not.toHaveBeenCalled();
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
 
@@ -193,14 +193,14 @@ describe('handleChatMessage (Reply Logic)', () => {
         } as any);
 
         await handleChatMessage(pmReplyEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         // Verify the event was skipped
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Skipping agent's own message"));
-        expect(mockConversationManager.getConversationByEvent).not.toHaveBeenCalled();
-        expect(mockConversationManager.createConversation).not.toHaveBeenCalled();
+        expect(mockConversationCoordinator.getConversationByEvent).not.toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).not.toHaveBeenCalled();
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
 });

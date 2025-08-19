@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { ConversationManager } from "../ConversationManager";
+import { ConversationCoordinator } from "../ConversationCoordinator";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { PHASES } from "../phases";
 import type { AgentInstance } from "@/agents/types";
@@ -66,12 +66,12 @@ mock.module("@/nostr/utils", () => ({
     }
 }));
 
-describe("ConversationManager - Phase Transitions", () => {
-    let manager: ConversationManager;
+describe("ConversationCoordinator - Phase Transitions", () => {
+    let manager: ConversationCoordinator;
     const projectPath = "/tmp/test-project-" + Date.now();
     
     beforeEach(async () => {
-        manager = new ConversationManager(projectPath);
+        manager = new ConversationCoordinator(projectPath);
         await manager.initialize();
     });
 

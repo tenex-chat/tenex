@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
 import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { Conversation } from "@/conversations/types";
 import { logger } from "@/utils/logger";
@@ -19,7 +19,7 @@ mock.module("@/utils/logger", () => ({
 }));
 
 describe("Task Reply Routing", () => {
-    let mockConversationManager: any;
+    let mockConversationCoordinator: any;
     let mockAgentExecutor: any;
     let mockProjectContext: any;
     let userPubkey: string;
@@ -60,7 +60,7 @@ describe("Task Reply Routing", () => {
         spyOn(services, "getProjectContext").mockReturnValue(mockProjectContext);
 
         // Create mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             getConversationByEvent: mock(),
             getConversation: mock(),
             createConversation: mock(),
@@ -113,30 +113,30 @@ describe("Task Reply Routing", () => {
         };
 
         // Setup mocks
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined); // No direct conversation found
-        mockConversationManager.getTaskMapping.mockReturnValue({
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined); // No direct conversation found
+        mockConversationCoordinator.getTaskMapping.mockReturnValue({
             conversationId,
             claudeSessionId,
         });
-        mockConversationManager.getConversation.mockImplementation((id: string) => {
+        mockConversationCoordinator.getConversation.mockImplementation((id: string) => {
             if (id === conversationId) return mockConversation;
             return undefined;
         });
 
         // Call the handler
         await handleChatMessage(replyToTaskEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         // Verify task mapping was checked
-        expect(mockConversationManager.getTaskMapping).toHaveBeenCalledWith(taskId);
+        expect(mockConversationCoordinator.getTaskMapping).toHaveBeenCalledWith(taskId);
 
         // Verify conversation was retrieved using the mapped ID
-        expect(mockConversationManager.getConversation).toHaveBeenCalledWith(conversationId);
+        expect(mockConversationCoordinator.getConversation).toHaveBeenCalledWith(conversationId);
 
         // Verify event was added to the conversation
-        expect(mockConversationManager.addEvent).toHaveBeenCalledWith(conversationId, replyToTaskEvent);
+        expect(mockConversationCoordinator.addEvent).toHaveBeenCalledWith(conversationId, replyToTaskEvent);
 
         // Verify agent executor was called with the correct Claude session ID
         expect(mockAgentExecutor.execute).toHaveBeenCalledWith(
@@ -180,27 +180,27 @@ describe("Task Reply Routing", () => {
         };
 
         // Setup mocks
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
-        mockConversationManager.getTaskMapping.mockReturnValue(undefined); // No mapping exists
-        mockConversationManager.getConversation.mockImplementation((id: string) => {
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getTaskMapping.mockReturnValue(undefined); // No mapping exists
+        mockConversationCoordinator.getConversation.mockImplementation((id: string) => {
             if (id === taskId) return mockConversation;
             return undefined;
         });
 
         // Call the handler
         await handleChatMessage(replyToTaskEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         // Verify task mapping was checked first
-        expect(mockConversationManager.getTaskMapping).toHaveBeenCalledWith(taskId);
+        expect(mockConversationCoordinator.getTaskMapping).toHaveBeenCalledWith(taskId);
 
         // Verify fallback to direct conversation lookup
-        expect(mockConversationManager.getConversation).toHaveBeenCalledWith(taskId);
+        expect(mockConversationCoordinator.getConversation).toHaveBeenCalledWith(taskId);
 
         // Verify event was processed
-        expect(mockConversationManager.addEvent).toHaveBeenCalledWith(taskId, replyToTaskEvent);
+        expect(mockConversationCoordinator.addEvent).toHaveBeenCalledWith(taskId, replyToTaskEvent);
         expect(mockAgentExecutor.execute).toHaveBeenCalled();
     });
 
@@ -241,16 +241,16 @@ describe("Task Reply Routing", () => {
         };
 
         // Setup mocks
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
-        mockConversationManager.getTaskMapping.mockReturnValue({
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getTaskMapping.mockReturnValue({
             conversationId,
             claudeSessionId: mappedSessionId,  // Mapping has a session ID
         });
-        mockConversationManager.getConversation.mockReturnValue(mockConversation);
+        mockConversationCoordinator.getConversation.mockReturnValue(mockConversation);
 
         // Call the handler
         await handleChatMessage(replyWithSessionTag, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
@@ -278,19 +278,19 @@ describe("Task Reply Routing", () => {
         });
 
         // Setup mocks - no conversation found anywhere
-        mockConversationManager.getConversationByEvent.mockReturnValue(undefined);
-        mockConversationManager.getTaskMapping.mockReturnValue(undefined);
-        mockConversationManager.getConversation.mockReturnValue(undefined);
+        mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
+        mockConversationCoordinator.getTaskMapping.mockReturnValue(undefined);
+        mockConversationCoordinator.getConversation.mockReturnValue(undefined);
 
         // Call the handler
         await handleChatMessage(replyToNonExistentTask, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor,
         });
 
         // Verify attempts were made to find the conversation
-        expect(mockConversationManager.getTaskMapping).toHaveBeenCalledWith(taskId);
-        expect(mockConversationManager.getConversation).toHaveBeenCalledWith(taskId);
+        expect(mockConversationCoordinator.getTaskMapping).toHaveBeenCalledWith(taskId);
+        expect(mockConversationCoordinator.getConversation).toHaveBeenCalledWith(taskId);
 
         // Verify no execution happened (no conversation found)
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();

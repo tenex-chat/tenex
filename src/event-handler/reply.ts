@@ -3,7 +3,7 @@ import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ExecutionConfig } from "../agents/execution/constants";
 import type { ExecutionContext } from "../agents/execution/types";
-import type { ConversationManager, Conversation } from "../conversations";
+import type { ConversationCoordinator, Conversation } from "../conversations";
 import { NostrPublisher } from "../nostr";
 import { getProjectContext } from "../services";
 import { DelegationRegistry } from "../services/DelegationRegistry";
@@ -14,7 +14,7 @@ import { logger } from "../utils/logger";
 const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
     agentExecutor: AgentExecutor;
 }
 
@@ -69,7 +69,7 @@ export const handleChatMessage = async (
  */
 async function findConversationForReply(
     event: NDKEvent,
-    conversationManager: ConversationManager
+    conversationManager: ConversationCoordinator
 ): Promise<{ conversation: Conversation | undefined; claudeSessionId?: string }> {
     const convRoot = event.tagValue("E") || event.tagValue("A");
     
@@ -148,7 +148,7 @@ async function findConversationForReply(
  */
 async function handleOrphanedReply(
     event: NDKEvent,
-    conversationManager: ConversationManager,
+    conversationManager: ConversationCoordinator,
     mentionedPubkeys: string[]
 ): Promise<Conversation | undefined> {
     if (event.tagValue("K") !== "11" || mentionedPubkeys.length === 0) {
@@ -227,7 +227,7 @@ function determineTargetAgent(
 async function processTaskCompletion(
     event: NDKEvent,
     conversation: Conversation,
-    conversationManager: ConversationManager
+    conversationManager: ConversationCoordinator
 ): Promise<TaskCompletionResult> {
     const taskId = event.tagValue("E");
     logger.debug('[processTaskCompletion] Task ID from E tag:', taskId?.substring(0, 8) || 'NONE');
@@ -365,7 +365,7 @@ async function executeAgent(
     executionContext: ExecutionContext,
     agentExecutor: AgentExecutor,
     conversation: Conversation,
-    conversationManager: ConversationManager,
+    conversationManager: ConversationCoordinator,
     projectManager: AgentInstance,
     event: NDKEvent
 ): Promise<void> {
@@ -393,9 +393,8 @@ async function executeAgent(
                 errorType: isCreditsError ? 'insufficient_credits' : 'execution_error'
             },
             {
-                agent: projectManager,
                 triggeringEvent: event,
-                conversationId: conversation.id
+                conversationEvent: conversation.history[0] // Root event is first in history
             }
         );
 

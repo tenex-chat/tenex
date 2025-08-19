@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { ConversationManager } from "../ConversationManager";
+import { ConversationCoordinator } from "../ConversationCoordinator";
 import { FileSystemAdapter } from "../persistence";
 import { getNDK } from "@/nostr";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -20,8 +20,8 @@ mock.module("../persistence", () => ({
     FileSystemAdapter: mock(() => ({}))
 }));
 
-describe("ConversationManager - Nostr Entity Processing", () => {
-    let conversationManager: ConversationManager;
+describe("ConversationCoordinator - Nostr Entity Processing", () => {
+    let conversationManager: ConversationCoordinator;
     let mockNDK: any;
     let mockProjectContext: any;
     let mockFetchEvent: any;
@@ -66,7 +66,7 @@ describe("ConversationManager - Nostr Entity Processing", () => {
         const MockFileSystemAdapter = FileSystemAdapter as any;
         MockFileSystemAdapter.mockImplementation(() => mockPersistence);
 
-        conversationManager = new ConversationManager("/test/path");
+        conversationManager = new ConversationCoordinator("/test/path");
     });
 
     describe("processNostrEntities", () => {

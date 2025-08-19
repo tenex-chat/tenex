@@ -114,26 +114,3 @@ export async function getConfigPath(projectPath: string = process.cwd()): Promis
         : configService.getGlobalPath();
 }
 
-/**
- * Determine whether to use project or global configuration based on flags and project detection
- * @param options - Command options with optional global and project flags
- * @param projectPath - The path to check (defaults to current working directory)
- * @returns Configuration scope information
- * @deprecated Use resolveConfigScope instead
- */
-export async function determineConfigScope(
-    options: { global?: boolean; project?: boolean },
-    projectPath: string = process.cwd()
-): Promise<{ useProject: boolean; isProject: boolean; configPath: string }> {
-    const scope = await resolveConfigScope(options, projectPath);
-    
-    if (scope.error) {
-        throw new Error(scope.error);
-    }
-    
-    return {
-        useProject: scope.isProject,
-        isProject: scope.isProject,
-        configPath: scope.basePath
-    };
-}

@@ -10,6 +10,7 @@ import { logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StatusIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import type { AgentInstance } from "@/agents/types";
 
 /**
  * StatusPublisher handles periodic publishing of status events to Nostr.
@@ -87,19 +88,21 @@ export class StatusPublisher {
             // Gather queue info
             await this.gatherQueueInfo(intent);
             
-            // Create a minimal event context for status publishing
+            // Create a minimal agent for status publishing
             // Status events are published by the project itself
+            const projectAgent: AgentInstance = {
+                pubkey: projectCtx.signer.pubkey,
+                signer: projectCtx.signer,
+                name: 'Project',
+                role: 'System',
+                tools: [],
+                llm: null,
+                isGlobal: false
+            };
+            
+            // Create event context
             // Note: No conversationEvent since status events are system-level, not part of conversations
             const context: EventContext = {
-                agent: {
-                    pubkey: projectCtx.signer.pubkey,
-                    signer: projectCtx.signer,
-                    name: 'Project',
-                    role: 'System',
-                    tools: [],
-                    llm: null,
-                    isGlobal: false
-                },
                 triggeringEvent: new NDKEvent(getNDK(), {
                     id: projectCtx.project.dTag,
                     pubkey: projectCtx.signer.pubkey,
@@ -112,8 +115,7 @@ export class StatusPublisher {
             };
             
             // Use AgentPublisher to create and publish the event
-            // Pass the agent from the context, which is a minimal project agent
-            const agentPublisher = new AgentPublisher(context.agent);
+            const agentPublisher = new AgentPublisher(projectAgent);
             await agentPublisher.status(intent, context);
         } catch (err) {
             const errorMessage = formatAnyError(err);

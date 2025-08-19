@@ -96,11 +96,13 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
         hashtags
       };
 
+      // Get conversation for the event context
+      const conversation = context.conversationManager.getConversation(context.conversationId);
+      
       // Create event context
       const eventContext: EventContext = {
-        agent: context.agent,
         triggeringEvent: context.triggeringEvent,
-        conversationId: context.conversationId
+        conversationEvent: conversation ? conversation.history[0] : undefined // Root event is first in history
       };
 
       // Use AgentPublisher to create and publish the lesson

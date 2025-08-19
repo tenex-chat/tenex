@@ -3,9 +3,9 @@ import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { getRootConversationId } from "@/utils/conversation-utils";
 import { z } from "zod";
 import { createToolDefinition, success, failure } from "../types";
-import type { AgentStateUpdateIntent } from "@/nostr/AgentEventEncoder";
 
 /**
  * Strips thinking blocks from content.
@@ -31,7 +31,7 @@ const claudeCodeSchema = z.object({
         .describe("Optional branch name for the task"),
 });
 
-interface ClaudeCodeOutput extends AgentStateUpdateIntent {
+interface ClaudeCodeOutput {
     sessionId?: string;
     totalCost: number;
     messageCount: number;
@@ -74,13 +74,27 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         });
 
         try {
-            // Get the current Claude session ID from the conversation's agent state
-            const conversation = context.conversationManager.getConversation(context.conversationId);
-            const agentState = conversation?.agentStates.get(context.agent.slug);
-            const existingSessionId = agentState?.claudeSessionId;
+            // Get the root conversation ID (handles delegations)
+            const rootConversationId = getRootConversationId(context);
+            
+            // Get the root conversation's agent state
+            const rootConversation = context.conversationManager.getConversation(rootConversationId);
+            const agentState = rootConversation?.agentStates.get(context.agent.slug);
+            const existingSessionId = agentState?.claudeSessionsByPhase?.[context.phase];
 
             if (existingSessionId) {
-                logger.info(`[claude_code] Resuming Claude session: ${existingSessionId}`);
+                logger.info(`[claude_code] Resuming Claude session for phase ${context.phase}`, {
+                    sessionId: existingSessionId,
+                    agent: context.agent.slug,
+                    phase: context.phase,
+                    rootConversationId: rootConversationId.substring(0, 8)
+                });
+            } else {
+                logger.info(`[claude_code] No existing session for phase ${context.phase}`, {
+                    agent: context.agent.slug,
+                    phase: context.phase,
+                    rootConversationId: rootConversationId.substring(0, 8)
+                });
             }
 
             // Create instances for Claude Code execution
@@ -114,6 +128,39 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
                 });
             }
 
+            // Update the Claude session ID in the root conversation's agent state for this phase
+            if (result.sessionId) {
+                const rootConversationId = getRootConversationId(context);
+                const rootConversation = context.conversationManager.getConversation(rootConversationId);
+                
+                if (rootConversation) {
+                    const agentState = rootConversation.agentStates.get(context.agent.slug) || {
+                        lastProcessedMessageIndex: 0
+                    };
+                    
+                    // Initialize claudeSessionsByPhase if it doesn't exist
+                    if (!agentState.claudeSessionsByPhase) {
+                        agentState.claudeSessionsByPhase = {};
+                    }
+                    
+                    // Store the session ID for this phase
+                    agentState.claudeSessionsByPhase[context.phase] = result.sessionId;
+                    
+                    await context.conversationManager.updateAgentState(
+                        rootConversationId,
+                        context.agent.slug,
+                        agentState
+                    );
+                    
+                    logger.info(`[claude_code] Stored Claude session ID for phase ${context.phase}`, {
+                        sessionId: result.sessionId,
+                        agent: context.agent.slug,
+                        phase: context.phase,
+                        rootConversationId: rootConversationId.substring(0, 8)
+                    });
+                }
+            }
+
             // Return the result
             const response = result.finalResponse || result.task.content || "Task completed successfully";
             
@@ -124,18 +171,13 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
                 duration: result.duration,
             });
 
-            // Return success with agent state update intent
-            const output: ClaudeCodeOutput = {
-                type: 'agent_state_update',
-                updates: result.sessionId ? { claudeSessionId: result.sessionId } : {},
+            return success({
                 sessionId: result.sessionId,
                 totalCost: result.totalCost,
                 messageCount: result.messageCount,
                 duration: result.duration,
                 response,
-            };
-
-            return success(output);
+            });
         } catch (error) {
             logger.error("Claude Code tool failed", { error });
 

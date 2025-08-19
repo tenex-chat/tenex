@@ -229,13 +229,8 @@ export class ToolStreamHandler {
         }
 
         const output = result.output as Record<string, unknown>;
-        // Check for new deferred event format
-        if (output.toolType === 'complete' || output.toolType === 'delegate' || output.toolType === 'delegate_phase') {
-            return true;
-        }
-        
-        // Legacy check for backwards compatibility
-        return output.type === "complete" || (!!output.taskIds && Array.isArray(output.taskIds));
+        // Check for terminal tool types
+        return output.toolType === 'complete' || output.toolType === 'delegate' || output.toolType === 'delegate_phase';
     }
 
     /**

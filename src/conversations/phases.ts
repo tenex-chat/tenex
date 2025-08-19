@@ -166,10 +166,6 @@ export const PHASE_DEFINITIONS: Record<Phase, PhaseDefinition> = {
     },
 } as const;
 
-// DEPRECATED: Phase transitions are now flexible and controlled by PM
-// All phases can transition to any other phase based on PM's judgment
-// export const PHASE_TRANSITIONS = { ... }
-
 export function isValidPhase(phase: string): phase is Phase {
     return ALL_PHASES.includes(phase as Phase);
 }
@@ -180,7 +176,7 @@ export function getValidTransitions(_currentPhase: Phase): readonly Phase[] {
     return ALL_PHASES;
 }
 
-// Always returns true - PM controls phase transitions through switch_phase tool
+// Always returns true - PM controls phase transitions through delegate_phase tool
 export function canTransitionTo(_currentPhase: Phase, _targetPhase: Phase): boolean {
     // Any phase can transition to any other phase
     // The PM uses context and task complexity to decide appropriate transitions

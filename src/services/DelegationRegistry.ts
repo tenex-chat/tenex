@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import type { AgentInstance } from "@/agents/types";
 import { promises as fs } from "fs";
 import path from "path";
+import { z } from "zod";
 
 interface DelegationRecord {
   // Core identifiers
@@ -58,6 +59,55 @@ interface DelegationBatch {
   conversationId: string;
 }
 
+// Zod schemas for validation
+const DelegationRecordSchema = z.object({
+  taskId: z.string(),
+  delegationBatchId: z.string(),
+  delegatingAgent: z.object({
+    slug: z.string(),
+    pubkey: z.string(),
+    conversationId: z.string()
+  }),
+  assignedTo: z.object({
+    pubkey: z.string(),
+    slug: z.string().optional()
+  }),
+  content: z.object({
+    title: z.string(),
+    fullRequest: z.string(),
+    phase: z.string().optional()
+  }),
+  status: z.enum(['pending', 'in_progress', 'completed', 'failed']),
+  completion: z.object({
+    eventId: z.string(),
+    response: z.string(),
+    summary: z.string().optional(),
+    completedAt: z.number(),
+    completedBy: z.string()
+  }).optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  siblingTaskIds: z.array(z.string())
+});
+
+const DelegationBatchSchema = z.object({
+  batchId: z.string(),
+  delegatingAgent: z.string(),
+  taskIds: z.array(z.string()),
+  allCompleted: z.boolean(),
+  createdAt: z.number(),
+  originalRequest: z.string(),
+  conversationId: z.string()
+});
+
+const PersistedDataSchema = z.object({
+  delegations: z.array(z.tuple([z.string(), DelegationRecordSchema])),
+  batches: z.array(z.tuple([z.string(), DelegationBatchSchema])),
+  agentTasks: z.array(z.tuple([z.string(), z.array(z.string())])),
+  conversationTasks: z.array(z.tuple([z.string(), z.array(z.string())])),
+  version: z.literal(1)
+});
+
 export class DelegationRegistry {
   private static instance: DelegationRegistry;
   
@@ -75,14 +125,31 @@ export class DelegationRegistry {
   
   // Persistence
   private persistencePath: string;
+  private backupPath: string;
   private persistenceTimer?: NodeJS.Timeout;
+  private cleanupTimer?: NodeJS.Interval;
   private isDirty = false;
+  private isShuttingDown = false;
   
   private constructor() {
     this.persistencePath = path.join(process.cwd(), '.tenex', 'delegations.json');
+    this.backupPath = path.join(process.cwd(), '.tenex', 'delegations.backup.json');
+    
+    // Restore data on startup
     this.restore().catch(err => 
       logger.error("Failed to restore delegation registry", { error: err })
     );
+    
+    // Set up periodic cleanup (every hour)
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupOldDelegations();
+      if (this.isDirty) {
+        this.schedulePersistence();
+      }
+    }, 60 * 60 * 1000);
+    
+    // Set up graceful shutdown
+    this.setupGracefulShutdown();
   }
   
   static getInstance(): DelegationRegistry {
@@ -342,7 +409,7 @@ export class DelegationRegistry {
   }
   
   private async persist(): Promise<void> {
-    if (!this.isDirty) return;
+    if (!this.isDirty || this.isShuttingDown) return;
     
     const data = {
       delegations: Array.from(this.delegations.entries()),
@@ -354,40 +421,89 @@ export class DelegationRegistry {
       version: 1
     };
     
-    // Ensure directory exists
-    const dir = path.dirname(this.persistencePath);
-    await fs.mkdir(dir, { recursive: true });
-    
-    // Write atomically with temp file
-    const tempPath = `${this.persistencePath}.tmp`;
-    await fs.writeFile(tempPath, JSON.stringify(data, null, 2));
-    await fs.rename(tempPath, this.persistencePath);
-    
-    this.isDirty = false;
-    logger.debug("Persisted delegation registry", {
-      delegations: this.delegations.size,
-      batches: this.batches.size
-    });
+    try {
+      // Validate data before persisting
+      PersistedDataSchema.parse(data);
+      
+      // Ensure directory exists
+      const dir = path.dirname(this.persistencePath);
+      await fs.mkdir(dir, { recursive: true });
+      
+      // Create backup of existing file if it exists
+      try {
+        await fs.access(this.persistencePath);
+        await fs.copyFile(this.persistencePath, this.backupPath);
+      } catch (error) {
+        // File doesn't exist yet, that's ok
+      }
+      
+      // Write atomically with temp file
+      const tempPath = `${this.persistencePath}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(data, null, 2));
+      await fs.rename(tempPath, this.persistencePath);
+      
+      this.isDirty = false;
+      logger.debug("Persisted delegation registry", {
+        delegations: this.delegations.size,
+        batches: this.batches.size
+      });
+    } catch (error) {
+      logger.error("Failed to persist delegation registry", { 
+        error,
+        delegations: this.delegations.size,
+        batches: this.batches.size
+      });
+      throw error;
+    }
   }
   
   private async restore(): Promise<void> {
+    let dataLoaded = false;
+    let data: any = null;
+    
+    // Try to load from main file first
     try {
-      const data = JSON.parse(
-        await fs.readFile(this.persistencePath, 'utf-8')
-      );
-      
-      if (data.version !== 1) {
-        logger.warn("Unknown delegation registry version", { version: data.version });
-        return;
+      const rawData = await fs.readFile(this.persistencePath, 'utf-8');
+      data = JSON.parse(rawData);
+      dataLoaded = true;
+      logger.debug("Loaded delegation registry from main file");
+    } catch (error: any) {
+      if (error.code !== 'ENOENT') {
+        logger.warn("Failed to load main delegation registry file", { error });
       }
+    }
+    
+    // If main file failed, try backup
+    if (!dataLoaded) {
+      try {
+        const rawData = await fs.readFile(this.backupPath, 'utf-8');
+        data = JSON.parse(rawData);
+        dataLoaded = true;
+        logger.info("Loaded delegation registry from backup file");
+      } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+          logger.warn("Failed to load backup delegation registry file", { error });
+        }
+      }
+    }
+    
+    // If no data loaded, start fresh
+    if (!dataLoaded) {
+      logger.info("No existing delegation registry found, starting fresh");
+      return;
+    }
+    
+    // Validate and load data
+    try {
+      const validatedData = PersistedDataSchema.parse(data);
       
-      this.delegations = new Map(data.delegations);
-      this.batches = new Map(data.batches);
+      this.delegations = new Map(validatedData.delegations);
+      this.batches = new Map(validatedData.batches);
       this.agentTasks = new Map(
-        data.agentTasks.map(([k, v]: [string, string[]]) => [k, new Set(v)])
+        validatedData.agentTasks.map(([k, v]) => [k, new Set(v)])
       );
       this.conversationTasks = new Map(
-        data.conversationTasks.map(([k, v]: [string, string[]]) => [k, new Set(v)])
+        validatedData.conversationTasks.map(([k, v]) => [k, new Set(v)])
       );
       
       // Clean up old completed delegations (older than 24 hours)
@@ -395,13 +511,22 @@ export class DelegationRegistry {
       
       logger.info("Restored delegation registry", {
         delegations: this.delegations.size,
-        batches: this.batches.size
+        batches: this.batches.size,
+        activeTasks: Array.from(this.delegations.values()).filter(d => d.status === 'pending').length
       });
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        logger.debug("No existing delegation registry to restore");
-      } else {
-        logger.error("Failed to restore delegation registry", { error });
+    } catch (error) {
+      logger.error("Failed to validate restored delegation data", { 
+        error,
+        dataKeys: data ? Object.keys(data) : []
+      });
+      
+      // If validation fails, start fresh but save the corrupted data for debugging
+      const corruptPath = `${this.persistencePath}.corrupt.${Date.now()}`;
+      try {
+        await fs.writeFile(corruptPath, JSON.stringify(data, null, 2));
+        logger.info("Saved corrupted delegation data for debugging", { path: corruptPath });
+      } catch (saveError) {
+        logger.error("Failed to save corrupted data", { error: saveError });
       }
     }
   }
@@ -452,5 +577,82 @@ export class DelegationRegistry {
     this.conversationTasks.clear();
     this.isDirty = true;
     await this.persist();
+  }
+  
+  /**
+   * Set up graceful shutdown handlers
+   */
+  private setupGracefulShutdown(): void {
+    const shutdown = async (signal: string) => {
+      if (this.isShuttingDown) return;
+      this.isShuttingDown = true;
+      
+      logger.info(`DelegationRegistry: Received ${signal}, saving state...`);
+      
+      // Cancel any pending persistence timer
+      if (this.persistenceTimer) {
+        clearTimeout(this.persistenceTimer);
+      }
+      
+      // Cancel cleanup timer
+      if (this.cleanupTimer) {
+        clearInterval(this.cleanupTimer);
+      }
+      
+      // Force final persistence
+      if (this.isDirty) {
+        try {
+          await this.persist();
+          logger.info("DelegationRegistry: State saved successfully");
+        } catch (error) {
+          logger.error("DelegationRegistry: Failed to save state during shutdown", { error });
+        }
+      }
+    };
+    
+    // Handle various shutdown signals
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGUSR2', () => shutdown('SIGUSR2')); // Nodemon restart
+    
+    // Handle uncaught errors
+    process.once('uncaughtException', async (error) => {
+      logger.error("DelegationRegistry: Uncaught exception, saving state", { error });
+      await shutdown('uncaughtException');
+      process.exit(1);
+    });
+    
+    process.once('unhandledRejection', async (reason) => {
+      logger.error("DelegationRegistry: Unhandled rejection, saving state", { reason });
+      await shutdown('unhandledRejection');
+      process.exit(1);
+    });
+  }
+  
+  /**
+   * Get registry statistics
+   */
+  getStats(): {
+    totalDelegations: number;
+    pendingDelegations: number;
+    completedDelegations: number;
+    failedDelegations: number;
+    totalBatches: number;
+    completedBatches: number;
+    activeAgents: number;
+    activeConversations: number;
+  } {
+    const delegationArray = Array.from(this.delegations.values());
+    
+    return {
+      totalDelegations: delegationArray.length,
+      pendingDelegations: delegationArray.filter(d => d.status === 'pending').length,
+      completedDelegations: delegationArray.filter(d => d.status === 'completed').length,
+      failedDelegations: delegationArray.filter(d => d.status === 'failed').length,
+      totalBatches: this.batches.size,
+      completedBatches: Array.from(this.batches.values()).filter(b => b.allCompleted).length,
+      activeAgents: Array.from(this.agentTasks.entries()).filter(([_, tasks]) => tasks.size > 0).length,
+      activeConversations: Array.from(this.conversationTasks.entries()).filter(([_, tasks]) => tasks.size > 0).length
+    };
   }
 }

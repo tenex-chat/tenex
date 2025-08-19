@@ -35,7 +35,7 @@ const ExecutionTimeSchema = z.object({
 // Simplified agent state schema
 export const AgentStateSchema = z.object({
     lastProcessedMessageIndex: z.number().int().min(0),
-    claudeSessionId: z.string().optional(),
+    claudeSessionsByPhase: z.record(z.string(), z.string()).optional(), // Phase -> sessionId mapping
     lastSeenPhase: z.string().optional(), // Phase as string
 });
 

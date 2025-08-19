@@ -26,11 +26,14 @@ describe("AgentEventEncoder", () => {
         ["e", "reply123", "", "reply"]
     ];
 
+    const mockConversationEvent = new NDKEvent();
+    mockConversationEvent.id = "conv123";
+    mockConversationEvent.content = "Initial conversation";
+
     const baseContext: EventContext = {
         agent: mockAgent,
         triggeringEvent: mockTriggeringEvent,
-        conversationId: "conv123",
-        projectId: "proj123"
+        conversationEvent: mockConversationEvent
     };
 
     describe("encodeCompletion", () => {

@@ -4,7 +4,7 @@ import type { PhaseTransition } from "@/conversations/types";
 import type { ToolExecutionResult } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NostrPublisher } from "@/nostr/NostrPublisher";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { TracingContext } from "@/tracing";
 
@@ -16,7 +16,7 @@ export interface ExecutionContext {
     triggeringEvent: NDKEvent;
     replyTarget?: NDKEvent;  // Optional: what to reply to (if different from trigger)
     publisher: NostrPublisher;
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
     previousPhase?: Phase;
     handoff?: PhaseTransition;
     claudeSessionId?: string;

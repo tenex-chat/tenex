@@ -1,5 +1,5 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMService } from "@/llm/types";
 import { NostrPublisher } from "@/nostr";
 import { buildSystemPromptMessages, buildStandaloneSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
@@ -39,7 +39,7 @@ export interface StandaloneAgentContext {
 export class AgentExecutor {
     constructor(
         private llmService: LLMService,
-        private conversationManager: ConversationManager,
+        private conversationManager: ConversationCoordinator,
         private standaloneContext?: StandaloneAgentContext
     ) {}
 

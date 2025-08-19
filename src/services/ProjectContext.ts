@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -46,7 +46,7 @@ export class ProjectContext {
     /**
      * Conversation manager for the project (optional, initialized when needed)
      */
-    public conversationManager?: ConversationManager;
+    public conversationManager?: ConversationCoordinator;
 
     constructor(project: NDKProject, agents: Map<string, AgentInstance>) {
         this.project = project;

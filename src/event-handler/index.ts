@@ -3,7 +3,7 @@ import { type NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
-import { ConversationManager } from "../conversations/ConversationManager";
+import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
 import { ExecutionQueueManager } from "../conversations/executionQueue";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
@@ -25,7 +25,7 @@ const IGNORED_EVENT_KINDS = [
 ];
 
 export class EventHandler {
-    private conversationManager!: ConversationManager;
+    private conversationManager!: ConversationCoordinator;
     private agentExecutor!: AgentExecutor;
     private executionQueueManager?: ExecutionQueueManager;
     private isUpdatingProject = false;
@@ -55,7 +55,7 @@ export class EventHandler {
         }
 
         // Initialize components directly
-        this.conversationManager = new ConversationManager(
+        this.conversationManager = new ConversationCoordinator(
             this.projectPath,
             undefined, // default persistence
             this.executionQueueManager

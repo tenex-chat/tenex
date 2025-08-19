@@ -3,7 +3,7 @@ import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import { handleCliError } from "@/utils/cli-error";
-import { determineConfigScope } from "@/utils/cli-config-scope";
+import { resolveConfigScope } from "@/utils/cli-config-scope";
 import { isValidSlug } from "@/utils/validation";
 import { Command } from "commander";
 
@@ -98,13 +98,14 @@ export const addCommand = new Command("add")
 
             // Determine where to save
             const projectPath = process.cwd();
-            let scopeInfo;
-            try {
-                scopeInfo = await determineConfigScope(options, projectPath);
-            } catch (error) {
-                handleCliError(error);
+            const scopeInfo = await resolveConfigScope(options, projectPath);
+            
+            if (scopeInfo.error) {
+                handleCliError(scopeInfo.error);
             }
-            const { useProject, configPath: basePath } = scopeInfo;
+            
+            const useProject = scopeInfo.isProject;
+            const basePath = scopeInfo.basePath;
 
             // Load existing MCP config
             const existingMCP = await configService.loadTenexMCP(basePath);

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { NostrPublisher } from "../NostrPublisher";
 import type { NostrPublisherContext } from "../NostrPublisher";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 
@@ -11,7 +11,7 @@ describe("Voice Mode Tag Propagation", () => {
     let mockContext: NostrPublisherContext;
     let mockNDK: NDK;
     let mockTriggeringEvent: NDKEvent;
-    let mockConversationManager: ConversationManager;
+    let mockConversationCoordinator: ConversationCoordinator;
 
     beforeEach(() => {
         // Mock NDK
@@ -53,7 +53,7 @@ describe("Voice Mode Tag Propagation", () => {
         } as Agent;
 
         // Mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             getConversation: mock(() => ({
                 id: "test-conversation",
                 phase: "chat",
@@ -63,14 +63,14 @@ describe("Voice Mode Tag Propagation", () => {
                 metadata: {},
             })),
             saveConversation: mock(async () => {}),
-        } as unknown as ConversationManager;
+        } as unknown as ConversationCoordinator;
 
         // Create context
         mockContext = {
             conversationId: "test-conversation",
             agent: mockAgent,
             triggeringEvent: mockTriggeringEvent,
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
         };
 
         // Mock getProjectContext and getNDK

@@ -1,7 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
-import type { ConversationManager } from "../conversations";
+import type { ConversationCoordinator } from "../conversations";
 import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
@@ -10,7 +10,7 @@ import { createNostrPublisher } from "../nostr/factory";
 const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
     agentExecutor: AgentExecutor;
 }
 

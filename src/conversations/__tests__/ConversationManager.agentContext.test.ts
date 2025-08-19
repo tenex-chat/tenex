@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { ConversationManager } from "../ConversationManager";
+import { ConversationCoordinator } from "../ConversationCoordinator";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
@@ -72,12 +72,12 @@ mock.module("@/nostr/utils", () => ({
     }
 }));
 
-describe("ConversationManager - Agent Context Management", () => {
-    let manager: ConversationManager;
+describe("ConversationCoordinator - Agent Context Management", () => {
+    let manager: ConversationCoordinator;
     const projectPath = "/tmp/test-project-" + Date.now();
 
     beforeEach(async () => {
-        manager = new ConversationManager(projectPath);
+        manager = new ConversationCoordinator(projectPath);
         await manager.initialize();
     });
 

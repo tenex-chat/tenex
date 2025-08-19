@@ -4,7 +4,7 @@ import type { Phase } from "./phases";
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
     lastProcessedMessageIndex: number; // Index into Conversation.history
-    claudeSessionId?: string; // Claude Code session ID (if per-agent per-conversation)
+    claudeSessionsByPhase?: Record<Phase, string>; // Claude Code session IDs per phase
     lastSeenPhase?: Phase; // Track the last phase this agent operated in
 }
 

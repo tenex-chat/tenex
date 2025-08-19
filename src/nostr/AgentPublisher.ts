@@ -23,9 +23,9 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
  */
 export class AgentPublisher {
     private ndk: NDK;
-    private agent?: AgentInstance;
+    private agent: AgentInstance;
 
-    constructor(agent?: AgentInstance, ndk?: NDK) {
+    constructor(agent: AgentInstance, ndk?: NDK) {
         this.agent = agent;
         this.ndk = ndk || getNDK();
     }
@@ -35,22 +35,21 @@ export class AgentPublisher {
      * Creates and publishes a properly tagged completion event.
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.info("Dispatching completion", {
-            agent: agent.name,
+            agent: this.agent.name,
             contentLength: intent.content.length,
             summary: intent.summary
         });
 
-        const event = AgentEventEncoder.encodeCompletion(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeCompletion(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         logger.info("Completion event published", {
             eventId: event.id,
-            agent: agent.name
+            agent: this.agent.name
         });
 
         return event;
@@ -64,18 +63,17 @@ export class AgentPublisher {
         tasks: NDKTask[];
         batchId: string;
     }> {
-        const agent = this.agent || context.agent;
         logger.info("Dispatching delegation", {
-            agent: agent.name,
+            agent: this.agent.name,
             recipients: intent.recipients.length,
             phase: intent.phase
         });
 
-        const tasks = AgentEventEncoder.encodeDelegation(intent, { ...context, agent });
+        const tasks = AgentEventEncoder.encodeDelegation(intent, { ...context, agent: this.agent });
         
         // Sign all tasks first
         for (const task of tasks) {
-            await task.sign(agent.signer);
+            await task.sign(this.agent.signer);
         }
 
         // Register with DelegationRegistry
@@ -88,8 +86,8 @@ export class AgentPublisher {
                 fullRequest: intent.request,
                 phase: intent.phase
             })),
-            delegatingAgent: agent,
-            conversationId: context.conversationId,
+            delegatingAgent: this.agent,
+            conversationId: context.conversationEvent?.id || '',
             originalRequest: intent.request
         });
 
@@ -115,16 +113,15 @@ export class AgentPublisher {
      * Creates and publishes a standard response event.
      */
     async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.debug("Dispatching conversation response", {
-            agent: agent.name,
+            agent: this.agent.name,
             contentLength: intent.content.length
         });
 
-        const event = AgentEventEncoder.encodeConversation(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeConversation(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         return event;
@@ -135,21 +132,20 @@ export class AgentPublisher {
      * Creates and publishes an error notification event.
      */
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.debug("Dispatching error", {
-            agent: agent.name,
+            agent: this.agent.name,
             error: intent.message
         });
 
-        const event = AgentEventEncoder.encodeError(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeError(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         logger.debug("Error event published", {
             eventId: event.id,
-            agent: agent.name,
+            agent: this.agent.name,
             error: intent.message
         });
 
@@ -160,16 +156,15 @@ export class AgentPublisher {
      * Publish a typing indicator event.
      */
     async typing(intent: TypingIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.debug("Dispatching typing indicator", {
-            agent: agent.name,
+            agent: this.agent.name,
             state: intent.state
         });
 
-        const event = AgentEventEncoder.encodeTypingIndicator(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeTypingIndicator(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         return event;
@@ -179,11 +174,10 @@ export class AgentPublisher {
      * Publish a streaming progress event.
      */
     async streaming(intent: StreamingIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
-        const event = AgentEventEncoder.encodeStreamingProgress(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeStreamingProgress(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         return event;
@@ -193,16 +187,15 @@ export class AgentPublisher {
      * Publish a project status event.
      */
     async status(intent: StatusIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.debug("Dispatching status", {
-            agent: agent.name,
+            agent: this.agent.name,
             agentCount: intent.agents.length
         });
 
-        const event = AgentEventEncoder.encodeProjectStatus(intent, { ...context, agent });
+        const event = AgentEventEncoder.encodeProjectStatus(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await event.sign(agent.signer);
+        await event.sign(this.agent.signer);
         await event.publish();
 
         return event;
@@ -212,21 +205,20 @@ export class AgentPublisher {
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
-        const agent = this.agent || context.agent;
         logger.debug("Dispatching lesson", {
-            agent: agent.name,
+            agent: this.agent.name,
             title: intent.title
         });
 
-        const lessonEvent = AgentEventEncoder.encodeLesson(intent, { ...context, agent });
+        const lessonEvent = AgentEventEncoder.encodeLesson(intent, { ...context, agent: this.agent });
         
         // Sign and publish
-        await lessonEvent.sign(agent.signer);
+        await lessonEvent.sign(this.agent.signer);
         await lessonEvent.publish();
 
         logger.debug("Lesson event published", {
             eventId: lessonEvent.id,
-            agent: agent.name,
+            agent: this.agent.name,
             title: intent.title
         });
 
@@ -238,7 +230,7 @@ export class AgentPublisher {
     /**
      * Publishes a kind:0 profile event for an agent
      */
-    async publishAgentProfile(
+    static async publishAgentProfile(
         signer: NDKPrivateKeySigner,
         agentName: string,
         agentRole: string,
@@ -260,7 +252,7 @@ export class AgentPublisher {
                 project: projectTitle,
             };
 
-            const profileEvent = new NDKEvent(this.ndk, {
+            const profileEvent = new NDKEvent(getNDK(), {
                 kind: 0,
                 pubkey: signer.pubkey,
                 content: JSON.stringify(profile),
@@ -297,14 +289,14 @@ export class AgentPublisher {
     /**
      * Publishes an agent request event
      */
-    async publishAgentRequest(
+    static async publishAgentRequest(
         signer: NDKPrivateKeySigner,
         agentConfig: Omit<AgentConfig, "nsec">,
         projectEvent: NDKProject,
         ndkAgentEventId?: string
     ): Promise<NDKEvent> {
         try {
-            const requestEvent = new NDKEvent(this.ndk, {
+            const requestEvent = new NDKEvent(getNDK(), {
                 kind: EVENT_KINDS.AGENT_REQUEST,
                 content: "",
                 tags: [],
@@ -356,7 +348,7 @@ export class AgentPublisher {
     /**
      * Publishes all agent-related events when creating a new agent
      */
-    async publishAgentCreation(
+    static async publishAgentCreation(
         signer: NDKPrivateKeySigner,
         agentConfig: Omit<AgentConfig, "nsec">,
         projectTitle: string,
@@ -364,7 +356,7 @@ export class AgentPublisher {
         ndkAgentEventId?: string
     ): Promise<void> {
         // Publish profile event
-        await this.publishAgentProfile(
+        await AgentPublisher.publishAgentProfile(
             signer,
             agentConfig.name,
             agentConfig.role,
@@ -374,6 +366,6 @@ export class AgentPublisher {
         );
 
         // Publish request event
-        await this.publishAgentRequest(signer, agentConfig, projectEvent, ndkAgentEventId);
+        await AgentPublisher.publishAgentRequest(signer, agentConfig, projectEvent, ndkAgentEventId);
     }
 }

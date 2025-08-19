@@ -4,7 +4,7 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
-import { ConversationManager } from "@/conversations/ConversationManager";
+import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { createAgentAwareLLMService, loadLLMRouter } from "@/llm";
@@ -83,7 +83,7 @@ export async function runDebugChat(
 
         // Create conversation state for AgentExecutor
         const conversationId = uuidv4();
-        const _conversationManager = new ConversationManager(projectPath);
+        const _conversationManager = new ConversationCoordinator(projectPath);
         const conversation: Conversation = {
             id: conversationId,
             title: "Debug Chat Session",

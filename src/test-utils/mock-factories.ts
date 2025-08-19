@@ -123,7 +123,7 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
         publishAgentThinking: async () => mockEvent
     } as any;
     
-    const mockConversationManager = {
+    const mockConversationCoordinator = {
         getConversation: async () => createMockConversation(),
         updateConversation: async () => {},
         transitionPhase: async () => {}
@@ -136,7 +136,7 @@ export function createMockExecutionContext(overrides?: Partial<ExecutionContext>
         projectPath: "/mock/project",
         triggeringEvent: mockEvent,
         publisher: mockPublisher,
-        conversationManager: mockConversationManager,
+        conversationManager: mockConversationCoordinator,
         ...overrides
     } as ExecutionContext;
 }

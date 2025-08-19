@@ -6,7 +6,7 @@ import * as path from "node:path";
 import type { Tool, ToolContext } from "@/tools/types";
 
 // Mock conversation manager
-const mockConversationManager = {
+const mockConversationCoordinator = {
     getConversation: mock(() => ({
         metadata: {
             readFiles: []
@@ -23,11 +23,11 @@ describe("readPath tool", () => {
         testDir = await createTempDir();
         
         // Reset mocks before each test
-        mockConversationManager.getConversation.mockClear();
-        mockConversationManager.updateMetadata.mockClear();
+        mockConversationCoordinator.getConversation.mockClear();
+        mockConversationCoordinator.updateMetadata.mockClear();
         
         // Reset mock implementation
-        mockConversationManager.getConversation = mock(() => ({
+        mockConversationCoordinator.getConversation = mock(() => ({
             metadata: {
                 readFiles: []
             }
@@ -39,7 +39,7 @@ describe("readPath tool", () => {
             conversationId: "test-conv-123",
             phase: "EXECUTE",
             agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-            conversationManager: mockConversationManager as any,
+            conversationManager: mockConversationCoordinator as any,
         };
     });
 
@@ -150,7 +150,7 @@ describe("readPath tool", () => {
                 context
             );
 
-            expect(mockConversationManager.updateMetadata).toHaveBeenCalledWith(
+            expect(mockConversationCoordinator.updateMetadata).toHaveBeenCalledWith(
                 "test-conv-123",
                 { readFiles: ["context/important.md"] }
             );
@@ -162,7 +162,7 @@ describe("readPath tool", () => {
             writeFileSync(path.join(contextDir, "tracked.md"), "Already tracked");
 
             // Mock conversation with existing tracked file
-            mockConversationManager.getConversation = mock(() => ({
+            mockConversationCoordinator.getConversation = mock(() => ({
                 metadata: { readFiles: ["context/tracked.md"] }
             }));
 
@@ -171,7 +171,7 @@ describe("readPath tool", () => {
                 context
             );
 
-            expect(mockConversationManager.updateMetadata).not.toHaveBeenCalled();
+            expect(mockConversationCoordinator.updateMetadata).not.toHaveBeenCalled();
         });
 
         it("should not track non-context files", async () => {
@@ -182,7 +182,7 @@ describe("readPath tool", () => {
                 context
             );
 
-            expect(mockConversationManager.updateMetadata).not.toHaveBeenCalled();
+            expect(mockConversationCoordinator.updateMetadata).not.toHaveBeenCalled();
         });
     });
 
@@ -367,7 +367,7 @@ describe("readPath tool", () => {
             mkdirSync(contextDir);
             writeFileSync(path.join(contextDir, "file.md"), "content");
 
-            mockConversationManager.getConversation = mock(() => null);
+            mockConversationCoordinator.getConversation = mock(() => null);
 
             const result = await readPathTool.execute(
                 { value: { path: "context/file.md" }, parsed: true },
@@ -375,7 +375,7 @@ describe("readPath tool", () => {
             );
 
             expect(result.ok).toBe(true);
-            expect(mockConversationManager.updateMetadata).toHaveBeenCalledWith(
+            expect(mockConversationCoordinator.updateMetadata).toHaveBeenCalledWith(
                 "test-conv-123",
                 { readFiles: ["context/file.md"] }
             );

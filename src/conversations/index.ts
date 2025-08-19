@@ -1,2 +1,2 @@
-export { ConversationManager } from "./ConversationManager";
+export { ConversationCoordinator } from "./ConversationCoordinator";
 export * from "./types";

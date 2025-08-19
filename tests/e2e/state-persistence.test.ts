@@ -10,7 +10,7 @@ import {
     assertToolCalls,
     type E2ETestContext
 } from "./test-harness";
-import { ConversationManager } from "@/conversations/ConversationManager";
+import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { MockLLMResponse } from "@/test-utils/mock-llm/types";
 import path from "path";
@@ -247,14 +247,14 @@ describe("E2E: State Persistence and Recovery", () => {
         assertPhaseTransitions(trace, "plan", "build");
         
         // Step 3: Simulate system restart by creating new instances
-        const newConversationManager = new ConversationManager(context.projectPath);
-        await newConversationManager.initialize();
+        const newConversationCoordinator = new ConversationCoordinator(context.projectPath);
+        await newConversationCoordinator.initialize();
         
         const newAgentRegistry = new AgentRegistry(context.projectPath);
         await newAgentRegistry.loadFromProject();
         
         // Step 4: Load conversation from persistence
-        const recoveredConversation = await newConversationManager.getConversation(conversationId);
+        const recoveredConversation = await newConversationCoordinator.getConversation(conversationId);
         expect(recoveredConversation).toBeDefined();
         expect(recoveredConversation?.id).toBe(conversationId);
         expect(recoveredConversation?.phase).toBe("build");
@@ -272,7 +272,7 @@ describe("E2E: State Persistence and Recovery", () => {
         // Create updated context with new manager
         const updatedContext = {
             ...context,
-            conversationManager: newConversationManager,
+            conversationManager: newConversationCoordinator,
             agentRegistry: newAgentRegistry
         };
         
@@ -406,12 +406,12 @@ describe("E2E: State Persistence and Recovery", () => {
         }
         
         // Simulate restart and recover all conversations
-        const newConversationManager = new ConversationManager(context.projectPath);
-        await newConversationManager.initialize();
+        const newConversationCoordinator = new ConversationCoordinator(context.projectPath);
+        await newConversationCoordinator.initialize();
         
         // Load and verify all conversations
         const recoveredConversations = await Promise.all(
-            conversationIds.map(id => newConversationManager.getConversation(id))
+            conversationIds.map(id => newConversationCoordinator.getConversation(id))
         );
         
         recoveredConversations.forEach((conv, index) => {
@@ -462,11 +462,11 @@ describe("E2E: State Persistence and Recovery", () => {
         expect(metricsBeforeCrash?.executionTime.totalSeconds).toBeGreaterThan(0);
         
         // Simulate restart
-        const newConversationManager = new ConversationManager(context.projectPath);
-        await newConversationManager.initialize();
+        const newConversationCoordinator = new ConversationCoordinator(context.projectPath);
+        await newConversationCoordinator.initialize();
         
         // Load conversation
-        const recovered = await newConversationManager.getConversation(conversationId);
+        const recovered = await newConversationCoordinator.getConversation(conversationId);
         expect(recovered).toBeDefined();
         
         // Verify metrics are preserved
@@ -478,7 +478,7 @@ describe("E2E: State Persistence and Recovery", () => {
         // Continue execution with updated context
         const updatedContext = {
             ...context,
-            conversationManager: newConversationManager
+            conversationManager: newConversationCoordinator
         };
         
         // Add continuation response
@@ -548,11 +548,11 @@ describe("E2E: State Persistence and Recovery", () => {
         }
         
         // Attempt to load with new manager
-        const newConversationManager = new ConversationManager(context.projectPath);
-        await newConversationManager.initialize();
+        const newConversationCoordinator = new ConversationCoordinator(context.projectPath);
+        await newConversationCoordinator.initialize();
         
         // Should handle corrupted file gracefully
-        const recovered = await newConversationManager.getConversation(conversationId);
+        const recovered = await newConversationCoordinator.getConversation(conversationId);
         
         // The current implementation might return null or throw
         // This test verifies the system doesn't crash completely
@@ -595,11 +595,11 @@ describe("E2E: State Persistence and Recovery", () => {
         expect(trace.executions.length).toBeGreaterThan(0);
         
         // Simulate restart
-        const newConversationManager = new ConversationManager(context.projectPath);
-        await newConversationManager.initialize();
+        const newConversationCoordinator = new ConversationCoordinator(context.projectPath);
+        await newConversationCoordinator.initialize();
         
         // Load conversation
-        const recovered = await newConversationManager.getConversation(conversationId);
+        const recovered = await newConversationCoordinator.getConversation(conversationId);
         expect(recovered).toBeDefined();
         
         // Verify history is preserved in correct order

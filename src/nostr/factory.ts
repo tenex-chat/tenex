@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { NostrPublisher } from "./NostrPublisher";
 
 /**
@@ -10,7 +10,7 @@ export async function createNostrPublisher(params: {
     conversationId: string;
     agent: AgentInstance;
     triggeringEvent: NDKEvent;
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
 }): Promise<NostrPublisher> {
     const { NostrPublisher: Publisher } = await import("@/nostr/NostrPublisher");
     return new Publisher({

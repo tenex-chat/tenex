@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { NDKTask } from "@nostr-dev-kit/ndk";
 import { handleTask } from "../task";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
-import type { ConversationManager } from "@/conversations";
+import type { ConversationCoordinator } from "@/conversations";
 import type { AgentInstance } from "@/agents/types";
 import { createMockAgent } from "@/test-utils";
 
 describe("handleTask", () => {
-    let mockConversationManager: ConversationManager;
+    let mockConversationCoordinator: ConversationCoordinator;
     let mockAgentExecutor: AgentExecutor;
     let mockAgent: AgentInstance;
     let mockOrchestratorAgent: AgentInstance;
@@ -56,7 +56,7 @@ describe("handleTask", () => {
         }));
 
         // Create mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             createConversation: mock(() => Promise.resolve({
                 id: "test-conversation-id",
                 phase: "CHAT"
@@ -79,12 +79,12 @@ describe("handleTask", () => {
 
     it("should create conversation and route to orchestrator when no p-tags", async () => {
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
         // Verify conversation was created
-        expect(mockConversationManager.createConversation).toHaveBeenCalledWith(mockEvent);
+        expect(mockConversationCoordinator.createConversation).toHaveBeenCalledWith(mockEvent);
 
         // Verify executor was called with orchestrator
         expect(mockAgentExecutor.execute).toHaveBeenCalledWith(
@@ -103,7 +103,7 @@ describe("handleTask", () => {
         mockEvent.tags = [["p", "agent-pubkey-123"]];
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
@@ -121,12 +121,12 @@ describe("handleTask", () => {
         mockEvent.tags = [["p", "unknown-pubkey"]];
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
         // Verify conversation was created but no execution happened
-        expect(mockConversationManager.createConversation).toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).toHaveBeenCalled();
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
 
@@ -139,7 +139,7 @@ describe("handleTask", () => {
         ];
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
@@ -153,14 +153,14 @@ describe("handleTask", () => {
 
     it("should handle conversation creation failure gracefully", async () => {
         // Make conversation creation fail
-        mockConversationManager.createConversation = mock(() => 
+        mockConversationCoordinator.createConversation = mock(() => 
             Promise.reject(new Error("Failed to create conversation"))
         );
 
         // Should not throw
         await expect(
             handleTask(mockEvent, {
-                conversationManager: mockConversationManager,
+                conversationManager: mockConversationCoordinator,
                 agentExecutor: mockAgentExecutor
             })
         ).resolves.toBeUndefined();
@@ -178,18 +178,18 @@ describe("handleTask", () => {
         // Should not throw
         await expect(
             handleTask(mockEvent, {
-                conversationManager: mockConversationManager,
+                conversationManager: mockConversationCoordinator,
                 agentExecutor: mockAgentExecutor
             })
         ).resolves.toBeUndefined();
 
         // Conversation should still be created
-        expect(mockConversationManager.createConversation).toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).toHaveBeenCalled();
     });
 
     it("should pass claude session ID when present", async () => {
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
@@ -205,7 +205,7 @@ describe("handleTask", () => {
         mockEvent.tagValue = mock(() => undefined);
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
@@ -221,12 +221,12 @@ describe("handleTask", () => {
         mockEvent.content = "a".repeat(200);
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
         // Should still process normally
-        expect(mockConversationManager.createConversation).toHaveBeenCalled();
+        expect(mockConversationCoordinator.createConversation).toHaveBeenCalled();
         expect(mockAgentExecutor.execute).toHaveBeenCalled();
     });
 
@@ -243,7 +243,7 @@ describe("handleTask", () => {
         }));
 
         await handleTask(mockEvent, {
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             agentExecutor: mockAgentExecutor
         });
 
@@ -253,7 +253,7 @@ describe("handleTask", () => {
             conversationId: "test-conversation-id",
             agent: mockOrchestratorAgent,
             triggeringEvent: mockEvent,
-            conversationManager: mockConversationManager
+            conversationManager: mockConversationCoordinator
         });
     });
 });

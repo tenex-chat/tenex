@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { ConversationManager } from "@/conversations/ConversationManager";
+import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
 import { createMockLLMService } from "@/test-utils/mock-llm";
@@ -107,7 +107,7 @@ describe("State Recovery E2E Tests", () => {
     
     it("should persist conversation state after each agent response", async () => {
         // Create conversation manager with test persistence
-        const conversationManager = new ConversationManager(projectPath, testPersistence);
+        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create initial event
         const triggeringEvent = createMockNDKEvent({
@@ -162,7 +162,7 @@ describe("State Recovery E2E Tests", () => {
     
     it("should recover conversation state from persistence", async () => {
         // Create first conversation manager instance
-        const conversationManager1 = new ConversationManager(projectPath, testPersistence);
+        const conversationManager1 = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create and execute initial conversation
         const triggeringEvent = createMockNDKEvent({
@@ -200,7 +200,7 @@ describe("State Recovery E2E Tests", () => {
         await conversationManager1.saveConversation(conversationId);
         
         // Simulate system restart - create new conversation manager
-        const conversationManager2 = new ConversationManager(projectPath, testPersistence);
+        const conversationManager2 = new ConversationCoordinator(projectPath, testPersistence);
         await conversationManager2.initialize();
         
         // Load conversation from persistence
@@ -221,7 +221,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should handle recovery from incomplete agent execution", async () => {
-        const conversationManager = new ConversationManager(projectPath, testPersistence);
+        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
@@ -253,7 +253,7 @@ describe("State Recovery E2E Tests", () => {
         await conversationManager.saveConversation(conversation.id);
         
         // Simulate recovery - create new manager and load conversation
-        const recoveredManager = new ConversationManager(projectPath, testPersistence);
+        const recoveredManager = new ConversationCoordinator(projectPath, testPersistence);
         await recoveredManager.initialize();
         const recovered = recoveredManager.getConversation(conversation.id);
         
@@ -278,7 +278,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should maintain conversation integrity during concurrent updates", async () => {
-        const conversationManager = new ConversationManager(projectPath, testPersistence);
+        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
@@ -342,7 +342,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should properly archive and restore conversations", async () => {
-        const conversationManager = new ConversationManager(projectPath, testPersistence);
+        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create multiple conversations
         const conversations = [];

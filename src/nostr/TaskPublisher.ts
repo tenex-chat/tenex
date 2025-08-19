@@ -3,14 +3,14 @@ import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKTask } from "@nostr-dev-kit/ndk";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 
 export interface TaskCreationOptions {
     title: string;
     prompt: string;
     branch?: string;
     conversationRootEventId?: string;
-    conversationManager?: ConversationManager;
+    conversationManager?: ConversationCoordinator;
     claudeSessionId?: string;
 }
 

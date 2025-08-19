@@ -4,7 +4,7 @@ import { createMockLLMService, MockFactory } from "@/test-utils";
 import type { ExecutionContext } from "../types";
 import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { NDK } from "@nostr-dev-kit/ndk";
 
 describe("AgentExecutor", () => {
@@ -12,7 +12,7 @@ describe("AgentExecutor", () => {
     let mockAgent: AgentInstance;
     let mockContext: ExecutionContext;
     let mockNDK: NDK;
-    let mockConversationManager: ConversationManager;
+    let mockConversationCoordinator: ConversationCoordinator;
     
     beforeEach(() => {
         // Mock required modules
@@ -128,7 +128,7 @@ describe("AgentExecutor", () => {
         } as any;
         
         // Create mock conversation manager
-        mockConversationManager = {
+        mockConversationCoordinator = {
             getConversation: mock(() => ({
                 id: "test-conversation-id",
                 title: "Test Conversation",
@@ -198,7 +198,7 @@ describe("AgentExecutor", () => {
             messages: [],
             tools: [],
             toolContext: {},
-            conversationManager: mockConversationManager,
+            conversationManager: mockConversationCoordinator,
             publisher: mockPublisher as any,
             onStreamStart: mock(() => {}),
             onStreamToken: mock(() => {}),
@@ -216,7 +216,7 @@ describe("AgentExecutor", () => {
     
     describe("constructor", () => {
         it("should create an AgentExecutor instance", () => {
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             expect(executor).toBeDefined();
         });
     });
@@ -237,7 +237,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             await executor.execute(mockContext);
             
             expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -266,7 +266,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             await executor.execute(mockContext);
             
             expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -296,7 +296,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             await executor.execute(mockContext);
             
             expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -315,7 +315,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             
             try {
                 await executor.execute(mockContext);
@@ -344,7 +344,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             await executor.execute(mockContext);
             
             // Should use default backend successfully
@@ -381,7 +381,7 @@ describe("AgentExecutor", () => {
                 }
             }));
             
-            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationManager);
+            const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
             await executor.execute(mockContext);
             
             expect(mockContext.onComplete).toHaveBeenCalledWith({

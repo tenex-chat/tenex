@@ -8,7 +8,7 @@ import {
     type MockLLMService
 } from "@/test-utils";
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
-import { ConversationManager } from "@/conversations/ConversationManager";
+import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { ToolCall } from "@/llm/types";
 import { Message } from "multi-llm-ts";
@@ -19,7 +19,7 @@ export interface E2ETestContext {
     projectPath: string;
     tempDir: string;
     mockLLM: MockLLMService;
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
     agentRegistry: AgentRegistry;
     configService: typeof ConfigService;
     services: {
@@ -272,7 +272,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: a
     
     // Initialize services with test persistence adapter
     const testPersistenceAdapter = new TestPersistenceAdapter();
-    const conversationManager = new ConversationManager(projectPath, testPersistenceAdapter);
+    const conversationManager = new ConversationCoordinator(projectPath, testPersistenceAdapter);
     await conversationManager.initialize();
     
     const agentRegistry = new AgentRegistry(projectPath);

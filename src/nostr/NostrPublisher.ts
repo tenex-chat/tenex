@@ -1,7 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { getTotalExecutionTimeSeconds } from "@/conversations/executionTime";
 import type { Conversation } from "@/conversations/types";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr";
 import { EXECUTION_TAGS } from "@/nostr/tags";
@@ -22,7 +22,7 @@ export interface NostrPublisherContext {
     agent: AgentInstance;
     triggeringEvent: NDKEvent;
     replyTarget?: NDKEvent;  // Optional: what to reply to (if different from trigger)
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
 }
 
 
@@ -57,7 +57,7 @@ export class NostrPublisher {
         );
         if (!conversation) {
             throw new Error(
-                `Conversation not found in ConversationManager: ${this.context.conversationId}`
+                `Conversation not found in ConversationCoordinator: ${this.context.conversationId}`
             );
         }
         return conversation;
@@ -90,11 +90,13 @@ export class NostrPublisher {
                 message: state === "start" ? (message || `${agent.name} is typing`) : undefined
             };
 
+            // Get conversation for the event context
+            const conversation = this.getConversation();
+            
             // Create event context
             const eventContext: EventContext = {
-                agent: this.context.agent,
                 triggeringEvent: this.context.triggeringEvent,
-                conversationId: this.context.conversationId
+                conversationEvent: conversation.history[0] // Root event is first in history
             };
 
             // Use AgentPublisher to create and publish the event

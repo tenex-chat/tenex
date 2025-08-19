@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { ConversationManager } from "../ConversationManager";
+import { ConversationCoordinator } from "../ConversationCoordinator";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Phase, PhaseTransition } from "../types";
 import * as fs from "@/lib/fs";
@@ -25,12 +25,12 @@ mock.module("../persistence", () => ({
 mock.module("@/tracing", () => ({
     createTracingContext: mock(() => ({ id: "trace-123" }))
 }));
-describe("ConversationManager", () => {
-    let manager: ConversationManager;
+describe("ConversationCoordinator", () => {
+    let manager: ConversationCoordinator;
     const projectPath = "/test/project";
 
     beforeEach(() => {
-        manager = new ConversationManager(projectPath);
+        manager = new ConversationCoordinator(projectPath);
     });
 
     describe("phase transitions", () => {
@@ -230,7 +230,7 @@ Special characters: "quotes", 'apostrophes', \`backticks\`, \\backslashes\\`;
             const { FileSystemAdapter } = await import("../persistence");
             (FileSystemAdapter as any).mockImplementation(() => mockPersistence);
 
-            manager = new ConversationManager(projectPath);
+            manager = new ConversationCoordinator(projectPath);
             await manager.initialize();
 
             const mockEvent: NDKEvent = {

@@ -1,6 +1,6 @@
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { Conversation } from "@/conversations/types";
-import type { ConversationManager } from "@/conversations/ConversationManager";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { TaskPublisher } from "@/nostr/TaskPublisher";
 import { logger } from "@/utils/logger";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -18,7 +18,7 @@ export interface ClaudeTaskOptions {
     branch?: string;
     conversationRootEventId?: string;
     conversation?: Conversation;
-    conversationManager?: ConversationManager;
+    conversationManager?: ConversationCoordinator;
     abortSignal?: AbortSignal;
     resumeSessionId?: string;
     agentName?: string;
