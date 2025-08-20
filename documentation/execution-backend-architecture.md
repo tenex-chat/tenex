@@ -18,22 +18,22 @@ The execution backend system is built on several key principles:
 
 ## Component Architecture
 
-### 1. ExecutionBackend Interface
+### 1. ReasonActLoop Implementation
 
-The `ExecutionBackend` interface (src/agents/execution/ExecutionBackend.ts) defines the contract that all execution strategies must implement:
+The `ReasonActLoop` class (src/agents/execution/ReasonActLoop.ts) is the sole execution implementation for all agents:
 
 ```typescript
-interface ExecutionBackend {
+class ReasonActLoop {
     execute(
         messages: Array<Message>,
         tools: Tool[],
         context: ExecutionContext,
-        publisher: NostrPublisher
+        publisher: StreamPublisher
     ): Promise<void>;
 }
 ```
 
-This simple interface enables the Strategy pattern, allowing different agents to use different execution approaches while maintaining a consistent API.
+This unified implementation ensures consistent behavior across all agents with tool-based reasoning and action execution.
 
 ### 2. ExecutionContext
 
@@ -73,7 +73,7 @@ Key responsibilities:
 
 ### ReasonActLoop - The Unified Backend
 
-The `ReasonActLoop` (src/agents/execution/ReasonActLoop.ts) is the default backend for most agents, implementing a sophisticated streaming execution model:
+The `ReasonActLoop` (src/agents/execution/ReasonActLoop.ts) is the single execution backend for all agents, implementing a sophisticated streaming execution model:
 
 **Core Flow:**
 1. **Stream Processing**: Processes LLM stream events in real-time
@@ -152,13 +152,6 @@ The `TerminationHandler` (src/agents/execution/TerminationHandler.ts) enforces p
 - Orchestrator: "You MUST route to appropriate agents"
 - Regular agents: "You MUST use the 'complete' tool"
 
-### 4. CompletionHandler
-
-The `completionHandler` (src/agents/execution/completionHandler.ts) provides shared completion logic:
-
-**Used By:**
-- The `complete` tool
-- ClaudeBackend for automatic completion
 
 **Responsibilities:**
 1. Routes completions to orchestrator
@@ -183,12 +176,12 @@ These type guards ensure type safety throughout the execution flow.
 1. AgentExecutor receives ExecutionContext
 2. Builds messages with system prompts and conversation history
 3. Retrieves Claude session ID if available
-4. Selects appropriate backend based on agent configuration
+4. Instantiates ReasonActLoop backend
 5. Creates NostrPublisher for response handling
 
 ### 2. Execution Phase
 
-**For ReasonActLoop:**
+**ReasonActLoop Execution:**
 1. Initialize StreamStateManager and handlers
 2. Create LLM stream with tools and context
 3. Process stream events:
@@ -199,18 +192,12 @@ These type guards ensure type safety throughout the execution flow.
 5. Retry with reminder if needed
 6. Finalize stream with metadata
 
-**For RoutingBackend:**
-1. Get routing decision from LLM
-2. Start orchestrator turn
-3. Handle phase transitions if needed
-4. Execute target agents sequentially
-5. Handle invalid agent names with feedback
-
-**For ClaudeBackend:**
-1. Extract prompts from messages
-2. Execute Claude Code directly
-3. Store session ID for resumption
-4. Use completionHandler for response
+**Orchestrator Routing:**
+The orchestrator uses the delegate tool to route to other agents, which triggers:
+1. Agent selection based on task requirements
+2. Context handoff to target agent
+3. Sequential or parallel agent execution
+4. Result aggregation and phase transitions
 
 ### 3. Finalization Phase
 1. Stop typing indicators
@@ -235,11 +222,11 @@ The system implements comprehensive error handling at multiple levels:
 - Publisher finalization on error
 - Error propagation with context
 
-### 3. Routing Errors
-- Invalid agent name feedback
-- Retry with corrected names
-- Fallback to orchestrator
-- Lesson learning from mistakes
+### 3. Delegation Errors
+- Invalid agent name handling in delegate tool
+- Error feedback to requesting agent
+- Fallback to available agents
+- Lesson learning from delegation failures
 
 ### 4. System Errors
 - Execution timeout handling

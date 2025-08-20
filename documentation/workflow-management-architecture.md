@@ -76,15 +76,15 @@ The TENEX workflow management system implements a sophisticated phase-based mult
    - Never directly interacts with users
 
 3. **AgentExecutor** (`src/agents/execution/AgentExecutor.ts`)
-   - Selects appropriate execution backend
+   - Instantiates ReasonActLoop backend
    - Manages agent lifecycle
    - Handles streaming and tool execution
    - Enforces termination requirements
 
-4. **Execution Backends**
-   - **ReasonActLoop**: Standard streaming execution with tool support
-   - **RoutingBackend**: Orchestrator-specific routing logic
-   - **ClaudeBackend**: Direct Claude passthrough for stateful sessions
+4. **ReasonActLoop Backend**
+   - Unified streaming execution with tool support for all agents
+   - Handles orchestrator routing through delegate tool
+   - Manages Claude session continuity
 
 ## Phase-Based State Machine
 

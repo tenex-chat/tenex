@@ -34,7 +34,7 @@ Complete routing system design and implementation plan. Details the core princip
 ### Execution Infrastructure
 
 #### 8. [Execution Backend Architecture](./execution-backend-architecture.md)
-The pluggable backend system that provides different execution strategies (ReasonActLoop, RoutingBackend, ClaudeBackend). Handles LLM interactions, streaming, and tool execution with backend-specific optimizations.
+The unified backend system that implements the ReasonActLoop execution strategy for all agents. Handles LLM interactions, streaming, tool execution, and termination enforcement with consistent behavior across the system.
 
 #### 9. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
 Critical component handling real-time LLM response streaming, tool execution coordination, and state consistency during agent interactions. Ensures reliable, low-latency communication.
