@@ -21,19 +21,28 @@ describe("systemPromptBuilder", () => {
         tools: [],
         instructions: "You are a test agent. Help users with their tasks.",
         backend: "reason-act-loop" as const,
+        signer: {
+            npub: "npub1test123",
+            privateKey: "mock-private-key",
+            sign: async () => "mock-signature"
+        } as any,
     };
 
     const mockProject = {
         pubkey: "project-pubkey",
         title: "Test Project",
-        tags: [],
+        tags: [["title", "Test Project"]],
+        tagValue(tagName: string): string | undefined {
+            const tag = this.tags.find((t: string[]) => t[0] === tagName);
+            return tag?.[1];
+        }
     };
 
     it("should NOT include phase-specific completion guidance in base prompt", () => {
         const messages = buildSystemPromptMessages({
             agent: { ...baseAgent, isOrchestrator: false },
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
         const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
@@ -47,7 +56,7 @@ describe("systemPromptBuilder", () => {
         const messages = buildSystemPromptMessages({
             agent: { ...baseAgent, isOrchestrator: true },
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
         const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
@@ -67,7 +76,7 @@ describe("systemPromptBuilder", () => {
         const messages = buildSystemPromptMessages({
             agent: customAgent,
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
         const systemPrompt = messages.map(m => m.message.content).join("\n\n");
 
@@ -88,20 +97,29 @@ describe("buildSystemPromptMessages", () => {
         tools: [],
         instructions: "You are a test agent. Help users with their tasks.",
         backend: "reason-act-loop" as const,
+        signer: {
+            npub: "npub1test123",
+            privateKey: "mock-private-key",
+            sign: async () => "mock-signature"
+        } as any,
     };
 
     const mockProject = {
         id: "project-id",
         pubkey: "project-pubkey",
         title: "Test Project",
-        tags: [],
+        tags: [["title", "Test Project"]],
+        tagValue(tagName: string): string | undefined {
+            const tag = this.tags.find((t: string[]) => t[0] === tagName);
+            return tag?.[1];
+        }
     };
 
     it("should return an array of system messages", () => {
         const messages = buildSystemPromptMessages({
             agent: { ...baseAgent, isOrchestrator: false },
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
 
         expect(Array.isArray(messages)).toBe(true);
@@ -119,7 +137,7 @@ describe("buildSystemPromptMessages", () => {
         const messages = buildSystemPromptMessages({
             agent: projectManagerAgent,
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
 
         // Should have multiple messages
@@ -157,7 +175,7 @@ describe("buildSystemPromptMessages", () => {
         const messages = buildSystemPromptMessages({
             agent: regularAgent,
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
 
         const projectMdMessage = messages.find(m => m.metadata?.description === "PROJECT.md content");
@@ -168,7 +186,7 @@ describe("buildSystemPromptMessages", () => {
         expect(inventoryMessage).toBeDefined();
     });
 
-    it("should not include inventory or PROJECT.md for orchestrator", () => {
+    it("should include inventory but not PROJECT.md for orchestrator", () => {
         const orchestratorAgent = {
             ...baseAgent,
             isOrchestrator: true,
@@ -177,14 +195,16 @@ describe("buildSystemPromptMessages", () => {
         const messages = buildSystemPromptMessages({
             agent: orchestratorAgent,
             phase: PHASES.EXECUTE,
-            project: mockProject as any,
+            project: mockProject,
         });
 
         const projectMdMessage = messages.find(m => m.metadata?.description === "PROJECT.md content");
         const inventoryMessage = messages.find(m => m.metadata?.description === "Project inventory");
         
+        // Orchestrators should not have PROJECT.md (only project-manager has it)
         expect(projectMdMessage).toBeUndefined();
-        expect(inventoryMessage).toBeUndefined();
+        // But should have inventory (all agents get inventory)
+        expect(inventoryMessage).toBeDefined();
     });
 
 });

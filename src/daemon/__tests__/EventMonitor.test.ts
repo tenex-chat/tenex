@@ -15,7 +15,7 @@ mock.module("nostr-tools", () => ({
 
 // Mock types
 interface MockNDK {
-    subscribe: (filter: NDKFilter, options?: any) => NDKSubscription;
+    subscribe: (filter: NDKFilter, options?: Record<string, unknown>) => NDKSubscription;
 }
 
 interface MockSubscription extends NDKSubscription {
@@ -27,7 +27,8 @@ interface MockSubscription extends NDKSubscription {
 // Extend EventMonitor to expose private method for testing
 class TestableEventMonitor extends EventMonitor {
     public async testHandleEvent(event: NDKEvent): Promise<void> {
-        return (this as any).handleEvent(event);
+        // Access private method for testing
+        return (this as unknown as { handleEvent: (event: NDKEvent) => Promise<void> }).handleEvent(event);
     }
 }
 
@@ -37,8 +38,8 @@ describe("EventMonitor", () => {
     let mockProcessManager: IProcessManager;
     let mockNDK: MockNDK;
     let mockSubscription: MockSubscription;
-    let loggerErrorSpy: any;
-    let loggerInfoSpy: any;
+    let loggerErrorSpy: ReturnType<typeof mock>;
+    let loggerInfoSpy: ReturnType<typeof mock>;
 
     beforeEach(() => {
 

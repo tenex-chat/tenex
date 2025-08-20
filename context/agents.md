@@ -12,13 +12,14 @@ The `src/agents` module is the core of the TENEX application, responsible for de
 
 - **`built-in/`**: This directory contains the definitions of the built-in agents provided by TENEX:
     - **`executor.ts`**: An agent that executes a single task.
-    - **`orchestrator.ts`**: An agent that breaks down a complex task into smaller subtasks and coordinates their execution.
     - **`planner.ts`**: An agent that creates a plan for a complex task but does not execute it.
     - **`project-manager.ts`**: An agent that manages the entire lifecycle of a project, from planning to execution.
 
 - **`execution/`**: This directory contains the core logic for the agent execution loop, including:
     - **`ReasonActLoop.ts`**: Implements the ReAct (Reason and Act) pattern for agent execution.
     - **`ToolStreamHandler.ts`**: Handles the streaming of tool outputs.
-    - **`RoutingBackend.ts`**: Determines which backend (e.g., Claude, OpenAI) should be used for a given request.
+    - **`StreamStateManager.ts`**: Manages the state of streaming operations during tool execution.
+    - **`TerminationHandler.ts`**: Handles graceful termination of agent execution.
+    - **`ToolRepetitionDetector.ts`**: Detects and prevents infinite loops in tool usage.
 
 - **`types.ts`**: Defines the data structures and types used throughout the agents module, such as `Agent`, `AgentExecution`, and `Tool`.

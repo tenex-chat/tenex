@@ -53,10 +53,22 @@ const originalProcessKill = process.kill;
 };
 
 // Mock child_process module
-const mockProcessesByPid = new Map<number, any>();
+interface MockProcess {
+    pid: number;
+    stdout: { on: ReturnType<typeof mock> } | null;
+    stderr: { on: ReturnType<typeof mock> } | null;
+    on: ReturnType<typeof mock>;
+    once: ReturnType<typeof mock>;
+    kill: (signal?: string) => void;
+    _exitHandler?: Function;
+    _exitOnceHandler?: Function;
+    _errorHandler?: Function;
+}
+
+const mockProcessesByPid = new Map<number, MockProcess>();
 
 mock.module("child_process", () => ({
-    spawn: mock((command: string, args: string[], options: any) => {
+    spawn: mock((command: string, args: string[], options: { stdio?: string; cwd?: string }) => {
         const pid = nextPid++;
         
         let exitHandler: Function | null = null;
@@ -203,7 +215,7 @@ describe("ProcessManager", () => {
             
             // Call the exit handler
             const exitHandler = mockProcess.on.mock.calls.find(
-                ([event]: any) => event === 'exit'
+                ([event]: unknown[]) => event === 'exit'
             )?.[1];
             
             if (exitHandler) {
@@ -223,7 +235,7 @@ describe("ProcessManager", () => {
             let errorTriggered = false;
             
             mock.module("child_process", () => ({
-                spawn: mock((command: string, args: string[], options: any) => {
+                spawn: mock((command: string, args: string[], options: { stdio?: string; cwd?: string }) => {
                     if (!errorTriggered) {
                         errorTriggered = true;
                         const pid = nextPid++;

@@ -346,7 +346,7 @@ describe("TaskPublisher", () => {
                         ["p", "pubkey2"],
                         ["other", "tag"],
                     ] as string[][],
-                    tag: mock((project: any) => {}),
+                    tag: mock((project: MockProject) => {}),
                     sign: mock(() => Promise.resolve()),
                     publish: mock(() => Promise.resolve()),
                 };
@@ -416,9 +416,9 @@ describe("TaskPublisher", () => {
 
             // Check if the logger was called with the expected pattern
             const calls = loggerDebugSpy.mock.calls;
-            const hasProgressCall = calls.some((call: any[]) => 
+            const hasProgressCall = calls.some((call: unknown[]) => 
                 call[0] === "Published task progress" && 
-                call[1]?.contentLength === 10000
+                (call[1] as { contentLength?: number })?.contentLength === 10000
             );
             expect(hasProgressCall).toBe(true);
         });
