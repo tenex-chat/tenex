@@ -19,8 +19,26 @@ describe("Example E2E Test with Mock LLM", () => {
   });
 
   it("should complete full workflow from chat to verification", async () => {
-    // This would be your actual E2E test code
-    // For example, starting the daemon and sending events
+    // Create a custom mock for this specific test
+    mockLLM = createMockLLMService([], {
+      debug: true,
+      responses: [
+        {
+          match: /user authentication/i,
+          response: {
+            type: "text",
+            content: "I'll help you create a user authentication system with JWT and OAuth.",
+            toolCalls: [
+              {
+                id: "tool-1",
+                name: "continue",
+                params: { phase: "PLAN" },
+              },
+            ],
+          },
+        },
+      ],
+    });
 
     // Simulate user message
     const userMessage = "Create a user authentication system with JWT and OAuth";

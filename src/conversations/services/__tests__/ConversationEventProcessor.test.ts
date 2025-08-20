@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "@jest/globals";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { PHASES } from "../../phases";
 import type { Conversation } from "../../types";

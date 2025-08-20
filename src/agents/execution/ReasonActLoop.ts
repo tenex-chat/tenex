@@ -120,7 +120,7 @@ export class ReasonActLoop {
 
         // Check if we should continue iterating
         if (iterationResult.isTerminal) {
-          tracingLogger.info("[ReasonActLoop] Terminal tool detected, ending loop", {
+          tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
             iteration: iterations,
             willExitLoop: true,
             hasDeferredEvent: !!iterationResult.deferredTerminalEvent,
@@ -172,7 +172,7 @@ export class ReasonActLoop {
         }
       }
 
-      tracingLogger.info("[ReasonActLoop] Exited main loop", {
+      tracingLogger.debug("[ReasonActLoop] Exited main loop", {
         iterations,
         isComplete,
         reason: isComplete ? "completed" : "max iterations",
@@ -297,7 +297,7 @@ export class ReasonActLoop {
 
               // Check if output is an intent (has 'type' field)
               if (output.type === "completion" || output.type === "delegation") {
-                tracingLogger.info("[ReasonActLoop] Terminal intent detected", {
+                tracingLogger.debug("[ReasonActLoop] Terminal intent detected", {
                   tool: event.tool,
                   intentType: output.type,
                 });
@@ -604,10 +604,6 @@ export class ReasonActLoop {
     context: ExecutionContext,
     stateManager: StreamStateManager
   ): Promise<void> {
-    tracingLogger.info("[ReasonActLoop] Publishing terminal intent", {
-      type: deferredEvent.type,
-    });
-
     const agentPublisher = new AgentPublisher(context.agent);
     const intent = deferredEvent.intent;
 

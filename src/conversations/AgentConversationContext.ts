@@ -216,6 +216,15 @@ export class AgentConversationContext {
   }
 
   /**
+   * Clear processed event IDs to allow rebuilding full conversation history
+   * This is essential for agents to see their own previous responses
+   */
+  clearProcessedEvents(): void {
+    this.processedEventIds.clear();
+    this.messages = [];
+  }
+
+  /**
    * Remove the last message (useful for error recovery)
    */
   popMessage(): Message | undefined {

@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { NDKEvent, NDKKind, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
 import { AgentEventDecoder } from "../AgentEventDecoder";
 import {
   AgentEventEncoder,
@@ -8,9 +9,42 @@ import {
   type ConversationIntent,
   type DelegationIntent,
   type EventContext,
+  type StatusIntent,
 } from "../AgentEventEncoder";
+import { 
+  TENEXTestFixture, 
+  getTestUserWithSigner,
+  createMockAgentConfig,
+  type TestUserName 
+} from "@/test-utils/ndk-test-helpers";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks"; // Keep for AgentEventDecoder tests
+
+// Mock the modules
+mock.module("@/nostr/ndkClient", () => ({
+  getNDK: mock(() => ({
+    // Mock NDK instance
+  })),
+}));
+
+mock.module("@/services", () => ({
+  getProjectContext: mock(),
+}));
+
+import { getProjectContext } from "@/services";
+import { getNDK } from "@/nostr/ndkClient";
 
 describe("AgentEventEncoder", () => {
+  beforeEach(() => {
+    // Setup default mock for getProjectContext
+    const defaultProjectContext = {
+      project: {
+        pubkey: "defaultOwner",
+        tagReference: () => ["a", "31933:defaultOwner:default-project"],
+      },
+    };
+    (getProjectContext as ReturnType<typeof mock>).mockReturnValue(defaultProjectContext);
+  });
+  
   const mockAgent: AgentInstance = {
     name: "TestAgent",
     pubkey: "agent123",
@@ -21,19 +55,20 @@ describe("AgentEventEncoder", () => {
     role: "test",
   };
 
-  const mockTriggeringEvent = new NDKEvent();
+  const mockTriggeringEvent = createMockNDKEvent();
   mockTriggeringEvent.id = "trigger123";
   mockTriggeringEvent.tags = [
     ["e", "root123", "", "root"],
     ["e", "reply123", "", "reply"],
   ];
 
-  const mockConversationEvent = new NDKEvent();
+  const mockConversationEvent = createMockNDKEvent();
   mockConversationEvent.id = "conv123";
   mockConversationEvent.content = "Initial conversation";
+  mockConversationEvent.kind = NDKKind.Text;
+  mockConversationEvent.pubkey = "user123";
 
   const baseContext: EventContext = {
-    agent: mockAgent,
     triggeringEvent: mockTriggeringEvent,
     conversationEvent: mockConversationEvent,
   };
@@ -50,11 +85,10 @@ describe("AgentEventEncoder", () => {
       expect(event.kind).toBe(NDKKind.GenericReply);
       expect(event.content).toBe("Task completed successfully");
 
-      // Check E-tags are marked as completed
+      // Check conversation tags are added
       const eTags = event.getMatchingTags("e");
-      expect(eTags).toHaveLength(2);
-      expect(eTags[0]).toEqual(["e", "root123", "", "completed"]);
-      expect(eTags[1]).toEqual(["e", "reply123", "", "completed"]);
+      expect(eTags).toHaveLength(1);
+      expect(eTags[0]).toEqual(["e", "conv123"]); // References the conversation event
     });
 
     it("should include optional completion metadata", () => {
@@ -196,6 +230,84 @@ describe("AgentEventEncoder", () => {
     });
   });
 
+  describe("encodeProjectStatus", () => {
+    beforeEach(() => {
+      // Setup mock project context for status tests
+      const mockProjectContext = {
+        project: {
+          pubkey: "projectOwner123",
+          tagReference: () => ["a", "31933:projectOwner123:test-project"],
+        },
+      };
+      (getProjectContext as ReturnType<typeof mock>).mockReturnValue(mockProjectContext);
+    });
+
+    it("should encode project status with owner p-tag", () => {
+      const intent: StatusIntent = {
+        type: "status",
+        agents: [
+          { pubkey: "agent1", slug: "agent-one" },
+          { pubkey: "agent2", slug: "agent-two" },
+        ],
+        models: [
+          { slug: "gpt-4", agents: ["agent-one"] },
+        ],
+        tools: [
+          { name: "search", agents: ["agent-one", "agent-two"] },
+        ],
+      };
+
+      const event = AgentEventEncoder.encodeProjectStatus(intent);
+
+      // Check event kind
+      expect(event.kind).toBe(EVENT_KINDS.PROJECT_STATUS);
+      expect(event.content).toBe("");
+
+      // Check project reference tag
+      const aTags = event.getMatchingTags("a");
+      expect(aTags).toHaveLength(1);
+      expect(aTags[0]).toEqual(["a", "31933:projectOwner123:test-project"]);
+
+      // Check p-tag for project owner
+      const pTags = event.getMatchingTags("p");
+      expect(pTags).toHaveLength(1);
+      expect(pTags[0]).toEqual(["p", "projectOwner123"]);
+
+      // Check agent tags
+      const agentTags = event.getMatchingTags("agent");
+      expect(agentTags).toHaveLength(2);
+      expect(agentTags[0]).toEqual(["agent", "agent1", "agent-one"]);
+      expect(agentTags[1]).toEqual(["agent", "agent2", "agent-two"]);
+
+      // Check model tags
+      const modelTags = event.getMatchingTags("model");
+      expect(modelTags).toHaveLength(1);
+      expect(modelTags[0]).toEqual(["model", "gpt-4", "agent-one"]);
+
+      // Check tool tags
+      const toolTags = event.getMatchingTags("tool");
+      expect(toolTags).toHaveLength(1);
+      expect(toolTags[0]).toEqual(["tool", "search", "agent-one", "agent-two"]);
+    });
+
+    it("should include queue tags when provided", () => {
+      const intent: StatusIntent = {
+        type: "status",
+        agents: [],
+        models: [],
+        tools: [],
+        queue: ["conv123", "conv456"],
+      };
+
+      const event = AgentEventEncoder.encodeProjectStatus(intent);
+
+      const queueTags = event.getMatchingTags("queue");
+      expect(queueTags).toHaveLength(2);
+      expect(queueTags[0]).toEqual(["queue", "conv123"]);
+      expect(queueTags[1]).toEqual(["queue", "conv456"]);
+    });
+  });
+
   describe("encodeConversation", () => {
     it("should create a simple response without completion semantics", () => {
       const intent: ConversationIntent = {
@@ -218,16 +330,17 @@ describe("AgentEventEncoder", () => {
 });
 
 describe("AgentEventDecoder", () => {
+  // These tests use simple mocks since they only test static utility functions
   describe("isCompletionEvent", () => {
     it("should identify completion events by completed e-tags", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.tags = [["e", "event123", "", "completed"]];
 
       expect(AgentEventDecoder.isCompletionEvent(event)).toBe(true);
     });
 
     it("should not identify regular replies as completions", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.tags = [["e", "event123", "", "reply"]];
 
       expect(AgentEventDecoder.isCompletionEvent(event)).toBe(false);
@@ -236,7 +349,7 @@ describe("AgentEventDecoder", () => {
 
   describe("decodeCompletion", () => {
     it("should decode completion events back to intents", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.content = "Task finished";
       event.tags = [
         ["e", "event123", "", "completed"],
@@ -253,7 +366,7 @@ describe("AgentEventDecoder", () => {
     });
 
     it("should return null for non-completion events", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.tags = [["e", "event123", "", "reply"]];
 
       expect(AgentEventDecoder.decodeCompletion(event)).toBeNull();
@@ -262,7 +375,7 @@ describe("AgentEventDecoder", () => {
 
   describe("isDelegationEvent", () => {
     it("should identify task events with agent p-tags", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.kind = EVENT_KINDS.TASK;
       event.tags = [["p", "agent123", "", "agent"]];
 
@@ -270,7 +383,7 @@ describe("AgentEventDecoder", () => {
     });
 
     it("should not identify regular tasks as delegations", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.kind = EVENT_KINDS.TASK;
       event.tags = [["p", "user123", "", "assignee"]];
 
@@ -280,7 +393,7 @@ describe("AgentEventDecoder", () => {
 
   describe("extractContext", () => {
     it("should extract all metadata from an event", () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.tags = [
         ["conversation-id", "conv123"],
         ["project", "proj456"],

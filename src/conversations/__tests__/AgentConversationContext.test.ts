@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks";
 import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
 
@@ -14,7 +14,7 @@ describe("AgentConversationContext", () => {
 
   describe("duplicate event handling", () => {
     it("should not add duplicate events with the same ID", async () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.id = "event-123";
       event.content = "Test message";
       event.pubkey = "test-pubkey";
@@ -32,7 +32,7 @@ describe("AgentConversationContext", () => {
     });
 
     it("should not add duplicate triggering events with the same ID", async () => {
-      const event = new NDKEvent();
+      const event = createMockNDKEvent();
       event.id = "triggering-event-456";
       event.content = "User request";
       event.pubkey = "user-pubkey";
@@ -50,13 +50,13 @@ describe("AgentConversationContext", () => {
     });
 
     it("should add different events with different IDs", async () => {
-      const event1 = new NDKEvent();
+      const event1 = createMockNDKEvent();
       event1.id = "event-1";
       event1.content = "First message";
       event1.pubkey = "test-pubkey";
       event1.created_at = Date.now() / 1000;
 
-      const event2 = new NDKEvent();
+      const event2 = createMockNDKEvent();
       event2.id = "event-2";
       event2.content = "Second message";
       event2.pubkey = "test-pubkey";
@@ -70,13 +70,13 @@ describe("AgentConversationContext", () => {
     });
 
     it("should handle mixed duplicate and unique events correctly", async () => {
-      const event1 = new NDKEvent();
+      const event1 = createMockNDKEvent();
       event1.id = "event-1";
       event1.content = "First message";
       event1.pubkey = "test-pubkey";
       event1.created_at = Date.now() / 1000;
 
-      const event2 = new NDKEvent();
+      const event2 = createMockNDKEvent();
       event2.id = "event-2";
       event2.content = "Second message";
       event2.pubkey = "test-pubkey";
@@ -105,7 +105,7 @@ describe("AgentConversationContext", () => {
 
     it("should persist and restore processed event IDs", () => {
       // Create a context and add some events
-      const event1 = new NDKEvent();
+      const event1 = createMockNDKEvent();
       event1.id = "event-1";
       event1.content = "First message";
 

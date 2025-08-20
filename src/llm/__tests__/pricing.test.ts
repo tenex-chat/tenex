@@ -2,11 +2,12 @@
  * Tests for OpenRouter pricing service
  */
 
+import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { OpenRouterPricingService } from "../pricing";
 
 // Mock fetch for testing
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+const mockFetch = mock(() => Promise.resolve());
+global.fetch = mockFetch as any;
 
 const mockOpenRouterResponse = {
   data: [

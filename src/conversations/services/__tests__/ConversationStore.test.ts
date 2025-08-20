@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "@jest/globals";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks";
 import { PHASES } from "../../phases";
 import type { Conversation } from "../../types";
 import { ConversationStore } from "../ConversationStore";
@@ -11,10 +11,11 @@ describe("ConversationStore", () => {
   beforeEach(() => {
     store = new ConversationStore();
 
-    const mockEvent = new NDKEvent();
-    mockEvent.id = "event1";
-    mockEvent.content = "Test message";
-    mockEvent.created_at = Date.now();
+    const mockEvent = createMockNDKEvent({
+      id: "event1",
+      content: "Test message",
+      created_at: Math.floor(Date.now() / 1000),
+    });
 
     mockConversation = {
       id: "conv1",

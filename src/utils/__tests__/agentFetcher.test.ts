@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks";
 import { fetchAgentDefinition } from "../agentFetcher";
 
 describe("fetchAgentDefinition", () => {
@@ -9,7 +9,7 @@ describe("fetchAgentDefinition", () => {
 
   beforeEach(() => {
     // Create a mock NDKEvent
-    mockEvent = new NDKEvent();
+    mockEvent = createMockNDKEvent();
     mockEvent.id = "test-event-id";
     mockEvent.pubkey = "test-pubkey";
     mockEvent.created_at = 1234567890;

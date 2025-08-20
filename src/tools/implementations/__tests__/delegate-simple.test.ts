@@ -76,6 +76,7 @@ describe("delegateTool", () => {
     // Empty array should be valid structurally (will fail in execution)
     const validated = schema.validate({
       recipients: [],
+      title: "Empty Test",
       fullRequest: "Test message",
     });
 

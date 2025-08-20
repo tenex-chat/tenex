@@ -113,13 +113,17 @@ export class AgentEventEncoder {
       throw new Error("EventContext is missing required triggeringEvent with id");
     }
 
+    const rootEventId = context.conversationEvent.tagValue("E") || context.conversationEvent.id;
+    const rootEventKind = context.conversationEvent.tagValue("K") || context.conversationEvent.kind;
+    const rootEventPubkey = context.conversationEvent.tagValue("P") || context.conversationEvent.pubkey;
+
     // Add conversation root tag (E tag) - using the conversation event's ID
-    event.tag(["E", context.conversationEvent.id]);
-    event.tag(["K", context.conversationEvent.kind.toString()]);
-    event.tag(["P", context.conversationEvent.pubkey]);
+    event.tag(["E", rootEventId]);
+    event.tag(["K", rootEventKind.toString()]);
+    event.tag(["P", rootEventPubkey]);
 
     // Add reply to conversation event (e tag)
-    event.tag(["e", context.conversationEvent.id]);
+    event.tag(["e", rootEventId]);
   }
   /**
    * Encode a completion intent into a tagged event.
@@ -330,6 +334,9 @@ export class AgentEventEncoder {
     // Add project tag
     const projectCtx = getProjectContext();
     event.tag(projectCtx.project.tagReference());
+
+    // Add p-tag for the project owner's pubkey
+    event.tag(["p", projectCtx.project.pubkey]);
 
     // Add agent pubkeys
     for (const agent of intent.agents) {

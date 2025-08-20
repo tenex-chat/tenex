@@ -234,6 +234,10 @@ export class ConversationCoordinator {
     // Get or create the agent context
     const context = this.getOrCreateAgentContext(conversationId, targetAgent.slug);
 
+    // Clear processed event IDs to ensure we rebuild the full conversation history
+    // This is critical for the agent to see its own previous responses
+    context.clearProcessedEvents();
+
     // Get or initialize the agent's state
     let agentState = conversation.agentStates.get(targetAgent.slug);
     if (!agentState) {

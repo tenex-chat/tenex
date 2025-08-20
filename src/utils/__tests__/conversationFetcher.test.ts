@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks";
 import { fetchConversation } from "../conversationFetcher";
 
 // Mock the services module before importing anything that uses it
@@ -31,14 +31,14 @@ describe("fetchConversation", () => {
 
   beforeEach(() => {
     // Create mock events
-    mockRootEvent = new NDKEvent();
+    mockRootEvent = createMockNDKEvent();
     mockRootEvent.id = "root-event-id";
     mockRootEvent.pubkey = "human-pubkey";
     mockRootEvent.created_at = 1234567890;
     mockRootEvent.content = "This is the root message";
     mockRootEvent.tags = [];
 
-    mockReplyEvent = new NDKEvent();
+    mockReplyEvent = createMockNDKEvent();
     mockReplyEvent.id = "reply-event-id";
     mockReplyEvent.pubkey = "agent-pubkey";
     mockReplyEvent.created_at = 1234567900;
@@ -103,7 +103,7 @@ describe("fetchConversation", () => {
   });
 
   test("formats events in tree structure", async () => {
-    const olderEvent = new NDKEvent();
+    const olderEvent = createMockNDKEvent();
     olderEvent.id = "older-event-id";
     olderEvent.pubkey = "another-pubkey";
     olderEvent.created_at = 1234567880; // Earlier timestamp
@@ -136,7 +136,7 @@ describe("fetchConversation", () => {
 
     mockNdk.getUser = mock(() => mockUserWithoutProfile);
 
-    const unknownEvent = new NDKEvent();
+    const unknownEvent = createMockNDKEvent();
     unknownEvent.id = "unknown-event-id";
     unknownEvent.pubkey = "unknown-pubkey";
     unknownEvent.created_at = 1234567895;
@@ -153,7 +153,7 @@ describe("fetchConversation", () => {
   });
 
   test("builds conversation tree with nested replies", async () => {
-    const nestedReply = new NDKEvent();
+    const nestedReply = createMockNDKEvent();
     nestedReply.id = "nested-reply-id";
     nestedReply.pubkey = "human-pubkey";
     nestedReply.created_at = 1234567910;

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { createMockNDKEvent } from "@/test-utils/bun-mocks";
 import type { ExecutionQueueManager } from "../../executionQueue";
 import { PHASES } from "../../phases";
 import type { Conversation } from "../../types";
@@ -10,23 +10,24 @@ const { VERIFICATION } = PHASES;
 describe("PhaseManager", () => {
   let phaseManager: PhaseManager;
   let mockConversation: Conversation;
-  let mockQueueManager: jest.Mocked<ExecutionQueueManager>;
+  let mockQueueManager: any;
 
   beforeEach(() => {
     // Create mock queue manager
     mockQueueManager = {
-      requestExecution: jest.fn(),
-      releaseExecution: jest.fn(),
-      on: jest.fn(),
-      off: jest.fn(),
-      emit: jest.fn(),
-    } as any;
+      requestExecution: mock(() => Promise.resolve({ granted: true })),
+      releaseExecution: mock(() => {}),
+      on: mock(() => {}),
+      off: mock(() => {}),
+      emit: mock(() => {}),
+    };
 
     phaseManager = new PhaseManager(mockQueueManager);
 
-    const mockEvent = new NDKEvent();
-    mockEvent.id = "event1";
-    mockEvent.content = "Test message";
+    const mockEvent = createMockNDKEvent({
+      id: "event1",
+      content: "Test message",
+    });
 
     mockConversation = {
       id: "conv1",
@@ -187,9 +188,9 @@ describe("PhaseManager", () => {
 
   describe("setupQueueListeners", () => {
     it("should setup event listeners on queue manager", () => {
-      const onLockAcquired = jest.fn();
-      const onTimeout = jest.fn();
-      const onTimeoutWarning = jest.fn();
+      const onLockAcquired = mock(() => {});
+      const onTimeout = mock(() => {});
+      const onTimeoutWarning = mock(() => {});
 
       phaseManager.setupQueueListeners(onLockAcquired, onTimeout, onTimeoutWarning);
 
@@ -200,9 +201,9 @@ describe("PhaseManager", () => {
 
     it("should not setup listeners if no queue manager", () => {
       const phaseManagerNoQueue = new PhaseManager();
-      const onLockAcquired = jest.fn();
-      const onTimeout = jest.fn();
-      const onTimeoutWarning = jest.fn();
+      const onLockAcquired = mock(() => {});
+      const onTimeout = mock(() => {});
+      const onTimeoutWarning = mock(() => {});
 
       // Should not throw
       phaseManagerNoQueue.setupQueueListeners(onLockAcquired, onTimeout, onTimeoutWarning);

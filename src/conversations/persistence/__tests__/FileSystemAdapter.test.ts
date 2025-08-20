@@ -1,9 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists } from "@/lib/fs/filesystem";
 import { cleanupTempDir, createMockConversation, createTempDir } from "@/test-utils";
+import { createMockNDK } from "@/test-utils/bun-mocks";
 import { FileSystemAdapter } from "../FileSystemAdapter";
+
+// Mock NDK
+const mockNDK = createMockNDK();
+mock.module("@/nostr/ndkClient", () => ({
+  getNDK: () => mockNDK,
+  initNDK: mock(() => Promise.resolve()),
+}));
 
 describe("FileSystemAdapter", () => {
   let adapter: FileSystemAdapter;
@@ -12,8 +20,9 @@ describe("FileSystemAdapter", () => {
 
   beforeEach(async () => {
     tempDir = await createTempDir("fs-adapter-test-");
-    basePath = path.join(tempDir, "conversations");
-    adapter = new FileSystemAdapter(basePath);
+    // FileSystemAdapter takes projectPath and adds .tenex/conversations itself
+    basePath = path.join(tempDir, ".tenex", "conversations");
+    adapter = new FileSystemAdapter(tempDir);
     await adapter.initialize();
   });
 
@@ -23,8 +32,9 @@ describe("FileSystemAdapter", () => {
 
   describe("initialize", () => {
     it("should create the base directory if it doesn't exist", async () => {
-      const newPath = path.join(tempDir, "new-conversations");
-      const newAdapter = new FileSystemAdapter(newPath);
+      const newProjectPath = path.join(tempDir, "new-project");
+      const newAdapter = new FileSystemAdapter(newProjectPath);
+      const newPath = path.join(newProjectPath, ".tenex", "conversations");
 
       await newAdapter.initialize();
 
@@ -50,18 +60,9 @@ describe("FileSystemAdapter", () => {
 
       await adapter.save(conversation);
 
-      // Check the conversations subdirectory
-      const conversationsDir = path.join(basePath, "conversations");
-      const dirExists = await pathExists(conversationsDir);
-
-      if (dirExists) {
-        const files = await fs.readdir(conversationsDir);
-        expect(files.length).toBeGreaterThan(0);
-      } else {
-        // Check base directory
-        const files = await fs.readdir(basePath);
-        expect(files.length).toBeGreaterThan(0);
-      }
+      // Check base directory
+      const files = await fs.readdir(basePath);
+      expect(files.length).toBeGreaterThan(0);
 
       // The adapter might sanitize the filename
       const savedFile = files.find((f) => f.includes("test-conv-123"));
