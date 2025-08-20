@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
-import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKKind, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { AgentEventDecoder } from "../AgentEventDecoder";
 import {
   AgentEventEncoder,
@@ -15,8 +15,10 @@ describe("AgentEventEncoder", () => {
     name: "TestAgent",
     pubkey: "agent123",
     slug: "test-agent",
-    signer: {} as any,
+    signer: {} as NDKPrivateKeySigner,
     llmConfig: "test-config",
+    tools: [],
+    role: "test",
   };
 
   const mockTriggeringEvent = new NDKEvent();

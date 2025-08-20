@@ -71,21 +71,17 @@ The block is NOT used when:
 - The agent is continuing a direct conversation with the user
 - There are no new messages from others since the agent's last interaction
 
-### NEW INTERACTION Marker
+### END OF HISTORY Marker
 
-The "=== NEW INTERACTION ===" marker works in conjunction with the "MESSAGES WHILE YOU WERE AWAY" block to differentiate between:
-- The backfilled context (messages while away)
-- The new message that the agent needs to respond to
+The "=== END OF HISTORY ===" marker works in conjunction with the "MESSAGES WHILE YOU WERE AWAY" block to:
+- Signal the end of the historical context
+- Prompt the agent to respond to the most recent user message
 
-The marker is added ONLY when:
-- A "MESSAGES WHILE YOU WERE AWAY" block has been added
-- The agent needs a clear delineation between the backfilled messages and the current triggering event
+The marker is included at the end of the "MESSAGES WHILE YOU WERE AWAY" block along with:
+- A clear instruction to respond to the most recent user message
+- A reminder to consider the provided context
 
-The marker is NOT added when:
-- There's no "MESSAGES WHILE YOU WERE AWAY" block
-- The conversation flow is already clear (e.g., direct user message with no intervening messages)
-
-This dual-marker system ensures agents can distinguish between context they're being caught up on versus the actual message they need to respond to.
+This marker system ensures agents can distinguish between historical context they're being caught up on versus the actual message they need to respond to.
 
 ## Agent Participation Patterns
 
@@ -224,13 +220,13 @@ The `buildAgentMessages` function follows this sequence:
 1. **Build complete conversation history** - All messages up to but not including the triggering event
 2. **Check for messages while away** - Messages from others after `lastProcessedMessageIndex`
 3. **Add MESSAGES WHILE YOU WERE AWAY block** - Only if there are new messages from others
-4. **Add NEW INTERACTION marker** - Only if a "while away" block was added
+4. **Add END OF HISTORY marker** - Included at the end of the "while away" block with instructions
 5. **Add the triggering event** - The actual message to respond to
 
 Key implementation details:
 - Messages from others after `lastProcessedMessageIndex` are included in "MESSAGES WHILE YOU WERE AWAY"
-- The check no longer excludes messages already in `allPreviousMessages` 
-- NEW INTERACTION marker is conditional on the presence of the "while away" block
+- The END OF HISTORY marker includes an instruction to respond to the most recent user message
+- The system ensures agents have full context while clearly delineating historical vs current messages
 
 Key functions involved in the conversation management:
 - `buildAgentMessages`: Constructs the complete message context for an agent
