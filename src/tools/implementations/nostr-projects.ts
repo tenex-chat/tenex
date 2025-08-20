@@ -3,7 +3,7 @@ import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { NDKArticle, type NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
+import { NDKArticle, NDKUser } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema } from "../types";
@@ -174,7 +174,14 @@ Use this to understand what projects exist for a given user or the current proje
       });
 
       // Once we have the list of projects, fetch spec documents that tag them
-      let specArticles: NDKEvent[] = [];
+      interface SpecArticle {
+        title: string | undefined;
+        summary: string | undefined;
+        id: string;
+        date: number | undefined;
+        _projectRefs: string[];
+      }
+      let specArticles: SpecArticle[] = [];
       if (projectEvents.size > 0) {
         // Create array of project tag IDs for fetching articles
         const projectTagIds = Array.from(projectEvents).map((projectEvent) => {

@@ -129,7 +129,8 @@ export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapte
     let results = Array.from(this.metadata.values());
 
     if (criteria.title) {
-      results = results.filter((m) => m.title.toLowerCase().includes(criteria.title.toLowerCase()));
+      const searchTitle = criteria.title.toLowerCase();
+      results = results.filter((m) => m.title.toLowerCase().includes(searchTitle));
     }
 
     if (criteria.phase) {

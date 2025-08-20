@@ -219,6 +219,8 @@ export class ToolPlugin extends Plugin {
       const errorResult: ToolExecutionResult = {
         success: false,
         output: undefined,
+        toolName: this.tool.name,
+        toolArgs: parameters,
         error: {
           kind: "execution",
           tool: this.tool.name,

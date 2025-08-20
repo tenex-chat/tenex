@@ -64,7 +64,7 @@ export class NDKAgentDiscovery {
       }
 
       // Sort by creation time (newest first)
-      filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      filtered.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
       return filtered;
     } catch (error) {

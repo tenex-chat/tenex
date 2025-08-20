@@ -1,4 +1,5 @@
 import { ClaudeTaskOrchestrator } from "@/claude/orchestrator";
+import type { Phase } from "@/conversations/phases";
 import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import { getRootConversationId } from "@/utils/conversation-utils";
@@ -56,7 +57,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         agent: context.agent.name,
       });
     }
-    if (systemPrompt && cleanedSystemPrompt !== systemPrompt) {
+    if (systemPrompt && cleanedSystemPrompt && cleanedSystemPrompt !== systemPrompt) {
       logger.debug("[claude_code] Stripped thinking blocks from system prompt", {
         originalLength: systemPrompt.length,
         cleanedLength: cleanedSystemPrompt.length,

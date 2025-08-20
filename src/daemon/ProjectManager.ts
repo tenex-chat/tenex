@@ -220,7 +220,8 @@ export class ProjectManager implements IProjectManager {
     } catch (error: unknown) {
       // Only log if it's not a missing project configuration error
       // The MCP server command will handle this specific error with a friendlier message
-      if (!error?.message?.includes("Project configuration missing projectNaddr")) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes("Project configuration missing projectNaddr")) {
         logger.error("Failed to initialize ProjectContext", { error, projectPath });
       }
       throw error;
@@ -306,7 +307,7 @@ export class ProjectManager implements IProjectManager {
     project: ProjectData,
     ndk: NDK,
     ndkProject: NDKProject | undefined,
-    agentRegistry: unknown
+    agentRegistry: import("@/agents/AgentRegistry").AgentRegistry
   ): Promise<void> {
     const agentsDir = path.join(projectPath, ".tenex", "agents");
     await fs.mkdir(agentsDir, { recursive: true });
