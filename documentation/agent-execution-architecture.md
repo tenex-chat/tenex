@@ -877,7 +877,7 @@ Root Context
 
 ## Conclusion
 
-The Agent Execution Architecture represents a sophisticated streaming-based execution engine that successfully balances multiple complex requirements: real-time user interaction, type-safe tool execution, reliable task completion, and robust error recovery. Its layered design with pluggable backends enables different execution strategies while maintaining consistent behavior guarantees.
+The Agent Execution Architecture represents a sophisticated streaming-based execution engine that successfully balances multiple complex requirements: real-time user interaction, type-safe tool execution, reliable task completion, and robust error recovery. Its unified design through the ReasonActLoop implementation ensures consistent behavior across all agents.
 
 The architecture excels at:
 - **Streaming Performance**: Real-time content delivery with minimal latency

@@ -324,7 +324,7 @@ export class AgentConversationContext {
         
         context.lastProcessedIndex = jsonData.lastProcessedIndex || 0;
         context.claudeSessionId = jsonData.claudeSessionId;
-        context.currentPhase = jsonData.currentPhase;
+        context.currentPhase = jsonData.currentPhase as Phase | undefined;
         
         return context;
     }

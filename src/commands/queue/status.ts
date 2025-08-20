@@ -139,7 +139,7 @@ function displayQueueStatus(status: unknown, detailed?: boolean): void {
 
   // Display active timeouts if detailed
   const statusWithTimeouts = status as QueueStatus & { activeTimeouts?: string[] };
-  if (detailed && statusWithTimeouts.activeTimeouts?.length > 0) {
+  if (detailed && statusWithTimeouts.activeTimeouts && statusWithTimeouts.activeTimeouts.length > 0) {
     console.log();
     console.log(chalk.bold('Active Timeouts:'));
     for (const conversationId of statusWithTimeouts.activeTimeouts) {

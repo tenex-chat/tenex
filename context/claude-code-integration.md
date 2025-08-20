@@ -131,6 +131,6 @@ As of the latest update, the `claude_code` tool is **automatically available** t
 This dual-pattern approach provides:
 - **Efficiency** for direct Claude execution scenarios
 - **Flexibility** for complex, multi-tool workflows
-- **Clear separation of concerns** between execution strategies
+- **Clear separation of concerns** in the execution model
 - **Optimal cost** by avoiding unnecessary LLM calls where not needed
 - **Progressive capability** - agents can be configured for either pattern based on their role

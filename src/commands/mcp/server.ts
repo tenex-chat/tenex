@@ -8,7 +8,7 @@ import { ProjectManager } from "@/daemon/ProjectManager";
 import { getProjectContext } from "@/services/ProjectContext";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner, type NDKKind } from "@nostr-dev-kit/ndk";
 
 // Type definitions
 interface MCPToolInfo {
@@ -40,8 +40,11 @@ interface LessonResult {
 interface LessonSummary {
   title: string;
   lesson: string;
+  detailed?: string;
   category?: string;
-  hashtags?: string[];
+  hashtags: string[];
+  createdAt?: number;
+  eventId: string;
 }
 
 /**
@@ -185,20 +188,20 @@ class LessonService {
 
     async getLessons(filter: { agentPubkey: string }): Promise<LessonSummary[]> {
         const lessons = await this.ndk.fetchEvents({
-            kinds: [4129],  // NDKAgentLesson.kind
+            kinds: [NDKAgentLesson.kind as NDKKind],
             authors: [filter.agentPubkey],
         });
         
         const lessonList = Array.from(lessons).map(event => {
             const lesson = NDKAgentLesson.from(event);
             return {
-                title: lesson.title,
+                title: lesson.title || '',
                 lesson: lesson.lesson,
                 detailed: lesson.detailed,
                 category: lesson.category,
-                hashtags: lesson.hashtags,
+                hashtags: lesson.hashtags || [],
                 createdAt: lesson.created_at,
-                eventId: lesson.id,
+                eventId: lesson.id || '',
             };
         });
         
@@ -240,7 +243,8 @@ export const serverCommand = new Command("server")
                 project = projectContext.project;
                 logger.info("Running MCP server with project context");
             } catch (error) {
-                if (error?.message?.includes("Project configuration missing projectNaddr")) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                if (errorMessage.includes("Project configuration missing projectNaddr")) {
                     logger.info("Running MCP server without project context (standalone mode)");
                 } else {
                     // Re-throw if it's a different error
@@ -620,7 +624,7 @@ export const serverCommand = new Command("server")
                             // Fetch 24010 events (project status - online agents)
                             // Only get status events from the last minute to determine if online
                             ndk.fetchEvents({
-                                kinds: [24010],
+                                kinds: [24010 as NDKKind],
                                 "#p": [pubkey],
                                 since: oneMinuteAgo,
                             }),
@@ -725,8 +729,8 @@ export const serverCommand = new Command("server")
                             
                             // Find spec articles for this project
                             const projectSpecs = specArticles
-                                .filter(article => article._projectRefs.includes(projectTagId))
-                                .map(({ _projectRefs, ...article }) => article); // Remove internal _projectRefs field
+                                .filter((article: any) => article._projectRefs.includes(projectTagId))
+                                .map(({ _projectRefs, ...article }: any) => article); // Remove internal _projectRefs field
                             
                             return {
                                 id: projectId,

@@ -50,7 +50,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 for (const [key, state] of conversation.agentStates.entries()) {
                     agentStatesObj[key] = {
                         lastProcessedMessageIndex: state.lastProcessedMessageIndex,
-                        claudeSessionId: state.claudeSessionId,
+                        claudeSessionsByPhase: state.claudeSessionsByPhase,
                         lastSeenPhase: state.lastSeenPhase,
                     };
                 }
@@ -108,7 +108,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 for (const [agentSlug, stateData] of Object.entries(data.agentStates)) {
                     const state: AgentState = {
                         lastProcessedMessageIndex: stateData.lastProcessedMessageIndex,
-                        claudeSessionId: stateData.claudeSessionId,
+                        claudeSessionsByPhase: stateData.claudeSessionsByPhase,
                         lastSeenPhase: stateData.lastSeenPhase as Phase | undefined,
                     };
                     agentStatesMap.set(agentSlug, state);

@@ -87,7 +87,7 @@ Project-wide synchronization mechanism ensuring only one conversation per projec
 - **Event Sourcing**: State derived from event stream for auditability and recovery
 - **Repository Pattern**: Clean separation between business logic and persistence
 - **Builder Pattern**: Complex object construction with fluent interfaces
-- **Strategy Pattern**: Pluggable backends and execution strategies
+- **Strategy Pattern**: Unified execution through ReasonActLoop
 - **Observer Pattern**: Event-driven communication between components
 - **State Machine**: Deterministic phase transitions and workflow control
 

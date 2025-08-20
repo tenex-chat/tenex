@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Execution Backend system is the core architectural component responsible for managing how agents execute their tasks within TENEX. It provides a flexible, pluggable architecture that supports multiple execution strategies while maintaining consistency in agent behavior, tool execution, and conversation flow control.
+The Execution Backend system is the core architectural component responsible for managing how agents execute their tasks within TENEX. It provides a unified execution model through the ReasonActLoop implementation, ensuring consistency in agent behavior, tool execution, and conversation flow control.
 
 This document provides a comprehensive deep-dive into the internal workings of the execution backend system, its design philosophy, component interactions, and implementation nuances.
 
@@ -290,7 +290,7 @@ The system implements comprehensive error handling at multiple levels:
 - `RECENT_TRANSITION_THRESHOLD_MS`: 30 second threshold
 
 ### 2. Agent Configuration
-- `backend`: Execution backend selection
+- `backend`: ReasonActLoop execution backend
 - `tools`: Available tools for agent
 - `llmConfig`: LLM configuration name
 - `isOrchestrator`: Special routing behavior

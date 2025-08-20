@@ -300,15 +300,19 @@ export class ConversationCoordinator {
         context.setLastProcessedIndex(conversation.history.length);
         agentState.lastProcessedMessageIndex = conversation.history.length;
         
-        if (context.getClaudeSessionId()) {
-            agentState.claudeSessionId = context.getClaudeSessionId();
+        const sessionId = context.getClaudeSessionId();
+        if (sessionId && phase) {
+            if (!agentState.claudeSessionsByPhase) {
+                agentState.claudeSessionsByPhase = {};
+            }
+            agentState.claudeSessionsByPhase[phase] = sessionId;
         }
         
         await this.persistence.save(conversation);
         
         return { 
             messages: context.getMessages(), 
-            claudeSessionId: context.getClaudeSessionId() || agentState.claudeSessionId
+            claudeSessionId: sessionId || (phase && agentState.claudeSessionsByPhase?.[phase])
         };
     }
 
@@ -435,7 +439,7 @@ export class ConversationCoordinator {
 
                 // Ensure agentStates is a Map
                 if (!(conversation.agentStates instanceof Map)) {
-                    const statesObj = conversation.agentStates as Record<string, unknown>;
+                    const statesObj = conversation.agentStates as Record<string, AgentState>;
                     conversation.agentStates = new Map(Object.entries(statesObj || {}));
                 }
 
