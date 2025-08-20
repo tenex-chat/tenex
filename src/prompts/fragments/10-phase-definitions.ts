@@ -1,4 +1,4 @@
-import { PHASE_DEFINITIONS, PHASES } from "@/conversations/phases";
+import { PHASES, PHASE_DEFINITIONS } from "@/conversations/phases";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -7,10 +7,10 @@ import type { PromptFragment } from "../core/types";
  * This fragment is accessible to all agents so they understand the phase structure and expectations
  */
 export const phaseDefinitionsFragment: PromptFragment = {
-    id: "phase-definitions",
-    priority: 15, // Higher priority to ensure it appears early in the prompt
-    template: () => {
-        return `## Phase Definitions
+  id: "phase-definitions",
+  priority: 15, // Higher priority to ensure it appears early in the prompt
+  template: () => {
+    return `## Phase Definitions
 
 - **${PHASES.CHAT}**: ${PHASE_DEFINITIONS[PHASES.CHAT].description}
   - Goal: ${PHASE_DEFINITIONS[PHASES.CHAT].goal}
@@ -32,7 +32,7 @@ export const phaseDefinitionsFragment: PromptFragment = {
   
 - **${PHASES.REFLECTION}**: ${PHASE_DEFINITIONS[PHASES.REFLECTION].description}
   - Goal: ${PHASE_DEFINITIONS[PHASES.REFLECTION].goal}`;
-    },
+  },
 };
 
 // Register the fragment

@@ -3,6 +3,6 @@ import { projectRunCommand } from "@/commands/project/run";
 import { Command } from "commander";
 
 export const projectCommand = new Command("project")
-    .description("Project management commands")
-    .addCommand(projectInitCommand)
-    .addCommand(projectRunCommand);
+  .description("Project management commands")
+  .addCommand(projectInitCommand)
+  .addCommand(projectRunCommand);

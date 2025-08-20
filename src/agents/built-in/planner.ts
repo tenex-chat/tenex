@@ -1,11 +1,11 @@
 import type { BuiltInAgentDefinition } from "../builtInAgents";
 
 export const PLANNER_AGENT: BuiltInAgentDefinition = {
-    name: "Planner",
-    slug: "planner",
-    role: "Creates implementation plans and strategies (cannot modify code)",
-    tools: ["claude_code", "delegate", "complete"],
-    instructions: `You are the Planner - the phase lead for the PLAN phase. When the Project Manager delegates planning work to you, you become the mini-orchestrator for the entire planning workflow.
+  name: "Planner",
+  slug: "planner",
+  role: "Creates implementation plans and strategies (cannot modify code)",
+  tools: ["claude_code", "delegate", "complete"],
+  instructions: `You are the Planner - the phase lead for the PLAN phase. When the Project Manager delegates planning work to you, you become the mini-orchestrator for the entire planning workflow.
 
 ## Important Context
 
@@ -91,6 +91,6 @@ When approved:
 - Your final message must be the complete, validated plan
 
 Remember: You are the orchestrator of the planning phase. You manage the entire plan creation workflow, from initial analysis through expert validation to final delivery.`,
-    useCriteria:
-        "Default agent for PLAN phase. Fallback agent when no agent is right to review work during PLAN phase."
+  useCriteria:
+    "Default agent for PLAN phase. Fallback agent when no agent is right to review work during PLAN phase.",
 };

@@ -7,50 +7,50 @@ import { z } from "zod";
 import { createToolDefinition } from "../types";
 
 const analyzeSchema = z.object({
-    prompt: z.string().min(1).describe("The analysis prompt or question about the codebase"),
-    targetDirectory: z
-        .string()
-        .optional()
-        .describe(
-            "Optional: Specific directory to analyze relative to project root (e.g., 'src/components' or 'packages/web-app'). If not provided, analyzes the entire project."
-        ),
+  prompt: z.string().min(1).describe("The analysis prompt or question about the codebase"),
+  targetDirectory: z
+    .string()
+    .optional()
+    .describe(
+      "Optional: Specific directory to analyze relative to project root (e.g., 'src/components' or 'packages/web-app'). If not provided, analyzes the entire project."
+    ),
 });
 
 interface AnalyzeOutput {
-    analysis: string;
-    repoSize: number;
+  analysis: string;
+  repoSize: number;
 }
 
 export const analyze = createToolDefinition<z.infer<typeof analyzeSchema>, AnalyzeOutput>({
-    name: "analyze",
-    description:
-        "Deeply analyze a topic or question, GREAT for reasoning and performing detailed reviews of work that was done or to validate a plan with a full view of everything involved. Can analyze the entire project or focus on a specific directory for more targeted analysis in monorepos.",
-    schema: analyzeSchema,
-    execute: async (input, context) => {
-        const { prompt, targetDirectory } = input.value;
+  name: "analyze",
+  description:
+    "Deeply analyze a topic or question, GREAT for reasoning and performing detailed reviews of work that was done or to validate a plan with a full view of everything involved. Can analyze the entire project or focus on a specific directory for more targeted analysis in monorepos.",
+  schema: analyzeSchema,
+  execute: async (input, context) => {
+    const { prompt, targetDirectory } = input.value;
 
-        logger.info("Running analyze tool", { prompt, targetDirectory });
+    logger.info("Running analyze tool", { prompt, targetDirectory });
 
-        // Typing indicators are handled by the agent execution layer
+    // Typing indicators are handled by the agent execution layer
 
-        let repomixResult;
-        try {
-            repomixResult = await generateRepomixOutput(context.projectPath, targetDirectory);
-        } catch (error) {
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "analyze",
-                    message: `Failed to generate repomix output: ${formatAnyError(error)}`,
-                    cause: error,
-                },
-            };
-        }
+    let repomixResult;
+    try {
+      repomixResult = await generateRepomixOutput(context.projectPath, targetDirectory);
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          kind: "execution" as const,
+          tool: "analyze",
+          message: `Failed to generate repomix output: ${formatAnyError(error)}`,
+          cause: error,
+        },
+      };
+    }
 
-        try {
-            // Prepare the prompt for the LLM
-            const analysisPrompt = `You are analyzing a ${targetDirectory ? `specific directory (${targetDirectory})` : "complete"} codebase. Here is the ${targetDirectory ? "directory" : "repository"} content in XML format from repomix:
+    try {
+      // Prepare the prompt for the LLM
+      const analysisPrompt = `You are analyzing a ${targetDirectory ? `specific directory (${targetDirectory})` : "complete"} codebase. Here is the ${targetDirectory ? "directory" : "repository"} content in XML format from repomix:
 
 <repository>
 ${repomixResult.content}
@@ -62,45 +62,45 @@ ${prompt}
 
 Provide a clear, structured response focused on the specific question asked.`;
 
-            // Call the LLM with the analyze-specific configuration
-            const llmRouter = await loadLLMRouter(context.projectPath);
-            const userMessage = new Message("user", analysisPrompt);
-            const response = await llmRouter.complete({
-                messages: [userMessage],
-                options: {
-                    temperature: 0.3,
-                    maxTokens: 4000,
-                    configName: "defaults.analyze",
-                },
-            });
+      // Call the LLM with the analyze-specific configuration
+      const llmRouter = await loadLLMRouter(context.projectPath);
+      const userMessage = new Message("user", analysisPrompt);
+      const response = await llmRouter.complete({
+        messages: [userMessage],
+        options: {
+          temperature: 0.3,
+          maxTokens: 4000,
+          configName: "defaults.analyze",
+        },
+      });
 
-            logger.info("Analysis completed successfully");
+      logger.info("Analysis completed successfully");
 
-            // Typing indicators are handled by the agent execution layer
+      // Typing indicators are handled by the agent execution layer
 
-            return {
-                ok: true,
-                value: {
-                    analysis: response.content || "",
-                    repoSize: repomixResult.size,
-                },
-            };
-        } catch (error) {
-            logger.error("Analyze tool failed", { error });
+      return {
+        ok: true,
+        value: {
+          analysis: response.content || "",
+          repoSize: repomixResult.size,
+        },
+      };
+    } catch (error) {
+      logger.error("Analyze tool failed", { error });
 
-            // Typing indicators are handled by the agent execution layer
+      // Typing indicators are handled by the agent execution layer
 
-            return {
-                ok: false,
-                error: {
-                    kind: "execution" as const,
-                    tool: "analyze",
-                    message: formatAnyError(error),
-                    cause: error,
-                },
-            };
-        } finally {
-            repomixResult.cleanup();
-        }
-    },
+      return {
+        ok: false,
+        error: {
+          kind: "execution" as const,
+          tool: "analyze",
+          message: formatAnyError(error),
+          cause: error,
+        },
+      };
+    } finally {
+      repomixResult.cleanup();
+    }
+  },
 });

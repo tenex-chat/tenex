@@ -1,1 +1,1 @@
-export { StatusPublisher } from './StatusPublisher';
+export { StatusPublisher } from "./StatusPublisher";

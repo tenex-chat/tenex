@@ -9,12 +9,12 @@ import { isAbsolute, relative, resolve } from "node:path";
  * @throws Error if the path would escape the project directory
  */
 export function resolveAndValidatePath(filePath: string, projectPath: string): string {
-    const fullPath = isAbsolute(filePath) ? filePath : resolve(projectPath, filePath);
-    const relativePath = relative(projectPath, fullPath);
+  const fullPath = isAbsolute(filePath) ? filePath : resolve(projectPath, filePath);
+  const relativePath = relative(projectPath, fullPath);
 
-    if (relativePath.startsWith("..")) {
-        throw new Error(`Path outside project directory: ${filePath}`);
-    }
+  if (relativePath.startsWith("..")) {
+    throw new Error(`Path outside project directory: ${filePath}`);
+  }
 
-    return fullPath;
+  return fullPath;
 }

@@ -1,9 +1,9 @@
-import { EventEmitter } from 'events';
-import { ExecutionQueueConfig, DEFAULT_EXECUTION_QUEUE_CONFIG } from './types';
+import { EventEmitter } from "node:events";
+import { DEFAULT_EXECUTION_QUEUE_CONFIG, type ExecutionQueueConfig } from "./types";
 
 export interface TimeoutManagerEvents {
-  'timeout': (conversationId: string) => void;
-  'warning': (conversationId: string, remainingMs: number) => void;
+  timeout: (conversationId: string) => void;
+  warning: (conversationId: string, remainingMs: number) => void;
 }
 
 export class TimeoutManager extends EventEmitter {
@@ -24,12 +24,15 @@ export class TimeoutManager extends EventEmitter {
 
     this.clearTimeout(conversationId);
 
-    const timeoutDuration = duration || this.config.maxExecutionDuration || DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+    const timeoutDuration =
+      duration ||
+      this.config.maxExecutionDuration ||
+      DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
 
     // Set up warning timeout (5 minutes before expiry)
     if (timeoutDuration && timeoutDuration > this.WARNING_THRESHOLD) {
       const warningTimeout = setTimeout(() => {
-        this.emit('warning', conversationId, this.WARNING_THRESHOLD);
+        this.emit("warning", conversationId, this.WARNING_THRESHOLD);
         this.warnings.delete(conversationId);
       }, timeoutDuration - this.WARNING_THRESHOLD);
 
@@ -38,7 +41,7 @@ export class TimeoutManager extends EventEmitter {
 
     // Set up main timeout
     const timeout = setTimeout(() => {
-      this.emit('timeout', conversationId);
+      this.emit("timeout", conversationId);
       this.timeouts.delete(conversationId);
       this.warnings.delete(conversationId);
     }, timeoutDuration);
@@ -76,7 +79,8 @@ export class TimeoutManager extends EventEmitter {
     this.clearTimeout(conversationId);
 
     // Start new timeout with extended duration
-    const maxDuration = this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+    const maxDuration =
+      this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
     this.startTimeout(conversationId, maxDuration + additionalMs);
   }
 
@@ -92,7 +96,8 @@ export class TimeoutManager extends EventEmitter {
     const timeoutObj = timeout as NodeJS.Timeout & { _idleStart?: number };
     if (timeoutObj._idleStart) {
       const elapsed = Date.now() - timeoutObj._idleStart;
-      const maxDuration = this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+      const maxDuration =
+        this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
       const remaining = maxDuration - elapsed;
       return Math.max(0, remaining);
     }
@@ -136,18 +141,19 @@ export class TimeoutManager extends EventEmitter {
       activeTimeouts: Array.from(this.timeouts.keys()),
       activeWarnings: Array.from(this.warnings.keys()),
       config: {
-        enableAutoTimeout: this.config.enableAutoTimeout ?? DEFAULT_EXECUTION_QUEUE_CONFIG.enableAutoTimeout ?? true,
-        maxExecutionDuration: this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration ?? 1800000,
-        warningThreshold: this.WARNING_THRESHOLD
-      }
+        enableAutoTimeout:
+          this.config.enableAutoTimeout ?? DEFAULT_EXECUTION_QUEUE_CONFIG.enableAutoTimeout ?? true,
+        maxExecutionDuration:
+          this.config.maxExecutionDuration ??
+          DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration ??
+          1800000,
+        warningThreshold: this.WARNING_THRESHOLD,
+      },
     };
   }
 
   // Override EventEmitter methods for type safety
-  on<K extends keyof TimeoutManagerEvents>(
-    event: K,
-    listener: TimeoutManagerEvents[K]
-  ): this {
+  on<K extends keyof TimeoutManagerEvents>(event: K, listener: TimeoutManagerEvents[K]): this {
     return super.on(event, listener);
   }
 
@@ -158,10 +164,7 @@ export class TimeoutManager extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  off<K extends keyof TimeoutManagerEvents>(
-    event: K,
-    listener: TimeoutManagerEvents[K]
-  ): this {
+  off<K extends keyof TimeoutManagerEvents>(event: K, listener: TimeoutManagerEvents[K]): this {
     return super.off(event, listener);
   }
 }

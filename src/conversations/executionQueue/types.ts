@@ -42,7 +42,7 @@ export interface ExecutionHistory {
   startTime: number;
   endTime: number;
   agentPubkey: string;
-  reason: 'completed' | 'timeout' | 'forced' | 'error';
+  reason: "completed" | "timeout" | "forced" | "error";
 }
 
 export interface ForceReleaseRequest {
@@ -53,7 +53,7 @@ export interface ForceReleaseRequest {
 }
 
 export interface ExecutionQueueEvent {
-  type: 'lock_acquired' | 'lock_released' | 'queue_joined' | 'queue_left' | 'force_released';
+  type: "lock_acquired" | "lock_released" | "queue_joined" | "queue_left" | "force_released";
   conversationId: string;
   agentPubkey?: string;
   timestamp: number;
@@ -74,5 +74,5 @@ export const DEFAULT_EXECUTION_QUEUE_CONFIG: ExecutionQueueConfig = {
   maxQueueSize: 100,
   maxHistorySize: 1000,
   enableAutoTimeout: true,
-  enablePersistence: true
+  enablePersistence: true,
 };

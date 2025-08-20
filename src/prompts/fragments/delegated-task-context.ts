@@ -6,14 +6,14 @@ import type { PromptFragment } from "../core/types";
  * This is added when the triggering event is an NDKTask (kind 1934).
  */
 interface DelegatedTaskContextArgs {
-    taskDescription: string;
+  taskDescription: string;
 }
 
 export const delegatedTaskContextFragment: PromptFragment<DelegatedTaskContextArgs> = {
-    id: "delegated-task-context",
-    priority: 2, // Higher priority to appear right after identity
-    template: ({ taskDescription }) => {
-        return `
+  id: "delegated-task-context",
+  priority: 2, // Higher priority to appear right after identity
+  template: ({ taskDescription }) => {
+    return `
 ## 🚨 CRITICAL: You Are Working on a Delegated Task
 
 **THIS IS NOT A CONVERSATION - THIS IS A DELEGATED TASK THAT REQUIRES COMPLETION**
@@ -54,7 +54,7 @@ Your response: "Here's my analysis: [detailed analysis of auth flow]" then compl
 
 **REMEMBER**: The delegating agent is waiting for your complete() call. Without it, the workflow will hang. Always end delegated tasks with complete().
 `;
-    }
+  },
 };
 
 // Register the fragment

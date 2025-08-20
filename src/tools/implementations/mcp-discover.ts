@@ -1,22 +1,28 @@
-import type { Tool, ExecutionContext, Result, ToolError, Validated, ParameterSchema } from "@/tools/types";
-import { createZodSchema, success, failure } from "@/tools/types";
-import { getNDK } from "@/nostr";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
+import { getNDK } from "@/nostr";
+import type {
+  ExecutionContext,
+  ParameterSchema,
+  Result,
+  Tool,
+  ToolError,
+  Validated,
+} from "@/tools/types";
+import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 import type { NDKFilter } from "@nostr-dev-kit/ndk";
+import { z } from "zod";
 
 // Define the input schema
 const mcpDiscoverSchema = z.object({
-    searchText: z.string().optional().describe("Text to search for in tool name/description"),
-    limit: z.coerce.number().default(50).describe("Maximum number of tools to return"),
+  searchText: z.string().optional().describe("Text to search for in tool name/description"),
+  limit: z.coerce.number().default(50).describe("Maximum number of tools to return"),
 });
-
 
 // Define the output type - returns markdown formatted string
 interface McpDiscoverOutput {
-    markdown: string;
-    toolsFound: number;
+  markdown: string;
+  toolsFound: number;
 }
 
 /**
@@ -26,42 +32,47 @@ interface McpDiscoverOutput {
 /**
  * Format discovered tools as markdown
  */
-function formatToolsAsMarkdown(tools: Array<{
-  id: string;
-  name: string;
-  description?: string;
-  command?: string;
-  image?: string;
-  slug: string;
-  authorPubkey: string;
-  createdAt?: number;
-}>): string {
+function formatToolsAsMarkdown(
+  tools: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    command?: string;
+    image?: string;
+    slug: string;
+    authorPubkey: string;
+    createdAt?: number;
+  }>
+): string {
   if (tools.length === 0) {
     return "## No MCP tools found\n\nNo tools match your search criteria. Try broadening your search or check back later.";
   }
 
   const lines: string[] = [];
-  lines.push(`# MCP Tool Discovery Results`);
-  lines.push(`\nFound **${tools.length}** available tool${tools.length === 1 ? '' : 's'}:\n`);
+  lines.push("# MCP Tool Discovery Results");
+  lines.push(`\nFound **${tools.length}** available tool${tools.length === 1 ? "" : "s"}:\n`);
 
   tools.forEach((tool, index) => {
     lines.push(`## ${index + 1}. ${tool.name}`);
     lines.push(`nostr:${tool.id}`);
-    lines.push(``);
-    
-    lines.push(`---`);
-    lines.push(``);
+    lines.push("");
+
+    lines.push("---");
+    lines.push("");
   });
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOutput> = {
   name: "discover_capabilities",
   description:
     "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
-  promptFragment: `When showing the tools to the user, just use their nostr:id, the frontend will display them properly. You cannot install MCP tools directly, you can only suggest them to the user.`,
-  parameters: createZodSchema(mcpDiscoverSchema) as ParameterSchema<z.input<typeof mcpDiscoverSchema>>,
+  promptFragment:
+    "When showing the tools to the user, just use their nostr:id, the frontend will display them properly. You cannot install MCP tools directly, you can only suggest them to the user.",
+  parameters: createZodSchema(mcpDiscoverSchema) as ParameterSchema<
+    z.input<typeof mcpDiscoverSchema>
+  >,
   execute: async (
     input: Validated<z.input<typeof mcpDiscoverSchema>>,
     _context: ExecutionContext

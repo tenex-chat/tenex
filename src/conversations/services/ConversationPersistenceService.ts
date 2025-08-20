@@ -1,159 +1,159 @@
-import type { Conversation } from "../types";
-import type { 
-    ConversationPersistenceAdapter, 
-    ConversationMetadata, 
-    ConversationSearchCriteria 
-} from "../persistence/types";
-import { FileSystemAdapter } from "../persistence";
 import { logger } from "@/utils/logger";
+import { FileSystemAdapter } from "../persistence";
+import type {
+  ConversationMetadata,
+  ConversationPersistenceAdapter,
+  ConversationSearchCriteria,
+} from "../persistence/types";
+import type { Conversation } from "../types";
 
 /**
  * Service for persisting conversations to storage.
  * Single Responsibility: Handle all persistence operations.
  */
 export interface IConversationPersistenceService {
-    initialize(): Promise<void>;
-    save(conversation: Conversation): Promise<void>;
-    load(id: string): Promise<Conversation | null>;
-    loadAll(): Promise<Conversation[]>;
-    archive(id: string): Promise<void>;
-    search(criteria: ConversationSearchCriteria): Promise<Conversation[]>;
+  initialize(): Promise<void>;
+  save(conversation: Conversation): Promise<void>;
+  load(id: string): Promise<Conversation | null>;
+  loadAll(): Promise<Conversation[]>;
+  archive(id: string): Promise<void>;
+  search(criteria: ConversationSearchCriteria): Promise<Conversation[]>;
 }
 
 export class ConversationPersistenceService implements IConversationPersistenceService {
-    constructor(private adapter: ConversationPersistenceAdapter) {}
+  constructor(private adapter: ConversationPersistenceAdapter) {}
 
-    async initialize(): Promise<void> {
-        await this.adapter.initialize();
-        logger.info("[ConversationPersistenceService] Initialized");
+  async initialize(): Promise<void> {
+    await this.adapter.initialize();
+    logger.info("[ConversationPersistenceService] Initialized");
+  }
+
+  async save(conversation: Conversation): Promise<void> {
+    await this.adapter.save(conversation);
+    logger.debug(`[ConversationPersistenceService] Saved conversation ${conversation.id}`);
+  }
+
+  async load(id: string): Promise<Conversation | null> {
+    const conversation = await this.adapter.load(id);
+    if (conversation) {
+      logger.debug(`[ConversationPersistenceService] Loaded conversation ${id}`);
     }
+    return conversation;
+  }
 
-    async save(conversation: Conversation): Promise<void> {
-        await this.adapter.save(conversation);
-        logger.debug(`[ConversationPersistenceService] Saved conversation ${conversation.id}`);
-    }
+  async loadAll(): Promise<Conversation[]> {
+    const metadata = await this.adapter.list();
+    const conversations: Conversation[] = [];
 
-    async load(id: string): Promise<Conversation | null> {
-        const conversation = await this.adapter.load(id);
+    for (const meta of metadata) {
+      if (!meta.archived) {
+        const conversation = await this.adapter.load(meta.id);
         if (conversation) {
-            logger.debug(`[ConversationPersistenceService] Loaded conversation ${id}`);
+          conversations.push(conversation);
         }
-        return conversation;
+      }
     }
 
-    async loadAll(): Promise<Conversation[]> {
-        const metadata = await this.adapter.list();
-        const conversations: Conversation[] = [];
+    logger.info(`[ConversationPersistenceService] Loaded ${conversations.length} conversations`);
+    return conversations;
+  }
 
-        for (const meta of metadata) {
-            if (!meta.archived) {
-                const conversation = await this.adapter.load(meta.id);
-                if (conversation) {
-                    conversations.push(conversation);
-                }
-            }
-        }
+  async archive(id: string): Promise<void> {
+    await this.adapter.archive(id);
+    logger.info(`[ConversationPersistenceService] Archived conversation ${id}`);
+  }
 
-        logger.info(`[ConversationPersistenceService] Loaded ${conversations.length} conversations`);
-        return conversations;
+  async search(criteria: ConversationSearchCriteria): Promise<Conversation[]> {
+    const metadata = await this.adapter.search(criteria);
+    const conversations: Conversation[] = [];
+
+    for (const meta of metadata) {
+      const conversation = await this.adapter.load(meta.id);
+      if (conversation) {
+        conversations.push(conversation);
+      }
     }
 
-    async archive(id: string): Promise<void> {
-        await this.adapter.archive(id);
-        logger.info(`[ConversationPersistenceService] Archived conversation ${id}`);
-    }
-
-    async search(criteria: ConversationSearchCriteria): Promise<Conversation[]> {
-        const metadata = await this.adapter.search(criteria);
-        const conversations: Conversation[] = [];
-
-        for (const meta of metadata) {
-            const conversation = await this.adapter.load(meta.id);
-            if (conversation) {
-                conversations.push(conversation);
-            }
-        }
-
-        return conversations;
-    }
+    return conversations;
+  }
 }
 
 /**
  * Factory function to create a file-based persistence service
  */
-export function createFileSystemPersistenceService(projectPath: string): ConversationPersistenceService {
-    return new ConversationPersistenceService(new FileSystemAdapter(projectPath));
+export function createFileSystemPersistenceService(
+  projectPath: string
+): ConversationPersistenceService {
+  return new ConversationPersistenceService(new FileSystemAdapter(projectPath));
 }
 
 /**
  * In-memory persistence adapter for testing and standalone usage
  */
 export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapter {
-    private conversations: Map<string, Conversation> = new Map();
-    private metadata: Map<string, ConversationMetadata> = new Map();
+  private conversations: Map<string, Conversation> = new Map();
+  private metadata: Map<string, ConversationMetadata> = new Map();
 
-    async initialize(): Promise<void> {
-        // No initialization needed for in-memory storage
+  async initialize(): Promise<void> {
+    // No initialization needed for in-memory storage
+  }
+
+  async save(conversation: Conversation): Promise<void> {
+    this.conversations.set(conversation.id, conversation);
+    this.metadata.set(conversation.id, {
+      id: conversation.id,
+      title: conversation.title,
+      createdAt: conversation.history[0]?.created_at || Date.now(),
+      updatedAt: Date.now(),
+      phase: conversation.phase,
+      eventCount: conversation.history.length,
+      agentCount: conversation.agentStates.size,
+      archived: false,
+    });
+  }
+
+  async load(conversationId: string): Promise<Conversation | null> {
+    return this.conversations.get(conversationId) || null;
+  }
+
+  async delete(conversationId: string): Promise<void> {
+    this.conversations.delete(conversationId);
+    this.metadata.delete(conversationId);
+  }
+
+  async list(): Promise<ConversationMetadata[]> {
+    return Array.from(this.metadata.values());
+  }
+
+  async search(criteria: ConversationSearchCriteria): Promise<ConversationMetadata[]> {
+    let results = Array.from(this.metadata.values());
+
+    if (criteria.title) {
+      results = results.filter((m) => m.title.toLowerCase().includes(criteria.title.toLowerCase()));
     }
 
-    async save(conversation: Conversation): Promise<void> {
-        this.conversations.set(conversation.id, conversation);
-        this.metadata.set(conversation.id, {
-            id: conversation.id,
-            title: conversation.title,
-            createdAt: conversation.history[0]?.created_at || Date.now(),
-            updatedAt: Date.now(),
-            phase: conversation.phase,
-            eventCount: conversation.history.length,
-            agentCount: conversation.agentStates.size,
-            archived: false
-        });
+    if (criteria.phase) {
+      results = results.filter((m) => m.phase === criteria.phase);
     }
 
-    async load(conversationId: string): Promise<Conversation | null> {
-        return this.conversations.get(conversationId) || null;
+    if (criteria.archived !== undefined) {
+      results = results.filter((m) => m.archived === criteria.archived);
     }
 
-    async delete(conversationId: string): Promise<void> {
-        this.conversations.delete(conversationId);
-        this.metadata.delete(conversationId);
+    return results;
+  }
+
+  async archive(conversationId: string): Promise<void> {
+    const meta = this.metadata.get(conversationId);
+    if (meta) {
+      meta.archived = true;
     }
+  }
 
-    async list(): Promise<ConversationMetadata[]> {
-        return Array.from(this.metadata.values());
+  async restore(conversationId: string): Promise<void> {
+    const meta = this.metadata.get(conversationId);
+    if (meta) {
+      meta.archived = false;
     }
-
-    async search(criteria: ConversationSearchCriteria): Promise<ConversationMetadata[]> {
-        let results = Array.from(this.metadata.values());
-
-        if (criteria.title) {
-            results = results.filter(m => 
-                m.title.toLowerCase().includes(criteria.title.toLowerCase())
-            );
-        }
-
-        if (criteria.phase) {
-            results = results.filter(m => m.phase === criteria.phase);
-        }
-
-        if (criteria.archived !== undefined) {
-            results = results.filter(m => m.archived === criteria.archived);
-        }
-
-        return results;
-    }
-
-    async archive(conversationId: string): Promise<void> {
-        const meta = this.metadata.get(conversationId);
-        if (meta) {
-            meta.archived = true;
-        }
-    }
-
-    async restore(conversationId: string): Promise<void> {
-        const meta = this.metadata.get(conversationId);
-        if (meta) {
-            meta.archived = false;
-        }
-    }
+  }
 }

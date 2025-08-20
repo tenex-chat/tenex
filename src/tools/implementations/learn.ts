@@ -1,32 +1,43 @@
+import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { LessonIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema, success, failure } from "../types";
+import { createZodSchema, failure, success } from "../types";
 
 const lessonLearnSchema = z.object({
-    title: z.string().describe("Brief title/description of what this lesson is about"),
-    lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
-    detailed: z.string().optional().describe("Detailed version with richer explanation when deeper context is needed"),
-    category: z.string().optional().describe("Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"),
-    hashtags: z.array(z.string()).optional().describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
+  title: z.string().describe("Brief title/description of what this lesson is about"),
+  lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
+  detailed: z
+    .string()
+    .optional()
+    .describe("Detailed version with richer explanation when deeper context is needed"),
+  category: z
+    .string()
+    .optional()
+    .describe(
+      "Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"
+    ),
+  hashtags: z
+    .array(z.string())
+    .optional()
+    .describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 
 interface LessonLearnInput {
-    title: string;
-    lesson: string;
-    detailed?: string;
-    category?: string;
-    hashtags?: string[];
+  title: string;
+  lesson: string;
+  detailed?: string;
+  category?: string;
+  hashtags?: string[];
 }
 
 interface LessonLearnOutput {
-    message: string;
-    eventId: string;
-    title: string;
-    hasDetailed: boolean;
+  message: string;
+  eventId: string;
+  title: string;
+  hasDetailed: boolean;
 }
 
 export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
@@ -88,21 +99,21 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
     try {
       // Create lesson intent
       const intent: LessonIntent = {
-        type: 'lesson',
+        type: "lesson",
         title,
         lesson,
         detailed,
         category,
-        hashtags
+        hashtags,
       };
 
       // Get conversation for the event context
       const conversation = context.conversationManager.getConversation(context.conversationId);
-      
+
       // Create event context
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        conversationEvent: conversation ? conversation.history[0] : undefined // Root event is first in history
+        conversationEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
       };
 
       // Use AgentPublisher to create and publish the lesson

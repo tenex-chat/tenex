@@ -1,5 +1,5 @@
-import type { MockLLMScenario } from "../types";
 import { PHASES } from "@/conversations/phases";
+import type { MockLLMScenario } from "../types";
 
 /**
  * Inventory generation workflow scenario
@@ -11,61 +11,67 @@ import { PHASES } from "@/conversations/phases";
  * - Completing the workflow
  */
 export const inventoryGenerationScenario: MockLLMScenario = {
-    name: "inventory-generation",
-    description: "Complete workflow for generating project inventory",
-    responses: [
-        // Initial chat phase - user asks to generate inventory
-        {
-            trigger: {
-                agentName: "Orchestrator",
-                phase: PHASES.CHAT,
-                userMessage: /generate.*inventory|analyze.*codebase|understand.*project/i
-            },
-            response: {
-                content: "I'll analyze your codebase and generate a comprehensive inventory to help understand the project structure.",
-                toolCalls: [{
-                    id: "1",
-                    message: null,
-                    function: "continue",
-                    args: JSON.stringify({
-                        summary: "User wants to generate project inventory",
-                        suggestedPhase: PHASES.EXECUTE,
-                        confidence: 95,
-                        reasoning: "This is a straightforward task that can be executed immediately"
-                    })
-                }]
-            },
-            priority: 10
-        },
+  name: "inventory-generation",
+  description: "Complete workflow for generating project inventory",
+  responses: [
+    // Initial chat phase - user asks to generate inventory
+    {
+      trigger: {
+        agentName: "Orchestrator",
+        phase: PHASES.CHAT,
+        userMessage: /generate.*inventory|analyze.*codebase|understand.*project/i,
+      },
+      response: {
+        content:
+          "I'll analyze your codebase and generate a comprehensive inventory to help understand the project structure.",
+        toolCalls: [
+          {
+            id: "1",
+            message: null,
+            function: "continue",
+            args: JSON.stringify({
+              summary: "User wants to generate project inventory",
+              suggestedPhase: PHASES.EXECUTE,
+              confidence: 95,
+              reasoning: "This is a straightforward task that can be executed immediately",
+            }),
+          },
+        ],
+      },
+      priority: 10,
+    },
 
-        // EXECUTE phase - Executor generates inventory
-        {
-            trigger: {
-                agentName: "Executor", 
-                phase: PHASES.EXECUTE,
-                systemPrompt: /inventory|analyze.*codebase/i
-            },
-            response: {
-                content: "I'll now generate a comprehensive inventory of your project using our inventory analysis tool.",
-                toolCalls: [{
-                    id: "2",
-                    message: null,
-                    function: "generate_inventory",
-                    args: JSON.stringify({})
-                }]
-            },
-            priority: 10
-        },
+    // EXECUTE phase - Executor generates inventory
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.EXECUTE,
+        systemPrompt: /inventory|analyze.*codebase/i,
+      },
+      response: {
+        content:
+          "I'll now generate a comprehensive inventory of your project using our inventory analysis tool.",
+        toolCalls: [
+          {
+            id: "2",
+            message: null,
+            function: "generate_inventory",
+            args: JSON.stringify({}),
+          },
+        ],
+      },
+      priority: 10,
+    },
 
-        // Handle inventory generation completion
-        {
-            trigger: {
-                agentName: "Executor",
-                phase: PHASES.EXECUTE,
-                previousToolCalls: ["generate_inventory"]
-            },
-            response: {
-                content: `Great! I've successfully generated a comprehensive inventory of your project. Here's what was created:
+    // Handle inventory generation completion
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.EXECUTE,
+        previousToolCalls: ["generate_inventory"],
+      },
+      response: {
+        content: `Great! I've successfully generated a comprehensive inventory of your project. Here's what was created:
 
 📋 **Main Inventory**: Saved to \`context/INVENTORY.md\`
 - Complete project structure analysis
@@ -79,74 +85,80 @@ export const inventoryGenerationScenario: MockLLMScenario = {
 - Integration points highlighted
 
 The inventory provides a thorough understanding of your codebase architecture, making it easier to navigate and work with the project.`,
-                toolCalls: [{
-                    id: "3",
-                    message: null,
-                    function: "complete",
-                    args: JSON.stringify({
-                        phaseComplete: true,
-                        readyForNext: true,
-                        suggestedNextPhase: PHASES.VERIFICATION,
-                        summary: "Project inventory generated successfully"
-                    })
-                }]
-            },
-            priority: 9
-        },
+        toolCalls: [
+          {
+            id: "3",
+            message: null,
+            function: "complete",
+            args: JSON.stringify({
+              phaseComplete: true,
+              readyForNext: true,
+              suggestedNextPhase: PHASES.VERIFICATION,
+              summary: "Project inventory generated successfully",
+            }),
+          },
+        ],
+      },
+      priority: 9,
+    },
 
-        // Orchestrator handles completion
-        {
-            trigger: {
-                agentName: "Orchestrator",
-                phase: PHASES.EXECUTE,
-                previousToolCalls: ["complete"]
-            },
-            response: {
-                toolCalls: [{
-                    id: "4",
-                    message: null,
-                    function: "continue",
-                    args: JSON.stringify({
-                        summary: "Inventory generation completed successfully",
-                        suggestedPhase: PHASES.VERIFICATION,
-                        confidence: 100,
-                        reasoning: "Task completed, moving to verification"
-                    })
-                }]
-            },
-            priority: 9
-        },
+    // Orchestrator handles completion
+    {
+      trigger: {
+        agentName: "Orchestrator",
+        phase: PHASES.EXECUTE,
+        previousToolCalls: ["complete"],
+      },
+      response: {
+        toolCalls: [
+          {
+            id: "4",
+            message: null,
+            function: "continue",
+            args: JSON.stringify({
+              summary: "Inventory generation completed successfully",
+              suggestedPhase: PHASES.VERIFICATION,
+              confidence: 100,
+              reasoning: "Task completed, moving to verification",
+            }),
+          },
+        ],
+      },
+      priority: 9,
+    },
 
-        // VERIFICATION phase - confirm inventory was created
-        {
-            trigger: {
-                agentName: "Executor",
-                phase: PHASES.VERIFICATION,
-                systemPrompt: /inventory.*generated/i
-            },
-            response: {
-                content: `Let me verify the inventory generation was successful.`,
-                toolCalls: [{
-                    id: "5",
-                    message: null,
-                    function: "readPath",
-                    args: JSON.stringify({
-                        path: "context/INVENTORY.md"
-                    })
-                }]
-            },
-            priority: 10
-        },
+    // VERIFICATION phase - confirm inventory was created
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.VERIFICATION,
+        systemPrompt: /inventory.*generated/i,
+      },
+      response: {
+        content: "Let me verify the inventory generation was successful.",
+        toolCalls: [
+          {
+            id: "5",
+            message: null,
+            function: "readPath",
+            args: JSON.stringify({
+              path: "context/INVENTORY.md",
+            }),
+          },
+        ],
+      },
+      priority: 10,
+    },
 
-        // Verification complete
-        {
-            trigger: {
-                agentName: "Executor",
-                phase: PHASES.VERIFICATION,
-                previousToolCalls: ["readPath"]
-            },
-            response: {
-                content: `✅ Verification complete! The inventory has been successfully generated and contains:
+    // Verification complete
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.VERIFICATION,
+        previousToolCalls: ["readPath"],
+      },
+      response: {
+        content: `✅ Verification complete! The inventory has been successfully generated and contains:
 
 - Project overview and structure
 - Architectural patterns and conventions
@@ -155,29 +167,31 @@ The inventory provides a thorough understanding of your codebase architecture, m
 - Development guidelines
 
 The inventory is ready to use for understanding and navigating your codebase.`,
-                toolCalls: [{
-                    id: "6",
-                    message: null,
-                    function: "complete",
-                    args: JSON.stringify({
-                        phaseComplete: true,
-                        readyForNext: false,
-                        summary: "Inventory generation verified - task completed successfully"
-                    })
-                }]
-            },
-            priority: 9
-        },
+        toolCalls: [
+          {
+            id: "6",
+            message: null,
+            function: "complete",
+            args: JSON.stringify({
+              phaseComplete: true,
+              readyForNext: false,
+              summary: "Inventory generation verified - task completed successfully",
+            }),
+          },
+        ],
+      },
+      priority: 9,
+    },
 
-        // Alternative flow: Inventory already exists
-        {
-            trigger: {
-                agentName: "Executor",
-                phase: PHASES.EXECUTE,
-                messageContains: /inventory.*regenerated/i
-            },
-            response: {
-                content: `I've successfully regenerated your project inventory. The existing inventory has been updated with:
+    // Alternative flow: Inventory already exists
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.EXECUTE,
+        messageContains: /inventory.*regenerated/i,
+      },
+      response: {
+        content: `I've successfully regenerated your project inventory. The existing inventory has been updated with:
 
 📋 **Updated Main Inventory**: \`context/INVENTORY.md\` 
 - Refreshed with latest code changes
@@ -185,41 +199,46 @@ The inventory is ready to use for understanding and navigating your codebase.`,
 - Updated dependency analysis
 
 The regenerated inventory reflects the current state of your codebase.`,
-                toolCalls: [{
-                    id: "7",
-                    message: null,
-                    function: "complete",
-                    args: JSON.stringify({
-                        phaseComplete: true,
-                        readyForNext: true,
-                        suggestedNextPhase: PHASES.VERIFICATION,
-                        summary: "Project inventory regenerated with latest changes"
-                    })
-                }]
-            },
-            priority: 8
-        },
+        toolCalls: [
+          {
+            id: "7",
+            message: null,
+            function: "complete",
+            args: JSON.stringify({
+              phaseComplete: true,
+              readyForNext: true,
+              suggestedNextPhase: PHASES.VERIFICATION,
+              summary: "Project inventory regenerated with latest changes",
+            }),
+          },
+        ],
+      },
+      priority: 8,
+    },
 
-        // Error handling: Inventory generation fails
-        {
-            trigger: {
-                agentName: "Executor",
-                phase: PHASES.EXECUTE,
-                messageContains: /error.*inventory|failed.*generate/i
-            },
-            response: {
-                content: `I encountered an issue while generating the inventory. Let me try an alternative approach.`,
-                toolCalls: [{
-                    id: "8",
-                    message: null,
-                    function: "shell",
-                    args: JSON.stringify({
-                        command: "ls -la context/",
-                        purpose: "Check if context directory exists"
-                    })
-                }]
-            },
-            priority: 8
-        }
-    ]
+    // Error handling: Inventory generation fails
+    {
+      trigger: {
+        agentName: "Executor",
+        phase: PHASES.EXECUTE,
+        messageContains: /error.*inventory|failed.*generate/i,
+      },
+      response: {
+        content:
+          "I encountered an issue while generating the inventory. Let me try an alternative approach.",
+        toolCalls: [
+          {
+            id: "8",
+            message: null,
+            function: "shell",
+            args: JSON.stringify({
+              command: "ls -la context/",
+              purpose: "Check if context directory exists",
+            }),
+          },
+        ],
+      },
+      priority: 8,
+    },
+  ],
 };

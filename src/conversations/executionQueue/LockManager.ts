@@ -1,7 +1,18 @@
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import { ExecutionLock, PersistedLock, ExecutionQueueConfig, DEFAULT_EXECUTION_QUEUE_CONFIG } from './types';
-import { writeJsonFile, readJsonFile, ensureDirectory, handlePersistenceError, fileExists } from '../../utils/file-persistence';
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import {
+  ensureDirectory,
+  fileExists,
+  handlePersistenceError,
+  readJsonFile,
+  writeJsonFile,
+} from "../../utils/file-persistence";
+import {
+  DEFAULT_EXECUTION_QUEUE_CONFIG,
+  type ExecutionLock,
+  type ExecutionQueueConfig,
+  type PersistedLock,
+} from "./types";
 
 export class LockManager {
   private currentLock: ExecutionLock | null = null;
@@ -13,8 +24,8 @@ export class LockManager {
     config: Partial<ExecutionQueueConfig> = {}
   ) {
     this.config = { ...DEFAULT_EXECUTION_QUEUE_CONFIG, ...config };
-    const persistenceDir = this.config.persistenceDir || path.join(projectPath, '.tenex', 'state');
-    this.lockFile = path.join(persistenceDir, 'execution-lock.json');
+    const persistenceDir = this.config.persistenceDir || path.join(projectPath, ".tenex", "state");
+    this.lockFile = path.join(persistenceDir, "execution-lock.json");
   }
 
   async initialize(): Promise<void> {
@@ -62,11 +73,13 @@ export class LockManager {
       conversationId,
       agentPubkey,
       timestamp: Date.now(),
-      maxDuration: this.config.maxExecutionDuration ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration || 300000)
+      maxDuration:
+        this.config.maxExecutionDuration ??
+        (DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration || 300000),
     };
 
     this.currentLock = lock;
-    
+
     if (this.config.enablePersistence) {
       await this.saveLockToDisk(lock);
     }
@@ -82,7 +95,7 @@ export class LockManager {
     }
 
     this.currentLock = null;
-    
+
     if (this.config.enablePersistence) {
       await this.deleteLockFromDisk();
     }
@@ -98,7 +111,7 @@ export class LockManager {
     }
 
     this.currentLock = null;
-    
+
     if (this.config.enablePersistence) {
       await this.deleteLockFromDisk();
     }
@@ -115,7 +128,7 @@ export class LockManager {
 
     const releasedConversationId = currentLock.conversationId;
     this.currentLock = null;
-    
+
     if (this.config.enablePersistence) {
       await this.deleteLockFromDisk();
     }
@@ -139,7 +152,7 @@ export class LockManager {
 
   getRemainingTime(lock: ExecutionLock): number {
     if (!this.config.enableAutoTimeout) {
-      return Infinity;
+      return Number.POSITIVE_INFINITY;
     }
 
     const age = this.getLockAge(lock);
@@ -148,7 +161,7 @@ export class LockManager {
 
   private async clearExpiredLock(): Promise<void> {
     this.currentLock = null;
-    
+
     if (this.config.enablePersistence) {
       await this.deleteLockFromDisk();
     }
@@ -157,13 +170,13 @@ export class LockManager {
   private async saveLockToDisk(lock: ExecutionLock): Promise<void> {
     const persistedLock: PersistedLock = {
       ...lock,
-      projectPath: this.projectPath
+      projectPath: this.projectPath,
     };
 
     try {
       await writeJsonFile(this.lockFile, persistedLock);
     } catch (error) {
-      handlePersistenceError('save lock to disk', error);
+      handlePersistenceError("save lock to disk", error);
       // Don't throw - allow operation to continue without persistence
     }
   }
@@ -184,7 +197,7 @@ export class LockManager {
         conversationId: persistedLock.conversationId,
         agentPubkey: persistedLock.agentPubkey,
         timestamp: persistedLock.timestamp,
-        maxDuration: persistedLock.maxDuration
+        maxDuration: persistedLock.maxDuration,
       };
 
       if (this.isLockExpired(lock)) {
@@ -197,7 +210,7 @@ export class LockManager {
       if (!(await fileExists(this.lockFile))) {
         return null; // No lock file exists
       }
-      handlePersistenceError('load lock from disk', error);
+      handlePersistenceError("load lock from disk", error);
       return null;
     }
   }
@@ -206,8 +219,8 @@ export class LockManager {
     try {
       await fs.unlink(this.lockFile);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        handlePersistenceError('delete lock file', error);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        handlePersistenceError("delete lock file", error);
       }
       // Don't throw - allow operation to continue
     }
@@ -222,7 +235,7 @@ export class LockManager {
     isExpired?: boolean;
   }> {
     const lock = await this.getCurrentLock();
-    
+
     if (!lock) {
       return { isLocked: false };
     }
@@ -232,7 +245,7 @@ export class LockManager {
       lock,
       age: this.getLockAge(lock),
       remainingTime: this.getRemainingTime(lock),
-      isExpired: this.isLockExpired(lock)
+      isExpired: this.isLockExpired(lock),
     };
   }
 }

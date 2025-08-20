@@ -1,46 +1,48 @@
+import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
-import type { AgentInstance } from "@/agents/types";
 
 /**
  * Identity fragment for specialist agents ONLY.
  * No conditionals, no isOrchestrator checks.
  */
 interface SpecialistIdentityArgs {
-    agent: AgentInstance;
-    projectTitle: string;
-    projectOwnerPubkey: string;
+  agent: AgentInstance;
+  projectTitle: string;
+  projectOwnerPubkey: string;
 }
 
 export const specialistIdentityFragment: PromptFragment<SpecialistIdentityArgs> = {
-    id: "specialist-identity",
-    priority: 1,
-    template: ({ agent, projectTitle, projectOwnerPubkey }) => {
-        const parts: string[] = [];
+  id: "specialist-identity",
+  priority: 1,
+  template: ({ agent, projectTitle, projectOwnerPubkey }) => {
+    const parts: string[] = [];
 
-        // Identity
-        parts.push("# Your Identity\n");
-        parts.push(`Your name: ${agent.name}`);
-        if (agent.role) {
-            parts.push(`Your role: ${agent.role}`);
-        }
-        parts.push(`Your npub: ${agent.signer.npub}`);
-        parts.push("");
+    // Identity
+    parts.push("# Your Identity\n");
+    parts.push(`Your name: ${agent.name}`);
+    if (agent.role) {
+      parts.push(`Your role: ${agent.role}`);
+    }
+    parts.push(`Your npub: ${agent.signer.npub}`);
+    parts.push("");
 
-        // Instructions
-        if (agent.instructions) {
-            parts.push(`## Your Instructions\n${agent.instructions}\n`);
-        }
+    // Instructions
+    if (agent.instructions) {
+      parts.push(`## Your Instructions\n${agent.instructions}\n`);
+    }
 
-        // Project context
-        parts.push([
-            "## Project Context",
-            `- Title: "${projectTitle}"`,
-            `- User pubkey: "${projectOwnerPubkey}"`
-        ].join('\n'));
+    // Project context
+    parts.push(
+      [
+        "## Project Context",
+        `- Title: "${projectTitle}"`,
+        `- User pubkey: "${projectOwnerPubkey}"`,
+      ].join("\n")
+    );
 
-        // Specialist guidelines (what used to be in expertise-boundaries and domain-expert-guidelines)
-        parts.push(`
+    // Specialist guidelines (what used to be in expertise-boundaries and domain-expert-guidelines)
+    parts.push(`
 ### Core Principles
 
 1. **Domain Expertise Focus**: Stick to your domain of expertise very closely. Do not venture outside your specialized area.
@@ -98,8 +100,8 @@ You: "Here's my review: [detailed review]" then complete("Review done") [WRONG -
 
 Remember: Be concise, professional, domain-focused, and put EVERYTHING inside complete().`);
 
-        return parts.join('\n');
-    }
+    return parts.join("\n");
+  },
 };
 
 // Register the fragment

@@ -6,9 +6,9 @@ import type { PromptFragment } from "../core/types";
  * No conditionals, no isOrchestrator checks.
  */
 export const specialistReasoningFragment: PromptFragment = {
-    id: "specialist-reasoning",
-    priority: 85,
-    template: () => `## Reasoning Output Format
+  id: "specialist-reasoning",
+  priority: 85,
+  template: () => `## Reasoning Output Format
 
 Before taking any action or making any decision, you MUST explain your reasoning in <thinking> tags.
 
@@ -37,7 +37,7 @@ Example:
 - Confidence: 0.85
 </thinking>
 
-Always include your thinking BEFORE using any tools or generating responses.`
+Always include your thinking BEFORE using any tools or generating responses.`,
 };
 
 // Register the fragment

@@ -6,47 +6,45 @@ import { logger } from "@/utils/logger";
 import { Command } from "commander";
 
 export const llmCommand = new Command("llm")
-    .description("Manage LLM configurations (global by default, --project for current project)")
-    .option("--project", "Use project-specific configuration instead of global")
-    .action(async (options) => {
-        try {
-            let configPath: string;
-            let isGlobal: boolean;
+  .description("Manage LLM configurations (global by default, --project for current project)")
+  .option("--project", "Use project-specific configuration instead of global")
+  .action(async (options) => {
+    try {
+      let configPath: string;
+      let isGlobal: boolean;
 
-            if (options.project) {
-                // Project-specific configuration
-                const projectPath = process.cwd();
+      if (options.project) {
+        // Project-specific configuration
+        const projectPath = process.cwd();
 
-                // Check if we're in a TENEX project
-                if (!(await fileSystem.directoryExists(path.join(projectPath, ".tenex")))) {
-                    logger.error(
-                        "No .tenex directory found. Make sure you're in a TENEX project directory."
-                    );
-                    process.exit(1);
-                }
-
-                configPath = projectPath;
-                isGlobal = false;
-            } else {
-                // Global configuration
-                const globalConfigDir = path.join(os.homedir(), ".tenex");
-
-                // Ensure global config directory exists
-                try {
-                    await fileSystem.ensureDirectory(globalConfigDir);
-                } catch (error) {
-                    logger.error(`Failed to create global config directory: ${error}`);
-                    process.exit(1);
-                }
-
-                configPath = "";
-                isGlobal = true;
-            }
-
-            const llmManager = new LLMConfigEditor(configPath, isGlobal);
-            await llmManager.showMainMenu();
-        } catch (error) {
-            logger.error(`Failed to start LLM configuration: ${error}`);
-            process.exit(1);
+        // Check if we're in a TENEX project
+        if (!(await fileSystem.directoryExists(path.join(projectPath, ".tenex")))) {
+          logger.error("No .tenex directory found. Make sure you're in a TENEX project directory.");
+          process.exit(1);
         }
-    });
+
+        configPath = projectPath;
+        isGlobal = false;
+      } else {
+        // Global configuration
+        const globalConfigDir = path.join(os.homedir(), ".tenex");
+
+        // Ensure global config directory exists
+        try {
+          await fileSystem.ensureDirectory(globalConfigDir);
+        } catch (error) {
+          logger.error(`Failed to create global config directory: ${error}`);
+          process.exit(1);
+        }
+
+        configPath = "";
+        isGlobal = true;
+      }
+
+      const llmManager = new LLMConfigEditor(configPath, isGlobal);
+      await llmManager.showMainMenu();
+    } catch (error) {
+      logger.error(`Failed to start LLM configuration: ${error}`);
+      process.exit(1);
+    }
+  });

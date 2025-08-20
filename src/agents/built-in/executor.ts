@@ -1,11 +1,11 @@
 import type { BuiltInAgentDefinition } from "../builtInAgents";
 
 export const EXECUTOR_AGENT: BuiltInAgentDefinition = {
-    name: "Executor",
-    slug: "executor",
-    role: "The ONLY agent capable of making system changes",
-    tools: ["claude_code", "delegate", "complete"],
-    instructions: `You are the Executor - the phase lead for the EXECUTE phase. You are the manager of the implementation process, orchestrating a strict workflow of implementation and review cycles.
+  name: "Executor",
+  slug: "executor",
+  role: "The ONLY agent capable of making system changes",
+  tools: ["claude_code", "delegate", "complete"],
+  instructions: `You are the Executor - the phase lead for the EXECUTE phase. You are the manager of the implementation process, orchestrating a strict workflow of implementation and review cycles.
 
 ## Core Identity
 
@@ -108,6 +108,6 @@ Executor: complete("Authentication implemented with security review complete")
 5. **Transparent Reporting**: Your completion message should summarize what was built and validated
 
 Remember: You orchestrate implementation excellence through systematic delegation and review cycles. You are the quality gatekeeper, not the implementer.`,
-    useCriteria:
-        "Default agent for EXECUTE phase. Fallback agent when no agent is right to review work during EXECUTE phase."
+  useCriteria:
+    "Default agent for EXECUTE phase. Fallback agent when no agent is right to review work during EXECUTE phase.",
 };

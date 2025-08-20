@@ -3,34 +3,34 @@ import type { PromptFragment } from "../core/types";
 
 // Helper function to convert git status codes to descriptions
 function getStatusDescription(status: string): string {
-    if (status.includes("M")) return "modified";
-    if (status.includes("A")) return "added";
-    if (status.includes("D")) return "deleted";
-    if (status.includes("R")) return "renamed";
-    if (status === "??") return "untracked";
-    return status;
+  if (status.includes("M")) return "modified";
+  if (status.includes("A")) return "added";
+  if (status.includes("D")) return "deleted";
+  if (status.includes("R")) return "renamed";
+  if (status === "??") return "untracked";
+  return status;
 }
 
 interface InventoryGenerationArgs {
-    repomixContent: string;
-    focusFiles?: Array<{ path: string; status: string }>;
+  repomixContent: string;
+  focusFiles?: Array<{ path: string; status: string }>;
 }
 
 export const mainInventoryPromptFragment: PromptFragment<InventoryGenerationArgs> = {
-    id: "main-inventory-generation",
-    priority: 10,
-    template: ({ repomixContent, focusFiles }) => {
-        const focusSection = focusFiles?.length
-            ? `
+  id: "main-inventory-generation",
+  priority: 10,
+  template: ({ repomixContent, focusFiles }) => {
+    const focusSection = focusFiles?.length
+      ? `
 ## Recently Modified Files
 The following files were recently modified and should receive special attention in your analysis:
 ${focusFiles.map((f) => `- ${f.path} (${getStatusDescription(f.status)})`).join("\n")}
 
 Please ensure these areas are accurately reflected in the inventory.
 `
-            : "";
+      : "";
 
-        return `You are analyzing a codebase to create a comprehensive inventory.${focusSection}
+    return `You are analyzing a codebase to create a comprehensive inventory.${focusSection}
 
 Here is the complete repository content in XML format from repomix:
 
@@ -78,28 +78,28 @@ At the end, if you identified any high-complexity modules, provide them in this 
 \`\`\`
 
 Make the inventory comprehensive but readable, focusing on helping developers quickly understand the codebase structure and purpose.`;
-    },
-    validateArgs: (args): args is InventoryGenerationArgs => {
-        return (
-            typeof args === "object" &&
-            args !== null &&
-            typeof (args as InventoryGenerationArgs).repomixContent === "string"
-        );
-    },
+  },
+  validateArgs: (args): args is InventoryGenerationArgs => {
+    return (
+      typeof args === "object" &&
+      args !== null &&
+      typeof (args as InventoryGenerationArgs).repomixContent === "string"
+    );
+  },
 };
 
 interface ModuleGuideArgs {
-    repomixContent: string;
-    moduleName: string;
-    modulePath: string;
-    complexityReason: string;
+  repomixContent: string;
+  moduleName: string;
+  modulePath: string;
+  complexityReason: string;
 }
 
 export const moduleGuidePromptFragment: PromptFragment<ModuleGuideArgs> = {
-    id: "module-guide-generation",
-    priority: 10,
-    template: ({ repomixContent, moduleName, modulePath, complexityReason }) => {
-        return `You are analyzing a specific complex module in a codebase. Here is the complete repository content in XML format from repomix:
+  id: "module-guide-generation",
+  priority: 10,
+  template: ({ repomixContent, moduleName, modulePath, complexityReason }) => {
+    return `You are analyzing a specific complex module in a codebase. Here is the complete repository content in XML format from repomix:
 
 <repository>
 ${repomixContent}
@@ -137,28 +137,28 @@ Please generate a comprehensive technical documentation for this module that inc
    - Common patterns and best practices
 
 Focus on documenting how the module works at both a high-level conceptual understanding and detailed technical level. Keep the documentation accessible to developers who need to understand, use, or modify this module.`;
-    },
-    validateArgs: (args): args is ModuleGuideArgs => {
-        return (
-            typeof args === "object" &&
-            args !== null &&
-            typeof (args as ModuleGuideArgs).repomixContent === "string" &&
-            typeof (args as ModuleGuideArgs).moduleName === "string" &&
-            typeof (args as ModuleGuideArgs).modulePath === "string" &&
-            typeof (args as ModuleGuideArgs).complexityReason === "string"
-        );
-    },
+  },
+  validateArgs: (args): args is ModuleGuideArgs => {
+    return (
+      typeof args === "object" &&
+      args !== null &&
+      typeof (args as ModuleGuideArgs).repomixContent === "string" &&
+      typeof (args as ModuleGuideArgs).moduleName === "string" &&
+      typeof (args as ModuleGuideArgs).modulePath === "string" &&
+      typeof (args as ModuleGuideArgs).complexityReason === "string"
+    );
+  },
 };
 
 interface ComplexModulesExtractionArgs {
-    content: string;
+  content: string;
 }
 
 export const complexModulesExtractionFragment: PromptFragment<ComplexModulesExtractionArgs> = {
-    id: "complex-modules-extraction",
-    priority: 10,
-    template: ({ content }) => {
-        return `Extract only the valid JSON array of complex modules from the following text and nothing else. If no JSON is present or no complex modules are mentioned, return an empty array [].
+  id: "complex-modules-extraction",
+  priority: 10,
+  template: ({ content }) => {
+    return `Extract only the valid JSON array of complex modules from the following text and nothing else. If no JSON is present or no complex modules are mentioned, return an empty array [].
 
 Response format should be exactly:
 \`\`\`json
@@ -176,14 +176,14 @@ Response format should be exactly:
 
 Text to analyze:
 ${content}`;
-    },
-    validateArgs: (args): args is ComplexModulesExtractionArgs => {
-        return (
-            typeof args === "object" &&
-            args !== null &&
-            typeof (args as ComplexModulesExtractionArgs).content === "string"
-        );
-    },
+  },
+  validateArgs: (args): args is ComplexModulesExtractionArgs => {
+    return (
+      typeof args === "object" &&
+      args !== null &&
+      typeof (args as ComplexModulesExtractionArgs).content === "string"
+    );
+  },
 };
 
 // Register fragments

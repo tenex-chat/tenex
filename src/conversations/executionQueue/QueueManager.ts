@@ -1,6 +1,18 @@
-import * as path from 'path';
-import { QueueEntry, QueueStatus, ExecutionQueueConfig, DEFAULT_EXECUTION_QUEUE_CONFIG, ExecutionHistory } from './types';
-import { writeJsonFile, readJsonFile, ensureDirectory, handlePersistenceError, fileExists } from '../../utils/file-persistence';
+import * as path from "node:path";
+import {
+  ensureDirectory,
+  fileExists,
+  handlePersistenceError,
+  readJsonFile,
+  writeJsonFile,
+} from "../../utils/file-persistence";
+import {
+  DEFAULT_EXECUTION_QUEUE_CONFIG,
+  type ExecutionHistory,
+  type ExecutionQueueConfig,
+  type QueueEntry,
+  type QueueStatus,
+} from "./types";
 
 export class QueueManager {
   private queue: QueueEntry[] = [];
@@ -9,14 +21,11 @@ export class QueueManager {
   private historyFile: string;
   private config: ExecutionQueueConfig;
 
-  constructor(
-    projectPath: string,
-    config: Partial<ExecutionQueueConfig> = {}
-  ) {
+  constructor(projectPath: string, config: Partial<ExecutionQueueConfig> = {}) {
     this.config = { ...DEFAULT_EXECUTION_QUEUE_CONFIG, ...config };
-    const persistenceDir = this.config.persistenceDir || path.join(projectPath, '.tenex', 'state');
-    this.queueFile = path.join(persistenceDir, 'execution-queue.json');
-    this.historyFile = path.join(persistenceDir, 'execution-history.json');
+    const persistenceDir = this.config.persistenceDir || path.join(projectPath, ".tenex", "state");
+    this.queueFile = path.join(persistenceDir, "execution-queue.json");
+    this.historyFile = path.join(persistenceDir, "execution-history.json");
   }
 
   async initialize(): Promise<void> {
@@ -33,16 +42,15 @@ export class QueueManager {
 
   async enqueue(conversationId: string, agentPubkey: string): Promise<number> {
     // Check if already in queue
-    const existingIndex = this.queue.findIndex(
-      entry => entry.conversationId === conversationId
-    );
+    const existingIndex = this.queue.findIndex((entry) => entry.conversationId === conversationId);
 
     if (existingIndex >= 0) {
       return existingIndex + 1; // Return 1-based position
     }
 
     // Check queue size limit
-    const maxQueueSize = this.config.maxQueueSize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxQueueSize || 10);
+    const maxQueueSize =
+      this.config.maxQueueSize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxQueueSize || 10);
     if (this.queue.length >= maxQueueSize) {
       throw new Error(`Queue is full (max size: ${maxQueueSize})`);
     }
@@ -51,11 +59,11 @@ export class QueueManager {
       conversationId,
       agentPubkey,
       timestamp: Date.now(),
-      retryCount: 0
+      retryCount: 0,
     };
 
     this.queue.push(entry);
-    
+
     if (this.config.enablePersistence) {
       await this.saveQueueToDisk();
     }
@@ -69,7 +77,7 @@ export class QueueManager {
     }
 
     const entry = this.queue.shift();
-    
+
     if (this.config.enablePersistence) {
       await this.saveQueueToDisk();
     }
@@ -79,9 +87,7 @@ export class QueueManager {
 
   async removeFromQueue(conversationId: string): Promise<boolean> {
     const initialLength = this.queue.length;
-    this.queue = this.queue.filter(
-      entry => entry.conversationId !== conversationId
-    );
+    this.queue = this.queue.filter((entry) => entry.conversationId !== conversationId);
 
     if (this.queue.length !== initialLength) {
       if (this.config.enablePersistence) {
@@ -99,7 +105,7 @@ export class QueueManager {
 
     // Add back to front of queue (priority for retries)
     this.queue.unshift(entry);
-    
+
     if (this.config.enablePersistence) {
       await this.saveQueueToDisk();
     }
@@ -111,26 +117,25 @@ export class QueueManager {
     return {
       totalWaiting: this.queue.length,
       estimatedWait: this.calculateEstimatedWait(),
-      queue: [...this.queue] // Return copy
+      queue: [...this.queue], // Return copy
     };
   }
 
   getQueuePosition(conversationId: string): number {
-    const index = this.queue.findIndex(
-      entry => entry.conversationId === conversationId
-    );
+    const index = this.queue.findIndex((entry) => entry.conversationId === conversationId);
     return index >= 0 ? index + 1 : 0;
   }
 
   isInQueue(conversationId: string): boolean {
-    return this.queue.some(entry => entry.conversationId === conversationId);
+    return this.queue.some((entry) => entry.conversationId === conversationId);
   }
 
   async addToHistory(history: ExecutionHistory): Promise<void> {
     this.executionHistory.push(history);
 
     // Trim history if it exceeds max size
-    const maxHistorySize = this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
+    const maxHistorySize =
+      this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
     if (this.executionHistory.length > maxHistorySize) {
       this.executionHistory = this.executionHistory.slice(-maxHistorySize);
     }
@@ -140,7 +145,7 @@ export class QueueManager {
     }
   }
 
-  getRecentExecutionHistory(count: number = 50): ExecutionHistory[] {
+  getRecentExecutionHistory(count = 50): ExecutionHistory[] {
     return this.executionHistory.slice(-count);
   }
 
@@ -152,7 +157,7 @@ export class QueueManager {
     }
 
     const validExecutions = recentExecutions.filter(
-      exec => exec.reason === 'completed' && exec.endTime > exec.startTime
+      (exec) => exec.reason === "completed" && exec.endTime > exec.startTime
     );
 
     if (validExecutions.length === 0) {
@@ -185,7 +190,7 @@ export class QueueManager {
     try {
       await writeJsonFile(this.queueFile, this.queue);
     } catch (error) {
-      handlePersistenceError('save queue to disk', error);
+      handlePersistenceError("save queue to disk", error);
       // Don't throw - allow operation to continue without persistence
     }
   }
@@ -193,18 +198,16 @@ export class QueueManager {
   private async loadQueueFromDisk(): Promise<void> {
     try {
       this.queue = await readJsonFile<QueueEntry[]>(this.queueFile);
-      
+
       // Validate queue entries
-      this.queue = this.queue.filter(entry => 
-        entry.conversationId && 
-        entry.agentPubkey && 
-        typeof entry.timestamp === 'number'
+      this.queue = this.queue.filter(
+        (entry) => entry.conversationId && entry.agentPubkey && typeof entry.timestamp === "number"
       );
     } catch (error) {
       if (!(await fileExists(this.queueFile))) {
         this.queue = []; // No queue file exists
       } else {
-        handlePersistenceError('load queue from disk', error);
+        handlePersistenceError("load queue from disk", error);
         this.queue = [];
       }
     }
@@ -214,7 +217,7 @@ export class QueueManager {
     try {
       await writeJsonFile(this.historyFile, this.executionHistory);
     } catch (error) {
-      handlePersistenceError('save history to disk', error);
+      handlePersistenceError("save history to disk", error);
       // Don't throw - allow operation to continue without persistence
     }
   }
@@ -222,16 +225,18 @@ export class QueueManager {
   private async loadHistoryFromDisk(): Promise<void> {
     try {
       this.executionHistory = await readJsonFile<ExecutionHistory[]>(this.historyFile);
-      
+
       // Validate history entries
-      this.executionHistory = this.executionHistory.filter(entry =>
-        entry.conversationId &&
-        typeof entry.startTime === 'number' &&
-        typeof entry.endTime === 'number'
+      this.executionHistory = this.executionHistory.filter(
+        (entry) =>
+          entry.conversationId &&
+          typeof entry.startTime === "number" &&
+          typeof entry.endTime === "number"
       );
 
       // Trim to max size
-      const maxHistorySize = this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
+      const maxHistorySize =
+        this.config.maxHistorySize ?? (DEFAULT_EXECUTION_QUEUE_CONFIG.maxHistorySize || 100);
       if (this.executionHistory.length > maxHistorySize) {
         this.executionHistory = this.executionHistory.slice(-maxHistorySize);
       }
@@ -239,7 +244,7 @@ export class QueueManager {
       if (!(await fileExists(this.historyFile))) {
         this.executionHistory = []; // No history file exists
       } else {
-        handlePersistenceError('load history from disk', error);
+        handlePersistenceError("load history from disk", error);
         this.executionHistory = [];
       }
     }
@@ -258,21 +263,25 @@ export class QueueManager {
       entries: [...this.queue],
       estimatedWait: this.calculateEstimatedWait(),
       averageExecutionTime: this.getAverageExecutionTime(),
-      historySize: this.executionHistory.length
+      historySize: this.executionHistory.length,
     };
   }
 
   clearQueue(): void {
     this.queue = [];
     if (this.config.enablePersistence) {
-      this.saveQueueToDisk().catch(error => handlePersistenceError('save queue after update', error));
+      this.saveQueueToDisk().catch((error) =>
+        handlePersistenceError("save queue after update", error)
+      );
     }
   }
 
   clearHistory(): void {
     this.executionHistory = [];
     if (this.config.enablePersistence) {
-      this.saveHistoryToDisk().catch(error => handlePersistenceError('save history after update', error));
+      this.saveHistoryToDisk().catch((error) =>
+        handlePersistenceError("save history after update", error)
+      );
     }
   }
 }

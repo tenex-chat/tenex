@@ -8,37 +8,37 @@ import "@/prompts/fragments/35-specialist-completion-guidance";
 /**
  * Builds phase-specific instructions to be injected as a system message
  * when an agent transitions to a new phase.
- * 
+ *
  * This includes:
  * - Current phase context and any transition information
  * - Phase-specific constraints
  * - Phase-specific completion guidance
  */
 export function buildPhaseInstructions(
-    phase: Phase,
-    conversation?: Conversation,
-    isOrchestrator: boolean = false
+  phase: Phase,
+  conversation?: Conversation,
+  isOrchestrator = false
 ): string {
-    // Orchestrators should not receive dynamic phase instructions
-    // as they output strict JSON and handle phases differently
-    if (isOrchestrator) {
-        return "";
-    }
+  // Orchestrators should not receive dynamic phase instructions
+  // as they output strict JSON and handle phases differently
+  if (isOrchestrator) {
+    return "";
+  }
 
-    const builder = new PromptBuilder()
-        .add("phase-context", {
-            phase,
-            phaseMetadata: conversation?.metadata,
-            conversation,
-        })
-        .add("phase-constraints", {
-            phase,
-        })
-        .add("specialist-completion-guidance", {
-            phase,
-        });
+  const builder = new PromptBuilder()
+    .add("phase-context", {
+      phase,
+      phaseMetadata: conversation?.metadata,
+      conversation,
+    })
+    .add("phase-constraints", {
+      phase,
+    })
+    .add("specialist-completion-guidance", {
+      phase,
+    });
 
-    return builder.build();
+  return builder.build();
 }
 
 /**
@@ -46,11 +46,11 @@ export function buildPhaseInstructions(
  * re-entering the conversation in a different phase.
  */
 export function formatPhaseTransitionMessage(
-    lastSeenPhase: Phase,
-    currentPhase: Phase,
-    phaseInstructions: string
+  lastSeenPhase: Phase,
+  currentPhase: Phase,
+  phaseInstructions: string
 ): string {
-    return `=== PHASE TRANSITION ===
+  return `=== PHASE TRANSITION ===
 
 You were last active in the ${lastSeenPhase.toUpperCase()} phase.
 The conversation has now moved to the ${currentPhase.toUpperCase()} phase.

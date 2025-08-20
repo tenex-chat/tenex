@@ -1,185 +1,191 @@
+import { getNDK } from "@/nostr";
+import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
+import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
-import type { Conversation, ConversationMetadata } from "../types";
-import { PHASES } from "../phases";
-import { isEventFromUser, getAgentSlugFromEvent } from "@/nostr/utils";
-import { getNDK } from "@/nostr";
-import { logger } from "@/utils/logger";
 import { ensureExecutionTimeInitialized } from "../executionTime";
+import { PHASES } from "../phases";
+import type { Conversation, ConversationMetadata } from "../types";
 
 /**
  * Processes events and creates/updates conversations.
  * Single Responsibility: Handle event processing and metadata extraction.
  */
 export class ConversationEventProcessor {
-    /**
-     * Create a new conversation from an initial event
-     */
-    async createConversationFromEvent(event: NDKEvent): Promise<Conversation> {
-        const id = event.id;
-        if (!id) {
-            throw new Error("Event must have an ID to create a conversation");
-        }
-
-        const title = event.tags.find(tag => tag[0] === "title")?.[1] || "Untitled Conversation";
-        const referencedArticle = await this.extractReferencedArticle(event);
-
-        const conversation: Conversation = {
-            id,
-            title,
-            phase: PHASES.CHAT,
-            history: [event],
-            agentStates: new Map(),
-            phaseStartedAt: Date.now(),
-            metadata: {
-                summary: event.content,
-                referencedArticle
-            },
-            phaseTransitions: [],
-            executionTime: {
-                totalSeconds: 0,
-                isActive: false,
-                lastUpdated: Date.now()
-            }
-        };
-
-        ensureExecutionTimeInitialized(conversation);
-
-        logger.info(`[ConversationEventProcessor] Created conversation ${id}`, {
-            title,
-            hasArticle: !!referencedArticle
-        });
-
-        return conversation;
+  /**
+   * Create a new conversation from an initial event
+   */
+  async createConversationFromEvent(event: NDKEvent): Promise<Conversation> {
+    const id = event.id;
+    if (!id) {
+      throw new Error("Event must have an ID to create a conversation");
     }
 
-    /**
-     * Process an incoming event and add it to a conversation
-     */
-    processIncomingEvent(conversation: Conversation, event: NDKEvent): void {
-        // Check if event already exists in history to prevent duplicates
-        if (conversation.history.some(e => e.id === event.id)) {
-            return;
-        }
+    const title = event.tags.find((tag) => tag[0] === "title")?.[1] || "Untitled Conversation";
+    const referencedArticle = await this.extractReferencedArticle(event);
 
-        // Add to history
-        conversation.history.push(event);
+    const conversation: Conversation = {
+      id,
+      title,
+      phase: PHASES.CHAT,
+      history: [event],
+      agentStates: new Map(),
+      phaseStartedAt: Date.now(),
+      metadata: {
+        summary: event.content,
+        referencedArticle,
+      },
+      phaseTransitions: [],
+      executionTime: {
+        totalSeconds: 0,
+        isActive: false,
+        lastUpdated: Date.now(),
+      },
+    };
 
-        // Update metadata if it's a user message
-        if (event.content && isEventFromUser(event)) {
-            conversation.metadata.summary = event.content;
-            conversation.metadata.last_user_message = event.content;
-        }
+    ensureExecutionTimeInitialized(conversation);
 
-        logger.debug(`[ConversationEventProcessor] Processed event for conversation ${conversation.id}`, {
-            eventId: event.id,
-            isUser: isEventFromUser(event)
-        });
+    logger.info(`[ConversationEventProcessor] Created conversation ${id}`, {
+      title,
+      hasArticle: !!referencedArticle,
+    });
+
+    return conversation;
+  }
+
+  /**
+   * Process an incoming event and add it to a conversation
+   */
+  processIncomingEvent(conversation: Conversation, event: NDKEvent): void {
+    // Check if event already exists in history to prevent duplicates
+    if (conversation.history.some((e) => e.id === event.id)) {
+      return;
     }
 
-    /**
-     * Update conversation metadata
-     */
-    updateMetadata(conversation: Conversation, metadata: Partial<ConversationMetadata>): void {
-        conversation.metadata = {
-            ...conversation.metadata,
-            ...metadata
-        };
+    // Add to history
+    conversation.history.push(event);
 
-        logger.debug(`[ConversationEventProcessor] Updated metadata for conversation ${conversation.id}`, {
-            updatedFields: Object.keys(metadata)
-        });
+    // Update metadata if it's a user message
+    if (event.content && isEventFromUser(event)) {
+      conversation.metadata.summary = event.content;
+      conversation.metadata.last_user_message = event.content;
     }
 
-    /**
-     * Extract referenced NDKArticle from event tags
-     */
-    private async extractReferencedArticle(event: NDKEvent): Promise<ConversationMetadata["referencedArticle"] | undefined> {
-        const articleTag = event.tags.find(tag => tag[0] === "a" && tag[1]?.startsWith("30023:"));
+    logger.debug(
+      `[ConversationEventProcessor] Processed event for conversation ${conversation.id}`,
+      {
+        eventId: event.id,
+        isUser: isEventFromUser(event),
+      }
+    );
+  }
 
-        if (!articleTag || !articleTag[1]) {
-            return undefined;
-        }
+  /**
+   * Update conversation metadata
+   */
+  updateMetadata(conversation: Conversation, metadata: Partial<ConversationMetadata>): void {
+    conversation.metadata = {
+      ...conversation.metadata,
+      ...metadata,
+    };
 
-        try {
-            // Parse the article reference (format: 30023:pubkey:dtag)
-            const [_kind, pubkey, dTag] = articleTag[1].split(":");
+    logger.debug(
+      `[ConversationEventProcessor] Updated metadata for conversation ${conversation.id}`,
+      {
+        updatedFields: Object.keys(metadata),
+      }
+    );
+  }
 
-            if (!pubkey || !dTag) {
-                return undefined;
-            }
+  /**
+   * Extract referenced NDKArticle from event tags
+   */
+  private async extractReferencedArticle(
+    event: NDKEvent
+  ): Promise<ConversationMetadata["referencedArticle"] | undefined> {
+    const articleTag = event.tags.find((tag) => tag[0] === "a" && tag[1]?.startsWith("30023:"));
 
-            const ndk = getNDK();
-            const filter = {
-                kinds: [30023],
-                authors: [pubkey],
-                "#d": [dTag]
-            };
+    if (!articleTag || !articleTag[1]) {
+      return undefined;
+    }
 
-            const articles = await ndk.fetchEvents(filter);
+    try {
+      // Parse the article reference (format: 30023:pubkey:dtag)
+      const [_kind, pubkey, dTag] = articleTag[1].split(":");
 
-            if (articles.size > 0) {
-                const articleEvent = Array.from(articles)[0];
-                if (!articleEvent) {
-                    throw new Error("Article event not found");
-                }
-                const article = NDKArticle.from(articleEvent);
-
-                return {
-                    title: article.title || `Context: ${dTag}`,
-                    content: article.content || "",
-                    dTag: dTag
-                };
-            }
-        } catch (error) {
-            logger.error("[ConversationEventProcessor] Failed to fetch referenced NDKArticle", { error });
-        }
-
+      if (!pubkey || !dTag) {
         return undefined;
-    }
+      }
 
-    /**
-     * Clean up conversation metadata that's no longer needed
-     */
-    cleanupMetadata(conversation: Conversation): void {
-        // Clear readFiles tracking
-        if (conversation.metadata.readFiles) {
-            logger.info("[ConversationEventProcessor] Cleaning up readFiles metadata", {
-                conversationId: conversation.id,
-                fileCount: conversation.metadata.readFiles.length
-            });
-            delete conversation.metadata.readFiles;
+      const ndk = getNDK();
+      const filter = {
+        kinds: [30023],
+        authors: [pubkey],
+        "#d": [dTag],
+      };
+
+      const articles = await ndk.fetchEvents(filter);
+
+      if (articles.size > 0) {
+        const articleEvent = Array.from(articles)[0];
+        if (!articleEvent) {
+          throw new Error("Article event not found");
         }
-
-        // Clear queue status if present
-        if (conversation.metadata.queueStatus) {
-            delete conversation.metadata.queueStatus;
-        }
-    }
-
-    /**
-     * Extract completion from an event (if it's a complete() tool call)
-     */
-    extractCompletionFromEvent(event: NDKEvent): {
-        agent: string;
-        message: string;
-        timestamp?: number;
-    } | null {
-        // Check if event has ["tool", "complete"] tag
-        const isCompletion = event.tags?.some(
-            tag => tag[0] === "tool" && tag[1] === "complete"
-        );
-
-        if (!isCompletion || !event.content) return null;
-
-        // Get agent slug from the event's pubkey
-        const agentSlug = getAgentSlugFromEvent(event);
-        if (!agentSlug) return null;
+        const article = NDKArticle.from(articleEvent);
 
         return {
-            agent: agentSlug,
-            message: event.content,
-            timestamp: event.created_at
+          title: article.title || `Context: ${dTag}`,
+          content: article.content || "",
+          dTag: dTag,
         };
+      }
+    } catch (error) {
+      logger.error("[ConversationEventProcessor] Failed to fetch referenced NDKArticle", { error });
     }
+
+    return undefined;
+  }
+
+  /**
+   * Clean up conversation metadata that's no longer needed
+   */
+  cleanupMetadata(conversation: Conversation): void {
+    // Clear readFiles tracking
+    if (conversation.metadata.readFiles) {
+      logger.info("[ConversationEventProcessor] Cleaning up readFiles metadata", {
+        conversationId: conversation.id,
+        fileCount: conversation.metadata.readFiles.length,
+      });
+      conversation.metadata.readFiles = undefined;
+    }
+
+    // Clear queue status if present
+    if (conversation.metadata.queueStatus) {
+      conversation.metadata.queueStatus = undefined;
+    }
+  }
+
+  /**
+   * Extract completion from an event (if it's a complete() tool call)
+   */
+  extractCompletionFromEvent(event: NDKEvent): {
+    agent: string;
+    message: string;
+    timestamp?: number;
+  } | null {
+    // Check if event has ["tool", "complete"] tag
+    const isCompletion = event.tags?.some((tag) => tag[0] === "tool" && tag[1] === "complete");
+
+    if (!isCompletion || !event.content) return null;
+
+    // Get agent slug from the event's pubkey
+    const agentSlug = getAgentSlugFromEvent(event);
+    if (!agentSlug) return null;
+
+    return {
+      agent: agentSlug,
+      message: event.content,
+      timestamp: event.created_at,
+    };
+  }
 }

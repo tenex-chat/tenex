@@ -1,20 +1,19 @@
-import { formatAnyError } from "@/utils/error-formatter";
+import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMService } from "@/llm/types";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
-import { buildSystemPromptMessages, buildStandaloneSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import {
+  buildStandaloneSystemPromptMessages,
+  buildSystemPromptMessages,
+} from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import {
-    type TracingContext,
-    createAgentExecutionContext,
-    createTracingContext,
-} from "@/tracing";
+import { type TracingContext, createAgentExecutionContext, createTracingContext } from "@/tracing";
+import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type { AgentInstance } from "@/agents/types";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
 import type { ExecutionContext } from "./types";
@@ -23,260 +22,256 @@ import "@/prompts/fragments/25-specialist-tools";
 import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { createExecutionLogger } from "@/logging/ExecutionLogger";
 
 /**
  * Minimal context for standalone agent execution
  */
 export interface StandaloneAgentContext {
-    agents: Map<string, AgentInstance>;
-    pubkey: string;
-    signer: NDKPrivateKeySigner;
-    project?: NDKProject;
-    getLessonsForAgent?: (pubkey: string) => NDKAgentLesson[];
+  agents: Map<string, AgentInstance>;
+  pubkey: string;
+  signer: NDKPrivateKeySigner;
+  project?: NDKProject;
+  getLessonsForAgent?: (pubkey: string) => NDKAgentLesson[];
 }
 
 export class AgentExecutor {
-    constructor(
-        private llmService: LLMService,
-        private conversationManager: ConversationCoordinator,
-        private standaloneContext?: StandaloneAgentContext
-    ) {}
+  constructor(
+    private llmService: LLMService,
+    private conversationManager: ConversationCoordinator,
+    private standaloneContext?: StandaloneAgentContext
+  ) {}
 
-    /**
-     * Get the execution backend - all agents now use ReasonActLoop
-     */
-    private getBackend(): ReasonActLoop {
-        return new ReasonActLoop(this.llmService);
+  /**
+   * Get the execution backend - all agents now use ReasonActLoop
+   */
+  private getBackend(): ReasonActLoop {
+    return new ReasonActLoop(this.llmService);
+  }
+
+  /**
+   * Execute an agent's assignment for a conversation with streaming
+   */
+  async execute(context: ExecutionContext, parentTracingContext?: TracingContext): Promise<void> {
+    // Create agent execution tracing context
+    const tracingContext = parentTracingContext
+      ? createAgentExecutionContext(parentTracingContext, context.agent.name)
+      : createAgentExecutionContext(
+          createTracingContext(context.conversationId),
+          context.agent.name
+        );
+
+    const executionLogger = createExecutionLogger(tracingContext, "agent");
+
+    // Build messages first to get the Claude session ID
+    const messages = await this.buildMessages(context, context.triggeringEvent);
+
+    // Get the Claude session ID from the conversation state
+    const conversation = this.conversationManager.getConversation(context.conversationId);
+    const agentState = conversation?.agentStates.get(context.agent.slug);
+    const claudeSessionId =
+      context.claudeSessionId || agentState?.claudeSessionsByPhase?.[context.phase];
+
+    if (claudeSessionId) {
+      logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {
+        conversationId: context.conversationId,
+        agentSlug: context.agent.slug,
+        sessionId: claudeSessionId,
+        source: context.claudeSessionId ? "triggering-event" : "agent-context",
+      });
     }
 
-    /**
-     * Execute an agent's assignment for a conversation with streaming
-     */
-    async execute(context: ExecutionContext, parentTracingContext?: TracingContext): Promise<void> {
-        // Create agent execution tracing context
-        const tracingContext = parentTracingContext
-            ? createAgentExecutionContext(parentTracingContext, context.agent.name)
-            : createAgentExecutionContext(
-                  createTracingContext(context.conversationId),
-                  context.agent.name
-              );
-        
-        const executionLogger = createExecutionLogger(tracingContext, "agent");
+    // Build full context with additional properties
+    const fullContext: ExecutionContext = {
+      ...context,
+      conversationManager: context.conversationManager || this.conversationManager,
+      agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
+      claudeSessionId, // Pass the determined session ID
+    };
 
-        // Build messages first to get the Claude session ID
-        const messages = await this.buildMessages(context, context.triggeringEvent);
-        
-        // Get the Claude session ID from the conversation state
-        const conversation = this.conversationManager.getConversation(context.conversationId);
-        const agentState = conversation?.agentStates.get(context.agent.slug);
-        const claudeSessionId = context.claudeSessionId || agentState?.claudeSessionsByPhase?.[context.phase];
-        
-        if (claudeSessionId) {
-            logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {
-                conversationId: context.conversationId,
-                agentSlug: context.agent.slug,
-                sessionId: claudeSessionId,
-                source: context.claudeSessionId ? "triggering-event" : "agent-context"
-            });
-        }
+    // Create AgentPublisher for typing indicators
+    const agentPublisher = new AgentPublisher(context.agent);
 
-        // Build full context with additional properties
-        const fullContext: ExecutionContext = {
-            ...context,
-            conversationManager: context.conversationManager || this.conversationManager,
-            agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
-            claudeSessionId, // Pass the determined session ID
+    try {
+      // Get fresh conversation data for execution time tracking
+      const conversation = context.conversationManager.getConversation(context.conversationId);
+      if (!conversation) {
+        throw new Error(`Conversation ${context.conversationId} not found`);
+      }
+
+      // Start execution time tracking
+      startExecutionTime(conversation);
+
+      // Log execution flow start
+      executionLogger.logEvent({
+        type: "execution_start",
+        timestamp: new Date(),
+        conversationId: context.conversationId,
+        agent: context.agent.name,
+        narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
+      });
+
+      // Publish typing indicator start using AgentPublisher
+      const eventContext: EventContext = {
+        triggeringEvent: context.triggeringEvent,
+        conversationEvent: conversation.history[0], // Root event is first in history
+      };
+      await agentPublisher.typing({ type: "typing", state: "start" }, eventContext);
+
+      await this.executeWithStreaming(fullContext, messages, tracingContext);
+
+      // Log execution flow complete
+      executionLogger.logEvent({
+        type: "execution_complete",
+        timestamp: new Date(),
+        conversationId: context.conversationId,
+        agent: context.agent.name,
+        narrative: `Agent ${context.agent.name} completed execution successfully`,
+        success: true,
+      });
+
+      // Stop typing indicator after successful execution
+      await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
+    } catch (error) {
+      // Log execution flow failure
+      executionLogger.logEvent({
+        type: "execution_complete",
+        timestamp: new Date(),
+        conversationId: context.conversationId,
+        agent: context.agent.name,
+        narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
+        success: false,
+      });
+      // Stop execution time tracking even on error
+      const conversation = context.conversationManager.getConversation(context.conversationId);
+      if (conversation) {
+        stopExecutionTime(conversation);
+      }
+
+      // Ensure typing indicator is stopped even on error
+      try {
+        const eventContext: EventContext = {
+          triggeringEvent: context.triggeringEvent,
+          conversationEvent: conversation ? conversation.history[0] : undefined,
         };
+        await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
+      } catch (typingError) {
+        logger.warn("Failed to stop typing indicator", { error: formatAnyError(typingError) });
+      }
 
-        // Create AgentPublisher for typing indicators
-        const agentPublisher = new AgentPublisher(context.agent);
-        
-        try {
-            // Get fresh conversation data for execution time tracking
-            const conversation = context.conversationManager.getConversation(
-                context.conversationId
-            );
-            if (!conversation) {
-                throw new Error(`Conversation ${context.conversationId} not found`);
-            }
+      throw error;
+    }
+  }
 
-            // Start execution time tracking
-            startExecutionTime(conversation);
-            
-            // Log execution flow start
-            executionLogger.logEvent({
-                type: "execution_start",
-                timestamp: new Date(),
-                conversationId: context.conversationId,
-                agent: context.agent.name,
-                narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`
-            });
+  /**
+   * Build the messages array for the agent execution
+   */
+  private async buildMessages(
+    context: ExecutionContext,
+    _triggeringEvent: NDKEvent
+  ): Promise<Message[]> {
+    const messages: Message[] = [];
 
-            // Publish typing indicator start using AgentPublisher
-            const eventContext: EventContext = {
-                triggeringEvent: context.triggeringEvent,
-                conversationEvent: conversation.history[0] // Root event is first in history
-            };
-            await agentPublisher.typing({ type: 'typing', state: 'start' }, eventContext);
-
-            await this.executeWithStreaming(fullContext, messages, tracingContext);
-            
-            // Log execution flow complete
-            executionLogger.logEvent({
-                type: "execution_complete",
-                timestamp: new Date(),
-                conversationId: context.conversationId,
-                agent: context.agent.name,
-                narrative: `Agent ${context.agent.name} completed execution successfully`,
-                success: true
-            });
-
-            // Stop typing indicator after successful execution
-            await agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
-        } catch (error) {
-            // Log execution flow failure
-            executionLogger.logEvent({
-                type: "execution_complete",
-                timestamp: new Date(),
-                conversationId: context.conversationId,
-                agent: context.agent.name,
-                narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
-                success: false
-            });
-            // Stop execution time tracking even on error
-            const conversation = context.conversationManager.getConversation(
-                context.conversationId
-            );
-            if (conversation) {
-                stopExecutionTime(conversation);
-            }
-
-            // Ensure typing indicator is stopped even on error
-            try {
-                const eventContext: EventContext = {
-                    triggeringEvent: context.triggeringEvent,
-                    conversationEvent: conversation ? conversation.history[0] : undefined
-                };
-                await agentPublisher.typing({ type: 'typing', state: 'stop' }, eventContext);
-            } catch (typingError) {
-                logger.warn("Failed to stop typing indicator", { error: formatAnyError(typingError) });
-            }
-            
-
-            throw error;
-        }
+    // Get fresh conversation data
+    const conversation = context.conversationManager.getConversation(context.conversationId);
+    if (!conversation) {
+      throw new Error(`Conversation ${context.conversationId} not found`);
     }
 
-    /**
-     * Build the messages array for the agent execution
-     */
-    private async buildMessages(
-        context: ExecutionContext,
-        _triggeringEvent: NDKEvent
-    ): Promise<Message[]> {
-        const messages: Message[] = [];
-        
-        // Get fresh conversation data
-        const conversation = context.conversationManager.getConversation(context.conversationId);
-        if (!conversation) {
-            throw new Error(`Conversation ${context.conversationId} not found`);
+    // Get MCP tools for the prompt
+    const mcpTools = mcpService.getCachedTools();
+
+    // Check if we're in standalone mode or project mode
+    if (this.standaloneContext) {
+      // Standalone mode - use minimal context
+      const availableAgents = Array.from(this.standaloneContext.agents.values());
+
+      // Get lessons if available
+      const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
+      if (this.standaloneContext.getLessonsForAgent) {
+        const lessons = this.standaloneContext.getLessonsForAgent(context.agent.pubkey);
+        if (lessons.length > 0) {
+          agentLessonsMap.set(context.agent.pubkey, lessons);
         }
+      }
 
-        // Get MCP tools for the prompt
-        const mcpTools = mcpService.getCachedTools();
+      // Build standalone system prompt
+      const systemMessages = buildStandaloneSystemPromptMessages({
+        agent: context.agent,
+        phase: context.phase,
+        availableAgents,
+        conversation,
+        agentLessons: agentLessonsMap,
+        mcpTools,
+        triggeringEvent: context.triggeringEvent,
+      });
 
-        // Check if we're in standalone mode or project mode
-        if (this.standaloneContext) {
-            // Standalone mode - use minimal context
-            const availableAgents = Array.from(this.standaloneContext.agents.values());
-            
-            // Get lessons if available
-            const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
-            if (this.standaloneContext.getLessonsForAgent) {
-                const lessons = this.standaloneContext.getLessonsForAgent(context.agent.pubkey);
-                if (lessons.length > 0) {
-                    agentLessonsMap.set(context.agent.pubkey, lessons);
-                }
-            }
+      // Add all system messages
+      for (const systemMsg of systemMessages) {
+        messages.push(systemMsg.message);
+      }
+    } else if (isProjectContextInitialized()) {
+      // Project mode - use full project context
+      const projectCtx = getProjectContext();
+      const project = projectCtx.project;
 
-            // Build standalone system prompt
-            const systemMessages = buildStandaloneSystemPromptMessages({
-                agent: context.agent,
-                phase: context.phase,
-                availableAgents,
-                conversation,
-                agentLessons: agentLessonsMap,
-                mcpTools,
-                triggeringEvent: context.triggeringEvent,
-            });
-
-            // Add all system messages
-            for (const systemMsg of systemMessages) {
-                messages.push(systemMsg.message);
-            }
-        } else if (isProjectContextInitialized()) {
-            // Project mode - use full project context
-            const projectCtx = getProjectContext();
-            const project = projectCtx.project;
-
-            // Create tag map for efficient lookup
-            const tagMap = new Map<string, string>();
-            for (const tag of project.tags) {
-                if (tag.length >= 2 && tag[0] && tag[1]) {
-                    tagMap.set(tag[0], tag[1]);
-                }
-            }
-
-            // Get all available agents for handoffs
-            const availableAgents = Array.from(projectCtx.agents.values());
-
-            // Build system prompt using the shared function
-            // Only pass the current agent's lessons
-            const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
-            const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
-            
-            if (currentAgentLessons.length > 0) {
-                agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
-            }
-
-            // Build system prompt messages for all agents (including orchestrator)
-            const systemMessages = buildSystemPromptMessages({
-                agent: context.agent,
-                phase: context.phase,
-                project,
-                availableAgents,
-                conversation,
-                agentLessons: agentLessonsMap,
-                mcpTools,
-                triggeringEvent: context.triggeringEvent,
-            });
-
-            // Add all system messages
-            for (const systemMsg of systemMessages) {
-                messages.push(systemMsg.message);
-            }
-        } else {
-            // Fallback: No context available - use absolute minimal prompt
-            logger.warn("No context available for agent execution, using minimal prompt");
-            messages.push(new Message("system", 
-                `You are ${context.agent.name}. ${context.agent.instructions || ""}`
-            ));
+      // Create tag map for efficient lookup
+      const tagMap = new Map<string, string>();
+      for (const tag of project.tags) {
+        if (tag.length >= 2 && tag[0] && tag[1]) {
+          tagMap.set(tag[0], tag[1]);
         }
+      }
 
-        // Add special instruction if this is a reactivation after task completion
-        if (context.isTaskCompletionReactivation) {
-            logger.info("[AgentExecutor] Agent reactivated after task completion", {
-                agent: context.agent.name,
-                hasReplyTarget: !!context.replyTarget,
-                replyTargetId: context.replyTarget?.id?.substring(0, 8),
-                replyTargetPubkey: context.replyTarget?.pubkey?.substring(0, 8),
-                triggeringEventId: context.triggeringEvent?.id?.substring(0, 8),
-                triggeringEventPubkey: context.triggeringEvent?.pubkey?.substring(0, 8),
-            });
-            
-            const taskCompletionInstruction = `
+      // Get all available agents for handoffs
+      const availableAgents = Array.from(projectCtx.agents.values());
+
+      // Build system prompt using the shared function
+      // Only pass the current agent's lessons
+      const agentLessonsMap = new Map<string, NDKAgentLesson[]>();
+      const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
+
+      if (currentAgentLessons.length > 0) {
+        agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
+      }
+
+      // Build system prompt messages for all agents (including orchestrator)
+      const systemMessages = buildSystemPromptMessages({
+        agent: context.agent,
+        phase: context.phase,
+        project,
+        availableAgents,
+        conversation,
+        agentLessons: agentLessonsMap,
+        mcpTools,
+        triggeringEvent: context.triggeringEvent,
+      });
+
+      // Add all system messages
+      for (const systemMsg of systemMessages) {
+        messages.push(systemMsg.message);
+      }
+    } else {
+      // Fallback: No context available - use absolute minimal prompt
+      logger.warn("No context available for agent execution, using minimal prompt");
+      messages.push(
+        new Message("system", `You are ${context.agent.name}. ${context.agent.instructions || ""}`)
+      );
+    }
+
+    // Add special instruction if this is a reactivation after task completion
+    if (context.isTaskCompletionReactivation) {
+      logger.info("[AgentExecutor] Agent reactivated after task completion", {
+        agent: context.agent.name,
+        hasReplyTarget: !!context.replyTarget,
+        replyTargetId: context.replyTarget?.id?.substring(0, 8),
+        replyTargetPubkey: context.replyTarget?.pubkey?.substring(0, 8),
+        triggeringEventId: context.triggeringEvent?.id?.substring(0, 8),
+        triggeringEventPubkey: context.triggeringEvent?.pubkey?.substring(0, 8),
+      });
+
+      const taskCompletionInstruction = `
 === CRITICAL: TASK COMPLETION NOTIFICATION ===
 
 STOP! A delegated task has JUST BEEN COMPLETED. The response is in the conversation above.
@@ -294,18 +289,18 @@ DO NOT use delegate(), delegate_phase(), or any other tool.
 ONLY use complete().
 
 === END CRITICAL NOTIFICATION ===`;
-            
-            messages.push(new Message("system", taskCompletionInstruction));
-            logger.info(`[AgentExecutor] Task completion reactivation mode for ${context.agent.name}`, {
-                conversationId: context.conversationId,
-                agentSlug: context.agent.slug
-            });
-        }
 
-        // Check for #debug flag in triggering event content
-        const hasDebugFlag = context.triggeringEvent?.content?.includes("#debug");
-        if (hasDebugFlag) {
-            const debugMetaCognitionPrompt = `
+      messages.push(new Message("system", taskCompletionInstruction));
+      logger.info(`[AgentExecutor] Task completion reactivation mode for ${context.agent.name}`, {
+        conversationId: context.conversationId,
+        agentSlug: context.agent.slug,
+      });
+    }
+
+    // Check for #debug flag in triggering event content
+    const hasDebugFlag = context.triggeringEvent?.content?.includes("#debug");
+    if (hasDebugFlag) {
+      const debugMetaCognitionPrompt = `
 === DEBUG MODE: META-COGNITIVE ANALYSIS REQUESTED ===
 
 The user has included "#debug" in their message. They are asking you to explain your decision-making process.
@@ -322,52 +317,52 @@ Provide a transparent, honest analysis of:
 
 Be completely transparent about your internal process. If you made a mistake or could have done better, acknowledge it. The goal is to help the user understand exactly how you arrived at your decision.
 === END DEBUG MODE ===`;
-            
-            messages.push(new Message("system", debugMetaCognitionPrompt));
-            logger.info(`[AgentExecutor] Debug mode activated for agent ${context.agent.name}`, {
-                conversationId: context.conversationId,
-                agentSlug: context.agent.slug
-            });
-        }
 
-        // All agents now get conversation transcript
-        const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
-            context.conversationId,
-            context.agent,
-            context.triggeringEvent
-        );
-
-        // Add the agent's messages
-        messages.push(...agentMessages);
-
-        return messages;
+      messages.push(new Message("system", debugMetaCognitionPrompt));
+      logger.info(`[AgentExecutor] Debug mode activated for agent ${context.agent.name}`, {
+        conversationId: context.conversationId,
+        agentSlug: context.agent.slug,
+      });
     }
 
-    /**
-     * Execute with streaming support
-     */
-    private async executeWithStreaming(
-        context: ExecutionContext,
-        messages: Message[],
-        _tracingContext: TracingContext
-    ): Promise<void> {
-        // Get tools for response processing - use agent's configured tools
-        const tools = context.agent.tools || [];
+    // All agents now get conversation transcript
+    const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
+      context.conversationId,
+      context.agent,
+      context.triggeringEvent
+    );
 
-        // Add MCP tools if available and agent has MCP access
-        let allTools = tools;
-        if (context.agent.mcp !== false) {
-            const mcpTools = mcpService.getCachedTools();
-            allTools = [...tools, ...mcpTools];
-        }
+    // Add the agent's messages
+    messages.push(...agentMessages);
 
-        // Add claude_code tool for agents that explicitly have it in their tools list
-        // This is now handled through agent configuration directly
+    return messages;
+  }
 
-        // Get the backend - all agents use ReasonActLoop now
-        const backend = this.getBackend();
+  /**
+   * Execute with streaming support
+   */
+  private async executeWithStreaming(
+    context: ExecutionContext,
+    messages: Message[],
+    _tracingContext: TracingContext
+  ): Promise<void> {
+    // Get tools for response processing - use agent's configured tools
+    const tools = context.agent.tools || [];
 
-        // Execute using the backend - all backends now use the same interface
-        await backend.execute(messages, allTools, context);
+    // Add MCP tools if available and agent has MCP access
+    let allTools = tools;
+    if (context.agent.mcp !== false) {
+      const mcpTools = mcpService.getCachedTools();
+      allTools = [...tools, ...mcpTools];
     }
+
+    // Add claude_code tool for agents that explicitly have it in their tools list
+    // This is now handled through agent configuration directly
+
+    // Get the backend - all agents use ReasonActLoop now
+    const backend = this.getBackend();
+
+    // Execute using the backend - all backends now use the same interface
+    await backend.execute(messages, allTools, context);
+  }
 }

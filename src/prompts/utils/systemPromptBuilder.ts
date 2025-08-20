@@ -20,39 +20,39 @@ import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 
 export interface BuildSystemPromptOptions {
-    // Required data
-    agent: AgentInstance;
-    phase: Phase;
-    project: NDKProject;
+  // Required data
+  agent: AgentInstance;
+  phase: Phase;
+  project: NDKProject;
 
-    // Optional runtime data
-    availableAgents?: AgentInstance[];
-    conversation?: Conversation;
-    agentLessons?: Map<string, NDKAgentLesson[]>;
-    mcpTools?: Tool[];
-    triggeringEvent?: NDKEvent;
+  // Optional runtime data
+  availableAgents?: AgentInstance[];
+  conversation?: Conversation;
+  agentLessons?: Map<string, NDKAgentLesson[]>;
+  mcpTools?: Tool[];
+  triggeringEvent?: NDKEvent;
 }
 
 export interface BuildStandalonePromptOptions {
-    // Required data
-    agent: AgentInstance;
-    phase: Phase;
+  // Required data
+  agent: AgentInstance;
+  phase: Phase;
 
-    // Optional runtime data
-    availableAgents?: AgentInstance[];
-    conversation?: Conversation;
-    agentLessons?: Map<string, NDKAgentLesson[]>;
-    mcpTools?: Tool[];
-    triggeringEvent?: NDKEvent;
+  // Optional runtime data
+  availableAgents?: AgentInstance[];
+  conversation?: Conversation;
+  agentLessons?: Map<string, NDKAgentLesson[]>;
+  mcpTools?: Tool[];
+  triggeringEvent?: NDKEvent;
 }
 
 export interface SystemMessage {
-    message: Message;
-    metadata?: {
-        cacheable?: boolean;
-        cacheKey?: string;
-        description?: string;
-    };
+  message: Message;
+  metadata?: {
+    cacheable?: boolean;
+    cacheKey?: string;
+    description?: string;
+  };
 }
 
 /**
@@ -61,235 +61,226 @@ export interface SystemMessage {
  * This is the single source of truth for system prompt generation.
  */
 export function buildSystemPromptMessages(options: BuildSystemPromptOptions): SystemMessage[] {
-    const messages: SystemMessage[] = [];
-    
-    // Build the main system prompt
-    const mainPrompt = buildMainSystemPrompt(options);
-    messages.push({
-        message: new Message("system", mainPrompt),
+  const messages: SystemMessage[] = [];
+
+  // Build the main system prompt
+  const mainPrompt = buildMainSystemPrompt(options);
+  messages.push({
+    message: new Message("system", mainPrompt),
+    metadata: {
+      description: "Main system prompt",
+    },
+  });
+
+  // Add PROJECT.md as separate cacheable message for project-manager
+  if (options.agent.slug === "project-manager") {
+    const projectMdContent = buildProjectMdContent(options);
+    if (projectMdContent) {
+      messages.push({
+        message: new Message("system", projectMdContent),
         metadata: {
-            description: "Main system prompt"
-        }
+          cacheable: true,
+          cacheKey: `project-md-${options.project.id}`,
+          description: "PROJECT.md content",
+        },
+      });
+    }
+  }
+
+  // Add project inventory as separate cacheable message for all agents
+  const inventoryContent = buildProjectInventoryContent(options);
+  if (inventoryContent) {
+    messages.push({
+      message: new Message("system", inventoryContent),
+      metadata: {
+        cacheable: true,
+        cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
+        description: "Project inventory",
+      },
     });
-    
-    // Add PROJECT.md as separate cacheable message for project-manager
-    if (options.agent.slug === "project-manager") {
-        const projectMdContent = buildProjectMdContent(options);
-        if (projectMdContent) {
-            messages.push({
-                message: new Message("system", projectMdContent),
-                metadata: {
-                    cacheable: true,
-                    cacheKey: `project-md-${options.project.id}`,
-                    description: "PROJECT.md content"
-                }
-            });
-        }
-    }
-    
-    // Add project inventory as separate cacheable message for all agents
-    const inventoryContent = buildProjectInventoryContent(options);
-    if (inventoryContent) {
-        messages.push({
-            message: new Message("system", inventoryContent),
-            metadata: {
-                cacheable: true,
-                cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
-                description: "Project inventory"
-            }
-        });
-    }
-    
-    return messages;
+  }
+
+  return messages;
 }
 
 /**
  * Builds the main system prompt content (without PROJECT.md and inventory)
  */
 function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
-    const {
-        agent,
-        phase,
-        project,
-        availableAgents = [],
-        conversation,
-        agentLessons,
-        mcpTools = [],
-        triggeringEvent,
-    } = options;
+  const {
+    agent,
+    phase,
+    project,
+    availableAgents = [],
+    conversation,
+    agentLessons,
+    mcpTools = [],
+    triggeringEvent,
+  } = options;
 
-    // Build system prompt with all agent and phase context
-    const systemPromptBuilder = new PromptBuilder();
-    
-    // Add specialist identity
-    systemPromptBuilder.add("specialist-identity", {
-        agent,
-        projectTitle: project.tagValue("title") || "Unknown Project",
-        projectOwnerPubkey: project.pubkey,
+  // Build system prompt with all agent and phase context
+  const systemPromptBuilder = new PromptBuilder();
+
+  // Add specialist identity
+  systemPromptBuilder.add("specialist-identity", {
+    agent,
+    projectTitle: project.tagValue("title") || "Unknown Project",
+    projectOwnerPubkey: project.pubkey,
+  });
+
+  // Check if this is a delegated task (NDKTask kind 1934)
+  const isDelegatedTask = triggeringEvent?.kind === 1934;
+  if (isDelegatedTask) {
+    // Add special instructions for delegated tasks
+    systemPromptBuilder.add("delegated-task-context", {
+      taskDescription: triggeringEvent?.content || "Complete the assigned task",
     });
-    
-    // Check if this is a delegated task (NDKTask kind 1934)
-    const isDelegatedTask = triggeringEvent?.kind === 1934;
-    if (isDelegatedTask) {
-        // Add special instructions for delegated tasks
-        systemPromptBuilder.add("delegated-task-context", {
-            taskDescription: triggeringEvent?.content || "Complete the assigned task",
-        });
-    }
-    
-    // Add available agents for specialists
-    systemPromptBuilder.add("specialist-available-agents", {
-        agents: availableAgents,
-        currentAgent: agent,
+  }
+
+  // Add available agents for specialists
+  systemPromptBuilder.add("specialist-available-agents", {
+    agents: availableAgents,
+    currentAgent: agent,
+  });
+
+  // Add voice mode instructions if this is a voice mode event
+  if (isVoiceMode(triggeringEvent)) {
+    systemPromptBuilder.add("voice-mode", {
+      isVoiceMode: true,
     });
-    
-    // Add voice mode instructions if this is a voice mode event
-    if (isVoiceMode(triggeringEvent)) {
-        systemPromptBuilder.add("voice-mode", {
-            isVoiceMode: true,
-        });
-    }
+  }
 
-    // Add referenced article context if present
-    if (conversation?.metadata?.referencedArticle) {
-        systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
-    }
+  // Add referenced article context if present
+  if (conversation?.metadata?.referencedArticle) {
+    systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
+  }
 
-    // Keep phase-definitions as it's foundational knowledge
-    // Remove phase-context and phase-constraints as they'll be injected dynamically
-    systemPromptBuilder
-        .add("phase-definitions", {})
-        .add("retrieved-lessons", {
-            agent,
-            phase,
-            conversation,
-            agentLessons: agentLessons || new Map(),
-        });
-    
-    // Add tools for specialists
-    systemPromptBuilder.add("specialist-tools", {
-        agent,
-        mcpTools,
-    });
-    // .add("tool-use", {});
+  // Keep phase-definitions as it's foundational knowledge
+  // Remove phase-context and phase-constraints as they'll be injected dynamically
+  systemPromptBuilder.add("phase-definitions", {}).add("retrieved-lessons", {
+    agent,
+    phase,
+    conversation,
+    agentLessons: agentLessons || new Map(),
+  });
 
-    // Add reasoning tags for specialists
-    {
-        // systemPromptBuilder.add("specialist-reasoning", {});
-    }
+  // Add tools for specialists
+  systemPromptBuilder.add("specialist-tools", {
+    agent,
+    mcpTools,
+  });
 
-    return systemPromptBuilder.build();
+  return systemPromptBuilder.build();
 }
 
 /**
  * Builds PROJECT.md content as a separate message
  */
 function buildProjectMdContent(options: BuildSystemPromptOptions): string | null {
-    const builder = new PromptBuilder();
-    builder.add("project-md", {
-        projectPath: process.cwd(),
-        currentAgent: options.agent,
-    });
-    const content = builder.build();
-    return content.trim() ? content : null;
+  const builder = new PromptBuilder();
+  builder.add("project-md", {
+    projectPath: process.cwd(),
+    currentAgent: options.agent,
+  });
+  const content = builder.build();
+  return content.trim() ? content : null;
 }
 
 /**
  * Builds project inventory content as a separate message
  */
 function buildProjectInventoryContent(options: BuildSystemPromptOptions): string | null {
-    const builder = new PromptBuilder();
-    builder.add("project-inventory-context", {
-        phase: options.phase,
-    });
-    const content = builder.build();
-    return content.trim() ? content : null;
+  const builder = new PromptBuilder();
+  builder.add("project-inventory-context", {
+    phase: options.phase,
+  });
+  const content = builder.build();
+  return content.trim() ? content : null;
 }
 
 /**
  * Builds system prompt messages for standalone agents (without project context).
  * Includes most fragments except project-specific ones.
  */
-export function buildStandaloneSystemPromptMessages(options: BuildStandalonePromptOptions): SystemMessage[] {
-    const messages: SystemMessage[] = [];
-    
-    // Build the main system prompt
-    const mainPrompt = buildStandaloneMainPrompt(options);
-    messages.push({
-        message: new Message("system", mainPrompt),
-        metadata: {
-            description: "Main standalone system prompt"
-        }
-    });
-    
-    return messages;
+export function buildStandaloneSystemPromptMessages(
+  options: BuildStandalonePromptOptions
+): SystemMessage[] {
+  const messages: SystemMessage[] = [];
+
+  // Build the main system prompt
+  const mainPrompt = buildStandaloneMainPrompt(options);
+  messages.push({
+    message: new Message("system", mainPrompt),
+    metadata: {
+      description: "Main standalone system prompt",
+    },
+  });
+
+  return messages;
 }
 
 /**
  * Builds the main system prompt for standalone agents
  */
 function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): string {
-    const {
-        agent,
-        phase,
-        availableAgents = [],
-        conversation,
-        agentLessons,
-        mcpTools = [],
-        triggeringEvent,
-    } = options;
+  const {
+    agent,
+    phase,
+    availableAgents = [],
+    conversation,
+    agentLessons,
+    mcpTools = [],
+    triggeringEvent,
+  } = options;
 
-    const systemPromptBuilder = new PromptBuilder();
-    
-    // For standalone agents, use a simplified identity without project references
-    systemPromptBuilder.add("specialist-identity", {
-        agent,
-        projectTitle: "Standalone Mode",
-        projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
+  const systemPromptBuilder = new PromptBuilder();
+
+  // For standalone agents, use a simplified identity without project references
+  systemPromptBuilder.add("specialist-identity", {
+    agent,
+    projectTitle: "Standalone Mode",
+    projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
+  });
+
+  // Add available agents if any (for potential handoffs in standalone mode)
+  if (availableAgents.length > 1) {
+    systemPromptBuilder.add("specialist-available-agents", {
+      agents: availableAgents,
+      currentAgent: agent,
     });
-    
-    // Add available agents if any (for potential handoffs in standalone mode)
-    if (availableAgents.length > 1) {
-        systemPromptBuilder.add("specialist-available-agents", {
-            agents: availableAgents,
-            currentAgent: agent,
-        });
-    }
-    
-    // Add voice mode instructions if applicable
-    if (isVoiceMode(triggeringEvent)) {
-        systemPromptBuilder.add("voice-mode", {
-            isVoiceMode: true,
-        });
-    }
+  }
 
-    // Add referenced article context if present
-    if (conversation?.metadata?.referencedArticle) {
-        systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
-    }
-
-    // Keep phase definitions as foundational knowledge
-    systemPromptBuilder
-        .add("phase-definitions", {})
-        .add("retrieved-lessons", {
-            agent,
-            phase,
-            conversation,
-            agentLessons: agentLessons || new Map(),
-        });
-    
-    // Add tools
-    systemPromptBuilder.add("specialist-tools", {
-        agent,
-        mcpTools,
+  // Add voice mode instructions if applicable
+  if (isVoiceMode(triggeringEvent)) {
+    systemPromptBuilder.add("voice-mode", {
+      isVoiceMode: true,
     });
+  }
 
-    // Specialists use reasoning tags
-    // systemPromptBuilder.add("specialist-reasoning", {});
+  // Add referenced article context if present
+  if (conversation?.metadata?.referencedArticle) {
+    systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
+  }
 
-    // Add completion guidance for non-orchestrator agents
-    systemPromptBuilder.add("specialist-completion-guidance", {});
+  // Keep phase definitions as foundational knowledge
+  systemPromptBuilder.add("phase-definitions", {}).add("retrieved-lessons", {
+    agent,
+    phase,
+    conversation,
+    agentLessons: agentLessons || new Map(),
+  });
 
-    return systemPromptBuilder.build();
+  // Add tools
+  systemPromptBuilder.add("specialist-tools", {
+    agent,
+    mcpTools,
+  });
+
+  // Specialists use reasoning tags
+  // systemPromptBuilder.add("specialist-reasoning", {});
+
+  // Add completion guidance for non-orchestrator agents
+  systemPromptBuilder.add("specialist-completion-guidance", {});
+
+  return systemPromptBuilder.build();
 }
-

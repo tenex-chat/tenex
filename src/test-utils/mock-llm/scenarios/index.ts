@@ -5,23 +5,23 @@ export * from "./concurrency-workflow";
 export * from "./inventory-generation";
 export * from "./network-resilience";
 
-import { errorHandlingScenario } from "./error-handling";
-import { statePersistenceScenario } from "./state-persistence";
-import { performanceTestingScenario } from "./performance-testing";
+import type { MockLLMScenario } from "../types";
 import { concurrencyWorkflowScenarios } from "./concurrency-workflow";
+import { errorHandlingScenario } from "./error-handling";
 import { inventoryGenerationScenario } from "./inventory-generation";
 import { networkResilienceScenario } from "./network-resilience";
-import type { MockLLMScenario } from "../types";
+import { performanceTestingScenario } from "./performance-testing";
+import { statePersistenceScenario } from "./state-persistence";
 
 /**
  * All available mock scenarios for testing
  */
 export const allScenarios: MockLLMScenario[] = [
-    errorHandlingScenario,
-    statePersistenceScenario,
-    performanceTestingScenario,
-    inventoryGenerationScenario,
-    networkResilienceScenario
+  errorHandlingScenario,
+  statePersistenceScenario,
+  performanceTestingScenario,
+  inventoryGenerationScenario,
+  networkResilienceScenario,
 ];
 
 /**
@@ -36,16 +36,16 @@ allScenarios.push(...concurrencyWorkflowScenarios);
  * Get a specific scenario by name
  */
 export function getScenario(name: string): MockLLMScenario | undefined {
-    return allScenarios.find(s => s.name === name);
+  return allScenarios.find((s) => s.name === name);
 }
 
 /**
  * Create a custom scenario for specific test cases
  */
 export function createScenario(
-    name: string,
-    description: string,
-    responses: MockLLMScenario['responses']
+  name: string,
+  description: string,
+  responses: MockLLMScenario["responses"]
 ): MockLLMScenario {
-    return { name, description, responses };
+  return { name, description, responses };
 }

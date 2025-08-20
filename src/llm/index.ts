@@ -3,10 +3,10 @@ export * from "./types";
 
 // Export router and utilities
 export {
-    LLMRouter,
-    loadLLMRouter,
-    createAgentAwareLLMService,
-    type LLMRouterConfig,
+  LLMRouter,
+  loadLLMRouter,
+  createAgentAwareLLMService,
+  type LLMRouterConfig,
 } from "./router";
 
 // Export model utilities

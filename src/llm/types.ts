@@ -1,18 +1,17 @@
-
 export interface ModelSelectionResult {
-    model: string;
-    supportsCaching: boolean;
+  model: string;
+  supportsCaching: boolean;
 }
 
 export interface ConfigurationPrompts {
-    configName: string;
-    enableCaching?: boolean;
-    setAsDefault: boolean;
+  configName: string;
+  enableCaching?: boolean;
+  setAsDefault: boolean;
 }
 
 export interface ApiKeyResult {
-    apiKey: string;
-    isNew: boolean;
+  apiKey: string;
+  isNew: boolean;
 }
 
 /**
@@ -23,11 +22,11 @@ export interface ApiKeyResult {
 import { NDKAgentDefinition } from "@/events";
 import { NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
 import type {
-    LlmCompletionOpts,
-    Message as LlmMessage,
-    LlmResponse,
-    LlmTool,
-    LlmToolCall,
+  LlmCompletionOpts,
+  Message as LlmMessage,
+  LlmResponse,
+  LlmTool,
+  LlmToolCall,
 } from "multi-llm-ts";
 
 // Re-export multi-llm-ts types directly
@@ -39,36 +38,36 @@ export type ToolCall = LlmToolCall;
 
 // Extended completion options with routing context
 export interface CompletionOptions extends LlmCompletionOpts {
-    configName?: string;
-    agentName?: string;
+  configName?: string;
+  agentName?: string;
 }
 
 // Import and re-export tool types
-import type { Tool, ExecutionContext } from "@/tools/types";
+import type { ExecutionContext, Tool } from "@/tools/types";
 export type { Tool, ExecutionContext };
 
 // Simplified completion request that uses multi-llm-ts types
 export interface CompletionRequest {
-    messages: Message[];
-    options?: CompletionOptions;
-    tools?: Tool[];
-    toolContext?: ExecutionContext;
+  messages: Message[];
+  options?: CompletionOptions;
+  tools?: Tool[];
+  toolContext?: ExecutionContext;
 }
 
 // Streaming types
 export type StreamEvent =
-    | { type: "content"; content: string }
-    | { type: "tool_start"; tool: string; args: Record<string, unknown> }
-    | { type: "tool_complete"; tool: string; result: unknown }
-    | { type: "error"; error: string }
-    | { type: "done"; response: CompletionResponse };
+  | { type: "content"; content: string }
+  | { type: "tool_start"; tool: string; args: Record<string, unknown> }
+  | { type: "tool_complete"; tool: string; result: unknown }
+  | { type: "error"; error: string }
+  | { type: "done"; response: CompletionResponse };
 
 /**
  * Pure LLM service interface - single responsibility
  */
 export interface LLMService {
-    complete(request: CompletionRequest): Promise<CompletionResponse>;
-    stream(request: CompletionRequest): AsyncIterable<StreamEvent>;
+  complete(request: CompletionRequest): Promise<CompletionResponse>;
+  stream(request: CompletionRequest): AsyncIterable<StreamEvent>;
 }
 
 /**
@@ -76,11 +75,11 @@ export interface LLMService {
  * Does NOT include credentials (apiKey, baseUrl) which are stored separately
  */
 export interface LLMModelConfig {
-    provider: LLMProvider;
-    model: string;
-    enableCaching?: boolean;
-    temperature?: number;
-    maxTokens?: number;
+  provider: LLMProvider;
+  model: string;
+  enableCaching?: boolean;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 /**
@@ -88,31 +87,30 @@ export interface LLMModelConfig {
  * This is what the LLM service actually needs to make API calls
  */
 export interface ResolvedLLMConfig extends LLMModelConfig {
-    apiKey?: string;
-    baseUrl?: string;
-    headers?: Record<string, string>;
+  apiKey?: string;
+  baseUrl?: string;
+  headers?: Record<string, string>;
 }
 
 /**
  * Named LLM configuration for UI display and management
  */
 export interface LLMConfigWithName extends ResolvedLLMConfig {
-    name: string;
+  name: string;
 }
-
 
 /**
  * LLM Provider types
  */
 export const LLM_PROVIDERS = [
-    "openai",
-    "openrouter",
-    "anthropic",
-    "google",
-    "groq",
-    "deepseek",
-    "ollama",
-    "mistral",
+  "openai",
+  "openrouter",
+  "anthropic",
+  "google",
+  "groq",
+  "deepseek",
+  "ollama",
+  "mistral",
 ] as const;
 
 export type LLMProvider = (typeof LLM_PROVIDERS)[number];
@@ -121,25 +119,25 @@ export type LLMProvider = (typeof LLM_PROVIDERS)[number];
  * Event kinds used in the TENEX system
  */
 export const EVENT_KINDS = {
-    METADATA: 0,
-    GENERIC_REPLY: NDKKind.GenericReply,
-    PROJECT: NDKProject.kind,
-    AGENT_CONFIG: NDKAgentDefinition.kind,
-    TASK: NDKTask.kind,
-    PROJECT_STATUS: 24010,
-    AGENT_REQUEST: 4133,
-    TYPING_INDICATOR: 24111,
-    TYPING_INDICATOR_STOP: 24112,
-    STREAMING_RESPONSE: 21111,
-    FORCE_RELEASE: 24019,
-    LLM_CONFIG_CHANGE: 24020,
+  METADATA: 0,
+  GENERIC_REPLY: NDKKind.GenericReply,
+  PROJECT: NDKProject.kind,
+  AGENT_CONFIG: NDKAgentDefinition.kind,
+  TASK: NDKTask.kind,
+  PROJECT_STATUS: 24010,
+  AGENT_REQUEST: 4133,
+  TYPING_INDICATOR: 24111,
+  TYPING_INDICATOR_STOP: 24112,
+  STREAMING_RESPONSE: 21111,
+  FORCE_RELEASE: 24019,
+  LLM_CONFIG_CHANGE: 24020,
 } as const;
 
 /**
  * Provider authentication
  */
 export interface ProviderAuth {
-    apiKey?: string;
-    baseUrl?: string;
-    headers?: Record<string, string>;
+  apiKey?: string;
+  baseUrl?: string;
+  headers?: Record<string, string>;
 }
