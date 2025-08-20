@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import * as path from "node:path";
+import { Command } from "commander";
 import * as fs from "@/lib/fs";
 import type { TenexConfig } from "@/services/config/types";
-import { Command } from "commander";
 import { addCommand } from "../add";
 
 // Mock modules
@@ -54,7 +53,7 @@ const mockConsoleError = mock();
 
 describe("MCP add command", () => {
   let program: Command;
-  let mockConfig: Partial<TenexConfig>;
+  let _mockConfig: Partial<TenexConfig>;
 
   beforeEach(() => {
     // Reset mocks
@@ -74,7 +73,7 @@ describe("MCP add command", () => {
     console.error = mockConsoleError;
 
     // Default mock config
-    mockConfig = {
+    _mockConfig = {
       mcp: {
         servers: {},
         enabled: true,

@@ -1,9 +1,9 @@
+import type NDK from "@nostr-dev-kit/ndk";
+import { NDKTask } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKTask } from "@nostr-dev-kit/ndk";
 
 export interface TaskCreationOptions {
   title: string;

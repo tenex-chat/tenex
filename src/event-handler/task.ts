@@ -1,6 +1,6 @@
-import type { AgentInstance } from "@/agents";
 import type { NDKTask } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
+import type { AgentInstance } from "@/agents";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { getProjectContext } from "../services";

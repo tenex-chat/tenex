@@ -1,17 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
   AgentLogger,
-  type LogModule,
-  ScopedLogger,
-  type VerbosityLevel,
   configureLogger,
   logDebug,
   logError,
+  logger,
   logInfo,
   logSuccess,
   logWarning,
-  logger,
   parseModuleVerbosity,
+  ScopedLogger,
 } from "../logger";
 
 describe("Logger", () => {

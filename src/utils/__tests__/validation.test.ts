@@ -53,21 +53,21 @@ describe("Validation Utilities", () => {
       expect(isValidPubkey("a".repeat(63))).toBe(false);
       expect(isValidPubkey("a".repeat(65))).toBe(false);
       expect(isValidPubkey("g".repeat(64))).toBe(false); // Invalid hex char
-      expect(isValidPubkey("not-hex-characters-here!".repeat(2) + "aa")).toBe(false);
+      expect(isValidPubkey(`${"not-hex-characters-here!".repeat(2)}aa`)).toBe(false);
     });
   });
 
   describe("isValidNpub", () => {
     it("should accept valid npubs", () => {
-      const validNpub = "npub1" + "a".repeat(58);
+      const validNpub = `npub1${"a".repeat(58)}`;
       expect(isValidNpub(validNpub)).toBe(true);
     });
 
     it("should reject invalid npubs", () => {
       expect(isValidNpub("npub1")).toBe(false); // Too short
-      expect(isValidNpub("invalid" + "a".repeat(57))).toBe(false); // Wrong prefix
-      expect(isValidNpub("npub1" + "a".repeat(57))).toBe(false); // Wrong length
-      expect(isValidNpub("npub1" + "a".repeat(59))).toBe(false); // Too long
+      expect(isValidNpub(`invalid${"a".repeat(57)}`)).toBe(false); // Wrong prefix
+      expect(isValidNpub(`npub1${"a".repeat(57)}`)).toBe(false); // Wrong length
+      expect(isValidNpub(`npub1${"a".repeat(59)}`)).toBe(false); // Too long
     });
   });
 

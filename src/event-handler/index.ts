@@ -1,7 +1,7 @@
-import { formatAnyError } from "@/utils/error-formatter";
 import type NDK from "@nostr-dev-kit/ndk";
 import { type NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
+import { formatAnyError } from "@/utils/error-formatter";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
 import { ExecutionQueueManager } from "../conversations/executionQueue";

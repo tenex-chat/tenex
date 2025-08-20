@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type NDK from "@nostr-dev-kit/ndk";
+import type { NDKSigner } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations/types";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type NDK from "@nostr-dev-kit/ndk";
-import type { NDKSigner } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { lessonLearnTool } from "../learn";
 
@@ -30,7 +30,7 @@ mock.module("@/events/NDKAgentLesson", () => {
   const mockTag = mock();
 
   return {
-    NDKAgentLesson: mock((ndk: NDK) => ({
+    NDKAgentLesson: mock((_ndk: NDK) => ({
       title: undefined,
       lesson: undefined,
       agent: undefined,
@@ -43,7 +43,6 @@ mock.module("@/events/NDKAgentLesson", () => {
   };
 });
 
-import { getTotalExecutionTimeSeconds } from "@/conversations/executionTime";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";

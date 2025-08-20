@@ -1,8 +1,8 @@
+import chalk from "chalk";
+import { format } from "date-fns";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import chalk from "chalk";
-import { format } from "date-fns";
 
 interface HistoryOptions {
   limit?: number;

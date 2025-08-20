@@ -8,7 +8,7 @@ import {
   stopExecutionTime,
 } from "../executionTime";
 import { PHASES } from "../phases";
-import type { Conversation, Phase } from "../types";
+import type { Conversation } from "../types";
 
 // Mock Date.now for controlled time testing
 let mockTime = 1000000;

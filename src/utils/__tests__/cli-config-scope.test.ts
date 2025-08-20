@@ -4,7 +4,9 @@ import { formatConfigScope, resolveConfigScope } from "../cli-config-scope";
 // Mock the ConfigService
 mock.module("@/services/ConfigService", () => ({
   configService: {
-    projectConfigExists: mock(async (path: string, configFile: string) => path.includes("project")),
+    projectConfigExists: mock(async (path: string, _configFile: string) =>
+      path.includes("project")
+    ),
     getGlobalPath: mock(() => "/home/user/.tenex"),
   },
 }));

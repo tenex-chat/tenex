@@ -1,11 +1,11 @@
+import type NDK from "@nostr-dev-kit/ndk";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { ToolCall } from "@/llm/types";
 import { EVENT_KINDS } from "@/llm/types";
-import type NDK from "@nostr-dev-kit/ndk";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * Factory functions for creating mock objects in tests
@@ -51,7 +51,7 @@ export class MockNostrEvent implements Partial<NDKEvent> {
     return tag?.[1];
   }
 
-  static deserialize(ndk: NDK, serialized: string): MockNostrEvent {
+  static deserialize(_ndk: NDK, serialized: string): MockNostrEvent {
     const data = JSON.parse(serialized);
     return new MockNostrEvent(data);
   }

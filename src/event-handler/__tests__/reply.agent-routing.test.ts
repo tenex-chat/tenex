@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../../conversations";
-import { getProjectContext } from "../../services";
 import { handleChatMessage } from "../reply";
 
 // Mock dependencies

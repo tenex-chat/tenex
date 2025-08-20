@@ -75,11 +75,8 @@ cd tenex
 # Install dependencies
 bun install
 
-# Configure your LLM provider
-bun run setup:llm
-
 # Start TENEX
-bun run tenex
+bun run start
 ```
 
 ### Quick Start
@@ -128,7 +125,7 @@ src/
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Please open issues and pull requests on GitHub.
 
 ### Development Setup
 
@@ -189,7 +186,7 @@ MIT - see [LICENSE](LICENSE) file for details
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/tenex-chat/tenex/issues)
 - **Nostr**: Follow the project at `npub1tenex...` 
-- **Documentation**: [Full documentation](https://docs.tenex.chat)
+- **Documentation**: [Full documentation](./documentation/)
 
 ---
 

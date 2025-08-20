@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { Conversation } from "@/conversations/types";
 import { pathExists } from "@/lib/fs/filesystem";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import { logger } from "@/utils/logger";
-import * as fs from "fs/promises";
 import { FileSystemAdapter } from "../FileSystemAdapter";
 
 describe(

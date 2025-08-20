@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { serializeToolResult } from "@/llm/ToolResult";
-import type { LLMService, StreamEvent } from "@/llm/types";
+import type { LLMService } from "@/llm/types";
 import type { ToolError } from "@/tools/core";
 import { formatToolError } from "@/utils/error-formatter";
 import { ReasonActLoop } from "../ReasonActLoop";

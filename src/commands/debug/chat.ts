@@ -1,4 +1,7 @@
 import * as readline from "node:readline";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import chalk from "chalk";
+import { v4 as uuidv4 } from "uuid";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ExecutionContext } from "@/agents/execution/types";
@@ -14,9 +17,6 @@ import { getProjectContext } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logDebug, logError, logInfo } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
-import { v4 as uuidv4 } from "uuid";
 import { debugError, debugInfo, debugLog, debugSection } from "./utils";
 
 interface DebugChatOptions {

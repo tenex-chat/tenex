@@ -1,10 +1,10 @@
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { Phase } from "@/conversations/phases";
 import type { ToolExecutionResult } from "@/tools/types";
 import type { TracingContext } from "@/tracing";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface ExecutionContext {
   agent: AgentInstance;

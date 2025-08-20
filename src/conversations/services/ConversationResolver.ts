@@ -1,10 +1,10 @@
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import chalk from "chalk";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services";
 import type { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 
 const logInfo = logger.info.bind(logger);
 

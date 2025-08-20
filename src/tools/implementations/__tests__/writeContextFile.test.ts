@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
@@ -645,7 +645,7 @@ describe("writeContextFile tool", () => {
     });
 
     it("should handle very long filenames", async () => {
-      const longFilename = "a".repeat(200) + ".md";
+      const longFilename = `${"a".repeat(200)}.md`;
 
       const result = await writeContextFileTool.execute(
         {

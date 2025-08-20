@@ -1,9 +1,8 @@
+import type { NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { getNDK } from "@/nostr";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { getProjectContext, isProjectContextInitialized, setProjectContext } from "@/services";
-import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { getProjectContext, isProjectContextInitialized } from "@/services";
 
 // Mock dependencies
 jest.mock("@/nostr");
@@ -59,8 +58,8 @@ describe("AgentRegistry.republishAllAgentProfiles", () => {
     };
 
     // Add agents to registry
-    agentRegistry["agents"].set("agent1", mockAgent1 as any);
-    agentRegistry["agents"].set("agent2", mockAgent2 as any);
+    agentRegistry.agents.set("agent1", mockAgent1 as any);
+    agentRegistry.agents.set("agent2", mockAgent2 as any);
 
     // Call republishAllAgentProfiles
     await agentRegistry.republishAllAgentProfiles(mockProject as NDKProject);
@@ -110,7 +109,7 @@ describe("AgentRegistry.republishAllAgentProfiles", () => {
     };
 
     // Add agent to registry
-    agentRegistry["agents"].set("agent1", mockAgent as any);
+    agentRegistry.agents.set("agent1", mockAgent as any);
 
     // Call republishAllAgentProfiles without project
     await agentRegistry.republishAllAgentProfiles();
@@ -137,7 +136,7 @@ describe("AgentRegistry.republishAllAgentProfiles", () => {
     };
 
     // Add agent to registry
-    agentRegistry["agents"].set("agent1", mockAgent as any);
+    agentRegistry.agents.set("agent1", mockAgent as any);
 
     // Call republishAllAgentProfiles without project
     await agentRegistry.republishAllAgentProfiles();
@@ -169,8 +168,8 @@ describe("AgentRegistry.republishAllAgentProfiles", () => {
     };
 
     // Add agents to registry
-    agentRegistry["agents"].set("agent1", mockAgent1 as any);
-    agentRegistry["agents"].set("agent2", mockAgent2 as any);
+    agentRegistry.agents.set("agent1", mockAgent1 as any);
+    agentRegistry.agents.set("agent2", mockAgent2 as any);
 
     // Make first call fail
     mockPublisher.publishAgentProfile

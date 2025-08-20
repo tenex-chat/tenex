@@ -1,5 +1,4 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { analyze } from "../analyze";
 

@@ -1,11 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type { ChildProcess } from "child_process";
-import * as path from "node:path";
-import { configService } from "@/services";
-import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
-import type { PluginParameter, Tool } from "@/tools/types";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import type { ChildProcess } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { configService } from "@/services";
+import type { TenexMCP } from "@/services/config/types";
 import { MCPService } from "../MCPService";
 
 // Mock modules
@@ -535,10 +533,10 @@ describe("MCPService", () => {
 
     it("should force kill after timeout", async () => {
       // Mock process that doesn't exit
-      let exitCallback: any;
+      let _exitCallback: any;
       (mockProcess.on as any).mockImplementation((event: string, cb: any) => {
         if (event === "exit") {
-          exitCallback = cb;
+          _exitCallback = cb;
         }
       });
 

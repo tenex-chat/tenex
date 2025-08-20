@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { getNDK } from "@/nostr";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKMCPTool } from "@/events/NDKMCPTool";
+import { getNDK } from "@/nostr";
 import type { ExecutionContext } from "../../types";
 import { mcpDiscover } from "../mcp-discover";
 
@@ -64,7 +64,7 @@ describe("mcpDiscover tool", () => {
     ];
 
     // Override the encode method to avoid accessing NDK internals
-    const originalEncode = NDKMCPTool.prototype.encode;
+    const _originalEncode = NDKMCPTool.prototype.encode;
     NDKMCPTool.prototype.encode = function (this: NDKMCPTool) {
       return `nevent1${this.id}`;
     };

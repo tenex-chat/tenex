@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { handleError, withErrorHandling } from "../error-handler";
-import { logger } from "../logger";
 
 const mockLogger = {
   error: mock(() => {}),

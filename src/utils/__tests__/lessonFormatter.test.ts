@@ -43,7 +43,7 @@ describe("formatLessonsForAgent", () => {
 
   it("should sort lessons by creation time (newest first)", () => {
     const result = formatLessonsForAgent(mockLessons);
-    const lines = result.split("\n");
+    const _lines = result.split("\n");
 
     // Check that Lesson 3 (newest) comes first
     expect(result.indexOf("Lesson 3")).toBeLessThan(result.indexOf("Lesson 2"));

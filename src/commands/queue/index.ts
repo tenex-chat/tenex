@@ -48,7 +48,7 @@ queueCommand
   .option("-f, --format <format>", "Output format: table|json|csv", "table")
   .action(async (options) => {
     await showExecutionHistory({
-      limit: Number.parseInt(options.limit),
+      limit: Number.parseInt(options.limit, 10),
       format: options.format,
     });
   });

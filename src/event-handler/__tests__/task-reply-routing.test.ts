@@ -1,11 +1,9 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { Conversation } from "@/conversations/types";
 import * as services from "@/services";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
 
 // Mock logger to avoid console output during tests

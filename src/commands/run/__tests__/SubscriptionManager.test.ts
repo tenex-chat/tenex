@@ -9,7 +9,7 @@ const mockStart = mock(() => {});
 const mockSubscription = {
   stop: mockStop,
   start: mockStart,
-  on: mock((event: string, handler: Function) => {}),
+  on: mock((_event: string, _handler: Function) => {}),
 };
 
 const mockSubscribe = mock(() => mockSubscription);
@@ -61,7 +61,7 @@ mock.module("@/commands/run/processedEventTracking", () => ({
 
 // Mock NDKAgentLesson
 const mockNDKAgentLesson = {
-  from: mock((event: any) => ({
+  from: mock((_event: any) => ({
     timestamp: new Date(),
     text: "Test lesson",
     projectNaddr: "naddr1test",
@@ -117,8 +117,8 @@ describe("SubscriptionManager", () => {
       await subscriptionManager.start();
 
       // Should create subscription for project updates
-      const projectUpdateCall = mockSubscribe.mock.calls.find(
-        (call) => call[0].kinds && call[0].kinds.includes(EVENT_KINDS.PROJECT_UPDATE)
+      const projectUpdateCall = mockSubscribe.mock.calls.find((call) =>
+        call[0].kinds?.includes(EVENT_KINDS.PROJECT_UPDATE)
       );
       expect(projectUpdateCall).toBeDefined();
     });
@@ -127,8 +127,8 @@ describe("SubscriptionManager", () => {
       await subscriptionManager.start();
 
       // Should create subscription for agent lessons
-      const lessonCall = mockSubscribe.mock.calls.find(
-        (call) => call[0].kinds && call[0].kinds.includes(EVENT_KINDS.LESSON)
+      const lessonCall = mockSubscribe.mock.calls.find((call) =>
+        call[0].kinds?.includes(EVENT_KINDS.LESSON)
       );
       expect(lessonCall).toBeDefined();
     });
@@ -137,8 +137,8 @@ describe("SubscriptionManager", () => {
       await subscriptionManager.start();
 
       // Should create subscription for text notes
-      const textNoteCall = mockSubscribe.mock.calls.find(
-        (call) => call[0].kinds && call[0].kinds.includes(EVENT_KINDS.TEXT_NOTE)
+      const textNoteCall = mockSubscribe.mock.calls.find((call) =>
+        call[0].kinds?.includes(EVENT_KINDS.TEXT_NOTE)
       );
       expect(textNoteCall).toBeDefined();
     });
@@ -184,8 +184,8 @@ describe("SubscriptionManager", () => {
       await subscriptionManager.start();
 
       // Find the project update subscription
-      const projectUpdateSub = mockSubscribe.mock.calls.find(
-        (call) => call[0].kinds && call[0].kinds.includes(EVENT_KINDS.PROJECT_UPDATE)
+      const projectUpdateSub = mockSubscribe.mock.calls.find((call) =>
+        call[0].kinds?.includes(EVENT_KINDS.PROJECT_UPDATE)
       );
 
       expect(projectUpdateSub).toBeDefined();

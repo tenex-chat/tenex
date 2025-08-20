@@ -95,7 +95,7 @@ describe("Debug Utils", () => {
       debugSection("Test Section");
       expect(consoleLogs).toHaveLength(2);
       expect(consoleLogs[0][0]).toBe(chalk.cyan("\n=== Test Section ==="));
-      expect(consoleLogs[1][0]).toBe(chalk.cyan("=".repeat(20) + "\n"));
+      expect(consoleLogs[1][0]).toBe(chalk.cyan(`${"=".repeat(20)}\n`));
     });
 
     it("should format section header with content", () => {
@@ -103,7 +103,7 @@ describe("Debug Utils", () => {
       expect(consoleLogs).toHaveLength(3);
       expect(consoleLogs[0][0]).toBe(chalk.cyan("\n=== Test Section ==="));
       expect(consoleLogs[1][0]).toBe("Section content");
-      expect(consoleLogs[2][0]).toBe(chalk.cyan("=".repeat(20) + "\n"));
+      expect(consoleLogs[2][0]).toBe(chalk.cyan(`${"=".repeat(20)}\n`));
     });
   });
 

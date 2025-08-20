@@ -1,14 +1,14 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { type NDKKind, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { Command } from "commander";
+import { z } from "zod";
 import { ProjectManager } from "@/daemon/ProjectManager";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { type NDKKind, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { Command } from "commander";
-import { z } from "zod";
 
 // Type definitions
 interface MCPToolInfo {
@@ -104,9 +104,9 @@ function formatMCPToolsAsMarkdown(tools: MCPToolInfo[]): string {
   return lines.join("\n");
 }
 
-import type { AgentInstance } from "@/agents/types";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent, NDKSigner } from "@nostr-dev-kit/ndk";
+import type { AgentInstance } from "@/agents/types";
 
 // Schema definitions for MCP handlers
 const ToolsListRequestSchema = z.object({

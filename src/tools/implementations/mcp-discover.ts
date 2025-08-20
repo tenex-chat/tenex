@@ -1,3 +1,5 @@
+import type { NDKFilter } from "@nostr-dev-kit/ndk";
+import { z } from "zod";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
 import type {
@@ -10,8 +12,6 @@ import type {
 } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import type { NDKFilter } from "@nostr-dev-kit/ndk";
-import { z } from "zod";
 
 // Define the input schema
 const mcpDiscoverSchema = z.object({

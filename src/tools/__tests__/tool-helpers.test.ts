@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { ExecutionContext } from "@/agents/execution/types";
-import { createMockExecutionContext } from "@/test-utils";
 import { z } from "zod";
+import { createMockExecutionContext } from "@/test-utils";
 import { createToolDefinition, defineToolParameters } from "../types";
 
 describe("Tool Helper Functions", () => {

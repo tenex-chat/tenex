@@ -1,9 +1,9 @@
+import chalk from "chalk";
+import { Command } from "commander";
 import { handleCliError } from "@/utils/cli-error";
 import { generateInventory, updateInventory } from "@/utils/inventory";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import chalk from "chalk";
-import { Command } from "commander";
 
 export const inventoryCommand = new Command("inventory")
   .description("Manage project inventory")

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { z } from "zod";
-import { MCPServerConfigSchema, TenexMCPSchema } from "../types";
 import type { MCPServerConfig, TenexMCP } from "../types";
+import { MCPServerConfigSchema, TenexMCPSchema } from "../types";
 
 describe("MCP Configuration Types", () => {
   describe("MCPServerConfigSchema", () => {

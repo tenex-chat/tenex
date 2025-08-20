@@ -1,5 +1,5 @@
+import { loadModels, loadOpenRouterModels, type ModelsList } from "multi-llm-ts";
 import { logger } from "@/utils/logger";
-import { type ModelsList, loadModels, loadOpenRouterModels } from "multi-llm-ts";
 import type { LLMProvider } from "./types";
 
 /**

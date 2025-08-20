@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
-import type { ExecutionContext } from "../types";
-import { ToolSchemas, createZodSchema, mcpSchemaToZod } from "../zod-schema";
+import { createZodSchema, mcpSchemaToZod, ToolSchemas } from "../zod-schema";
 
 describe("Zod Tool Schemas", () => {
   describe("createZodSchema", () => {

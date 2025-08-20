@@ -1,6 +1,6 @@
+import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
-import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { AgentEventDecoder } from "../AgentEventDecoder";
 import {
   AgentEventEncoder,

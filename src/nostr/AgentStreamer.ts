@@ -1,5 +1,5 @@
-import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { logger } from "@/utils/logger";
 import type { EventContext, StreamingIntent } from "./AgentEventEncoder";
 import type { AgentPublisher } from "./AgentPublisher";
 

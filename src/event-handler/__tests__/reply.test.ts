@@ -1,4 +1,4 @@
-import { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { mock, mockReset } from "jest-mock-extended";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import type { Agent } from "../../agents/types";

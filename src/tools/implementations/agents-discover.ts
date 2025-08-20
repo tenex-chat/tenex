@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getNDK } from "@/nostr";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
 import type {
@@ -10,7 +11,6 @@ import type {
 } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 
 // Define the input schema
 const agentsDiscoverSchema = z.object({

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { TenexConfig } from "@/services/config/types";
 import chalk from "chalk";
 import { Command } from "commander";
+import type { TenexConfig } from "@/services/config/types";
 import { listCommand } from "../list";
 
 // Mock modules

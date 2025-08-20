@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-import { AgentExecutor } from "../AgentExecutor";
 
 describe("AgentExecutor - Backend Selection", () => {
   let mockAgent: AgentInstance;

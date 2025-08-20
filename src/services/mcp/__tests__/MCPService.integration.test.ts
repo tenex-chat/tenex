@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { spawn } from "child_process";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { configService } from "@/services/ConfigService";
 import type { TenexMCP } from "@/services/config/types";
-import * as fs from "fs/promises";
 import { MCPService } from "../MCPService";
 
 // Helper to create a simple MCP server for testing

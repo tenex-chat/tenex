@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { AgentContext, Conversation } from "@/conversations/types";
 import { pathExists } from "@/lib/fs/filesystem";
 import { EVENT_KINDS } from "@/llm/types";
 import { cleanupTempDir, createMockNDKEvent, createTempDir } from "@/test-utils";
-import * as fs from "fs/promises";
 import { FileSystemAdapter } from "../FileSystemAdapter";
 
 describe("FileSystemAdapter State Persistence Tests", () => {
@@ -25,7 +25,7 @@ describe("FileSystemAdapter State Persistence Tests", () => {
     // Mock NDKEvent to handle deserialization
     mock.module("@nostr-dev-kit/ndk", () => ({
       NDKEvent: {
-        deserialize: (ndk: any, serialized: string) => {
+        deserialize: (_ndk: any, serialized: string) => {
           const data = JSON.parse(serialized);
           return createMockNDKEvent(data);
         },
@@ -53,7 +53,7 @@ describe("FileSystemAdapter State Persistence Tests", () => {
   it("should persist and recover complete conversation state", async () => {
     // Create a complex conversation with multiple agent contexts
     const conversationId = "test-state-persistence-1";
-    const mockEvent = createMockNDKEvent({
+    const _mockEvent = createMockNDKEvent({
       id: "event-123",
       content: "Create an authentication system",
       tags: [["title", "Auth System"]],

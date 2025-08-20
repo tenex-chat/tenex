@@ -72,7 +72,7 @@ export class NDKAgentDefinition extends NDKEvent {
   get version(): number {
     const val = this.tagValue("ver");
     if (val === undefined) return 1; // Default version if not specified
-    return Number.parseInt(val);
+    return Number.parseInt(val, 10);
   }
 
   set version(value: number) {

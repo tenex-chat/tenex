@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  type TracingContext,
   createAgentExecutionContext,
   createPhaseExecutionContext,
   createToolExecutionContext,
   createTracingContext,
   formatTracingContext,
   generateExecutionId,
+  type TracingContext,
 } from "../TracingContext";
 
 describe("TracingContext", () => {

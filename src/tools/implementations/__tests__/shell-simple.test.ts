@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionContext } from "@/test-utils";
 import { shellTool } from "../shell";
 
 describe("shellTool - simple test", () => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import * as ndkClient from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
-import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { EventMonitor } from "../EventMonitor";
 import type { IProcessManager } from "../ProcessManager";
 import type { IProjectManager } from "../ProjectManager";
@@ -41,7 +41,7 @@ describe("EventMonitor", () => {
   let mockNDK: MockNDK;
   let mockSubscription: MockSubscription;
   let loggerErrorSpy: ReturnType<typeof mock>;
-  let loggerInfoSpy: ReturnType<typeof mock>;
+  let _loggerInfoSpy: ReturnType<typeof mock>;
 
   beforeEach(() => {
     // Create mock implementations
@@ -67,7 +67,7 @@ describe("EventMonitor", () => {
         if (!mockSubscription.eventHandlers.has(event)) {
           mockSubscription.eventHandlers.set(event, []);
         }
-        mockSubscription.eventHandlers.get(event)!.push(handler);
+        mockSubscription.eventHandlers.get(event)?.push(handler);
       }),
       stop: mock(() => {}),
       eventHandlers: new Map(),
@@ -83,7 +83,7 @@ describe("EventMonitor", () => {
 
     // Spy on logger methods
     loggerErrorSpy = spyOn(logger, "error").mockImplementation(() => {});
-    loggerInfoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    _loggerInfoSpy = spyOn(logger, "info").mockImplementation(() => {});
 
     // Create EventMonitor instance
     eventMonitor = new TestableEventMonitor(mockProjectManager, mockProcessManager);
@@ -283,7 +283,7 @@ describe("EventMonitor", () => {
       // Get the event handler
       const handlers = mockSubscription.eventHandlers.get("event");
       expect(handlers).toBeDefined();
-      expect(handlers!.length).toBe(1);
+      expect(handlers?.length).toBe(1);
 
       // Create an event that will cause an error
       const errorEvent = {
@@ -299,7 +299,7 @@ describe("EventMonitor", () => {
       });
 
       // The handler should catch the error
-      expect(() => handlers![0](errorEvent)).not.toThrow();
+      expect(() => handlers?.[0](errorEvent)).not.toThrow();
 
       // Wait for async error handling
       await new Promise((resolve) => setTimeout(resolve, 10));

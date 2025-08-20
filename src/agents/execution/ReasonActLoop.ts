@@ -1,6 +1,7 @@
+import { Message } from "multi-llm-ts";
 import { MessageBuilder } from "@/conversations/MessageBuilder";
 import type { LLMService, StreamEvent, Tool } from "@/llm/types";
-import { type ExecutionLogger, createExecutionLogger } from "@/logging/ExecutionLogger";
+import { createExecutionLogger, type ExecutionLogger } from "@/logging/ExecutionLogger";
 import type { CompletionIntent, DelegationIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
@@ -12,7 +13,6 @@ import type { TracingContext, TracingLogger } from "@/tracing";
 import { createTracingContext, createTracingLogger } from "@/tracing";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { TerminationHandler } from "./TerminationHandler";
 import { ToolRepetitionDetector } from "./ToolRepetitionDetector";

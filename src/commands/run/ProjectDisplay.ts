@@ -2,9 +2,9 @@ import { logger } from "@/utils/logger";
 
 const logInfo = logger.info.bind(logger);
 
+import chalk from "chalk";
 import type { AgentInstance } from "@/agents/types";
 import { getProjectContext } from "@/services";
-import chalk from "chalk";
 
 export class ProjectDisplay {
   async displayProjectInfo(projectPath: string): Promise<void> {

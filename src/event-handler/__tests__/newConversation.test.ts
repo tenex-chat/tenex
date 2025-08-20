@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { createMockNDKEvent } from "@/test-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { createMockNDKEvent } from "@/test-utils";
 import { handleNewConversation } from "../newConversation";
 
 describe("handleNewConversation", () => {
@@ -114,7 +114,6 @@ describe("handleNewConversation", () => {
 
     mock.module("@/agents/execution/AgentExecutor", () => ({
       AgentExecutor: class {
-        constructor() {}
         execute = mockAgentExecutor.execute;
       },
     }));

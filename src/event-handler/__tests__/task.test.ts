@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { NDKTask } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import { createMockAgent } from "@/test-utils";
-import type { NDKTask } from "@nostr-dev-kit/ndk";
 import { handleTask } from "../task";
 
 describe("handleTask", () => {

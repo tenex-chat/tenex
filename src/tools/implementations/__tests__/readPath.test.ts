@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { Tool, ToolContext } from "@/tools/types";
+import type { ToolContext } from "@/tools/types";
 import { readPathTool } from "../readPath";
 
 // Mock conversation manager
@@ -195,7 +195,7 @@ describe("readPath tool", () => {
 
       // Make file unreadable (this might not work on all systems)
       try {
-        require("fs").chmodSync(testFile, 0o000);
+        require("node:fs").chmodSync(testFile, 0o000);
 
         const result = await readPathTool.execute(
           { value: { path: "no-read.txt" }, parsed: true },
@@ -210,8 +210,8 @@ describe("readPath tool", () => {
       } finally {
         // Restore permissions
         try {
-          require("fs").chmodSync(testFile, 0o644);
-        } catch (error) {
+          require("node:fs").chmodSync(testFile, 0o644);
+        } catch (_error) {
           // Cleanup error ignored in test teardown
         }
       }
@@ -242,7 +242,7 @@ describe("readPath tool", () => {
       // Create circular symlink (platform dependent)
       const symlinkPath = path.join(testDir, "circular");
       try {
-        require("fs").symlinkSync(symlinkPath, symlinkPath);
+        require("node:fs").symlinkSync(symlinkPath, symlinkPath);
 
         const result = await readPathTool.execute(
           { value: { path: "circular" }, parsed: true },

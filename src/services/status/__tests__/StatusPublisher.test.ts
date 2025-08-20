@@ -3,16 +3,16 @@ import { EVENT_KINDS } from "@/llm/types";
 import { StatusPublisher } from "../StatusPublisher";
 
 // Status publishing interval
-const STATUS_INTERVAL_MS = 30_000; // 30 seconds
+const _STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 // Mock dependencies
 const mockPublish = mock(async () => {});
 const mockSign = mock(async () => {});
-const mockNDKEvent = mock((ndk: unknown) => ({
+const mockNDKEvent = mock((_ndk: unknown) => ({
   kind: undefined as number | undefined,
   content: "",
   tags: [] as Array<string[]>,
-  tag: mock((project: unknown) => {}),
+  tag: mock((_project: unknown) => {}),
   sign: mockSign,
   publish: mockPublish,
 }));

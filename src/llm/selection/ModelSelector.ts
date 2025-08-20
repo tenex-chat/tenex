@@ -1,6 +1,6 @@
-import type { LLMProvider } from "@/llm/types";
 import search from "@inquirer/search";
 import type { ModelsList } from "multi-llm-ts";
+import type { LLMProvider } from "@/llm/types";
 import { getModelsForProvider } from "../models";
 
 export interface ModelSelectionResult {

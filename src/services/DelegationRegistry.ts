@@ -1,8 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 
 interface DelegationRecord {
   // Core identifiers

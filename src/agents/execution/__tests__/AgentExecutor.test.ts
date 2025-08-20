@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
-import { MockFactory, createMockLLMService } from "@/test-utils";
 import type { NDK } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
+import type { AgentInstance } from "@/agents/types";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import { createMockLLMService } from "@/test-utils";
 import { AgentExecutor } from "../AgentExecutor";
 import type { ExecutionContext } from "../types";
 
@@ -99,7 +99,6 @@ describe("AgentExecutor", () => {
 
     mock.module("@/nostr", () => ({
       AgentPublisher: class {
-        constructor() {}
         async typing() {}
       },
     }));
@@ -198,7 +197,7 @@ describe("AgentExecutor", () => {
       onStreamToken: mock(() => {}),
       onStreamToolCall: mock(() => {}),
       onComplete: mock(() => {}),
-      onError: mock((error: Error) => {
+      onError: mock((_error: Error) => {
         // Error handled in mock
       }),
     };
@@ -220,7 +219,7 @@ describe("AgentExecutor", () => {
       // Mock the backend modules
       mock.module("@/agents/execution/ClaudeBackend", () => ({
         ClaudeBackend: class {
-          async execute(messages: Message[], tools: Tool[], context: ExecutionContext) {
+          async execute(_messages: Message[], _tools: Tool[], context: ExecutionContext) {
             context.onStreamStart?.();
             context.onStreamToken?.("Test response");
             context.onComplete?.({
@@ -249,7 +248,7 @@ describe("AgentExecutor", () => {
       // Mock the backend modules
       mock.module("@/agents/execution/ReasonActLoop", () => ({
         ReasonActLoop: class {
-          async execute(messages: Message[], tools: Tool[], context: ExecutionContext) {
+          async execute(_messages: Message[], _tools: Tool[], context: ExecutionContext) {
             context.onStreamStart?.();
             context.onStreamToken?.("Reasoning: Test");
             context.onComplete?.({
@@ -282,7 +281,7 @@ describe("AgentExecutor", () => {
             private llm: LLMService,
             private conversationManager: ConversationCoordinator
           ) {}
-          async execute(messages: Message[], tools: Tool[], context: ExecutionContext) {
+          async execute(_messages: Message[], _tools: Tool[], context: ExecutionContext) {
             context.onStreamStart?.();
             context.onStreamToken?.("Routing to next agent");
             context.onComplete?.({
@@ -330,7 +329,7 @@ describe("AgentExecutor", () => {
       // Mock ReasonActLoop for unknown backend (defaults to reason-act-loop)
       mock.module("@/agents/execution/ReasonActLoop", () => ({
         ReasonActLoop: class {
-          async execute(messages: Message[], tools: Tool[], context: ExecutionContext) {
+          async execute(_messages: Message[], _tools: Tool[], context: ExecutionContext) {
             context.onStreamStart?.();
             context.onStreamToken?.("Using default backend");
             context.onComplete?.({
@@ -366,7 +365,7 @@ describe("AgentExecutor", () => {
       // Mock backend that checks tools
       mock.module("@/agents/execution/ClaudeBackend", () => ({
         ClaudeBackend: class {
-          async execute(messages: Message[], tools: Tool[], context: ExecutionContext) {
+          async execute(_messages: Message[], tools: Tool[], context: ExecutionContext) {
             expect(tools.length).toBe(2);
             expect(tools[0].name).toBe("analyze");
             expect(tools[1].name).toBe("complete");

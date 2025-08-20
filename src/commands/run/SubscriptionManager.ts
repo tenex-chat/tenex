@@ -1,4 +1,11 @@
 import {
+  filterAndRelaySetFromBech32,
+  type NDKEvent,
+  type NDKFilter,
+  type NDKSubscription,
+} from "@nostr-dev-kit/ndk";
+import chalk from "chalk";
+import {
   addProcessedEvent,
   clearProcessedEvents,
   flushProcessedEvents,
@@ -10,13 +17,6 @@ import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import {
-  type NDKEvent,
-  type NDKFilter,
-  type NDKSubscription,
-  filterAndRelaySetFromBech32,
-} from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 
 export class SubscriptionManager {
   private subscriptions: NDKSubscription[] = [];

@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type NDK from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import * as services from "@/services";
 import { logger } from "@/utils/logger";
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKTask } from "@nostr-dev-kit/ndk";
 import { TaskPublisher } from "../TaskPublisher";
 
 // Define mock types for better type safety
@@ -344,7 +343,7 @@ describe("TaskPublisher", () => {
             ["p", "pubkey2"],
             ["other", "tag"],
           ] as string[][],
-          tag: mock((project: MockProject) => {}),
+          tag: mock((_project: MockProject) => {}),
           sign: mock(() => Promise.resolve()),
           publish: mock(() => Promise.resolve()),
         };

@@ -1,6 +1,6 @@
-import { tmpdir } from "os";
-import * as path from "path";
-import * as fs from "fs/promises";
+import * as fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { ExecutionQueueManager } from "../ExecutionQueueManager";
 import type { ExecutionQueueConfig } from "../types";
 
@@ -37,7 +37,7 @@ describe("ExecutionQueueManager", () => {
     // Remove test directory
     try {
       await fs.rm(testProjectPath, { recursive: true, force: true });
-    } catch (error) {
+    } catch (_error) {
       // Ignore cleanup errors
     }
   });

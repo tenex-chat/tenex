@@ -111,9 +111,9 @@ describe("AgentConversationContext", () => {
 
       // Simulate adding events by directly manipulating the processed IDs
       // (since we'd need async for the actual addEvent method)
-      context["processedEventIds"].add("event-1");
-      context["processedEventIds"].add("event-2");
-      context["processedEventIds"].add("event-3");
+      context.processedEventIds.add("event-1");
+      context.processedEventIds.add("event-2");
+      context.processedEventIds.add("event-3");
 
       // Serialize the context
       const json = context.toJSON();
@@ -122,10 +122,10 @@ describe("AgentConversationContext", () => {
       const restoredContext = AgentConversationContext.fromJSON(json, messageBuilder);
 
       // Check that processed event IDs were restored
-      expect(restoredContext["processedEventIds"].has("event-1")).toBe(true);
-      expect(restoredContext["processedEventIds"].has("event-2")).toBe(true);
-      expect(restoredContext["processedEventIds"].has("event-3")).toBe(true);
-      expect(restoredContext["processedEventIds"].size).toBe(3);
+      expect(restoredContext.processedEventIds.has("event-1")).toBe(true);
+      expect(restoredContext.processedEventIds.has("event-2")).toBe(true);
+      expect(restoredContext.processedEventIds.has("event-3")).toBe(true);
+      expect(restoredContext.processedEventIds.size).toBe(3);
     });
   });
 });

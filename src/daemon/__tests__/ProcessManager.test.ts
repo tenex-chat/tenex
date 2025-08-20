@@ -8,7 +8,7 @@ const activePids = new Set<number>();
 let nextPid = 1000;
 
 // Store reference to the original process.kill
-const originalProcessKill = process.kill;
+const _originalProcessKill = process.kill;
 
 // Override process.kill globally
 (global as any).process = {
@@ -39,7 +39,7 @@ const originalProcessKill = process.kill;
     // For SIGTERM, trigger the mock process kill method
     if (signal === "SIGTERM") {
       const mockProcess = mockProcessesByPid.get(pid);
-      if (mockProcess && mockProcess.kill) {
+      if (mockProcess?.kill) {
         mockProcess.kill(signal);
       }
     } else {
@@ -68,12 +68,12 @@ interface MockProcess {
 const mockProcessesByPid = new Map<number, MockProcess>();
 
 mock.module("child_process", () => ({
-  spawn: mock((command: string, args: string[], options: { stdio?: string; cwd?: string }) => {
+  spawn: mock((_command: string, _args: string[], options: { stdio?: string; cwd?: string }) => {
     const pid = nextPid++;
 
     let exitHandler: Function | null = null;
     let exitOnceHandler: Function | null = null;
-    let errorHandler: Function | null = null;
+    let _errorHandler: Function | null = null;
 
     const mockProcess = {
       pid: pid,
@@ -93,7 +93,7 @@ mock.module("child_process", () => ({
         if (event === "exit") {
           exitHandler = handler;
         } else if (event === "error") {
-          errorHandler = handler;
+          _errorHandler = handler;
         }
       }),
       once: mock((event: string, handler: Function) => {
@@ -237,7 +237,7 @@ describe("ProcessManager", () => {
       const projectPath = path.join(tempDir, "test-project");
 
       // Temporarily override spawn to create an error process
-      const originalSpawn = require("child_process").spawn;
+      const originalSpawn = require("node:child_process").spawn;
       let errorTriggered = false;
 
       mock.module("child_process", () => ({

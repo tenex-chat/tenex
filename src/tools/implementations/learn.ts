@@ -1,8 +1,8 @@
+import { z } from "zod";
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema, failure, success } from "../types";
 
