@@ -251,12 +251,32 @@ While providing full history is essential for context:
 
 ## Key Components
 
-- **`ConversationManager.ts`**: The main class that manages the lifecycle of conversations. It provides methods for creating, retrieving, and updating conversations.
+- **`ConversationStore.ts`**: Manages the storage and retrieval of conversations in memory and coordinates with persistence layer.
 
-- **`persistence/`**: This directory contains the logic for persisting conversations to storage. It includes a `FileSystemAdapter` that saves conversations to the local filesystem.
+- **`ConversationCoordinator.ts`**: Coordinates conversation flow and manages agent interactions within conversations.
 
-- **`types.ts`**: Defines the data structures and types used throughout the conversations module, such as `Conversation`, `Message`, and `AgentContext`.
+- **`MessageBuilder.ts`**: Constructs properly formatted messages for agent consumption with full context.
 
-- **`phases.ts`**: Defines the different phases of a conversation, such as `CHAT`, `PLAN`, and `EXECUTE`.
+- **`AgentConversationContext.ts`**: Manages agent-specific context within conversations including state tracking.
 
-- **`executionTime.ts`**: A utility for tracking the execution time of different parts of the conversation.
+- **`services/`**: Directory containing core conversation services:
+    - **`ConversationEventProcessor.ts`**: Processes incoming events and updates conversation state.
+    - **`PhaseManager.ts`**: Manages phase transitions and phase-specific logic.
+    - **`AgentResolver.ts`**: Resolves agents referenced in conversations.
+    - **`ConversationPersistenceService.ts`**: Handles conversation persistence coordination.
+
+- **`persistence/`**: Contains persistence logic for saving conversations:
+    - **`FileSystemAdapter.ts`**: Saves conversations to the local filesystem.
+    - **`schemas.ts`**: Defines validation schemas for persisted data.
+
+- **`executionQueue/`**: Manages execution queue for preventing concurrent executions:
+    - **`ExecutionQueueManager.ts`**: Main queue management orchestrator.
+    - **`LockManager.ts`**: Handles execution lock acquisition and release.
+    - **`QueueManager.ts`**: Manages the FIFO queue of waiting conversations.
+    - **`TimeoutManager.ts`**: Handles execution timeouts and warnings.
+
+- **`types.ts`**: Defines data structures and types like `Conversation`, `Message`, and `AgentState`.
+
+- **`phases.ts`**: Defines conversation phases (`CHAT`, `BRAINSTORM`, `PLAN`, `EXECUTE`, `VERIFICATION`, `CHORES`, `REFLECTION`, `END`).
+
+- **`executionTime.ts`**: Tracks execution timing for different conversation operations.

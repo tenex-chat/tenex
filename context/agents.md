@@ -8,18 +8,23 @@ The `src/agents` module is the core of the TENEX application, responsible for de
 
 - **`AgentRegistry.ts`**: A singleton class that manages the registration and lifecycle of all agents. It allows for publishing, unpublishing, and republishing agents.
 
-- **`AgentExecutor.ts`**: The main class responsible for executing an agent's reasoning loop. It takes an agent, a conversation, and a set of tools, and then orchestrates the interaction between the LLM and the tools to accomplish a task.
-
 - **`built-in/`**: This directory contains the definitions of the built-in agents provided by TENEX:
     - **`executor.ts`**: An agent that executes a single task.
     - **`planner.ts`**: An agent that creates a plan for a complex task but does not execute it.
     - **`project-manager.ts`**: An agent that manages the entire lifecycle of a project, from planning to execution.
 
 - **`execution/`**: This directory contains the core logic for the agent execution loop, including:
+    - **`AgentExecutor.ts`**: The main class responsible for executing an agent's reasoning loop. It takes an agent, a conversation, and a set of tools, and then orchestrates the interaction between the LLM and the tools to accomplish a task.
     - **`ReasonActLoop.ts`**: Implements the ReAct (Reason and Act) pattern for agent execution.
     - **`ToolStreamHandler.ts`**: Handles the streaming of tool outputs.
     - **`StreamStateManager.ts`**: Manages the state of streaming operations during tool execution.
     - **`TerminationHandler.ts`**: Handles graceful termination of agent execution.
     - **`ToolRepetitionDetector.ts`**: Detects and prevents infinite loops in tool usage.
+
+- **`builtInAgents.ts`**: Registry of all built-in agents provided by TENEX.
+
+- **`constants.ts`**: Defines constants used throughout the agents module.
+
+- **`utils.ts`**: Utility functions for agent operations.
 
 - **`types.ts`**: Defines the data structures and types used throughout the agents module, such as `Agent`, `AgentExecution`, and `Tool`.

@@ -318,7 +318,7 @@ export class ConfigService {
       const validated = schema.parse(data);
 
       this.addToCache(filePath, validated);
-      return validated as T;
+      return validated;
     } catch (error) {
       logger.error(`Failed to load config file: ${filePath}`, { error: formatAnyError(error) });
       return defaultValue;

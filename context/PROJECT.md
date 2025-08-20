@@ -34,13 +34,18 @@ The fundamental shift is from traditional coding in a text editor to managing an
 *   **Human as Orchestrator:** The user acts as a high-level director, making strategic decisions and guiding the AI team, rather than writing code line-by-line.
 *   **Automation of Toil:** The goal is to automate the repetitive and tedious aspects of software development, freeing up human developers to focus on creative and strategic challenges.
 
-## 4. Technical Stack (Inferred from README)
+## 4. Technical Stack
 
-*   **Runtime:** Node.js / Bun
-*   **Protocol:** Nostr
+*   **Runtime:** Bun (primary) / Node.js (>=18.0.0 compatibility)
+*   **Language:** TypeScript (^5.8.3)
+*   **Protocol:** Nostr (via @nostr-dev-kit/ndk)
 *   **Version Control:** Git
+*   **Key Libraries:**
+    *   Commander - CLI framework
+    *   Zod - Runtime type validation
+    *   multi-llm-ts - Multi-LLM integration
 
-## 5. Project Goals (Inferred from README)
+## 5. Project Goals
 
 *   To create a new paradigm for software development that is more efficient and powerful than traditional methods.
 *   To leverage the power of multiple, specialized AI agents to tackle complex programming tasks.
