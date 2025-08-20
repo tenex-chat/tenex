@@ -1,5 +1,6 @@
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
+import { PHASES } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
@@ -45,7 +46,7 @@ export class ClaudeTaskOrchestrator {
   async execute(options: ClaudeTaskOptions): Promise<ClaudeTaskResult> {
     const startTime = Date.now();
 
-    // Create task with conversation mapping
+    // Create task with conversation mapping and delegation context
     const task = await this.taskPublisher.createTask({
       title: options.title,
       prompt: options.prompt,
@@ -53,6 +54,12 @@ export class ClaudeTaskOrchestrator {
       conversationRootEventId: options.conversationRootEventId,
       conversationManager: options.conversationManager,
       claudeSessionId: options.resumeSessionId,
+      // Provide delegation context for Claude Code tasks so they get registered
+      delegationContext: options.conversation ? {
+        conversationId: options.conversation.id,
+        originalRequest: options.prompt,
+        phase: PHASES.EXECUTE, // Claude Code tasks are always in execution phase
+      } : undefined,
     });
 
     // Log if we're resuming a session

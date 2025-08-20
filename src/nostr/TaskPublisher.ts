@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { getProjectContext } from "@/services";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKTask } from "@nostr-dev-kit/ndk";
@@ -12,6 +13,12 @@ export interface TaskCreationOptions {
   conversationRootEventId?: string;
   conversationManager?: ConversationCoordinator;
   claudeSessionId?: string;
+  // Optional delegation registration for Claude Code tasks
+  delegationContext?: {
+    conversationId: string;
+    originalRequest: string;
+    phase?: string;
+  };
 }
 
 export interface TaskCompletionOptions {
@@ -65,8 +72,30 @@ export class TaskPublisher {
     // Store the task instance for future operations
     this.currentTask = task;
 
-    // Task mapping is now handled by DelegationRegistry when tasks are created
-    // No need to register here anymore
+    // Register with DelegationRegistry if delegation context is provided (for Claude Code tasks)
+    if (options.delegationContext) {
+      const registry = DelegationRegistry.getInstance();
+      await registry.registerDelegationBatch({
+        tasks: [{
+          taskId: task.id,
+          assignedToPubkey: this.agent.pubkey, // Claude Code tasks are assigned to the same agent
+          title: options.title,
+          fullRequest: options.prompt,
+          phase: options.delegationContext.phase,
+        }],
+        delegatingAgent: this.agent,
+        conversationId: options.delegationContext.conversationId,
+        originalRequest: options.delegationContext.originalRequest,
+      });
+
+      logger.debug("Registered Claude Code task with DelegationRegistry", {
+        taskId: task.id.substring(0, 8),
+        fullTaskId: task.id,
+        conversationId: options.delegationContext.conversationId.substring(0, 8),
+        agent: this.agent.name,
+        phase: options.delegationContext.phase,
+      });
+    }
 
     return task;
   }
