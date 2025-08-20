@@ -13,6 +13,8 @@ describe("ToolResult", () => {
       const result: ToolExecutionResult = {
         success: true,
         duration: 100,
+        toolName: "test_tool",
+        toolArgs: { arg1: "value1" },
         output: { data: "test output" },
       };
 
@@ -21,6 +23,8 @@ describe("ToolResult", () => {
       expect(serialized).toEqual({
         success: true,
         duration: 100,
+        toolName: "test_tool",
+        toolArgs: { arg1: "value1" },
         data: {
           output: { data: "test output" },
           error: undefined,
@@ -32,6 +36,8 @@ describe("ToolResult", () => {
       const result: ToolExecutionResult = {
         success: false,
         duration: 50,
+        toolName: "test_tool",
+        toolArgs: { input: "invalid" },
         error: {
           kind: "validation",
           field: "input",
@@ -44,6 +50,8 @@ describe("ToolResult", () => {
       expect(serialized).toEqual({
         success: false,
         duration: 50,
+        toolName: "test_tool",
+        toolArgs: { input: "invalid" },
         data: {
           output: undefined,
           error: {
@@ -58,6 +66,8 @@ describe("ToolResult", () => {
       const result: ToolExecutionResult = {
         success: false,
         duration: 200,
+        toolName: "testTool",
+        toolArgs: { cmd: "run" },
         error: {
           kind: "execution",
           tool: "testTool",
@@ -70,6 +80,8 @@ describe("ToolResult", () => {
       expect(serialized).toEqual({
         success: false,
         duration: 200,
+        toolName: "testTool",
+        toolArgs: { cmd: "run" },
         data: {
           output: undefined,
           error: {
@@ -84,6 +96,8 @@ describe("ToolResult", () => {
       const result: ToolExecutionResult = {
         success: false,
         duration: 10,
+        toolName: "system_tool",
+        toolArgs: {},
         error: {
           kind: "system",
           message: "System error occurred",
@@ -95,6 +109,8 @@ describe("ToolResult", () => {
       expect(serialized).toEqual({
         success: false,
         duration: 10,
+        toolName: "system_tool",
+        toolArgs: {},
         data: {
           output: undefined,
           error: {
@@ -111,6 +127,8 @@ describe("ToolResult", () => {
       const obj: SerializedToolResult = {
         success: true,
         duration: 100,
+        toolName: "test_tool",
+        toolArgs: { arg1: "value1" },
         data: {
           output: "test",
         },
@@ -130,6 +148,8 @@ describe("ToolResult", () => {
     it("should return false for missing success field", () => {
       const obj = {
         duration: 100,
+        toolName: "test",
+        toolArgs: {},
         data: {},
       };
 
@@ -139,6 +159,8 @@ describe("ToolResult", () => {
     it("should return false for missing duration field", () => {
       const obj = {
         success: true,
+        toolName: "test",
+        toolArgs: {},
         data: {},
       };
 
@@ -149,6 +171,8 @@ describe("ToolResult", () => {
       const obj = {
         success: true,
         duration: 100,
+        toolName: "test",
+        toolArgs: {},
       };
 
       expect(isSerializedToolResult(obj)).toBe(false);
@@ -158,6 +182,8 @@ describe("ToolResult", () => {
       const obj = {
         success: "true",
         duration: 100,
+        toolName: "test",
+        toolArgs: {},
         data: {},
       };
 
@@ -168,6 +194,8 @@ describe("ToolResult", () => {
       const obj = {
         success: true,
         duration: "100",
+        toolName: "test",
+        toolArgs: {},
         data: {},
       };
 
@@ -180,6 +208,8 @@ describe("ToolResult", () => {
       const serialized: SerializedToolResult = {
         success: true,
         duration: 100,
+        toolName: "test_tool",
+        toolArgs: { arg1: "value1" },
         data: {
           output: { data: "test" },
         },
@@ -190,6 +220,8 @@ describe("ToolResult", () => {
       expect(result).toEqual({
         success: true,
         duration: 100,
+        toolName: "test_tool",
+        toolArgs: { arg1: "value1" },
         output: { data: "test" },
         error: undefined,
       });
@@ -199,6 +231,8 @@ describe("ToolResult", () => {
       const serialized: SerializedToolResult = {
         success: false,
         duration: 50,
+        toolName: "test_tool",
+        toolArgs: { input: "invalid" },
         data: {
           error: {
             kind: "validation",
@@ -212,6 +246,8 @@ describe("ToolResult", () => {
       expect(result).toEqual({
         success: false,
         duration: 50,
+        toolName: "test_tool",
+        toolArgs: { input: "invalid" },
         output: undefined,
         error: {
           kind: "validation",
@@ -225,6 +261,8 @@ describe("ToolResult", () => {
       const serialized: SerializedToolResult = {
         success: false,
         duration: 200,
+        toolName: "testTool",
+        toolArgs: { cmd: "run" },
         data: {
           error: {
             kind: "execution",
@@ -238,6 +276,8 @@ describe("ToolResult", () => {
       expect(result).toEqual({
         success: false,
         duration: 200,
+        toolName: "testTool",
+        toolArgs: { cmd: "run" },
         output: undefined,
         error: {
           kind: "execution",
@@ -251,6 +291,8 @@ describe("ToolResult", () => {
       const serialized: SerializedToolResult = {
         success: false,
         duration: 10,
+        toolName: "system_tool",
+        toolArgs: {},
         data: {
           error: {
             kind: "system",
@@ -264,6 +306,8 @@ describe("ToolResult", () => {
       expect(result).toEqual({
         success: false,
         duration: 10,
+        toolName: "system_tool",
+        toolArgs: {},
         output: undefined,
         error: {
           kind: "system",
@@ -276,6 +320,8 @@ describe("ToolResult", () => {
       const serialized: SerializedToolResult = {
         success: false,
         duration: 15,
+        toolName: "unknown_tool",
+        toolArgs: { test: true },
         data: {
           error: {
             kind: "unknown",
@@ -289,6 +335,8 @@ describe("ToolResult", () => {
       expect(result).toEqual({
         success: false,
         duration: 15,
+        toolName: "unknown_tool",
+        toolArgs: { test: true },
         output: undefined,
         error: {
           kind: "system",

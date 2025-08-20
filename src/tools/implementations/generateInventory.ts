@@ -9,7 +9,7 @@ import { createZodSchema } from "../types";
 
 const execAsync = promisify(exec);
 
-const generateInventorySchema = z.any();
+const generateInventorySchema = z.object({});
 
 type GenerateInventoryInput = z.infer<typeof generateInventorySchema>;
 

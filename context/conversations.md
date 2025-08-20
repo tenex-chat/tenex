@@ -277,6 +277,6 @@ While providing full history is essential for context:
 
 - **`types.ts`**: Defines data structures and types like `Conversation`, `Message`, and `AgentState`.
 
-- **`phases.ts`**: Defines conversation phases (`CHAT`, `BRAINSTORM`, `PLAN`, `EXECUTE`, `VERIFICATION`, `CHORES`, `REFLECTION`, `END`).
+- **`phases.ts`**: Defines conversation phases (`CHAT`, `BRAINSTORM`, `PLAN`, `EXECUTE`, `VERIFICATION`, `CHORES`, `REFLECTION`).
 
 - **`executionTime.ts`**: Tracks execution timing for different conversation operations.

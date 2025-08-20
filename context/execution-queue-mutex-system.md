@@ -14,7 +14,7 @@ When multiple users or automated processes interact with the same TENEX project,
 
 *   **Exclusive Access:** Only one conversation per project can hold the execution lock and be in the `EXECUTE` phase at a time.
 *   **Lock Acquisition:** A conversation automatically attempts to acquire the lock when it transitions into the `EXECUTE` phase.
-*   **Natural Lock Release:** The lock is automatically released when the active conversation transitions out of the `EXECUTE` phase (e.g., to `VERIFICATION`, `CHORES`, or `END`).
+*   **Natural Lock Release:** The lock is automatically released when the active conversation transitions out of the `EXECUTE` phase (e.g., to `VERIFICATION`, `CHORES`, or `REFLECTION`).
 
 ### 3.2. Queuing Mechanism
 
