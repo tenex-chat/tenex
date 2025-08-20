@@ -2,18 +2,17 @@
  * Simplified tool system for TENEX
  */
 
-import type { ExecutionContext } from "@/agents/execution/types";
 import type { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
 import type { ParameterSchema, Result, Tool, ToolError, Validated } from "./core";
 import { createZodSchema } from "./zod-schema";
 
+// Re-export unified ExecutionContext from agents
+export type { ExecutionContext } from "@/agents/execution/types";
 // Re-export core types
 export * from "./core";
 export * from "./executor";
 export * from "./zod-schema";
-
-// Re-export unified ExecutionContext from agents
-export type { ExecutionContext } from "@/agents/execution/types";
 
 /**
  * Helper function to create a tool's parameters object directly from a Zod schema

@@ -1,6 +1,6 @@
+import chalk from "chalk";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logDebug, logError, logInfo } from "@/utils/logger";
-import chalk from "chalk";
 
 /**
  * Debug output utilities for consistent formatting

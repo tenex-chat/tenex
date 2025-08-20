@@ -462,7 +462,7 @@ interface ExecutionContext {
     triggeringEvent: NDKEvent;
     handoff?: HandoffContext;
     publisher: NostrPublisher;
-    conversationManager: ConversationManager;
+    conversationManager: ConversationCoordinator;
     agentExecutor: AgentExecutor;
     claudeSessionId?: string;
 }

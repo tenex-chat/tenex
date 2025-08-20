@@ -1,7 +1,7 @@
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
-import { formatDuration } from "@/utils/formatting";
 import chalk from "chalk";
 import inquirer from "inquirer";
+import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import { formatDuration } from "@/utils/formatting";
 
 interface ConversationChoice {
   name: string;

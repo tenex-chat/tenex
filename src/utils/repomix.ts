@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { logger } from "@/utils/logger";
 import { type CliOptions, runDefaultAction } from "repomix";
+import { logger } from "@/utils/logger";
 
 export interface RepomixResult {
   content: string;

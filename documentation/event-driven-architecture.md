@@ -44,7 +44,7 @@ The central event processing hub that routes incoming events to appropriate hand
 
 - **Event Discrimination**: Ignores specific event kinds (status, typing indicators) to prevent loops
 - **Handler Routing**: Routes events based on kind to specialized handlers
-- **Component Management**: Initializes and manages ConversationManager and AgentExecutor
+- **Component Management**: Initializes and manages ConversationCoordinator and AgentExecutor
 - **State Management**: Handles project update locking to prevent concurrent modifications
 - **Configuration Updates**: Processes LLM configuration changes dynamically
 
@@ -159,7 +159,7 @@ Monitors events for daemon process management:
 User Event (kind: 11) 
     → EventHandler 
     → handleNewConversation 
-    → ConversationManager.createConversation
+    → ConversationCoordinator.createConversation
     → AgentExecutor.execute
     → NostrPublisher.publishResponse
 ```
@@ -241,7 +241,7 @@ The system uses Nostr tags for metadata and routing:
 ## State Management
 
 ### Conversation State
-- Maintained by ConversationManager
+- Maintained by ConversationCoordinator
 - Persisted to filesystem
 - Synchronized with Nostr events
 - Tracks phase transitions

@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import type { ExecutionQueueManager } from "../executionQueue";
 import type { Phase } from "../phases";
-import { PHASES, getValidTransitions } from "../phases";
+import { getValidTransitions, PHASES } from "../phases";
 import type { Conversation, PhaseTransition } from "../types";
 
 export interface PhaseTransitionContext {
@@ -191,5 +191,19 @@ export class PhaseManager {
       return `~${Math.floor(seconds / 60)} minutes`;
     }
     return `~${Math.floor(seconds / 3600)} hours`;
+  }
+
+  /**
+   * Get the execution queue manager
+   */
+  getExecutionQueueManager(): ExecutionQueueManager | undefined {
+    return this.executionQueueManager;
+  }
+
+  /**
+   * Set the execution queue manager
+   */
+  setExecutionQueueManager(manager: ExecutionQueueManager): void {
+    this.executionQueueManager = manager;
   }
 }

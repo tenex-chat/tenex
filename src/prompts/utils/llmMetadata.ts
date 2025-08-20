@@ -1,7 +1,7 @@
+import type { Message } from "multi-llm-ts";
 import { openRouterPricing } from "@/llm/pricing";
 import type { CompletionResponse } from "@/llm/types";
 import type { LLMMetadata } from "@/nostr/types";
-import type { Message } from "multi-llm-ts";
 
 interface ResponseWithUsage {
   usage?: {

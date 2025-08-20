@@ -1,5 +1,5 @@
-import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
+import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 
 export class NDKAgentDefinition extends NDKEvent {
   static kind = 4199;

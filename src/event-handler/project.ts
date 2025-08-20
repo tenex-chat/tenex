@@ -5,13 +5,13 @@ import { AgentRegistry } from "../agents/AgentRegistry";
 import type { AgentInstance } from "../agents/types";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
-import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
 import { mcpService } from "../services/mcp/MCPService";
 import {
   getInstalledMCPEventIds,
   installMCPServerFromEvent,
   removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
+import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
 import { fetchAgentDefinition } from "../utils/agentFetcher";
 import { logger } from "../utils/logger";
 import { toKebabCase } from "../utils/string";

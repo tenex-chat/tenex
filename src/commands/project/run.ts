@@ -1,4 +1,6 @@
 import * as path from "node:path";
+import type NDK from "@nostr-dev-kit/ndk";
+import { Command } from "commander";
 import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
@@ -12,8 +14,6 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import type NDK from "@nostr-dev-kit/ndk";
-import { Command } from "commander";
 
 export const projectRunCommand = new Command("run")
   .description("Run the TENEX agent orchestration system for the current project")

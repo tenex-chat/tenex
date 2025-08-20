@@ -90,7 +90,7 @@ The Execution Queue Mutex System implements a distributed lock mechanism using N
               │                     │
               ▼                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│            ConversationManager Integration                     │
+│            ConversationCoordinator Integration                     │
 │  ┌─────────────────────────┐  ┌─────────────────────────────┐  │
 │  │ Phase Transition        │  │ Queue Status                │  │
 │  │ Interceptor             │  │ Display                     │  │
@@ -645,12 +645,12 @@ async loadLockFromDisk(): Promise<ExecutionLock | null> {
 
 ## Integration Points
 
-### ConversationManager Integration
+### ConversationCoordinator Integration
 
-The ExecutionQueueManager integrates with ConversationManager at phase transition points:
+The ExecutionQueueManager integrates with ConversationCoordinator at phase transition points:
 
 ```typescript
-// In ConversationManager.transitionPhase()
+// In ConversationCoordinator.transitionPhase()
 async transitionPhase(
   conversationId: string,
   newPhase: Phase,
@@ -1084,7 +1084,7 @@ export class QueueCLI {
    - Add execution lock and queue tags
    - Modify StatusPublisher
 
-3. **Integrate with ConversationManager**
+3. **Integrate with ConversationCoordinator**
    - Add phase transition hooks
    - Implement queue request logic
    - Add timeout management

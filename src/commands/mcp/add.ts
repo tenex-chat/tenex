@@ -1,3 +1,4 @@
+import { Command } from "commander";
 import { which } from "@/lib/shell";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
@@ -5,7 +6,6 @@ import { resolveConfigScope } from "@/utils/cli-config-scope";
 import { handleCliError } from "@/utils/cli-error";
 import { logger } from "@/utils/logger";
 import { isValidSlug } from "@/utils/validation";
-import { Command } from "commander";
 
 interface AddOptions {
   project?: boolean;

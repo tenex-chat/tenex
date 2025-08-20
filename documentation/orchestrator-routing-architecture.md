@@ -42,12 +42,12 @@ The orchestrator operates as an invisible message router that coordinates agent 
 ## Key Components
 
 ### 1. Orchestrator Agent
-**Location**: `src/agents/built-in/orchestrator.ts`
+**Location**: `src/claude/orchestrator.ts`
 
 The orchestrator is a special-purpose agent with unique characteristics:
 
 **Core Properties**:
-- **Backend Type**: `"routing"` - Uses RoutingBackend instead of standard execution
+- **Backend Type**: `"routing"` - Uses ReasonActLoop instead of standard execution
 - **Visibility**: Completely invisible to users
 - **Input Format**: JSON context with routing history
 - **Output Format**: Structured JSON routing decisions only
@@ -68,8 +68,8 @@ The orchestrator is a special-purpose agent with unique characteristics:
 - Enforces phase flow quality gates
 - Routes to special "END" agent for termination
 
-### 2. RoutingBackend
-**Location**: `src/agents/execution/RoutingBackend.ts`
+### 2. ReasonActLoop
+**Location**: `src/agents/execution/ReasonActLoop.ts`
 
 The execution backend that implements the routing logic:
 
@@ -170,8 +170,8 @@ After reaching END, the orchestrator can restart conversations when new user mes
 - Routes to CHAT phase for new requests
 - Maintains full conversation history
 
-### 4. ConversationManager
-**Location**: `src/conversations/ConversationManager.ts`
+### 4. ConversationCoordinator
+**Location**: `src/conversations/ConversationCoordinator.ts`
 
 Manages conversation state and orchestrator coordination:
 
@@ -310,7 +310,7 @@ Executor (complete) → Orchestrator (VERIFICATION) → Executor (verify)
 When a user sends a request:
 
 1. **Event Creation**: User message becomes an NDKEvent
-2. **Conversation Start**: ConversationManager creates/updates conversation
+2. **Conversation Start**: ConversationCoordinator creates/updates conversation
 3. **Orchestrator Trigger**: System routes to orchestrator first
 4. **Context Building**: Manager builds OrchestratorRoutingContext
 
@@ -328,7 +328,7 @@ The orchestrator:
 
 ### 3. Agent Execution
 
-RoutingBackend processes the decision:
+ReasonActLoop processes the decision:
 
 ```typescript
 // Simplified execution flow
@@ -361,7 +361,7 @@ Agents signal completion via the `complete()` tool:
 
 1. **Tool Call**: Agent uses complete() with summary
 2. **Event Tag**: Event tagged with ["tool", "complete"]
-3. **Turn Update**: ConversationManager records completion
+3. **Turn Update**: ConversationCoordinator records completion
 4. **Next Routing**: Orchestrator analyzes completions
 
 ### 5. Phase Transitions
@@ -659,7 +659,7 @@ Key flows to test:
 The codebase includes comprehensive tests:
 - `OrchestratorRouting.test.ts`: Routing context building
 - `orchestrator-routing.test.ts`: Prompt fragment generation
-- `RoutingBackend.test.ts`: Execution backend logic
+- `ReasonActLoop.test.ts`: Execution backend logic
 
 ## Future Architectural Considerations
 
@@ -694,7 +694,7 @@ The codebase includes comprehensive tests:
 
 ### Implementation Uncertainties
 
-1. **END Agent Handling**: The END "agent" is special-cased in RoutingBackend. Should this be formalized as a control flow construct?
+1. **END Agent Handling**: The END "agent" is special-cased in ReasonActLoop. Should this be formalized as a control flow construct?
 
 2. **Completion Detection**: Relies on ["tool", "complete"] tags. What if an agent crashes before completing?
 

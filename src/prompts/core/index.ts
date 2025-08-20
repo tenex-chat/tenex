@@ -1,3 +1,3 @@
-export { PromptBuilder } from "./PromptBuilder";
 export { FragmentRegistry, fragmentRegistry } from "./FragmentRegistry";
-export type { PromptFragment, FragmentConfig } from "./types";
+export { PromptBuilder } from "./PromptBuilder";
+export type { FragmentConfig, PromptFragment } from "./types";

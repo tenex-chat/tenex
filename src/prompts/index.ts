@@ -1,7 +1,8 @@
 // Export core functionality
-export { PromptBuilder } from "./core/PromptBuilder";
+
 export { FragmentRegistry, fragmentRegistry } from "./core/FragmentRegistry";
-export type { PromptFragment, FragmentConfig } from "./core/types";
+export { PromptBuilder } from "./core/PromptBuilder";
+export type { FragmentConfig, PromptFragment } from "./core/types";
 
 // Import all fragments to ensure they're registered when the module is imported
 // Priority 01 - Identity

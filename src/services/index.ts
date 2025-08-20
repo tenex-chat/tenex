@@ -3,11 +3,11 @@
  */
 
 export { ConfigService, configService } from "./ConfigService";
-export {
-  ProjectContext,
-  getProjectContext,
-  setProjectContext,
-  isProjectContextInitialized,
-} from "./ProjectContext";
 export { DelegationRegistry } from "./DelegationRegistry";
+export {
+  getProjectContext,
+  isProjectContextInitialized,
+  ProjectContext,
+  setProjectContext,
+} from "./ProjectContext";
 export { StatusPublisher } from "./status";

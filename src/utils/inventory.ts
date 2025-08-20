@@ -1,13 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { NDKTask } from "@nostr-dev-kit/ndk";
+import { Message } from "multi-llm-ts";
 import { loadLLMRouter } from "@/llm";
-import { TaskPublisher, getNDK } from "@/nostr";
+import { getNDK, TaskPublisher } from "@/nostr";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKTask } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
 import { generateRepomixOutput } from "./repomix.js";
 import "@/prompts"; // This ensures all fragments are registered
 import type { AgentInstance } from "@/agents/types";

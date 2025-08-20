@@ -73,7 +73,7 @@ Conversation Creation
 1. **Conversation Level**
    - Created when a new conversation starts
    - Persists throughout the conversation lifecycle
-   - Stored in `ConversationManager.conversationContexts` map
+   - Stored in `ConversationCoordinator.conversationContexts` map
 
 2. **Phase Level**
    - Created during phase transitions
@@ -92,9 +92,9 @@ Conversation Creation
 
 ## Integration Points
 
-### 1. ConversationManager Integration
+### 1. ConversationCoordinator Integration
 
-The `ConversationManager` creates and maintains tracing contexts for conversations:
+The `ConversationCoordinator` creates and maintains tracing contexts for conversations:
 
 ```typescript
 // During conversation creation
@@ -182,7 +182,7 @@ this.isTracingEnabled = moduleVerbosity === "verbose" || moduleVerbosity === "de
 ### 2. Memory Management
 
 - **Context lifecycle**: Contexts are garbage collected with their parent objects
-- **Map storage**: ConversationManager maintains a map of active contexts
+- **Map storage**: ConversationCoordinator maintains a map of active contexts
 - **Cleanup**: Contexts removed when conversations complete
 
 ### 3. Execution ID Generation

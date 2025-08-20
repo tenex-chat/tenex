@@ -1,3 +1,5 @@
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Message } from "multi-llm-ts";
 import type { AgentInstance } from "@/agents/types";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import {
@@ -7,12 +9,10 @@ import {
 import type { TracingContext } from "@/tracing";
 import { createPhaseExecutionContext, createTracingContext } from "@/tracing";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";
-import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
+import { MessageBuilder } from "../MessageBuilder";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
 import type { AgentState, Conversation, ConversationMetadata } from "../types";
@@ -298,18 +298,19 @@ export class ConversationCoordinator {
     agentState.lastProcessedMessageIndex = conversation.history.length;
 
     const sessionId = context.getClaudeSessionId();
-    if (sessionId && phase) {
+    if (sessionId && conversation.phase) {
       if (!agentState.claudeSessionsByPhase) {
-        agentState.claudeSessionsByPhase = {};
+        agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
       }
-      agentState.claudeSessionsByPhase[phase] = sessionId;
+      agentState.claudeSessionsByPhase[conversation.phase] = sessionId;
     }
 
     await this.persistence.save(conversation);
 
     return {
       messages: context.getMessages(),
-      claudeSessionId: sessionId || (phase && agentState.claudeSessionsByPhase?.[phase]),
+      claudeSessionId:
+        sessionId || (conversation.phase && agentState.claudeSessionsByPhase?.[conversation.phase]),
     };
   }
 
@@ -401,14 +402,14 @@ export class ConversationCoordinator {
    * Get execution queue manager (if available)
    */
   getExecutionQueueManager(): ExecutionQueueManager | undefined {
-    return this.phaseManager.executionQueueManager;
+    return this.phaseManager.getExecutionQueueManager();
   }
 
   /**
    * Set execution queue manager
    */
   setExecutionQueueManager(manager: ExecutionQueueManager): void {
-    this.phaseManager.executionQueueManager = manager;
+    this.phaseManager.setExecutionQueueManager(manager);
     this.setupQueueListeners();
   }
 

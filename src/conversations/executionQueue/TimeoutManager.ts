@@ -80,7 +80,7 @@ export class TimeoutManager extends EventEmitter {
 
     // Start new timeout with extended duration
     const maxDuration =
-      this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+      this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration ?? 0;
     this.startTimeout(conversationId, maxDuration + additionalMs);
   }
 
@@ -97,7 +97,9 @@ export class TimeoutManager extends EventEmitter {
     if (timeoutObj._idleStart) {
       const elapsed = Date.now() - timeoutObj._idleStart;
       const maxDuration =
-        this.config.maxExecutionDuration ?? DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration;
+        this.config.maxExecutionDuration ??
+        DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration ??
+        0;
       const remaining = maxDuration - elapsed;
       return Math.max(0, remaining);
     }

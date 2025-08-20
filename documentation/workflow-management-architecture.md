@@ -63,13 +63,13 @@ The TENEX workflow management system implements a sophisticated phase-based mult
 
 ### Component Responsibilities
 
-1. **ConversationManager** (`src/conversations/ConversationManager.ts`)
+1. **ConversationCoordinator** (`src/conversations/ConversationCoordinator.ts`)
    - Maintains conversation state and history
    - Builds agent-specific message contexts
    - Tracks phase transitions and orchestrator turns
    - Manages agent states and session continuity
 
-2. **Orchestrator Agent** (`src/agents/built-in/orchestrator.ts`)
+2. **Orchestrator Agent** (`src/claude/orchestrator.ts`)
    - Analyzes user requests and determines routing
    - Makes phase transition decisions
    - Coordinates multi-agent collaboration
@@ -141,12 +141,12 @@ This sequence cannot be bypassed, ensuring consistent quality control.
 ```
 1. User Message (NDKEvent)
    ↓
-2. ConversationManager.handleEvent()
+2. ConversationCoordinator.handleEvent()
    - Create/update conversation
    - Initialize tracing context
    - Log conversation start
    ↓
-3. Orchestrator Analysis (RoutingBackend)
+3. Orchestrator Analysis (ReasonActLoop)
    - Parse routing context JSON
    - Determine target agents and phase
    - Start orchestrator turn
@@ -355,7 +355,7 @@ This enables:
 
 ### Message Building Strategy
 
-The ConversationManager builds agent-specific message contexts:
+The ConversationCoordinator builds agent-specific message contexts:
 
 1. **Historical Messages**: All messages up to triggering event
 2. **Own Messages**: Added as "assistant" role

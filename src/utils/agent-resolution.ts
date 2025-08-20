@@ -1,6 +1,6 @@
+import { NDKUser } from "@nostr-dev-kit/ndk";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
-import { NDKUser } from "@nostr-dev-kit/ndk";
 
 /**
  * Resolve a recipient string to a pubkey

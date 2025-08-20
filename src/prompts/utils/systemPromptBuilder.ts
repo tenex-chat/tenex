@@ -15,9 +15,9 @@ import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import "@/prompts/fragments/24-retrieved-lessons";
 import "@/prompts/fragments/30-project-inventory";
-import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
+import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 
 export interface BuildSystemPromptOptions {
   // Required data

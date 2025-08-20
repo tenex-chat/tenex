@@ -36,7 +36,7 @@ The phase management system operates as a distributed state machine across multi
                       │
 ┌─────────────────────▼───────────────────────────────────┐
 │         Phase Persistence Layer                          │
-│       (ConversationManager State)                        │
+│       (ConversationCoordinator State)                        │
 │    Tracks transitions → Maintains history                │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -211,7 +211,7 @@ interface PhaseTransition {
 
 ### Routing Decision Structure
 
-The orchestrator makes phase-aware routing decisions (src/agents/execution/RoutingBackend.ts:18-24):
+The orchestrator makes phase-aware routing decisions (src/agents/execution/ReasonActLoop.ts:18-24):
 
 ```typescript
 interface RoutingDecision {
@@ -223,7 +223,7 @@ interface RoutingDecision {
 
 ### Orchestrator Turn Management
 
-Each routing decision creates an orchestrator turn (src/conversations/ConversationManager.ts:820-854):
+Each routing decision creates an orchestrator turn (src/conversations/ConversationCoordinator.ts:820-854):
 
 1. **Turn Creation**: Unique ID generated for tracking
 2. **Agent Routing**: Multiple agents can be routed in parallel
@@ -248,7 +248,7 @@ Agents receive phase context that influences their behavior:
 
 ### Conversation State Structure
 
-The ConversationManager maintains comprehensive phase state (src/conversations/types.ts:10-28):
+The ConversationCoordinator maintains comprehensive phase state (src/conversations/types.ts:10-28):
 
 ```typescript
 interface Conversation {
@@ -262,7 +262,7 @@ interface Conversation {
 
 ### Phase Update Process
 
-Phase updates follow a precise sequence (src/conversations/ConversationManager.ts:145-211):
+Phase updates follow a precise sequence (src/conversations/ConversationCoordinator.ts:145-211):
 
 1. **Validation**: Ensure conversation exists
 2. **Logging**: Create execution log entry
@@ -341,7 +341,7 @@ Quality phases are rarely skipped:
 
 ### END Agent Mechanism
 
-The system uses a special "END" agent to terminate conversations (src/agents/execution/RoutingBackend.ts:95-110):
+The system uses a special "END" agent to terminate conversations (src/agents/execution/ReasonActLoop.ts:95-110):
 - Detected in routing decisions
 - Cleanly terminates conversation
 - Typically used after REFLECTION phase
@@ -412,7 +412,7 @@ Phase information flows through prompt construction:
 
 ### Invalid Agent Routing Recovery
 
-When orchestrator routes to non-existent agent (src/agents/execution/RoutingBackend.ts:165-256):
+When orchestrator routes to non-existent agent (src/agents/execution/ReasonActLoop.ts:165-256):
 1. System detects invalid agent slug
 2. Sends corrective feedback to orchestrator
 3. Records lesson for future reference

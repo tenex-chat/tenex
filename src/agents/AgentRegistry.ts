@@ -1,5 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type {
   AgentConfig,
   AgentConfigOptionalNsec,
@@ -9,14 +11,11 @@ import type {
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { configService } from "@/services";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 import type { ToolName } from "@/tools/registry";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
 

@@ -4,7 +4,7 @@ export {
   type ClaudeCodeResult,
 } from "./executor";
 export {
-  ClaudeTaskOrchestrator,
   type ClaudeTaskOptions,
+  ClaudeTaskOrchestrator,
   type ClaudeTaskResult,
 } from "./orchestrator";

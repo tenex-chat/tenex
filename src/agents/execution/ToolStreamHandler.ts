@@ -6,9 +6,9 @@ import type { StreamHandle } from "@/nostr/AgentStreamer";
 import type { ToolExecutionResult } from "@/tools/executor";
 import type { TracingLogger } from "@/tracing";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
-import type { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
 import { isComplete } from "./control-flow-types";
+import type { StreamStateManager } from "./StreamStateManager";
 import type { ExecutionContext } from "./types";
 
 /**

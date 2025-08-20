@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ALL_PHASES, type Phase } from "@/conversations/phases";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -7,10 +8,8 @@ import { mcpService } from "@/services/mcp/MCPService";
 import type { Tool } from "@/tools/types";
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
-import { logError, logInfo } from "@/utils/logger";
-import { logWarning } from "@/utils/logger";
+import { logError, logInfo, logWarning } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import chalk from "chalk";
 
 // Format content with enhancements
 function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {

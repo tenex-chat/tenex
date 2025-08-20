@@ -1,7 +1,7 @@
-import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
-import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKFilter } from "@nostr-dev-kit/ndk";
+import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
+import { logger } from "@/utils/logger";
 
 /**
  * Options for discovering NDKAgentDefinition events

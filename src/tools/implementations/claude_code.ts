@@ -1,10 +1,10 @@
+import { z } from "zod";
 import { ClaudeTaskOrchestrator } from "@/claude/orchestrator";
-import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getNDK } from "@/nostr/ndkClient";
+import { TaskPublisher } from "@/nostr/TaskPublisher";
 import { getRootConversationId } from "@/utils/conversation-utils";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 import { createToolDefinition, failure, success } from "../types";
 
 /**
@@ -110,7 +110,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         title: title || `Claude Code Execution (via ${context.agent.name})`,
         branch,
         conversationRootEventId: context.conversationId,
-        conversation,
+        conversation: rootConversation,
         conversationManager: context.conversationManager,
         abortSignal: abortController.signal,
         resumeSessionId: existingSessionId,
@@ -137,7 +137,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
 
           // Initialize claudeSessionsByPhase if it doesn't exist
           if (!agentState.claudeSessionsByPhase) {
-            agentState.claudeSessionsByPhase = {};
+            agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
           }
 
           // Store the session ID for this phase

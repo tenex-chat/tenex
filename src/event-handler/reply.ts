@@ -4,14 +4,13 @@ import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { AgentInstance } from "../agents/types";
 import type { Conversation, ConversationCoordinator } from "../conversations";
+import { ConversationResolver } from "../conversations/services/ConversationResolver";
+// New refactored modules
+import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "../services";
 import { DelegationRegistry } from "../services/DelegationRegistry";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
-
-import { ConversationResolver } from "../conversations/services/ConversationResolver";
-// New refactored modules
-import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { AgentRouter } from "./AgentRouter";
 import { TaskCompletionHandler } from "./TaskCompletionHandler";
 

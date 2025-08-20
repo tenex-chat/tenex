@@ -1,8 +1,8 @@
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr";
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { PHASES } from "../phases";
 import type { Conversation, ConversationMetadata } from "../types";

@@ -24,7 +24,7 @@ interface AgentState {
 
 ### 2. Conversation State Management
 
-The `ConversationManager` class (src/conversations/ConversationManager.ts:24-699) orchestrates all context-related operations:
+The `ConversationCoordinator` class (src/conversations/ConversationCoordinator.ts:24-699) orchestrates all context-related operations:
 
 - **State Storage**: Uses a `Map<string, AgentState>` per conversation to track each agent's position
 - **Persistence**: Serializes agent states to disk via `FileSystemAdapter` for recovery
@@ -32,7 +32,7 @@ The `ConversationManager` class (src/conversations/ConversationManager.ts:24-699
 
 ### 3. Context Building Pipeline
 
-The `buildAgentMessages()` method (src/conversations/ConversationManager.ts:278-486) implements a sophisticated pipeline for constructing agent context:
+The `buildAgentMessages()` method (src/conversations/ConversationCoordinator.ts:278-486) implements a sophisticated pipeline for constructing agent context:
 
 #### Phase 1: State Initialization
 When an agent enters a conversation for the first time:
@@ -44,7 +44,7 @@ When an agent enters a conversation for the first time:
    - If not p-tagged: Standard initialization at index 0
 
 ```typescript
-// ConversationManager.ts:294-326
+// ConversationCoordinator.ts:294-326
 if (triggeringEvent?.id) {
     const isDirectlyAddressed = triggeringEvent.tags?.some(
         tag => tag[0] === "p" && tag[1] === targetAgent.pubkey
@@ -73,7 +73,7 @@ The system builds a complete conversation history up to the triggering event:
 For returning agents, the system identifies "missed" messages:
 
 ```typescript
-// ConversationManager.ts:398-434
+// ConversationCoordinator.ts:398-434
 const missedEvents = conversation.history.slice(agentState.lastProcessedMessageIndex);
 // Filter for messages from others
 // Construct "MESSAGES WHILE YOU WERE AWAY" block if needed
@@ -174,7 +174,7 @@ The system employs several optimizations:
 
 ### Concurrency Handling
 
-The `updateAgentState()` method (src/conversations/ConversationManager.ts:593-606) ensures atomic updates:
+The `updateAgentState()` method (src/conversations/ConversationCoordinator.ts:593-606) ensures atomic updates:
 
 ```typescript
 async updateAgentState(conversationId: string, agentSlug: string, updates: Partial<AgentState>) {

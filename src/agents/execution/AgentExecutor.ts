@@ -1,3 +1,5 @@
+import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
+import { Message } from "multi-llm-ts";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMService } from "@/llm/types";
@@ -9,12 +11,9 @@ import {
 } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import { type TracingContext, createAgentExecutionContext, createTracingContext } from "@/tracing";
+import { createAgentExecutionContext, createTracingContext, type TracingContext } from "@/tracing";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
-import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
 import type { ExecutionContext } from "./types";
 import "@/prompts/fragments/01-specialist-identity";

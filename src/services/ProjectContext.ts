@@ -1,9 +1,8 @@
+import type { Hexpubkey, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
-import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -170,7 +169,7 @@ export class ProjectContext {
 }
 
 // Module-level variable for global access
-let projectContext: ProjectContext | undefined = undefined;
+let projectContext: ProjectContext | undefined;
 
 /**
  * Initialize the project context. Should be called once during project startup.

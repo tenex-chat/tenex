@@ -1,5 +1,5 @@
-import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
+import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * NDKProjectStatus represents a kind 24010 event

@@ -195,7 +195,7 @@ function onAgentComplete(agent, completion, phase) {
 - `/src/prompts/fragments/orchestrator-routing.ts` - Update routing instructions
 
 #### 1.2 Update orchestrator instructions
-**File:** `/src/agents/built-in/orchestrator.ts`
+**File:** `/src/claude/orchestrator.ts`
 ```typescript
 instructions: `You are a silent router that NEVER communicates with users directly.
 
@@ -280,7 +280,7 @@ The current complete() tool already works well for this architecture.
 - Detect review cycles vs initial work
 
 #### 4.2 Update conversation context
-**File:** `/src/conversations/ConversationManager.ts`
+**File:** `/src/conversations/ConversationCoordinator.ts`
 - Ensure phase context includes review state
 - Pass recommendations to executor properly
 

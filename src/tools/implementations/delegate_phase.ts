@@ -1,8 +1,8 @@
+import { z } from "zod";
 import { PHASES } from "@/conversations/phases";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
 import { createToolDefinition, failure, success } from "../types";
 
 const delegatePhaseSchema = z.object({

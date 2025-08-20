@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { logger } from "@/utils/logger";
 import { Command } from "commander";
+import { logger } from "@/utils/logger";
 import { ProjectManager } from "../../daemon/ProjectManager";
 import { getNDK, initNDK, shutdownNDK } from "../../nostr/ndkClient";
 import { handleCliError } from "../../utils/cli-error";

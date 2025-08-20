@@ -22,7 +22,7 @@ The Conversation Management system is the foundational infrastructure that orche
 
 ### System Overview
 
-The ConversationManager serves as the central hub for all conversation-related operations:
+The ConversationCoordinator serves as the central hub for all conversation-related operations:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -31,7 +31,7 @@ The ConversationManager serves as the central hub for all conversation-related o
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────┐
-│             ConversationManager                          │
+│             ConversationCoordinator                      │
 │         (Central State Orchestrator)                     │
 │                                                          │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -66,7 +66,7 @@ The ConversationManager serves as the central hub for all conversation-related o
 
 ### Core Components
 
-#### ConversationManager Class (src/conversations/ConversationManager.ts)
+#### ConversationCoordinator Class (src/conversations/ConversationCoordinator.ts)
 
 The central class that manages all conversation lifecycle operations:
 
@@ -80,7 +80,7 @@ The central class that manages all conversation lifecycle operations:
 
 **Core Data Structures:**
 ```typescript
-class ConversationManager {
+class ConversationCoordinator {
     private conversations: Map<string, Conversation>;
     private conversationContexts: Map<string, TracingContext>;
     private projectContext: ProjectContext;
@@ -524,7 +524,7 @@ private async saveConversationDelta(
 
 ### Phase Transition Handling
 
-The ConversationManager orchestrates phase transitions:
+The ConversationCoordinator orchestrates phase transitions:
 
 ```typescript
 async transitionPhase(
