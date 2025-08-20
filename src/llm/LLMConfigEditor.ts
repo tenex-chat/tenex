@@ -1,6 +1,7 @@
 import type { LLMProvider, ResolvedLLMConfig } from "@/llm/types";
 import { configService } from "@/services";
 import type { TenexLLMs } from "@/services/config/types";
+import inquirer from "inquirer";
 import { LLM_DEFAULTS } from "./constants";
 import { ModelSelector } from "./selection/ModelSelector";
 import { LLMTester } from "./testing/LLMTester";
@@ -160,35 +161,106 @@ export class LLMConfigEditor {
     // 1. Select provider
     const provider = await this.ui.promptProviderSelection();
 
-    // 2. Fetch and select model
+    // 2. For Ollama or OpenAI Compatible, get URL first before fetching models
+    let customBaseUrl: string | undefined;
+    let openAICompatibleConfig: { baseUrl: string; model: string } | null = null;
+    
+    if (provider === "ollama") {
+      customBaseUrl = await this.ui.promptOllamaUrl();
+    } else if (provider === "openai-compatible") {
+      openAICompatibleConfig = await this.ui.promptOpenAICompatibleConfig();
+      if (!openAICompatibleConfig) {
+        return;
+      }
+      customBaseUrl = openAICompatibleConfig.baseUrl;
+    }
+
+    // 3. Fetch and select model
     const existingApiKey =
       provider !== "ollama" ? this.getExistingApiKeys(llmsConfig, provider)[0] : undefined;
 
     this.ui.displayMessages.fetchingModels(provider);
 
     let modelSelection;
-    try {
-      modelSelection = await this.modelSelector.fetchAndSelectModel(provider, existingApiKey);
-      if (!modelSelection) {
-        this.ui.displayMessages.noModelsAvailable(provider);
-        if (provider === "ollama") {
-          this.ui.displayMessages.ollamaNotRunning();
+    
+    // For OpenAI Compatible, check if user already provided a model
+    if (provider === "openai-compatible" && openAICompatibleConfig?.model) {
+      modelSelection = { model: openAICompatibleConfig.model, supportsCaching: false };
+    } else {
+      try {
+        // Pass the custom URL to the model selector
+        modelSelection = await this.modelSelector.fetchAndSelectModel(
+          provider, 
+          existingApiKey,
+          customBaseUrl
+        );
+        if (!modelSelection) {
+          this.ui.displayMessages.noModelsAvailable(provider);
+          if (provider === "ollama") {
+            this.ui.displayMessages.ollamaNotRunning();
+            // Allow manual model entry for Ollama
+            const manualModel = await this.ui.promptManualOllamaModel();
+            if (manualModel) {
+              modelSelection = { model: manualModel, supportsCaching: false };
+            } else {
+              return;
+            }
+          } else if (provider === "openai-compatible") {
+            // For OpenAI Compatible, prompt for manual model entry
+            const { model } = await inquirer.prompt([
+              {
+                type: "input",
+                name: "model",
+                message: "Enter model name to use:",
+                validate: (input: string) => {
+                  if (!input.trim()) return "Model name is required";
+                  return true;
+                },
+              },
+            ]);
+            modelSelection = { model: model.trim(), supportsCaching: false };
+          } else {
+            return;
+          }
+        } else {
+          // Show success message (we can get count from the successful selection)
+          this.ui.displayMessages.modelsFound(0, provider); // Count will be shown by fetchAndSelectModel internally
         }
-        return;
+      } catch (error) {
+        this.ui.displayMessages.fetchModelsFailed(provider, error);
+        if (provider === "ollama") {
+          // Allow manual model entry for Ollama even on error
+          const manualModel = await this.ui.promptManualOllamaModel();
+          if (manualModel) {
+            modelSelection = { model: manualModel, supportsCaching: false };
+          } else {
+            return;
+          }
+        } else if (provider === "openai-compatible") {
+          // For OpenAI Compatible, prompt for manual model entry on error
+          const { model } = await inquirer.prompt([
+            {
+              type: "input",
+              name: "model",
+              message: "Enter model name to use:",
+              validate: (input: string) => {
+                if (!input.trim()) return "Model name is required";
+                return true;
+              },
+            },
+          ]);
+          modelSelection = { model: model.trim(), supportsCaching: false };
+        } else {
+          return;
+        }
       }
-
-      // Show success message (we can get count from the successful selection)
-      this.ui.displayMessages.modelsFound(0, provider); // Count will be shown by fetchAndSelectModel internally
-    } catch (error) {
-      this.ui.displayMessages.fetchModelsFailed(provider, error);
-      return;
     }
 
-    // 3. Get API key
+    // 4. Get API key
     const existingKeys = this.getExistingApiKeys(llmsConfig, provider);
     const apiKeyResult = await this.ui.promptApiKey(existingKeys, provider);
 
-    // 4. Configure settings
+    // 5. Configure settings
     const defaultConfigName = this.modelSelector.generateDefaultConfigName(
       provider,
       modelSelection.model
@@ -201,7 +273,7 @@ export class LLMConfigEditor {
       modelSelection.model
     );
 
-    // 5. Build and test configuration
+    // 6. Build and test configuration
     const newConfig: ResolvedLLMConfig = {
       provider,
       model: modelSelection.model,
@@ -214,6 +286,10 @@ export class LLMConfigEditor {
 
     if (provider === "openrouter") {
       newConfig.baseUrl = "https://openrouter.ai/api/v1";
+    } else if (provider === "ollama" && customBaseUrl) {
+      newConfig.baseUrl = customBaseUrl;
+    } else if (provider === "openai-compatible" && customBaseUrl) {
+      newConfig.baseUrl = customBaseUrl;
     }
 
     this.ui.displayMessages.testingConfiguration();
@@ -235,7 +311,7 @@ export class LLMConfigEditor {
       return;
     }
 
-    // 6. Save configuration
+    // 7. Save configuration
     llmsConfig.configurations[configPrompts.configName] = {
       provider,
       model: modelSelection.model,
@@ -249,14 +325,32 @@ export class LLMConfigEditor {
       llmsConfig.defaults[LLM_DEFAULTS.AGENTS] = configPrompts.configName;
     }
 
-    if (this.isGlobal && apiKeyResult.apiKey && provider !== "ollama") {
+    // Save credentials and baseUrl
+    if (this.isGlobal) {
       if (!llmsConfig.credentials) {
         llmsConfig.credentials = {};
       }
-      llmsConfig.credentials[provider] = {
-        apiKey: apiKeyResult.apiKey,
-        baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
-      };
+      
+      if (provider === "ollama") {
+        // For Ollama, only store baseUrl if custom
+        if (customBaseUrl) {
+          llmsConfig.credentials[provider] = {
+            baseUrl: customBaseUrl,
+          };
+        }
+      } else if (provider === "openai-compatible") {
+        // For OpenAI Compatible, store both API key and baseUrl
+        llmsConfig.credentials[provider] = {
+          apiKey: apiKeyResult.apiKey || "",
+          baseUrl: customBaseUrl,
+        };
+      } else if (apiKeyResult.apiKey) {
+        // For other providers, store API key and baseUrl if applicable
+        llmsConfig.credentials[provider] = {
+          apiKey: apiKeyResult.apiKey,
+          baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
+        };
+      }
     }
 
     await this.saveConfig(llmsConfig);

@@ -109,6 +109,7 @@ export const LLM_PROVIDERS = [
   "deepseek",
   "ollama",
   "mistral",
+  "openai-compatible",
 ] as const;
 
 export type LLMProvider = (typeof LLM_PROVIDERS)[number];

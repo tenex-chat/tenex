@@ -60,10 +60,11 @@ export class ModelSelector {
 
   async fetchAndSelectModel(
     provider: LLMProvider,
-    existingApiKey?: string
+    existingApiKey?: string,
+    ollamaUrl?: string
   ): Promise<ModelSelectionResult | null> {
     try {
-      const modelsList = await getModelsForProvider(provider, existingApiKey);
+      const modelsList = await getModelsForProvider(provider, existingApiKey, ollamaUrl);
       if (!modelsList || modelsList.chat.length === 0) {
         return null;
       }

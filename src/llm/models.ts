@@ -7,7 +7,8 @@ import type { LLMProvider } from "./types";
  */
 export async function getModelsForProvider(
   provider: LLMProvider,
-  apiKey?: string
+  apiKey?: string,
+  ollamaUrl?: string
 ): Promise<ModelsList | null> {
   try {
     if (provider === "openrouter" && apiKey) {
@@ -25,6 +26,23 @@ export async function getModelsForProvider(
     };
 
     const mappedProvider = providerMap[provider] || provider;
+    
+    // For Ollama, pass the custom URL if provided
+    if (provider === "ollama" && ollamaUrl) {
+      return await loadModels(mappedProvider, { baseUrl: ollamaUrl });
+    }
+    
+    // For OpenAI Compatible, try to fetch models from the endpoint
+    if (provider === "openai-compatible" && ollamaUrl) {
+      // Use OpenAI provider with custom baseUrl
+      try {
+        return await loadModels("openai", { baseUrl: ollamaUrl });
+      } catch {
+        // If fetching fails, return empty to allow manual entry
+        return null;
+      }
+    }
+    
     return await loadModels(mappedProvider, {});
   } catch (error) {
     logger.error(`Failed to load models for provider ${provider}:`, error);

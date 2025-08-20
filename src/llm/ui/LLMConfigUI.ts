@@ -135,6 +135,7 @@ export class LLMConfigUI {
           { name: "Deepseek", value: "deepseek" as LLMProvider },
           { name: "Ollama", value: "ollama" as LLMProvider },
           { name: "Mistral", value: "mistral" as LLMProvider },
+          { name: "OpenAI Compatible (Custom endpoint)", value: "openai-compatible" as LLMProvider },
         ],
       },
     ]);
@@ -144,6 +145,22 @@ export class LLMConfigUI {
   async promptApiKey(existingKeys: string[], provider: LLMProvider): Promise<ApiKeyResult> {
     if (provider === "ollama") {
       return { apiKey: "", isNew: false };
+    }
+    
+    // For OpenAI Compatible, ask if API key is needed
+    if (provider === "openai-compatible") {
+      const { needsApiKey } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "needsApiKey",
+          message: "Does this endpoint require an API key?",
+          default: false,
+        },
+      ]);
+      
+      if (!needsApiKey) {
+        return { apiKey: "", isNew: false };
+      }
     }
 
     if (existingKeys.length > 0) {
@@ -380,6 +397,115 @@ export class LLMConfigUI {
     return configName;
   }
 
+  async promptOllamaUrl(): Promise<string | undefined> {
+    const { ollamaUrl } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "ollamaUrl",
+        message: "Enter Ollama server URL:",
+        default: "http://localhost:11434",
+        validate: (input: string) => {
+          if (!input.trim()) return "URL is required";
+          try {
+            new URL(input);
+            return true;
+          } catch {
+            return "Please enter a valid URL (e.g., http://localhost:11434)";
+          }
+        },
+      },
+    ]);
+    return ollamaUrl === "http://localhost:11434" ? undefined : ollamaUrl;
+  }
+
+  async promptOpenAICompatibleConfig(): Promise<{ baseUrl: string; model: string } | null> {
+    logger.info(chalk.cyan("\n🔧 Configure OpenAI Compatible Endpoint\n"));
+    
+    const { baseUrl } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "baseUrl",
+        message: "Enter API endpoint URL:",
+        validate: (input: string) => {
+          if (!input.trim()) return "URL is required";
+          try {
+            new URL(input);
+            return true;
+          } catch {
+            return "Please enter a valid URL (e.g., http://localhost:1234/v1)";
+          }
+        },
+      },
+    ]);
+
+    const { tryFetchModels } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "tryFetchModels",
+        message: "Try to fetch available models from this endpoint?",
+        default: true,
+      },
+    ]);
+
+    if (tryFetchModels) {
+      // Will be handled by the caller to try fetching models
+      return { baseUrl, model: "" };
+    }
+
+    const { model } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "model",
+        message: "Enter model name to use:",
+        validate: (input: string) => {
+          if (!input.trim()) return "Model name is required";
+          return true;
+        },
+      },
+    ]);
+
+    return { baseUrl, model: model.trim() };
+  }
+
+  async promptManualOllamaModel(): Promise<string | null> {
+    const { action } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "No Ollama models found at this URL. What would you like to do?",
+        choices: [
+          { name: "Enter model name manually", value: "manual" },
+          { name: "Cancel and install models first", value: "cancel" },
+        ],
+      },
+    ]);
+
+    if (action === "cancel") {
+      logger.info(chalk.yellow("\n📝 To install Ollama models, run:"));
+      logger.info(chalk.cyan("   ollama pull llama3.2"));
+      logger.info(chalk.cyan("   ollama pull mistral"));
+      logger.info(chalk.cyan("   ollama pull codellama"));
+      logger.info(chalk.yellow("\n   Then run 'teenx setup llm' again.\n"));
+      return null;
+    }
+
+    const { modelName } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "modelName",
+        message: "Enter Ollama model name (e.g., llama3.2, mistral, codellama):",
+        validate: (input: string) => {
+          if (!input.trim()) return "Model name is required";
+          return true;
+        },
+      },
+    ]);
+
+    logger.info(chalk.yellow(`\n⚠️  Note: Make sure to install this model with: ollama pull ${modelName}\n`));
+    return modelName.trim();
+  }
+
+
   displayMessages = {
     setupStart: () => logger.info(chalk.cyan("\n🤖 LLM Configuration Setup\n")),
     addingConfiguration: () => logger.info(chalk.cyan("\n➕ Add New LLM Configuration\n")),
@@ -390,7 +516,7 @@ export class LLMConfigUI {
     noModelsAvailable: (provider: string) =>
       logger.error(chalk.red(`❌ No models available for ${provider}`)),
     ollamaNotRunning: () =>
-      logger.info(chalk.yellow("💡 Make sure Ollama is running with: ollama serve")),
+      logger.info(chalk.yellow("💡 Ollama is not running or has no models installed.")),
     fetchModelsFailed: (provider: string, error: unknown) =>
       logger.error(chalk.red(`❌ Failed to fetch ${provider} models: ${error}`)),
     testingConfiguration: () =>
