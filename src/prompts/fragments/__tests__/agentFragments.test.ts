@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { phaseContextFragment } from "../agentFragments";
+import { phaseContextFragment } from "../10-agent-execution";
 import type { Conversation, PhaseTransition } from "@/conversations/types";
 import type { Phase } from "@/conversations/phases";
 

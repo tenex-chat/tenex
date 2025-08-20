@@ -26,7 +26,7 @@ export class TaskCompletionHandler {
      */
     static async handleTaskCompletion(
         event: NDKEvent,
-        conversation: Conversation,
+        _conversation: Conversation,
         conversationManager: ConversationCoordinator
     ): Promise<TaskCompletionResult> {
         const taskId = AgentEventDecoder.getTaskId(event);

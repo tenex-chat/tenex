@@ -14,6 +14,8 @@ import type { ToolCall } from "@/llm/types";
 import { Message } from "multi-llm-ts";
 import { ConfigService } from "@/services/ConfigService";
 import { EVENT_KINDS } from "@/llm/types";
+import type { ProjectContext } from "@/services/project/ProjectContext";
+import type { TenexConfig } from "@/services/config/types";
 
 export interface E2ETestContext {
     projectPath: string;
@@ -24,9 +26,9 @@ export interface E2ETestContext {
     configService: typeof ConfigService;
     services: {
         configService: typeof ConfigService;
-        projectContext: any;
+        projectContext: ProjectContext;
     };
-    projectConfig: any;
+    projectConfig: TenexConfig;
 }
 
 // Execution trace for tracking conversation flow
@@ -43,7 +45,7 @@ export interface AgentExecutionRecord {
     phase: string;
     timestamp: Date;
     message?: string;
-    toolCalls?: any[];
+    toolCalls?: ToolCallRecord[];
 }
 
 export interface PhaseTransitionRecord {
@@ -57,7 +59,7 @@ export interface PhaseTransitionRecord {
 export interface ToolCallRecord {
     agent: string;
     tool: string;
-    arguments: any;
+    arguments: Record<string, unknown>;
     timestamp: Date;
 }
 
@@ -72,7 +74,7 @@ export interface RoutingDecisionRecord {
 /**
  * Setup E2E test environment
  */
-export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: any): Promise<E2ETestContext> {
+export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: string): Promise<E2ETestContext> {
     // Create temp directory
     const tempDir = await createTempDir("tenex-e2e-");
     const projectPath = path.join(tempDir, "test-project");

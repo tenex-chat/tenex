@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { isVoiceMode } from "../voice-mode";
+import { isVoiceMode } from "../20-voice-mode";
 
 describe("isVoiceMode", () => {
     it("should return true when event has voice mode tag", () => {

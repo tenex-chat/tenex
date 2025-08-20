@@ -59,7 +59,7 @@ async function executeAgent(
     executionContext: ExecutionContext,
     agentExecutor: AgentExecutor,
     conversation: Conversation,
-    conversationManager: ConversationCoordinator,
+    _conversationManager: ConversationCoordinator,
     projectManager: AgentInstance,
     event: NDKEvent
 ): Promise<void> {
