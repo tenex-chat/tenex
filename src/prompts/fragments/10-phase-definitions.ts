@@ -1,4 +1,4 @@
-import { PHASE_DEFINITIONS, PHASES } from "@/conversations/phases";
+import { PHASES, PHASE_DEFINITIONS } from "@/conversations/phases";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 

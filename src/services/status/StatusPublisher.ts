@@ -1,7 +1,6 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext, StatusIntent } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -10,6 +9,7 @@ import { configService, getProjectContext, isProjectContextInitialized } from "@
 import { mcpService } from "@/services/mcp/MCPService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logWarning } from "@/utils/logger";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * StatusPublisher handles periodic publishing of status events to Nostr.

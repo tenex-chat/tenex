@@ -1,8 +1,8 @@
-import chalk from "chalk";
-import { Command } from "commander";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import chalk from "chalk";
+import { Command } from "commander";
 
 interface ListOptions {
   project?: boolean;

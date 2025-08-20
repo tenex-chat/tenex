@@ -2,10 +2,6 @@ import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-// createAgent functionality has been moved to AgentRegistry
-import type NDK from "@nostr-dev-kit/ndk";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";
@@ -16,6 +12,10 @@ import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { ensureTenexInGitignore, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import { toKebabCase } from "@/utils/string";
+// createAgent functionality has been moved to AgentRegistry
+import type NDK from "@nostr-dev-kit/ndk";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
+import chalk from "chalk";
 
 const execAsync = promisify(exec);
 

@@ -1,9 +1,9 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { Command } from "commander";
 import * as fileSystem from "@/lib/fs";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { logger } from "@/utils/logger";
+import { Command } from "commander";
 
 export const llmCommand = new Command("llm")
   .description("Manage LLM configurations (global by default, --project for current project)")

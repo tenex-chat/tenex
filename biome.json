@@ -1,27 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.2.0/schema.json",
   "files": {
-    "includes": [
-      "**",
-      "!**/.tenex/**",
-      "!**/node_modules/**",
-      "!**/dist/**",
-      "!**/build/**",
-      "!**/*.min.js",
-      "!**/*.bundle.js",
-      "!**/*.test.js",
-      "!**/*.test.ts",
-      "!**/*.test.jsx",
-      "!**/*.test.tsx",
-      "!**/*.spec.js",
-      "!**/*.spec.ts",
-      "!**/*.spec.jsx",
-      "!**/*.spec.tsx",
-      "!**/tests/**",
-      "!**/test/**",
-      "!**/__tests__/**",
-      "!**/__test__/**"
-    ]
+    "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.js"]
   },
   "formatter": {
     "enabled": true,
@@ -36,7 +16,6 @@
       "recommended": true
     }
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "javascript": {
     "formatter": {
       "quoteStyle": "double",

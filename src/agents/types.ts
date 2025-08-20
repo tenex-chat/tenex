@@ -1,5 +1,5 @@
-import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool } from "@/tools/types";
+import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * Simplified agent representation for UI display and selection

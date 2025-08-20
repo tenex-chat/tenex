@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import type { ExecutionQueueManager } from "../executionQueue";
 import type { Phase } from "../phases";
-import { getValidTransitions, PHASES } from "../phases";
+import { PHASES, getValidTransitions } from "../phases";
 import type { Conversation, PhaseTransition } from "../types";
 
 export interface PhaseTransitionContext {

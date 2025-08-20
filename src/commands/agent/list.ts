@@ -1,8 +1,8 @@
-import { Command } from "commander";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import { Command } from "commander";
 
 interface ListOptions {
   project?: boolean;

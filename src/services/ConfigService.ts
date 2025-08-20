@@ -1,6 +1,5 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import type { z } from "zod";
 import { AGENTS_FILE, CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import type {
@@ -19,6 +18,7 @@ import {
 } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { z } from "zod";
 
 /**
  * Centralized configuration service for TENEX
@@ -28,7 +28,6 @@ import { logger } from "@/utils/logger";
 export class ConfigService {
   private static instance: ConfigService;
   private cache = new Map<string, { data: unknown; timestamp: number }>();
-  private readonly CACHE_TTL_MS = 5000; // 5 seconds
 
   private constructor() {}
 
@@ -358,7 +357,8 @@ export class ConfigService {
     }
 
     const now = Date.now();
-    if (now - entry.timestamp > this.cacheTTL) {
+    if (now - entry.timestamp > 5000) {
+      // 5 seconds TTL
       this.cache.delete(filePath);
       return null;
     }

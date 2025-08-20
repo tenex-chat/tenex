@@ -56,7 +56,7 @@ The `ExecutionContext` (src/agents/execution/types.ts) carries all necessary inf
 
 The `AgentExecutor` (src/agents/execution/AgentExecutor.ts) is the main orchestrator that:
 
-1. **Creates and uses the ReasonActLoop** for all agent executions (via `getBackend()` method)
+1. **Creates and uses the ReasonActLoop** for all agent executions (via `getBackend()` method which returns a new ReasonActLoop instance)
 2. **Builds messages** including system prompts and conversation history
 3. **Manages execution lifecycle** including typing indicators and error handling
 4. **Tracks execution time** for performance monitoring

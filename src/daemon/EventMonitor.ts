@@ -1,7 +1,7 @@
-import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
-import { nip19 } from "nostr-tools";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
+import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
+import { nip19 } from "nostr-tools";
 import type { IProcessManager } from "./ProcessManager";
 import type { IProjectManager } from "./ProjectManager";
 

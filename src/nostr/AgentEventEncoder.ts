@@ -1,9 +1,9 @@
-import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
+import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.

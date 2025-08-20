@@ -1,9 +1,9 @@
+import { getRelayUrls } from "@/utils/relays";
 /**
  * TENEX CLI: NDK Singleton
  * Manages a single NDK instance for the CLI
  */
 import NDK from "@nostr-dev-kit/ndk";
-import { getRelayUrls } from "@/utils/relays";
 
 let ndk: NDK | undefined;
 

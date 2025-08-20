@@ -1,13 +1,13 @@
 import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { z } from "zod";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import type { Tool } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { z } from "zod";
 import { adaptMCPTool } from "./MCPToolAdapter";
 
 interface MCPClient {

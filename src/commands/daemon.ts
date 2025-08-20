@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import { Command } from "commander";
 import { EventMonitor } from "@/daemon/EventMonitor";
 import { ProcessManager } from "@/daemon/ProcessManager";
 import { ProjectManager } from "@/daemon/ProjectManager";
@@ -8,6 +7,7 @@ import { configService } from "@/services";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "@/utils/setup";
+import { Command } from "commander";
 
 export const daemonCommand = new Command("daemon")
   .description("Start the TENEX daemon to monitor Nostr events")

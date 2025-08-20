@@ -1,12 +1,12 @@
-import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import type { NDKEvent, NDKSubscription, NDKTask } from "@nostr-dev-kit/ndk";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { Conversation } from "@/conversations/types";
-import { getNDK } from "@/nostr/ndkClient";
 import type { TaskPublisher } from "@/nostr/TaskPublisher";
+import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
+import type { NDKEvent, NDKSubscription, NDKTask } from "@nostr-dev-kit/ndk";
 import { DelayedMessageBuffer } from "./DelayedMessageBuffer";
 import { ClaudeCodeExecutor } from "./executor";
 

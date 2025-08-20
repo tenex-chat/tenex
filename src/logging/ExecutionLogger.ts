@@ -1,9 +1,9 @@
-import chalk from "chalk";
 import type { Phase } from "@/conversations/phases";
 import type { TracingContext } from "@/tracing";
 import { formatDuration } from "@/utils/formatting";
 import type { LogModule } from "@/utils/logger";
 import { logInfo } from "@/utils/logger";
+import chalk from "chalk";
 
 /**
  * Simplified event system using discriminated unions

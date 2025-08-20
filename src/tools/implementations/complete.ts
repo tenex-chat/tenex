@@ -1,5 +1,5 @@
-import { z } from "zod";
 import type { CompletionIntent } from "@/nostr/AgentEventEncoder";
+import { z } from "zod";
 import { createToolDefinition, success } from "../types";
 
 const completeSchema = z.object({

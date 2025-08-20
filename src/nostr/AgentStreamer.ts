@@ -1,5 +1,5 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { EventContext, StreamingIntent } from "./AgentEventEncoder";
 import type { AgentPublisher } from "./AgentPublisher";
 
@@ -34,7 +34,7 @@ export class AgentStreamer {
    * Returns a handle that RAL can use to stream content.
    */
   createStreamHandle(context: EventContext): StreamHandle {
-    const streamId = `${context.conversationId}-${Date.now()}`;
+    const streamId = `${context.conversationEvent?.id || context.triggeringEvent?.id || "stream"}-${Date.now()}`;
 
     const state: StreamState = {
       context,
@@ -144,10 +144,9 @@ export class AgentStreamer {
     const finalContent = state.accumulatedContent + state.pendingContent;
 
     // Merge any additional metadata into context
-    const finalContext: EventContext = {
-      ...state.context,
-      ...metadata,
-    };
+    const finalContext: EventContext = metadata
+      ? Object.assign({}, state.context, metadata)
+      : state.context;
 
     // Use AgentPublisher to create the final event
     const finalEvent = await this.agentPublisher.conversation(

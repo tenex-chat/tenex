@@ -1,7 +1,7 @@
-import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { getProjectContext } from "@/services";
+import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 
 /**
  * AgentEventDecoder - Utilities for decoding and analyzing Nostr events
