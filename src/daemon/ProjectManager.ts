@@ -90,7 +90,7 @@ export class ProjectManager implements IProjectManager {
       }
 
       // Now set the project context once with all agents loaded
-      setProjectContext(project, loadedAgents);
+      await setProjectContext(project, loadedAgents);
 
       // Republish kind:0 events for all agents
       await agentRegistry.republishAllAgentProfiles(project);
@@ -191,7 +191,7 @@ export class ProjectManager implements IProjectManager {
       });
 
       // Initialize ProjectContext
-      setProjectContext(project, loadedAgents);
+      await setProjectContext(project, loadedAgents);
 
       // Initialize ConversationCoordinator with ExecutionQueueManager for CLI commands
       const projectCtx = (await import("@/services")).getProjectContext();

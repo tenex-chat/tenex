@@ -6,22 +6,29 @@
  * or in bulk for agent assignment.
  */
 
-import { agentsDiscover } from "./implementations/agents-discover";
-import { agentsHire } from "./implementations/agents-hire";
-import { analyze } from "./implementations/analyze";
-import { claudeCode } from "./implementations/claude_code";
-import { completeTool } from "./implementations/complete";
-import { delegateTool } from "./implementations/delegate";
-import { delegatePhaseTool } from "./implementations/delegate_phase";
-import { generateInventoryTool } from "./implementations/generateInventory";
-import { lessonLearnTool } from "./implementations/learn";
-import { lessonGetTool } from "./implementations/lessonGet";
-import { mcpDiscover } from "./implementations/mcp-discover";
-import { nostrProjectsTool } from "./implementations/nostr-projects";
-import { readPathTool } from "./implementations/readPath";
-import { shellTool } from "./implementations/shell";
-import { writeContextFileTool } from "./implementations/writeContextFile";
-import type { Tool } from "./types";
+import { agentsDiscover } from "./implementations/agents-discover.js";
+import { agentsHire } from "./implementations/agents-hire.js";
+import { agentsList } from "./implementations/agents-list.js";
+import { agentsRead } from "./implementations/agents-read.js";
+import { agentsWrite } from "./implementations/agents-write.js";
+import { analyze } from "./implementations/analyze.js";
+import { claudeCode } from "./implementations/claude_code.js";
+import { completeTool } from "./implementations/complete.js";
+import { delegateTool } from "./implementations/delegate.js";
+import { delegatePhaseTool } from "./implementations/delegate_phase.js";
+import { generateInventoryTool } from "./implementations/generateInventory.js";
+import { lessonLearnTool } from "./implementations/learn.js";
+import { lessonGetTool } from "./implementations/lessonGet.js";
+import { mcpDiscover } from "./implementations/mcp-discover.js";
+import { nostrProjectsTool } from "./implementations/nostr-projects.js";
+import { readPathTool } from "./implementations/readPath.js";
+import { reportDeleteTool } from "./implementations/report-delete.js";
+import { reportReadTool } from "./implementations/report-read.js";
+import { reportWriteTool } from "./implementations/report-write.js";
+import { reportsListTool } from "./implementations/reports-list.js";
+import { shellTool } from "./implementations/shell.js";
+import { writeContextFileTool } from "./implementations/writeContextFile.js";
+import type { Tool } from "./types.js";
 
 /**
  * Union type of all available tool names in the system.
@@ -38,11 +45,18 @@ export type ToolName =
   | "shell"
   | "agents_discover"
   | "agents_hire"
+  | "agents_list"
+  | "agents_read"
+  | "agents_write"
   | "discover_capabilities"
   | "delegate"
   | "delegate_phase"
   | "nostr_projects"
-  | "claude_code";
+  | "claude_code"
+  | "report_write"
+  | "report_read"
+  | "reports_list"
+  | "report_delete";
 
 /**
  * Registry of all available tools mapped by their canonical names.
@@ -60,11 +74,18 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["shell", shellTool],
   ["agents_discover", agentsDiscover],
   ["agents_hire", agentsHire],
+  ["agents_list", agentsList],
+  ["agents_read", agentsRead],
+  ["agents_write", agentsWrite],
   ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
   ["delegate_phase", delegatePhaseTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
+  ["report_write", reportWriteTool],
+  ["report_read", reportReadTool],
+  ["reports_list", reportsListTool],
+  ["report_delete", reportDeleteTool],
 ]);
 
 /**

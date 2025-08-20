@@ -1,0 +1,145 @@
+import { fileExists, readFile } from "@/lib/fs";
+import { getProjectContext } from "@/services/ProjectContext";
+import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
+import { createZodSchema, failure, success } from "@/tools/types";
+import { logger } from "@/utils/logger";
+import * as path from "node:path";
+import { z } from "zod";
+
+// Define the input schema
+const agentsReadSchema = z.object({
+  slug: z.string().describe("The slug identifier of the agent to read"),
+});
+
+type AgentsReadInput = z.infer<typeof agentsReadSchema>;
+
+// Define the output type
+interface AgentsReadOutput {
+  success: boolean;
+  message?: string;
+  error?: string;
+  agent?: {
+    slug: string;
+    name: string;
+    role: string;
+    description?: string;
+    instructions?: string;
+    useCriteria?: string;
+    llmConfig?: string;
+    tools?: string[];
+    mcp?: boolean;
+    filePath?: string;
+    isGlobal?: boolean;
+  };
+}
+
+/**
+ * Tool: agents_read
+ * Read a local agent definition from JSON file
+ */
+export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
+  name: "agents_read",
+  description: "Read a local agent definition from its JSON file",
+  parameters: createZodSchema(agentsReadSchema),
+  execute: async (
+    input: Validated<AgentsReadInput>,
+    _context: ExecutionContext
+  ): Promise<Result<ToolError, AgentsReadOutput>> => {
+    try {
+      const { slug } = input.value;
+
+      if (!slug) {
+        return failure({
+          kind: "validation",
+          field: "slug",
+          message: "Agent slug is required",
+        });
+      }
+
+      // Get project context
+      const projectPath = process.cwd();
+      
+      // Try to read from project agents first
+      let agentsDir = path.join(projectPath, ".tenex", "agents");
+      let fileName = `${slug}.json`;
+      let filePath = path.join(agentsDir, fileName);
+      let isGlobal = false;
+
+      // Check if the file exists in project directory
+      if (!(await fileExists(filePath))) {
+        // Try global agents directory
+        const homedir = process.env.HOME || process.env.USERPROFILE || "";
+        agentsDir = path.join(homedir, ".tenex", "agents");
+        filePath = path.join(agentsDir, fileName);
+        isGlobal = true;
+
+        if (!(await fileExists(filePath))) {
+          return success({
+            success: false,
+            error: `Agent definition for slug "${slug}" not found in project or global agents`,
+          });
+        }
+      }
+
+      // Read the agent definition file
+      let agentDefinition: any;
+      try {
+        const content = await readFile(filePath);
+        agentDefinition = JSON.parse(content);
+      } catch (error) {
+        return failure({
+          kind: "execution",
+          tool: "agents_read",
+          message: `Failed to read or parse agent definition file: ${error}`,
+          cause: error,
+        });
+      }
+
+      // Also check if agent is in registry to get additional metadata
+      const registryPath = isGlobal
+        ? path.join(path.dirname(agentsDir), "agents.json")
+        : path.join(projectPath, ".tenex", "agents.json");
+      
+      let registryEntry: any = null;
+      if (await fileExists(registryPath)) {
+        try {
+          const content = await readFile(registryPath);
+          const registry = JSON.parse(content);
+          registryEntry = registry[slug];
+        } catch (error) {
+          logger.debug("Failed to read agents registry", { error });
+        }
+      }
+
+      logger.info(`Successfully read agent definition for "${agentDefinition.name}" (${slug})`);
+      logger.info(`  Location: ${isGlobal ? "Global" : "Project"}`);
+      logger.info(`  File: ${filePath}`);
+
+      return success({
+        success: true,
+        message: `Successfully read agent definition for "${agentDefinition.name}"`,
+        agent: {
+          slug,
+          name: agentDefinition.name,
+          role: agentDefinition.role,
+          description: agentDefinition.description,
+          instructions: agentDefinition.instructions,
+          useCriteria: agentDefinition.useCriteria,
+          llmConfig: agentDefinition.llmConfig,
+          tools: agentDefinition.tools,
+          mcp: agentDefinition.mcp,
+          filePath,
+          isGlobal,
+        },
+      });
+    } catch (error) {
+      logger.error("Failed to read agent definition", { error });
+      return failure({
+        kind: "execution",
+        tool: "agents_read",
+        message: error instanceof Error ? error.message : String(error),
+        cause: error,
+      });
+    }
+  },
+};

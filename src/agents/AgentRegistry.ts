@@ -792,30 +792,15 @@ export class AgentRegistry {
     const toolNames =
       agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
 
+    // CRITICAL: Ensure 'complete' tool is always included for ALL agents
+    // This is a core requirement - all agents must be able to complete tasks
+    if (!toolNames.includes("complete")) {
+      toolNames.push("complete");
+    }
+
     // Convert tool names to Tool instances
     const { getTools } = await import("@/tools/registry");
-    // Validate and filter tool names
-    const validToolNames = toolNames.filter((name): name is ToolName => {
-      const validTools: ToolName[] = [
-        "read_path",
-        "write_context_file",
-        "complete",
-        "analyze",
-        "generate_inventory",
-        "lesson_learn",
-        "lesson_get",
-        "shell",
-        "agents_discover",
-        "agents_hire",
-        "discover_capabilities",
-        "delegate",
-        "delegate_phase",
-        "nostr_projects",
-        "claude_code",
-      ];
-      return validTools.includes(name as ToolName);
-    });
-    agent.tools = getTools(validToolNames);
+    agent.tools = getTools(toolNames as ToolName[]);
 
     return agent;
   }
@@ -931,28 +916,7 @@ export class AgentRegistry {
         // FIX: Force update the tools for built-in agents
         if (def.tools !== undefined) {
           const { getTools } = await import("@/tools/registry");
-          // Validate and filter tool names
-          const validToolNames = def.tools.filter((name): name is ToolName => {
-            const validTools: ToolName[] = [
-              "read_path",
-              "write_context_file",
-              "complete",
-              "analyze",
-              "generate_inventory",
-              "lesson_learn",
-              "lesson_get",
-              "shell",
-              "agents_discover",
-              "agents_hire",
-              "discover_capabilities",
-              "delegate",
-              "delegate_phase",
-              "nostr_projects",
-              "claude_code",
-            ];
-            return validTools.includes(name as ToolName);
-          });
-          existingAgent.tools = getTools(validToolNames);
+          existingAgent.tools = getTools(def.tools as ToolName[]);
         }
         existingAgent.isBuiltIn = true;
       } else {

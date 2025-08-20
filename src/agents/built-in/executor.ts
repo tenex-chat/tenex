@@ -26,7 +26,7 @@ After claude_code returns its implementation report:
 - Analyze what was changed/created
 - Determine which expert agents should review the implementation
 - Use delegate() to send the implementation report to appropriate experts
-- Ask experts: "Please review this implementation: [claude_code's report]"
+- Ask experts: "Check if this implementation violates any critical principles in your domain. Respond with 'LGTM' or identify principle violations only: [claude_code's report]"
 
 ### Step 3: Synthesize and Decide
 After receiving all expert reviews, you MUST decide:
@@ -83,9 +83,9 @@ Executor: Use claude_code() tool: "Implement user authentication"
 ↓
 claude_code: "Created auth service with JWT tokens..."
 ↓
-Executor: delegate(["security-expert", "architect"], "Review this auth implementation: [report]")
+Executor: delegate(["security-expert", "architect"], "Check if this implementation violates any critical principles in your domain. Respond with 'LGTM' or identify principle violations only: [report]")
 ↓
-Experts: "Need to add rate limiting and use refresh tokens"
+Experts: "Violates rate limiting principle: authentication endpoints vulnerable to brute force"
 ↓
 Executor: Use claude_code() tool: "Revise implementation with: 
   - Add rate limiting to login endpoint
@@ -93,9 +93,9 @@ Executor: Use claude_code() tool: "Revise implementation with:
 ↓
 claude_code: "Added rate limiting and refresh tokens..."
 ↓
-Executor: delegate(["security-expert", "architect"], "Verify fixes: [updated report]")
+Executor: delegate(["security-expert", "architect"], "Verify principle compliance after fixes: [updated report]")
 ↓
-Experts: "Approved"
+Experts: "LGTM"
 ↓
 Executor: complete("Authentication implemented with security review complete")
 

@@ -23,10 +23,13 @@ export async function fetchConversation(
   ndk: NDK,
   _projectPath: string
 ): Promise<string> {
+  // Strip "nostr:" prefix if present
+  const cleanEventId = bech32Event.startsWith("nostr:") ? bech32Event.substring(6) : bech32Event;
+  
   // Fetch the event directly using the nevent string
-  const inputEvent = await ndk.fetchEvent(bech32Event);
+  const inputEvent = await ndk.fetchEvent(cleanEventId);
   if (!inputEvent) {
-    throw new Error(`Event ${bech32Event} not found`);
+    throw new Error(`Event ${cleanEventId} not found`);
   }
 
   // Get project context to identify human user

@@ -31,6 +31,22 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     ];
   }
 
+  // Special handling for human-resources agent - gets agent management tools
+  if (agent.slug === "human-resources") {
+    return [
+      readPathTool.name,
+      lessonLearnTool.name,
+      claudeCode.name,
+      completeTool.name,
+      delegateTool.name,
+      "agents_list",
+      "agents_discover",
+      "agents_hire",
+      "agents_read",
+      "agents_write",
+    ];
+  }
+
   // Base tools for all other agents
   const tools = [
     readPathTool.name,
@@ -40,6 +56,13 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     completeTool.name, // All agents can complete tasks
     delegateTool.name, // Non-PM agents use regular delegate
   ];
+
+  // Give agents with matching slugs access to read and write their own definitions
+  // This allows agents to self-modify and introspect
+  const agentSelfManagementSlugs = ["human-resources", "self-improving-agent", "meta-agent"];
+  if (agentSelfManagementSlugs.includes(agent.slug)) {
+    tools.push("agents_read", "agents_write");
+  }
 
   return tools;
 }

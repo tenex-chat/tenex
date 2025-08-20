@@ -22,13 +22,13 @@ export async function fetchAgentDefinition(
   pubkey: string;
 } | null> {
   try {
-    const event = await ndk.fetchEvent(eventId, {
-      closeOnEose: true,
-      groupable: false,
-    });
+    // Strip "nostr:" prefix if present
+    const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
+    
+    const event = await ndk.fetchEvent(cleanEventId, { groupable: false });
 
     if (!event) {
-      logger.warning(`Agent event not found: ${eventId}`);
+      logger.warning(`Agent event not found: ${cleanEventId}`);
       return null;
     }
 

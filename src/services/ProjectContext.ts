@@ -1,6 +1,8 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { NDKProjectStatus } from "@/events/NDKProjectStatus";
+import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 
@@ -149,7 +151,7 @@ export class ProjectContext {
    * Safely update project data without creating a new instance.
    * This ensures all parts of the system work with consistent state.
    */
-  updateProjectData(newProject: NDKProject, newAgents: Map<string, AgentInstance>): void {
+  async updateProjectData(newProject: NDKProject, newAgents: Map<string, AgentInstance>): Promise<void> {
     this.project = newProject;
     this.agents = new Map(newAgents);
 
@@ -165,6 +167,92 @@ export class ProjectContext {
       totalAgents: newAgents.size,
       agentSlugs: Array.from(newAgents.keys()),
     });
+
+    // Publish 24010 event to notify about the project status update
+    await this.publishProjectStatus();
+  }
+
+  /**
+   * Publish a 24010 event with the current project status
+   */
+  public async publishProjectStatus(): Promise<void> {
+    try {
+      const ndk = getNDK();
+      const status = new NDKProjectStatus(ndk);
+      
+      // Set the project reference (format: kind:pubkey:dTag)
+      const projectReference = `${this.project.kind}:${this.project.pubkey}:${this.project.dTag}`;
+      status.projectReference = projectReference;
+      
+      // Add all active agents
+      for (const [slug, agent] of this.agents) {
+        status.addAgent(agent.pubkey, slug);
+      }
+      
+      // Group agents by model
+      const modelToAgents = new Map<string, string[]>();
+      for (const [slug, agent] of this.agents) {
+        if (agent.llmConfig) {
+          const modelSlug = agent.llmConfig;
+          if (!modelToAgents.has(modelSlug)) {
+            modelToAgents.set(modelSlug, []);
+          }
+          modelToAgents.get(modelSlug)?.push(slug);
+        }
+      }
+      
+      // Add model configurations
+      for (const [modelSlug, agentSlugs] of modelToAgents) {
+        status.addModel(modelSlug, agentSlugs);
+      }
+      
+      // Import the registry to get all available tools
+      const { getAllTools } = await import("@/tools/registry");
+      const allTools = getAllTools();
+      
+      // Create a map of all tools with their assigned agents
+      const toolToAgents = new Map<string, string[]>();
+      
+      // First, add all registered tools (even if unassigned)
+      for (const tool of allTools) {
+        toolToAgents.set(tool.name, []);
+      }
+      
+      // Then populate with agent assignments
+      for (const [slug, agent] of this.agents) {
+        if (agent.tools && agent.tools.length > 0) {
+          for (const tool of agent.tools) {
+            const toolName = typeof tool === 'string' ? tool : tool.name;
+            const agentList = toolToAgents.get(toolName);
+            if (agentList) {
+              agentList.push(slug);
+            }
+          }
+        }
+      }
+      
+      // Add all tool configurations (including unassigned ones)
+      for (const [toolName, agentSlugs] of toolToAgents) {
+        status.addTool(toolName, agentSlugs);
+      }
+      
+      // Set status content
+      status.status = `Project ${this.project.tagValue("title")} updated with ${this.agents.size} agents`;
+      
+      // Sign and publish the event
+      await status.sign(this.signer);
+      await status.publish();
+      
+      logger.info("Published project status update (24010)", {
+        projectId: this.project.id,
+        projectTitle: this.project.tagValue("title"),
+        agentCount: this.agents.size,
+        modelCount: modelToAgents.size,
+        toolCount: toolToAgents.size,
+      });
+    } catch (error) {
+      logger.error("Failed to publish project status update", { error });
+    }
   }
 }
 
@@ -174,8 +262,10 @@ let projectContext: ProjectContext | undefined;
 /**
  * Initialize the project context. Should be called once during project startup.
  */
-export function setProjectContext(project: NDKProject, agents: Map<string, AgentInstance>): void {
+export async function setProjectContext(project: NDKProject, agents: Map<string, AgentInstance>): Promise<void> {
   projectContext = new ProjectContext(project, agents);
+  // Publish initial 24010 status event
+  await projectContext.publishProjectStatus();
 }
 
 /**

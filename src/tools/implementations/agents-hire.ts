@@ -5,6 +5,7 @@ import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/too
 import { createZodSchema, failure, success } from "@/tools/types";
 import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { logger } from "@/utils/logger";
+import { filterAndRelaySetFromBech32 } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 
 // Define the input schema
@@ -46,7 +47,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
     _context: ExecutionContext
   ): Promise<Result<ToolError, AgentsHireOutput>> => {
     try {
-      const { eventId, slug } = input.value;
+      let { eventId, slug } = input.value;
 
       if (!eventId) {
         return failure({
@@ -56,15 +57,41 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
         });
       }
 
+      // Strip "nostr:" prefix if present
+      if (eventId.startsWith("nostr:")) {
+        eventId = eventId.substring(6);
+      }
+
+      // Get NDK instance for validation and fetching
+      const ndk = getNDK();
+
+      // Validate the event ID format
+      if (eventId.startsWith("nevent1") || eventId.startsWith("note1")) {
+        // Validate bech32 format
+        try {
+          filterAndRelaySetFromBech32(eventId, ndk);
+        } catch (error) {
+          return success({
+            success: false,
+            error: `Invalid event ID format: "${eventId}". Please provide a valid Nostr event ID in bech32 format (e.g., nevent1...) or hex format.`,
+          });
+        }
+      } else if (!/^[0-9a-f]{64}$/i.test(eventId)) {
+        // Not a valid hex format either
+        return success({
+          success: false,
+          error: `Invalid event ID format: "${eventId}". Please provide a valid Nostr event ID in bech32 format (e.g., nevent1...) or 64-character hex format.`,
+        });
+      }
+
       // Fetch the NDKAgentDefinition from the network
       // fetchAgentDefinition handles both hex and nevent formats
-      const ndk = getNDK();
       const agentDefinition = await fetchAgentDefinition(eventId, ndk);
 
       if (!agentDefinition) {
         return success({
           success: false,
-          error: `NDKAgentDefinition with event ID ${eventId} not found on the network`,
+          error: `Agent event not found: ${eventId}. Please ensure you provide a valid agent event ID from the Nostr network (e.g., nevent1qqsfryd2uw56t9jv3x29de0t5dwyzq5...).`,
         });
       }
 
@@ -114,6 +141,28 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
 
       // Add the agent to the project
       const agent = await registry.ensureAgent(agentSlug, agentConfig, projectContext.project);
+
+      // Update the project event to add the new agent reference
+      const project = projectContext.project;
+      
+      // Check if agent is already in project (shouldn't be, but let's be safe)
+      const hasAgent = project.tags.some(tag => tag[0] === "agent" && tag[1] === agentDefinition.id);
+      
+      if (!hasAgent) {
+        // Add the agent tag to the project
+        project.tags.push(["agent", agentDefinition.id]);
+        
+        // Sign and publish the updated project event
+        await project.sign(projectContext.signer);
+        await project.publish();
+        
+        logger.info(`Updated project event with new agent reference`);
+      }
+
+      // Update the ProjectContext with the new agent to trigger 24010 event
+      const updatedAgents = new Map(projectContext.agents);
+      updatedAgents.set(agentSlug, agent);
+      await projectContext.updateProjectData(projectContext.project, updatedAgents);
 
       logger.info(
         `Successfully hired NDKAgentDefinition "${agentDefinition.title}" (${agentDefinition.id})`

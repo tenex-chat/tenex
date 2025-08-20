@@ -71,7 +71,7 @@ describe("State Recovery E2E Tests", () => {
                 projectPath,
                 tenexConfig: { conversations: { persistence: "filesystem" } }
             }),
-            setProjectContext: () => {},
+            setProjectContext: async () => {},
             isProjectContextInitialized: () => true
         }));
         

@@ -220,7 +220,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
     const ndkProject = event as NDKProject;
 
     // Update the existing project context atomically
-    currentContext.updateProjectData(ndkProject, updatedAgents);
+    await currentContext.updateProjectData(ndkProject, updatedAgents);
 
     logger.info("Project context updated", {
       totalAgents: updatedAgents.size,

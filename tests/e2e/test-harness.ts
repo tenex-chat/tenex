@@ -262,7 +262,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
             initialize: () => {},
             getLessonsForAgent: () => []  // Add missing method
         }),
-        setProjectContext: () => {},
+        setProjectContext: async () => {},
         isProjectContextInitialized: () => true
     }));
     

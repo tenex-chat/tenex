@@ -78,22 +78,37 @@ export class EventHandler {
     // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
     if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
-    const pTags = event.getMatchingTags("p").map((t) => t[1].substring(0, 8));
-
     // Try to get agent slug if the event is from an agent
     let fromIdentifier = event.pubkey;
+    let forIdentifiers: string = "without any recipient";
+    
     try {
       const projectCtx = getProjectContext();
       const agent = projectCtx.getAgentByPubkey(event.pubkey);
       if (agent) {
         fromIdentifier = agent.slug;
       }
+      
+      // Process p-tags to show agent slugs where possible
+      const pTags = event.getMatchingTags("p");
+      if (pTags.length > 0) {
+        const recipients = pTags.map((t) => {
+          const pubkey = t[1];
+          const recipientAgent = projectCtx.getAgentByPubkey(pubkey);
+          return recipientAgent ? recipientAgent.slug : pubkey.substring(0, 8);
+        });
+        forIdentifiers = recipients.join(", ");
+      }
     } catch {
       // Project context might not be available, continue with pubkey
+      const pTags = event.getMatchingTags("p");
+      if (pTags.length > 0) {
+        forIdentifiers = pTags.map((t) => t[1].substring(0, 8)).join(", ");
+      }
     }
 
     logger.info(
-      `event handler, kind: ${event.kind} from ${fromIdentifier} for (${pTags.join(", ")})`
+      `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers})`
     );
 
     switch (event.kind) {

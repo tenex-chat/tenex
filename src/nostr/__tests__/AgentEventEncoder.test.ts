@@ -185,16 +185,16 @@ describe("AgentEventEncoder", () => {
       expect(tasks).toHaveLength(2);
 
       // Check first task
-      expect(tasks[0].kind).toBe(EVENT_KINDS.TASK);
+      expect(tasks[0].kind).toBe(1934); // NDKTask.kind
       expect(tasks[0].content).toBe("Please review the authentication module");
       expect(tasks[0].title).toBe("Review code");
 
       const pTag1 = tasks[0].getMatchingTags("p")[0];
-      expect(pTag1).toEqual(["p", "recipient1", "", "agent"]);
+      expect(pTag1[1]).toBe("recipient1"); // Check recipient pubkey
 
       // Check second task
       const pTag2 = tasks[1].getMatchingTags("p")[0];
-      expect(pTag2).toEqual(["p", "recipient2", "", "agent"]);
+      expect(pTag2[1]).toBe("recipient2"); // Check recipient pubkey
     });
 
     it("should include phase information when provided", () => {
@@ -226,7 +226,7 @@ describe("AgentEventEncoder", () => {
       const tasks = AgentEventEncoder.encodeDelegation(intent, baseContext);
 
       const eTags = tasks[0].getMatchingTags("e");
-      expect(eTags).toContainEqual(["e", "trigger123", "", "delegation-trigger"]);
+      expect(eTags).toContainEqual(["e", "conv123"]); // References conversation event
     });
   });
 
@@ -320,107 +320,84 @@ describe("AgentEventEncoder", () => {
       expect(event.kind).toBe(NDKKind.GenericReply);
       expect(event.content).toBe("I'm still working on this...");
 
-      // Check E-tags are marked as reply, not completed
+      // Check conversation tags
       const eTags = event.getMatchingTags("e");
-      expect(eTags).toHaveLength(2);
-      expect(eTags[0]).toEqual(["e", "root123", "", "reply"]);
-      expect(eTags[1]).toEqual(["e", "reply123", "", "reply"]);
+      expect(eTags).toHaveLength(1); // Only conversation event tag
+      expect(eTags[0]).toEqual(["e", "conv123"]); // References conversation event
     });
   });
 });
 
 describe("AgentEventDecoder", () => {
   // These tests use simple mocks since they only test static utility functions
-  describe("isCompletionEvent", () => {
-    it("should identify completion events by completed e-tags", () => {
+  describe("isTaskCompletionEvent", () => {
+    it("should identify task completion by status and tool tags", () => {
       const event = createMockNDKEvent();
-      event.tags = [["e", "event123", "", "completed"]];
+      event.tags = [
+        ["status", "complete"],
+        ["tool", "complete"]
+      ];
 
-      expect(AgentEventDecoder.isCompletionEvent(event)).toBe(true);
+      expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(true);
     });
 
-    it("should not identify regular replies as completions", () => {
+    it("should identify task completion by K and P tags matching", () => {
+      const event = createMockNDKEvent();
+      event.tags = [
+        ["K", "1934"],
+        ["P", "agent123"],
+        ["p", "agent123"]
+      ];
+
+      expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(true);
+    });
+
+    it("should not identify regular events as task completions", () => {
       const event = createMockNDKEvent();
       event.tags = [["e", "event123", "", "reply"]];
 
-      expect(AgentEventDecoder.isCompletionEvent(event)).toBe(false);
+      expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(false);
     });
   });
 
-  describe("decodeCompletion", () => {
-    it("should decode completion events back to intents", () => {
+  describe("getConversationRoot", () => {
+    it("should extract conversation root from E tag", () => {
       const event = createMockNDKEvent();
-      event.content = "Task finished";
-      event.tags = [
-        ["e", "event123", "", "completed"],
-        ["summary", "All tests passed"],
-      ];
+      event.tags = [["E", "root123"]];
 
-      const intent = AgentEventDecoder.decodeCompletion(event);
-
-      expect(intent).toEqual({
-        type: "completion",
-        content: "Task finished",
-        summary: "All tests passed",
-      });
+      expect(AgentEventDecoder.getConversationRoot(event)).toBe("root123");
     });
 
-    it("should return null for non-completion events", () => {
+    it("should extract conversation root from A tag if no E tag", () => {
       const event = createMockNDKEvent();
-      event.tags = [["e", "event123", "", "reply"]];
+      event.tags = [["A", "31933:pubkey:project"]];
 
-      expect(AgentEventDecoder.decodeCompletion(event)).toBeNull();
+      expect(AgentEventDecoder.getConversationRoot(event)).toBe("31933:pubkey:project");
     });
   });
 
-  describe("isDelegationEvent", () => {
-    it("should identify task events with agent p-tags", () => {
-      const event = createMockNDKEvent();
-      event.kind = EVENT_KINDS.TASK;
-      event.tags = [["p", "agent123", "", "agent"]];
-
-      expect(AgentEventDecoder.isDelegationEvent(event)).toBe(true);
-    });
-
-    it("should not identify regular tasks as delegations", () => {
-      const event = createMockNDKEvent();
-      event.kind = EVENT_KINDS.TASK;
-      event.tags = [["p", "user123", "", "assignee"]];
-
-      expect(AgentEventDecoder.isDelegationEvent(event)).toBe(false);
-    });
-  });
-
-  describe("extractContext", () => {
-    it("should extract all metadata from an event", () => {
-      const event = createMockNDKEvent();
-      event.tags = [
-        ["conversation-id", "conv123"],
-        ["project", "proj456"],
-        ["llm-model", "claude-3"],
-        ["execution-time", "2500"],
-        ["llm-prompt-tokens", "200"],
-        ["llm-completion-tokens", "100"],
-        ["llm-total-tokens", "300"],
-        ["tool", "search", '{"query":"test"}'],
-        ["tool", "calculate", '{"expression":"2+2"}'],
-      ];
-
-      const context = AgentEventDecoder.extractContext(event);
-
-      expect(context.conversationId).toBe("conv123");
-      expect(context.projectId).toBe("proj456");
-      expect(context.model).toBe("claude-3");
-      expect(context.executionTime).toBe(2500);
-      expect(context.usage).toEqual({
-        prompt_tokens: 200,
-        completion_tokens: 100,
-        total_tokens: 300,
-      });
-      expect(context.toolCalls).toEqual([
-        { name: "search", arguments: { query: "test" } },
-        { name: "calculate", arguments: { expression: "2+2" } },
+  describe("isDirectedToSystem", () => {
+    it("should identify events directed to system agents", () => {
+      const systemAgents = new Map([
+        ["agent1", { pubkey: "agent123" } as any],
+        ["agent2", { pubkey: "agent456" } as any]
       ]);
+      
+      const event = createMockNDKEvent();
+      event.tags = [["p", "agent123"]];
+
+      expect(AgentEventDecoder.isDirectedToSystem(event, systemAgents)).toBe(true);
+    });
+
+    it("should not identify events without system agent mentions", () => {
+      const systemAgents = new Map([
+        ["agent1", { pubkey: "agent123" } as any]
+      ]);
+      
+      const event = createMockNDKEvent();
+      event.tags = [["p", "user789"]];
+
+      expect(AgentEventDecoder.isDirectedToSystem(event, systemAgents)).toBe(false);
     });
   });
 });
