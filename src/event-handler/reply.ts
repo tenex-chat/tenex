@@ -37,13 +37,28 @@ export const handleChatMessage = async (
 
   // Check if this message is directed to the system using centralized decoder
   const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(event, projectCtx.agents);
-  if (!isDirectedToSystem && AgentEventDecoder.isEventFromAgent(event, projectCtx.agents)) {
-    // Agent event not directed to system - ignore
-    logger.debug(`Skipping agent event not directed to system: ${event.id?.substring(0, 8)}`);
+  const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
+  
+  if (!isDirectedToSystem && isFromAgent) {
+    // Agent event not directed to system - only add to conversation history, don't process
+    logger.debug(`Agent event not directed to system - adding to history only: ${event.id?.substring(0, 8)}`);
+    
+    // Try to find and update the conversation this event belongs to
+    const registry = DelegationRegistry.getInstance();
+    const resolver = new ConversationResolver(context.conversationManager, registry);
+    const result = await resolver.resolveConversationForEvent(event);
+    
+    if (result.conversation) {
+      // Add the event to conversation history without triggering any agent processing
+      await context.conversationManager.addEvent(result.conversation.id, event);
+      logger.debug(`Added agent response to conversation history: ${result.conversation.id.substring(0, 8)}`);
+    } else {
+      logger.debug(`Could not find conversation for agent event: ${event.id?.substring(0, 8)}`);
+    }
     return;
   }
 
-  // Process the reply
+  // Process the reply (triggers agent execution)
   try {
     await handleReplyLogic(event, context);
   } catch (error) {

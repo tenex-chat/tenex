@@ -33,7 +33,7 @@ EVENT_KINDS = {
     TYPING_INDICATOR_STOP: 24112,  // Typing stop
     STREAMING_RESPONSE: 21111,      // Real-time streaming
     TENEX_LOG: 24015,              // System logs
-    LLM_CONFIG_CHANGE: 24020,      // Dynamic config updates
+    AGENT_CONFIG_UPDATE: 24020,    // Agent configuration updates
 }
 ```
 
@@ -46,7 +46,7 @@ The central event processing hub that routes incoming events to appropriate hand
 - **Handler Routing**: Routes events based on kind to specialized handlers
 - **Component Management**: Initializes and manages ConversationCoordinator and AgentExecutor
 - **State Management**: Handles project update locking to prevent concurrent modifications
-- **Configuration Updates**: Processes LLM configuration changes dynamically
+- **Configuration Updates**: Processes agent configuration updates dynamically
 
 #### Specialized Event Handlers
 
@@ -203,8 +203,8 @@ Agent Response Generation
 ### 5. Configuration Update Flow
 
 ```
-LLM Config Change (kind: 24020)
-    → EventHandler.handleLLMConfigChange
+Agent Config Update (kind: 24020)
+    → EventHandler.handleAgentConfigUpdate
     → Extract agent pubkey and model
     → Update AgentRegistry
     → Persist configuration

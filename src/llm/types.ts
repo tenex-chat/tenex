@@ -19,8 +19,6 @@ export interface ApiKeyResult {
  * No agent or orchestration concerns
  */
 
-import { NDKAgentDefinition } from "@/events";
-import { NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
 import type {
   LlmCompletionOpts,
   Message as LlmMessage,
@@ -117,20 +115,17 @@ export type LLMProvider = (typeof LLM_PROVIDERS)[number];
 
 /**
  * Event kinds used in the TENEX system
+ * 
+ * Don't add kinds here if they are defined in NDKKind or if we have NDKEvent wrappers (i.e. don't add NDKKind.GenericReply or NDKProject.kind)
  */
 export const EVENT_KINDS = {
-  METADATA: 0,
-  GENERIC_REPLY: NDKKind.GenericReply,
-  PROJECT: NDKProject.kind,
-  AGENT_CONFIG: NDKAgentDefinition.kind,
-  TASK: NDKTask.kind,
   PROJECT_STATUS: 24010,
   AGENT_REQUEST: 4133,
   TYPING_INDICATOR: 24111,
   TYPING_INDICATOR_STOP: 24112,
   STREAMING_RESPONSE: 21111,
   FORCE_RELEASE: 24019,
-  LLM_CONFIG_CHANGE: 24020,
+  AGENT_CONFIG_UPDATE: 24020,
 } as const;
 
 /**

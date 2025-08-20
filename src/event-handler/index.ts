@@ -1,6 +1,6 @@
 import { formatAnyError } from "@/utils/error-formatter";
 import type NDK from "@nostr-dev-kit/ndk";
-import { type NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
@@ -80,33 +80,45 @@ export class EventHandler {
 
     const pTags = event.getMatchingTags("p").map((t) => t[1].substring(0, 8));
 
+    // Try to get agent slug if the event is from an agent
+    let fromIdentifier = event.pubkey;
+    try {
+      const projectCtx = getProjectContext();
+      const agent = projectCtx.getAgentByPubkey(event.pubkey);
+      if (agent) {
+        fromIdentifier = agent.slug;
+      }
+    } catch {
+      // Project context might not be available, continue with pubkey
+    }
+
     logger.info(
-      `event handler, kind: ${event.kind} from ${event.pubkey} for (${pTags.join(", ")})`
+      `event handler, kind: ${event.kind} from ${fromIdentifier} for (${pTags.join(", ")})`
     );
 
     switch (event.kind) {
-      case EVENT_KINDS.GENERIC_REPLY:
+      case NDKKind.GenericReply: // kind 1111
         await handleChatMessage(event, {
           conversationManager: this.conversationManager,
           agentExecutor: this.agentExecutor,
         });
         break;
 
-      case NDKKind.Thread:
+      case NDKKind.Thread: // kind 11
         await handleNewConversation(event, {
           conversationManager: this.conversationManager,
           agentExecutor: this.agentExecutor,
         });
         break;
 
-      case EVENT_KINDS.TASK:
+      case NDKTask.kind: // kind 1934
         await handleTask(NDKTask.from(event), {
           conversationManager: this.conversationManager,
           agentExecutor: this.agentExecutor,
         });
         break;
 
-      case EVENT_KINDS.PROJECT:
+      case NDKProject.kind: // kind 31933
         if (this.isUpdatingProject) {
           logger.warn("Project update already in progress, skipping event", {
             eventId: event.id,
@@ -122,8 +134,8 @@ export class EventHandler {
         }
         break;
 
-      case EVENT_KINDS.LLM_CONFIG_CHANGE:
-        await this.handleLLMConfigChange(event);
+      case EVENT_KINDS.AGENT_CONFIG_UPDATE:
+        await this.handleAgentConfigUpdate(event);
         break;
 
       default:
@@ -131,12 +143,12 @@ export class EventHandler {
     }
   }
 
-  private async handleLLMConfigChange(event: NDKEvent): Promise<void> {
+  private async handleAgentConfigUpdate(event: NDKEvent): Promise<void> {
     try {
       // Extract the agent pubkey from the event tags
       const agentPubkey = event.tagValue("p");
       if (!agentPubkey) {
-        logger.warn("LLM_CONFIG_CHANGE event missing agent pubkey", {
+        logger.warn("AGENT_CONFIG_UPDATE event missing agent pubkey", {
           eventId: event.id,
         });
         return;
@@ -164,20 +176,20 @@ export class EventHandler {
       // Check for model configuration change
       const newModel = event.tagValue("model");
       if (newModel) {
-        logger.info("Received LLM config change request", {
+        logger.info("Received agent config update request", {
           agentPubkey,
           newModel,
           eventId: event.id,
           from: event.pubkey,
         });
 
-        // Update the agent's LLM configuration persistently
+        // Update the agent's model configuration persistently
         const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
 
         if (updated) {
           // Also update in memory for immediate effect
           agent.llmConfig = newModel;
-          logger.info("Updated and persisted LLM configuration for agent", {
+          logger.info("Updated and persisted model configuration for agent", {
             agentName: agent.name,
             agentPubkey: agent.pubkey,
             newModel,
@@ -185,7 +197,7 @@ export class EventHandler {
         } else {
           // Fallback: at least update in memory for this session
           agent.llmConfig = newModel;
-          logger.warn("Updated LLM configuration in memory only (persistence failed)", {
+          logger.warn("Updated model configuration in memory only (persistence failed)", {
             agentName: agent.name,
             agentPubkey: agent.pubkey,
             newModel,
@@ -228,7 +240,7 @@ export class EventHandler {
 
       // If neither model nor tools were provided, log a warning
       if (!newModel && toolTags.length === 0) {
-        logger.warn("LLM_CONFIG_CHANGE event has neither model nor tool tags", {
+        logger.warn("AGENT_CONFIG_UPDATE event has neither model nor tool tags", {
           eventId: event.id,
           agentPubkey,
         });
