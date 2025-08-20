@@ -1,12 +1,12 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import chalk from "chalk";
-import type { CommandModule } from "yargs";
 import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import type { LLMCallLogEntry } from "@/llm/callLogger";
 import type { ToolCallLogEntry } from "@/tools/toolLogger";
 import { formatDuration } from "@/utils/formatting";
 import { logError, logInfo, logWarning } from "@/utils/logger";
+import chalk from "chalk";
+import type { CommandModule } from "yargs";
 import { selectConversation } from "./conversationSelector";
 
 interface TimelineEvent {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { ToolExecutionResult } from "@/tools/types";
 import {
+  type SerializedToolResult,
   deserializeToolResult,
   isSerializedToolResult,
-  type SerializedToolResult,
   serializeToolResult,
 } from "../ToolResult";
 

@@ -1,11 +1,11 @@
-import { confirm, input } from "@inquirer/prompts";
-import { Command } from "commander";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { configService } from "@/services/ConfigService";
 import { formatConfigScope, resolveConfigScope } from "@/utils/cli-config-scope";
 import { logger } from "@/utils/logger";
 import { isValidSlug } from "@/utils/validation";
+import { confirm, input } from "@inquirer/prompts";
+import { Command } from "commander";
 
 interface AddOptions {
   project?: boolean;

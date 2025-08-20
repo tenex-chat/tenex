@@ -1,8 +1,8 @@
+import { getAgentSlugFromEvent } from "@/nostr/utils";
+import { type ProjectContext, getProjectContext } from "@/services";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
-import { getAgentSlugFromEvent } from "@/nostr/utils";
-import { getProjectContext, type ProjectContext } from "@/services";
 
 interface ConversationEvent {
   event: NDKEvent;

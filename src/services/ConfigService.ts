@@ -1,6 +1,5 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import type { z } from "zod";
 import { AGENTS_FILE, CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import type {
@@ -19,6 +18,7 @@ import {
 } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { z } from "zod";
 
 /**
  * Centralized configuration service for TENEX

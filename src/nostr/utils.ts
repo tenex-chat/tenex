@@ -1,5 +1,5 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * Check if an event is from an agent (either project agent or individual agent)

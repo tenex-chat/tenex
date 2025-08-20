@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { configService } from "@/services";
 import type { TenexMCP } from "@/services/config/types";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { MCPService } from "../MCPService";
 
 // Mock modules
@@ -82,7 +82,8 @@ describe("MCPService", () => {
               },
             ],
           });
-        } else if (params.method === "tools/call") {
+        }
+        if (params.method === "tools/call") {
           return Promise.resolve({
             content: [{ type: "text", text: "Tool result" }],
           });

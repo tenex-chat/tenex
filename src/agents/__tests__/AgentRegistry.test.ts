@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import * as path from "node:path";
-import { nip19 } from "nostr-tools";
 import type { AgentConfig } from "@/agents/types";
 import * as fs from "@/lib/fs";
 import { configService } from "@/services";
+import { nip19 } from "nostr-tools";
 import { AgentRegistry } from "../AgentRegistry";
 
 // Mock file system

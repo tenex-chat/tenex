@@ -1,7 +1,5 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type {
   AgentConfig,
   AgentConfigOptionalNsec,
@@ -16,6 +14,8 @@ import type { TenexAgents } from "@/services/config/types";
 import type { ToolName } from "@/tools/registry";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
 import { getDefaultToolsForAgent } from "./constants";
 

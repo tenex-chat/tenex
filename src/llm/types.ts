@@ -19,6 +19,7 @@ export interface ApiKeyResult {
  * No agent or orchestration concerns
  */
 
+import { NDKAgentDefinition } from "@/events";
 import { NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
 import type {
   LlmCompletionOpts,
@@ -27,7 +28,6 @@ import type {
   LlmTool,
   LlmToolCall,
 } from "multi-llm-ts";
-import { NDKAgentDefinition } from "@/events";
 
 // Re-export multi-llm-ts types directly
 export type Message = LlmMessage;

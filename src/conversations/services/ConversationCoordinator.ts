@@ -1,5 +1,3 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Message } from "multi-llm-ts";
 import type { AgentInstance } from "@/agents/types";
 import { createExecutionLogger } from "@/logging/ExecutionLogger";
 import {
@@ -9,10 +7,12 @@ import {
 import type { TracingContext } from "@/tracing";
 import { createPhaseExecutionContext, createTracingContext } from "@/tracing";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";
+import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
-import { MessageBuilder } from "../MessageBuilder";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
 import type { AgentState, Conversation, ConversationMetadata } from "../types";

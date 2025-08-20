@@ -1,7 +1,7 @@
+import { getNDK } from "@/nostr/ndkClient";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { getNDK } from "@/nostr/ndkClient";
 import { discoverAgents } from "../agents-discover";
 
 jest.mock("@/nostr/ndkClient");

@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-// CLI entry point for TENEX
-import { Command } from "commander";
 import { handleCliError } from "@/utils/cli-error";
 import { logError } from "@/utils/logger";
+// CLI entry point for TENEX
+import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
 import { runDebugSystemPrompt } from "./commands/debug/index";

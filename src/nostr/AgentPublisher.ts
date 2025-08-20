@@ -1,14 +1,14 @@
+import type { AgentConfig, AgentInstance } from "@/agents/types";
+import { EVENT_KINDS } from "@/llm/types";
+import { getNDK } from "@/nostr/ndkClient";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { logger } from "@/utils/logger";
 import {
   NDKEvent,
   type NDKPrivateKeySigner,
   type NDKProject,
   type NDKTask,
 } from "@nostr-dev-kit/ndk";
-import type { AgentConfig, AgentInstance } from "@/agents/types";
-import { EVENT_KINDS } from "@/llm/types";
-import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
-import { logger } from "@/utils/logger";
 import {
   AgentEventEncoder,
   type CompletionIntent,

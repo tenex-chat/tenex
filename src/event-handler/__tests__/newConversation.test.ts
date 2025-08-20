@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createMockNDKEvent } from "@/test-utils";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleNewConversation } from "../newConversation";
 
 describe("handleNewConversation", () => {

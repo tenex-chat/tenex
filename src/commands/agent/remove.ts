@@ -1,8 +1,8 @@
-import { confirm } from "@inquirer/prompts";
-import { Command } from "commander";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import { confirm } from "@inquirer/prompts";
+import { Command } from "commander";
 
 interface RemoveOptions {
   project?: boolean;

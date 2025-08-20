@@ -1,9 +1,9 @@
-import type { NDKFilter } from "@nostr-dev-kit/ndk";
-import { z } from "zod";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { NDKFilter } from "@nostr-dev-kit/ndk";
+import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema } from "../types";
 

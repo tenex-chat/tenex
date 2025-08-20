@@ -1,9 +1,9 @@
-import chalk from "chalk";
-import inquirer from "inquirer";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import chalk from "chalk";
+import inquirer from "inquirer";
 
 export async function runInteractiveSetup(): Promise<TenexConfig> {
   logger.info(chalk.cyan("\n🚀 Welcome to TENEX Daemon Setup\n"));

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import * as ndkClient from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
+import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { EventMonitor } from "../EventMonitor";
 import type { IProcessManager } from "../ProcessManager";
 import type { IProjectManager } from "../ProjectManager";

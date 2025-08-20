@@ -1,8 +1,8 @@
-import type { NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { getNDK } from "@/nostr";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
+import type { NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 
 // Mock dependencies
 jest.mock("@/nostr");

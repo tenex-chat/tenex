@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type NDK from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import * as services from "@/services";
 import { logger } from "@/utils/logger";
+import type NDK from "@nostr-dev-kit/ndk";
 import { TaskPublisher } from "../TaskPublisher";
 
 // Define mock types for better type safety

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockExecutionContext } from "@/test-utils";
 import type { Tool } from "../core";
-import { createToolExecutor, ToolExecutor } from "../executor";
+import { ToolExecutor, createToolExecutor } from "../executor";
 import type { ExecutionContext } from "../types";
 
 describe("ToolExecutor", () => {

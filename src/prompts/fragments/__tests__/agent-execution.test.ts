@@ -1,7 +1,7 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Import fragments to register them
 import "../10-agent-execution";

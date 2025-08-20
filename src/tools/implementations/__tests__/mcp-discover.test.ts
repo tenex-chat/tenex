@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
+import type NDK from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { mcpDiscover } from "../mcp-discover";
 

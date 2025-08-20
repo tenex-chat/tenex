@@ -1,10 +1,10 @@
-import type { SDKMessage } from "@anthropic-ai/claude-code";
-import type { TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import chalk from "chalk";
 import { ClaudeCodeExecutor, type ClaudeCodeResult } from "@/claude/executor";
 import { formatAnyError } from "@/utils/error-formatter";
 import { colorizeJSON } from "@/utils/formatting";
 import { logDebug, logError, logInfo } from "@/utils/logger";
+import type { SDKMessage } from "@anthropic-ai/claude-code";
+import type { TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
+import chalk from "chalk";
 
 interface DebugClaudeCodeOptions {
   timeout?: number;

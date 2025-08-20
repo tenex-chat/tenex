@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { completeTool } from "../implementations/complete";
 import { readPathTool } from "../implementations/readPath";
 import { shellTool } from "../implementations/shell";
-import { getAllTools, getTool, getTools, type ToolName } from "../registry";
+import { type ToolName, getAllTools, getTool, getTools } from "../registry";
 
 describe("Tool Registry", () => {
   describe("getTool", () => {

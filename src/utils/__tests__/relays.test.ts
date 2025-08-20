@@ -19,7 +19,7 @@ describe("relays", () => {
 
   describe("getRelayUrls", () => {
     it("should return default relay URLs when RELAYS env is not set", () => {
-      delete process.env.RELAYS;
+      process.env.RELAYS = undefined;
       const urls = getRelayUrls();
       expect(urls).toEqual(["wss://tenex.chat"]);
     });

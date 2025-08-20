@@ -34,8 +34,8 @@ describe("Debug Utils", () => {
     }) as any;
 
     // Clear environment variables
-    delete process.env.DEBUG;
-    delete process.env.TENEX_DEBUG;
+    process.env.DEBUG = undefined;
+    process.env.TENEX_DEBUG = undefined;
   });
 
   afterEach(() => {

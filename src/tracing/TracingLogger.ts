@@ -1,4 +1,4 @@
-import { logger as baseLogger, type LogModule, parseModuleVerbosity } from "@/utils/logger";
+import { type LogModule, logger as baseLogger, parseModuleVerbosity } from "@/utils/logger";
 import type { TracingContext } from "./TracingContext";
 import { formatTracingContext } from "./TracingContext";
 

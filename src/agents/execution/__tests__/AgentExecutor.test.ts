@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { NDK } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { createMockLLMService } from "@/test-utils";
+import type { NDK } from "@nostr-dev-kit/ndk";
+import { Message } from "multi-llm-ts";
 import { AgentExecutor } from "../AgentExecutor";
 import type { ExecutionContext } from "../types";
 

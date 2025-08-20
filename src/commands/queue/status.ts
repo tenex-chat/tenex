@@ -1,9 +1,9 @@
-import chalk from "chalk";
-import { formatDistanceToNow } from "date-fns";
 import type { ExecutionQueueManager } from "@/conversations/executionQueue";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
+import chalk from "chalk";
+import { formatDistanceToNow } from "date-fns";
 
 interface StatusOptions {
   detailed?: boolean;

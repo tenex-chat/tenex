@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type NDK from "@nostr-dev-kit/ndk";
-import type { NDKSigner } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations/types";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type NDK from "@nostr-dev-kit/ndk";
+import type { NDKSigner } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { lessonLearnTool } from "../learn";
 

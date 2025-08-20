@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
@@ -6,6 +5,7 @@ import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/too
 import { createZodSchema, failure, success } from "@/tools/types";
 import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { logger } from "@/utils/logger";
+import { z } from "zod";
 
 // Define the input schema
 const agentsHireSchema = z.object({

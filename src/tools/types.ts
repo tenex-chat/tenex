@@ -2,8 +2,8 @@
  * Simplified tool system for TENEX
  */
 
-import type { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { z } from "zod";
 import type { ParameterSchema, Result, Tool, ToolError, Validated } from "./core";
 import { createZodSchema } from "./zod-schema";
 

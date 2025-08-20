@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { Command } from "commander";
 import * as fs from "@/lib/fs";
 import type { TenexConfig } from "@/services/config/types";
+import { Command } from "commander";
 import { addCommand } from "../add";
 
 // Mock modules

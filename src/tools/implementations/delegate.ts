@@ -1,7 +1,7 @@
-import { z } from "zod";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
+import { z } from "zod";
 import { createToolDefinition, failure, success } from "../types";
 
 const delegateSchema = z.object({

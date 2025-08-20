@@ -1,8 +1,8 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { type LlmRole, Message } from "multi-llm-ts";
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { type LlmRole, Message } from "multi-llm-ts";
 import { MessageBuilder } from "./MessageBuilder";
 import type { Phase } from "./phases";
 

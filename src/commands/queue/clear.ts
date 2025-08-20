@@ -1,8 +1,8 @@
-import chalk from "chalk";
-import inquirer from "inquirer";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
+import chalk from "chalk";
+import inquirer from "inquirer";
 
 interface ClearOptions {
   confirm?: boolean;
