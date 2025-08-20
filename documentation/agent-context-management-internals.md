@@ -232,7 +232,7 @@ This ensures tools and context remain consistent across agent turns.
 ### 2. Execution System
 
 - **AgentExecutor**: Consumes built contexts for LLM interaction
-- **ExecutionBackend**: Different backends (Claude, ReasonActLoop) use context differently
+- **ReasonActLoop**: The unified execution implementation uses context consistently
 - **NostrPublisher**: Updates conversation state after agent responses
 
 ### 3. Orchestration Layer

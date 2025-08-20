@@ -24,8 +24,8 @@ The orchestrator operates as an invisible message router that coordinates agent 
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────┐
-│                  RoutingBackend                          │
-│            (ExecutionBackend Implementation)             │
+│                 ReasonActLoop                            │
+│         (Unified Execution Implementation)               │
 │         • Validates routing decisions                    │
 │         • Executes target agents                         │
 │         • Handles error recovery                         │

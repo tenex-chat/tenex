@@ -457,18 +457,12 @@ The orchestrator learns from routing mistakes:
 
 ## Implementation Patterns
 
-### Backend Selection Pattern
+### Unified Execution Pattern
 
 ```typescript
-// AgentExecutor selects backend based on agent type
-private selectBackend(agent: Agent): ExecutionBackend {
-    if (agent.isOrchestrator) {
-        return new RoutingBackend(this.llmService, this.conversationManager);
-    }
-    if (agent.claudeSessionId) {
-        return new ClaudeBackend(this.llmService);
-    }
-    return new ReasonActLoop(this.llmService, this.conversationManager);
+// AgentExecutor uses a single unified backend for all agents
+private getBackend(): ReasonActLoop {
+    return new ReasonActLoop(this.llmService);
 }
 ```
 

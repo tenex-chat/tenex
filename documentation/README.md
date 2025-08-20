@@ -20,7 +20,7 @@ The foundational infrastructure that orchestrates multi-agent interactions, main
 ### Agent Systems
 
 #### 4. [Agent Execution Architecture](./agent-execution-architecture.md)
-The core execution framework that manages agent lifecycle, message building, tool execution, and response streaming. Provides the runtime environment for all agent operations with multiple execution backends.
+The core execution framework that manages agent lifecycle, message building, tool execution, and response streaming. Provides the runtime environment for all agent operations through the unified ReasonActLoop implementation.
 
 #### 5. [Agent Context Management Internals](./agent-context-management-internals.md)
 Deep technical analysis of how agents maintain and utilize context across conversations. Covers memory management, context windows, state persistence, and cross-conversation learning mechanisms.
@@ -138,7 +138,7 @@ Project-wide synchronization mechanism ensuring only one conversation per projec
 
 1. **New Agents**: Implement Agent interface, register in project context
 2. **New Tools**: Create tool definition, add to registry, assign to agents
-3. **New Backends**: Implement ExecutionBackend interface, add selection logic
+3. **New Execution Logic**: Modify the ReasonActLoop implementation if needed
 4. **New Phases**: Update phase definitions, transition rules, and constraints
 
 ### Best Practices

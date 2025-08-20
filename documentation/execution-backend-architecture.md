@@ -44,19 +44,19 @@ The `ExecutionContext` (src/agents/execution/types.ts) carries all necessary inf
 - **phase**: Current conversation phase (brainstorm, requirements, implementation, etc.)
 - **projectPath**: File system path to the project
 - **triggeringEvent**: The Nostr event that triggered this execution
-- **publisher**: NostrPublisher for sending responses
+- **replyTarget**: Optional: what to reply to (if different from trigger)
 - **conversationManager**: For conversation state management
 - **previousPhase**: For phase transition context
-- **handoff**: Phase transition information
 - **claudeSessionId**: For resuming Claude Code sessions
 - **agentExecutor**: Reference to the AgentExecutor for recursive execution
 - **tracingContext**: For distributed tracing
+- **isTaskCompletionReactivation**: True when agent is reactivated after delegated task completion
 
 ### 3. AgentExecutor
 
 The `AgentExecutor` (src/agents/execution/AgentExecutor.ts) is the main orchestrator that:
 
-1. **Instantiates the ReasonActLoop backend** for all agent executions
+1. **Creates and uses the ReasonActLoop** for all agent executions (via `getBackend()` method)
 2. **Builds messages** including system prompts and conversation history
 3. **Manages execution lifecycle** including typing indicators and error handling
 4. **Tracks execution time** for performance monitoring
@@ -64,7 +64,7 @@ The `AgentExecutor` (src/agents/execution/AgentExecutor.ts) is the main orchestr
 
 Key responsibilities:
 - Message construction with proper context (system prompts, agent lessons, MCP tools)
-- ReasonActLoop backend instantiation
+- ReasonActLoop instantiation and execution
 - Publisher lifecycle management
 - Execution time tracking
 - Error recovery and cleanup
@@ -298,10 +298,10 @@ The system implements comprehensive error handling at multiple levels:
 
 ## Design Patterns
 
-### 1. Strategy Pattern
-- ExecutionBackend interface
-- Multiple backend implementations
-- Runtime strategy selection
+### 1. Unified Execution Model
+- ReasonActLoop as the single execution implementation
+- Consistent behavior across all agents
+- No runtime strategy selection needed
 
 ### 2. State Pattern
 - StreamStateManager for state tracking
@@ -325,10 +325,10 @@ The system implements comprehensive error handling at multiple levels:
 
 ## Future Considerations
 
-### 1. Additional Backends
-- WebSocket-based execution
-- Batch processing backend
-- Distributed execution
+### 1. Enhanced Execution Capabilities
+- WebSocket-based communication
+- Batch processing of tool executions
+- Distributed agent coordination
 
 ### 2. Enhanced Monitoring
 - Detailed execution metrics
