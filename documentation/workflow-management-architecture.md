@@ -492,7 +492,7 @@ for await (const event of stream) {
 // Consistent completion handling
 async function handleAgentCompletion(options: CompletionOptions) {
     // Track in orchestrator turn
-    await conversationManager.addCompletionToTurn(...);
+    await conversationCoordinator.addCompletionToTurn(...);
     
     // Publish completion event
     await publisher.publishResponse({

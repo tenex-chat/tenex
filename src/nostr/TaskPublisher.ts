@@ -11,7 +11,7 @@ export interface TaskCreationOptions {
   prompt: string;
   branch?: string;
   conversationRootEventId?: string;
-  conversationManager?: ConversationCoordinator;
+  conversationCoordinator?: ConversationCoordinator;
   claudeSessionId?: string;
   // Optional delegation registration for Claude Code tasks
   delegationContext?: {

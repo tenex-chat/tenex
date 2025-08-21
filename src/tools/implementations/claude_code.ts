@@ -65,7 +65,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
       });
     }
 
-    logger.info("Running claude_code tool", {
+    logger.debug("Running claude_code tool", {
       prompt: cleanedPrompt.substring(0, 100),
       hasSystemPrompt: !!cleanedSystemPrompt,
       agent: context.agent.name,
@@ -76,19 +76,13 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
       const rootConversationId = getRootConversationId(context);
 
       // Get the root conversation's agent state
-      const rootConversation = context.conversationManager.getConversation(rootConversationId);
+      const rootConversation = context.conversationCoordinator.getConversation(rootConversationId);
       const agentState = rootConversation?.agentStates.get(context.agent.slug);
       const existingSessionId = agentState?.claudeSessionsByPhase?.[context.phase];
 
       if (existingSessionId) {
-        logger.info(`[claude_code] Resuming Claude session for phase ${context.phase}`, {
+        logger.debug(`[claude_code] Resuming Claude session for phase ${context.phase}`, {
           sessionId: existingSessionId,
-          agent: context.agent.slug,
-          phase: context.phase,
-          rootConversationId: rootConversationId.substring(0, 8),
-        });
-      } else {
-        logger.info(`[claude_code] No existing session for phase ${context.phase}`, {
           agent: context.agent.slug,
           phase: context.phase,
           rootConversationId: rootConversationId.substring(0, 8),
@@ -112,7 +106,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         branch,
         conversationRootEventId: context.conversationId,
         conversation: rootConversation,
-        conversationManager: context.conversationManager,
+        conversationCoordinator: context.conversationCoordinator,
         abortSignal: abortController.signal,
         resumeSessionId: existingSessionId,
         agentName: context.agent.name,
@@ -129,7 +123,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
       // Update the Claude session ID in the root conversation's agent state for this phase
       if (result.sessionId) {
         const rootConversationId = getRootConversationId(context);
-        const rootConversation = context.conversationManager.getConversation(rootConversationId);
+        const rootConversation = context.conversationCoordinator.getConversation(rootConversationId);
 
         if (rootConversation) {
           const agentState = rootConversation.agentStates.get(context.agent.slug) || {
@@ -144,7 +138,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
           // Store the session ID for this phase
           agentState.claudeSessionsByPhase[context.phase] = result.sessionId;
 
-          await context.conversationManager.updateAgentState(
+          await context.conversationCoordinator.updateAgentState(
             rootConversationId,
             context.agent.slug,
             agentState

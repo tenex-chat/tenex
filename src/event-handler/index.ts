@@ -26,7 +26,7 @@ const IGNORED_EVENT_KINDS = [
 ];
 
 export class EventHandler {
-  private conversationManager!: ConversationCoordinator;
+  private conversationCoordinator!: ConversationCoordinator;
   private agentExecutor!: AgentExecutor;
   private executionQueueManager?: ExecutionQueueManager;
   private isUpdatingProject = false;
@@ -59,19 +59,23 @@ export class EventHandler {
     await DelegationRegistry.initialize();
 
     // Initialize components directly
-    this.conversationManager = new ConversationCoordinator(
+    this.conversationCoordinator = new ConversationCoordinator(
       this.projectPath,
       undefined, // default persistence
       this.executionQueueManager
     );
-    this.agentExecutor = new AgentExecutor(this.llmService, this.conversationManager);
+    this.agentExecutor = new AgentExecutor(this.llmService, this.conversationCoordinator);
 
     // Initialize components
-    await this.conversationManager.initialize();
+    await this.conversationCoordinator.initialize();
   }
 
   getExecutionQueueManager(): ExecutionQueueManager | undefined {
     return this.executionQueueManager;
+  }
+
+  getConversationCoordinator(): ConversationCoordinator {
+    return this.conversationCoordinator;
   }
 
   async handleEvent(event: NDKEvent): Promise<void> {
@@ -114,21 +118,21 @@ export class EventHandler {
     switch (event.kind) {
       case NDKKind.GenericReply: // kind 1111
         await handleChatMessage(event, {
-          conversationManager: this.conversationManager,
+          conversationCoordinator: this.conversationCoordinator,
           agentExecutor: this.agentExecutor,
         });
         break;
 
       case NDKKind.Thread: // kind 11
         await handleNewConversation(event, {
-          conversationManager: this.conversationManager,
+          conversationCoordinator: this.conversationCoordinator,
           agentExecutor: this.agentExecutor,
         });
         break;
 
       case NDKTask.kind: // kind 1934
         await handleTask(NDKTask.from(event), {
-          conversationManager: this.conversationManager,
+          conversationCoordinator: this.conversationCoordinator,
           agentExecutor: this.agentExecutor,
         });
         break;
@@ -282,7 +286,7 @@ export class EventHandler {
 
   async cleanup(): Promise<void> {
     // Save all conversations before shutting down
-    await this.conversationManager.cleanup();
+    await this.conversationCoordinator.cleanup();
     logInfo("EventHandler cleanup completed");
   }
 }

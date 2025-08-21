@@ -73,11 +73,6 @@ export class AgentConversationContext {
 
     this.messages.push(new Message("system", transitionMessage));
 
-    logger.info(`[AGENT_CONTEXT] Phase transition for ${this.agentSlug}`, {
-      from: this.currentPhase,
-      to: newPhase,
-    });
-
     this.currentPhase = newPhase;
     return true; // Transition occurred
   }

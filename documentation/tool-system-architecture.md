@@ -309,7 +309,7 @@ interface ExecutionContext {
     phase: Phase;          // Conversation phase
     projectPath: string;   // Project root
     publisher?: NostrPublisher;
-    conversationManager?: ConversationCoordinator;
+    conversationCoordinator?: ConversationCoordinator;
     triggeringEvent?: NostrEvent;
 }
 ```

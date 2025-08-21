@@ -92,7 +92,7 @@ describe("Agent Event Routing", () => {
 
     // Handle the event
     await handleChatMessage(agentEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -136,7 +136,7 @@ describe("Agent Event Routing", () => {
 
     // Handle the event
     await handleChatMessage(userEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -187,7 +187,7 @@ describe("Agent Event Routing", () => {
 
     // Handle the event
     await handleChatMessage(agentEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 

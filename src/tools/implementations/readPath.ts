@@ -1,4 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
 import type { Tool } from "../types";
@@ -28,6 +29,26 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
   execute: async (input, context) => {
     const { path } = input.value;
 
+    // Publish status message about what we're doing
+    try {
+      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      
+      if (conversation?.history?.[0]) {
+        await agentPublisher.conversation(
+          { type: "conversation", content: `📖 Reading ${path}` },
+          {
+            triggeringEvent: context.triggeringEvent,
+            rootEvent: conversation.history[0],
+            conversationId: context.conversationId,
+          }
+        );
+      }
+    } catch (error) {
+      // Don't fail the tool if we can't publish the status
+      console.warn("Failed to publish read_path status:", error);
+    }
+
     try {
       // Resolve path and ensure it's within project
       const fullPath = resolveAndValidatePath(path, context.projectPath);
@@ -42,24 +63,20 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
         return {
           ok: true,
           value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
-          metadata: {
-            displayMessage: `📁 Listing directory ${path}`,
-            executedArgs: { path },
-          },
         };
       }
 
       const content = await readFile(fullPath, "utf-8");
 
       // Track file read in conversation metadata if path starts with context/
-      if (path.startsWith("context/") && context.conversationManager) {
-        const conversation = context.conversationManager.getConversation(context.conversationId);
+      if (path.startsWith("context/") && context.conversationCoordinator) {
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         const currentMetadata = conversation?.metadata || {};
         const readFiles = currentMetadata.readFiles || [];
 
         // Only add if not already tracked
         if (!readFiles.includes(path)) {
-          await context.conversationManager.updateMetadata(context.conversationId, {
+          await context.conversationCoordinator.updateMetadata(context.conversationId, {
             readFiles: [...readFiles, path],
           });
         }
@@ -68,10 +85,6 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
       return {
         ok: true,
         value: content,
-        metadata: {
-          displayMessage: `📖 Reading ${path}`,
-          executedArgs: { path },
-        },
       };
     } catch (error: unknown) {
       // If it's an EISDIR error that we somehow missed, provide helpful guidance
@@ -84,10 +97,6 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
           return {
             ok: true,
             value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
-            metadata: {
-              displayMessage: `📁 Listing directory ${path}`,
-              executedArgs: { path },
-            },
           };
         } catch {
           // If we can't read the directory, fall back to the original error

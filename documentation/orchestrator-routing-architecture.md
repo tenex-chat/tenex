@@ -370,7 +370,7 @@ Phase changes are managed carefully:
 
 ```typescript
 // Phase transition with comprehensive context
-await conversationManager.updatePhase(
+await conversationCoordinator.updatePhase(
     conversationId,
     newPhase,
     transitionMessage,    // Full context

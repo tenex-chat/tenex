@@ -71,7 +71,7 @@ describe("handleNewConversation", () => {
     mock.module("@/services", () => ({
       getProjectContext: () => ({
         agentRegistry: mockAgentRegistry,
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agents: new Map([
           [
             "orchestrator",
@@ -146,7 +146,7 @@ describe("handleNewConversation", () => {
   describe("conversation creation", () => {
     it("should create a new conversation", async () => {
       await handleNewConversation(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       });
 
@@ -155,7 +155,7 @@ describe("handleNewConversation", () => {
 
     it("should use specified agent from tags", async () => {
       await handleNewConversation(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       });
 
@@ -172,7 +172,7 @@ describe("handleNewConversation", () => {
       mockEvent.tags = [["d", "conversation-456"]];
 
       await handleNewConversation(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       });
 
@@ -193,7 +193,7 @@ describe("handleNewConversation", () => {
       // Should not throw
       await expect(
         handleNewConversation(mockEvent, {
-          conversationManager: mockConversationCoordinator,
+          conversationCoordinator: mockConversationCoordinator,
           agentExecutor: mockAgentExecutor,
         })
       ).resolves.toBeUndefined();
@@ -206,7 +206,7 @@ describe("handleNewConversation", () => {
       // Should not throw
       await expect(
         handleNewConversation(mockEvent, {
-          conversationManager: mockConversationCoordinator,
+          conversationCoordinator: mockConversationCoordinator,
           agentExecutor: mockAgentExecutor,
         })
       ).resolves.toBeUndefined();
@@ -219,7 +219,7 @@ describe("handleNewConversation", () => {
       // Should not throw
       await expect(
         handleNewConversation(mockEvent, {
-          conversationManager: mockConversationCoordinator,
+          conversationCoordinator: mockConversationCoordinator,
           agentExecutor: mockAgentExecutor,
         })
       ).resolves.toBeUndefined();
@@ -233,7 +233,7 @@ describe("handleNewConversation", () => {
       // Should not throw
       await expect(
         handleNewConversation(mockEvent, {
-          conversationManager: mockConversationCoordinator,
+          conversationCoordinator: mockConversationCoordinator,
           agentExecutor: mockAgentExecutor,
         })
       ).resolves.toBeUndefined();
@@ -243,7 +243,7 @@ describe("handleNewConversation", () => {
       mockEvent.content = "";
 
       await handleNewConversation(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       });
 

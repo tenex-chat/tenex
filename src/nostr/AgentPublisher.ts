@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentInstance } from "@/agents/types";
+import type { ConversationCoordinator } from "@/conversations";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
@@ -7,7 +8,6 @@ import {
   NDKEvent,
   type NDKPrivateKeySigner,
   type NDKProject,
-  type NDKTask,
 } from "@nostr-dev-kit/ndk";
 import {
   AgentEventEncoder,
@@ -28,9 +28,11 @@ import {
  */
 export class AgentPublisher {
   private agent: AgentInstance;
+  private encoder: AgentEventEncoder;
 
-  constructor(agent: AgentInstance) {
+  constructor(agent: AgentInstance, conversationCoordinator: ConversationCoordinator) {
     this.agent = agent;
+    this.encoder = new AgentEventEncoder(conversationCoordinator);
   }
 
   /**
@@ -44,7 +46,7 @@ export class AgentPublisher {
       summary: intent.summary,
     });
 
-    const event = AgentEventEncoder.encodeCompletion(intent, context);
+    const event = this.encoder.encodeCompletion(intent, context);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -59,81 +61,55 @@ export class AgentPublisher {
   }
 
   /**
-   * Publish delegation task events.
-   * Creates and publishes task events for each recipient.
+   * Publish delegation request events.
+   * Creates and publishes kind:1111 conversation events for each recipient.
    */
   async delegate(
     intent: DelegationIntent,
     context: EventContext
   ): Promise<{
-    tasks: NDKTask[];
+    events: NDKEvent[];
     batchId: string;
   }> {
-    logger.info("Dispatching delegation", {
-      agent: this.agent.name,
-      recipients: intent.recipients.length,
-      phase: intent.phase,
-    });
+    const events = this.encoder.encodeDelegation(intent, context);
 
-    const tasks = AgentEventEncoder.encodeDelegation(intent, context);
-
-    // Debug: Log task IDs before signing
-    for (const [index, task] of tasks.entries()) {
-      logger.debug("Task ID before signing", {
-        index,
-        taskId: task.id,
-        hasId: !!task.id,
-        assignedTo: intent.recipients[index]?.substring(0, 16),
-      });
+    // Sign all events first
+    for (const event of events) {
+      await event.sign(this.agent.signer);
     }
-
-    // Sign all tasks first
-    for (const task of tasks) {
-      await task.sign(this.agent.signer);
-    }
-
-    // Debug: Log task IDs after signing
-    for (const [index, task] of tasks.entries()) {
-      logger.debug("Task ID after signing", {
-        index,
-        taskId: task.id,
-        hasId: !!task.id,
-        assignedTo: intent.recipients[index]?.substring(0, 16),
-      });
-    }
-
-    // Register with DelegationRegistry
+    
+    // Register with DelegationRegistry (now using event IDs instead of task IDs)
     const registry = DelegationRegistry.getInstance();
     const batchId = await registry.registerDelegationBatch({
-      tasks: tasks.map((task, index) => ({
-        taskId: task.id,
+      tasks: events.map((event, index) => ({
+        taskId: event.id, // Using event ID as the identifier
         assignedToPubkey: intent.recipients[index],
-        title: intent.title,
         fullRequest: intent.request,
         phase: intent.phase,
       })),
       delegatingAgent: this.agent,
-      conversationId: context.conversationEvent?.id || "",
+      conversationId: context.rootEvent?.id || "",
       originalRequest: intent.request,
     });
 
-    // Publish all tasks
-    for (const [index, task] of tasks.entries()) {
-      await task.publish();
-      logger.debug("Published delegation task", {
+    // Publish all events
+    for (const [index, event] of events.entries()) {
+      await event.publish();
+      logger.debug("Published delegation request", {
         index,
-        taskId: task.id,
-        taskIdTruncated: task.id?.substring(0, 8),
-        assignedTo: task.tagValue("p")?.substring(0, 16),
+        eventId: event.id,
+        eventIdTruncated: event.id?.substring(0, 8),
+        kind: event.kind,
+        assignedTo: event.tagValue("p")?.substring(0, 16),
       });
     }
 
     logger.info("Delegation batch published", {
       batchId,
-      taskCount: tasks.length,
+      eventCount: events.length,
     });
 
-    return { tasks, batchId };
+    return { events, batchId };
   }
 
   /**
@@ -146,7 +122,7 @@ export class AgentPublisher {
       contentLength: intent.content.length,
     });
 
-    const event = AgentEventEncoder.encodeConversation(intent, context);
+    const event = this.encoder.encodeConversation(intent, context);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -165,7 +141,7 @@ export class AgentPublisher {
       error: intent.message,
     });
 
-    const event = AgentEventEncoder.encodeError(intent, context);
+    const event = this.encoder.encodeError(intent, context);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -189,7 +165,7 @@ export class AgentPublisher {
       state: intent.state,
     });
 
-    const event = AgentEventEncoder.encodeTypingIndicator(intent, context, this.agent);
+    const event = this.encoder.encodeTypingIndicator(intent, context, this.agent);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -202,7 +178,7 @@ export class AgentPublisher {
    * Publish a streaming progress event.
    */
   async streaming(intent: StreamingIntent, context: EventContext): Promise<NDKEvent> {
-    const event = AgentEventEncoder.encodeStreamingProgress(intent, context);
+    const event = this.encoder.encodeStreamingProgress(intent, context);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -220,7 +196,7 @@ export class AgentPublisher {
       agentCount: intent.agents.length,
     });
 
-    const event = AgentEventEncoder.encodeProjectStatus(intent);
+    const event = this.encoder.encodeProjectStatus(intent);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -235,10 +211,9 @@ export class AgentPublisher {
   async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching lesson", {
       agent: this.agent.name,
-      title: intent.title,
     });
 
-    const lessonEvent = AgentEventEncoder.encodeLesson(intent, context, this.agent);
+    const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
     // Sign and publish
     await lessonEvent.sign(this.agent.signer);
@@ -247,7 +222,6 @@ export class AgentPublisher {
     logger.debug("Lesson event published", {
       eventId: lessonEvent.id,
       agent: this.agent.name,
-      title: intent.title,
     });
 
     return lessonEvent;

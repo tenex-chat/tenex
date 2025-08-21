@@ -1,9 +1,10 @@
+import type { ConversationCoordinator } from "@/conversations";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -21,7 +22,6 @@ export interface CompletionIntent {
 export interface DelegationIntent {
   type: "delegation";
   recipients: string[];
-  title: string;
   request: string;
   phase?: string;
 }
@@ -79,8 +79,8 @@ export type AgentIntent =
 // Execution context provided by RAL
 export interface EventContext {
   triggeringEvent: NDKEvent;
-  conversationEvent?: NDKEvent; // Optional - not all events belong to conversations
-  delegatingAgentPubkey?: string; // For task completions
+  rootEvent?: NDKEvent; // Optional - not all events belong to conversations
+  conversationId: string; // Required for conversation lookup
   toolCalls?: Array<{ name: string; arguments: unknown }>;
   executionTime?: number;
   model?: string;
@@ -89,6 +89,7 @@ export interface EventContext {
     completion_tokens: number;
     total_tokens: number;
   };
+  cost?: number; // LLM cost in USD
   phase?: string; // Current phase for phase-aware events
 }
 
@@ -96,123 +97,162 @@ export interface EventContext {
  * Encodes agent intents into properly tagged Nostr events.
  * All tagging logic is centralized here for consistency and testability.
  */
-
-// biome-ignore lint/complexity/noStaticOnlyClass: Static utility class for encoding event semantics
 export class AgentEventEncoder {
+  constructor(private conversationCoordinator: ConversationCoordinator) {}
+
   /**
    * Add conversation tags consistently to any event.
    * Centralizes conversation tagging logic for all agent events.
    */
-  private static addConversationTags(event: NDKEvent, context: EventContext): void {
-    if (!context.conversationEvent || !context.conversationEvent.id) {
+  private addConversationTags(event: NDKEvent, context: EventContext): void {
+    if (!context.rootEvent || !context.rootEvent.id) {
       throw new Error(
-        "EventContext is missing required conversationEvent - this event type requires conversation context"
+        "EventContext is missing required rootEvent - this event type requires conversation context"
       );
     }
     if (!context.triggeringEvent || !context.triggeringEvent.id) {
       throw new Error("EventContext is missing required triggeringEvent with id");
     }
 
-    const rootEventId = context.conversationEvent.tagValue("E") || context.conversationEvent.id;
-    const rootEventKind = context.conversationEvent.tagValue("K") || context.conversationEvent.kind;
-    const rootEventPubkey = context.conversationEvent.tagValue("P") || context.conversationEvent.pubkey;
+    const rootEventId = context.rootEvent.id;
+    const rootEventKind = context.rootEvent.kind;
+    const rootEventPubkey = context.rootEvent.pubkey;
 
     // Add conversation root tag (E tag) - using the conversation event's ID
     event.tag(["E", rootEventId]);
     event.tag(["K", rootEventKind.toString()]);
     event.tag(["P", rootEventPubkey]);
 
-    // Add reply to conversation event (e tag)
-    event.tag(["e", rootEventId]);
+    // Add reply to triggering event (e tag) - what we're directly replying to
+    event.tag(["e", context.triggeringEvent.id]);
   }
+  
   /**
    * Encode a completion intent into a tagged event.
-   * Completion events mark the end of a flow branch with specific E-tag semantics.
+   * Handles both regular completions and delegation completions.
    */
-  static encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
+  encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
     const event = new NDKEvent(getNDK());
-    event.kind = NDKKind.GenericReply;
+    event.kind = 1111;
     event.content = intent.content;
 
-    // Add conversation tags
-    AgentEventEncoder.addConversationTags(event, context);
+    // we complete to the event that triggered this event
+    let completeToEvent = context.triggeringEvent;
 
-    // Completion metadata
+    // but wait, if the triggering event was a complete event (completion-of-completion), 
+    // we need to complete to that completion's triggering event to avoid chaining
+    if (context.triggeringEvent.tagValue("tool") === "complete") {
+      // get the event ID that triggered the completion
+      const originalTriggeringEventId = context.triggeringEvent.tagValue("e");
+      
+      if (originalTriggeringEventId) {
+        // Fetch the actual event from conversation history
+        const conversation = this.conversationCoordinator.getConversation(context.conversationId);
+        if (conversation?.history) {
+          const originalEvent = conversation.history.find(e => e.id === originalTriggeringEventId);
+          if (originalEvent) {
+            completeToEvent = originalEvent;
+          }
+        }
+      }
+    }
+
+    // Add conversation tags (E, K, P for root)
+    this.addConversationTags(event, context);
+    
+    // Remove the e-tag that addConversationTags added (we'll add our own)
+    event.tags = event.tags.filter(t => t[0] !== "e");
+    
+    // Add our corrected e-tag and p-tag
+    event.tag(["e", completeToEvent.id]);
+    event.tag(["p", completeToEvent.pubkey]);
+    
+    // Mark as completion
+    event.tag(["tool", "complete"]);
+    
+    // Add summary if provided
     if (intent.summary) {
       event.tag(["summary", intent.summary]);
     }
-
-    // If this is a task completion, p-tag the delegating agent
-    if (context.delegatingAgentPubkey) {
-      event.tag(["p", context.delegatingAgentPubkey]);
-    }
-
-    // Add standard metadata
-    AgentEventEncoder.addStandardTags(event, context);
+      
+    // Add standard metadata (LLM usage, etc)
+    this.addStandardTags(event, context);
 
     logger.debug("Encoded completion event", {
       eventId: event.id,
-      hasCompletedTags: true,
       summary: intent.summary,
-      hasDelegatingAgent: !!context.delegatingAgentPubkey,
+      completingTo: completeToEvent.id?.substring(0, 8),
+      completingToPubkey: completeToEvent.pubkey?.substring(0, 8),
     });
 
     return event;
   }
 
   /**
-   * Encode a delegation intent into NDKTask events.
-   * Creates properly tagged task events for each recipient.
+   * Encode a delegation intent into kind:1111 conversation events.
+   * Creates properly tagged delegation request events for each recipient.
    */
-  static encodeDelegation(intent: DelegationIntent, context: EventContext): NDKTask[] {
-    if (!context.conversationEvent || !context.conversationEvent.id) {
+  encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
+    if (!context.rootEvent || !context.rootEvent.id) {
       throw new Error(
-        "EventContext is missing required conversationEvent - this event type requires conversation context"
+        "EventContext is missing required rootEvent - this event type requires conversation context"
       );
     }
 
-    const tasks: NDKTask[] = [];
+    const events: NDKEvent[] = [];
+    
+    // Get the root conversation ID for proper threading
+    const rootEventId = context.rootEvent.tagValue("E") || context.rootEvent.id;
 
     for (const recipientPubkey of intent.recipients) {
-      const task = new NDKTask(getNDK());
-      task.content = intent.request;
-      task.title = intent.title;
+      const event = new NDKEvent(getNDK());
+      event.kind = 1111; // NIP-22 comment/conversation kind
+      event.content = intent.request;
 
-      // Core delegation tags
-      task.tag(["p", recipientPubkey]);
+      // NIP-22 threading tags
+      event.tag(["E", rootEventId]); // Conversation root
+      event.tag(["e", context.triggeringEvent.id]); // What triggered this delegation
+      
+      // Recipient tag - this makes it a delegation
+      event.tag(["p", recipientPubkey]);
+      
+      // Phase metadata if provided
+      if (intent.phase) {
+        event.tag(["phase", intent.phase]);
+      }
 
-      // Add conversation tags for context
-      task.tag(["e", context.conversationEvent.id]);
+      event.tag(["tool", "delegate"])
 
       // Add standard metadata
-      AgentEventEncoder.addStandardTags(task, context);
+      this.addStandardTags(event, context);
 
-      tasks.push(task);
+      events.push(event);
     }
 
-    logger.debug("Encoded delegation tasks", {
-      taskCount: tasks.length,
+    logger.debug("Encoded delegation requests", {
+      eventCount: events.length,
       phase: intent.phase,
       recipients: intent.recipients.map((r) => r.substring(0, 8)),
+      kind: 1111,
     });
 
-    return tasks;
+    return events;
   }
 
   /**
    * Encode a conversation intent into a response event.
    * Standard agent response without flow termination semantics.
    */
-  static encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
+  encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
     const event = new NDKEvent(getNDK());
     event.kind = NDKKind.GenericReply;
     event.content = intent.content;
 
     // Add conversation tags
-    AgentEventEncoder.addConversationTags(event, context);
+    this.addConversationTags(event, context);
 
     // Add standard metadata
-    AgentEventEncoder.addStandardTags(event, context);
+    this.addStandardTags(event, context);
 
     return event;
   }
@@ -221,7 +261,7 @@ export class AgentEventEncoder {
    * Add standard metadata tags that all agent events should have.
    * Centralizes common tagging logic.
    */
-  private static addStandardTags(event: NDKEvent, context: EventContext): void {
+  private addStandardTags(event: NDKEvent, context: EventContext): void {
     // Add project tag - ALL agent events should reference their project
     const projectCtx = getProjectContext();
     event.tag(projectCtx.project.tagReference());
@@ -250,6 +290,17 @@ export class AgentEventEncoder {
         (context.usage.prompt_tokens + context.usage.completion_tokens).toString(),
       ]);
     }
+    // Add cost metadata if available
+    if (context.cost !== undefined) {
+      event.tag(["llm-cost-usd", context.cost.toString()]);
+      
+      // ============ TRACE LOGGING: Cost Tag Added ============
+      console.log("🔍 [TRACE] AgentEventEncoder.ts - COST TAG ADDED");
+      console.log("  Cost value:", context.cost);
+      console.log("  Event kind:", event.kind);
+      console.log("  All tags:", event.tags);
+      console.log("================================================");
+    }
     if (context.executionTime) {
       event.tag(["execution-time", context.executionTime.toString()]);
     }
@@ -258,19 +309,19 @@ export class AgentEventEncoder {
   /**
    * Encode an error intent into an error event.
    */
-  static encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
+  encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
     const event = new NDKEvent(getNDK());
     event.kind = NDKKind.GenericReply;
     event.content = intent.message;
 
     // Add conversation tags
-    AgentEventEncoder.addConversationTags(event, context);
+    this.addConversationTags(event, context);
 
     // Mark as error
     event.tag(["error", intent.errorType || "system"]);
 
     // Add standard metadata
-    AgentEventEncoder.addStandardTags(event, context);
+    this.addStandardTags(event, context);
 
     return event;
   }
@@ -278,7 +329,7 @@ export class AgentEventEncoder {
   /**
    * Encode a typing indicator intent.
    */
-  static encodeTypingIndicator(
+  encodeTypingIndicator(
     intent: TypingIntent,
     context: EventContext,
     agent: { name: string }
@@ -296,8 +347,8 @@ export class AgentEventEncoder {
     }
 
     // Add conversation reference (not full conversation tags) if available
-    if (context.conversationEvent?.id) {
-      event.tag(["e", context.conversationEvent.id]);
+    if (context.rootEvent?.id) {
+      event.tag(["e", context.rootEvent.id]);
     }
 
     // Add project tag
@@ -310,7 +361,7 @@ export class AgentEventEncoder {
   /**
    * Encode a streaming progress intent.
    */
-  static encodeStreamingProgress(intent: StreamingIntent, context: EventContext): NDKEvent {
+  encodeStreamingProgress(intent: StreamingIntent, context: EventContext): NDKEvent {
     const event = new NDKEvent(getNDK());
     event.kind = EVENT_KINDS.STREAMING_RESPONSE;
     event.content = intent.content;
@@ -326,7 +377,7 @@ export class AgentEventEncoder {
   /**
    * Encode a project status intent.
    */
-  static encodeProjectStatus(intent: StatusIntent): NDKEvent {
+  encodeProjectStatus(intent: StatusIntent): NDKEvent {
     const event = new NDKEvent(getNDK());
     event.kind = EVENT_KINDS.PROJECT_STATUS;
     event.content = "";
@@ -366,7 +417,7 @@ export class AgentEventEncoder {
   /**
    * Encode a lesson learned intent.
    */
-  static encodeLesson(
+  encodeLesson(
     intent: LessonIntent,
     context: EventContext,
     agent: { eventId?: string }
@@ -394,7 +445,7 @@ export class AgentEventEncoder {
     }
 
     // Add standard metadata including project tag
-    AgentEventEncoder.addStandardTags(lessonEvent, context);
+    this.addStandardTags(lessonEvent, context);
 
     return lessonEvent;
   }

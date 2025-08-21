@@ -15,14 +15,14 @@ export async function removeFromQueue(options: RemoveOptions = {}): Promise<void
     await ensureProjectInitialized(process.cwd());
 
     const projectContext = getProjectContext();
-    const conversationManager = projectContext.conversationManager;
+    const conversationCoordinator = projectContext.conversationCoordinator;
 
-    if (!conversationManager) {
+    if (!conversationCoordinator) {
       console.error(chalk.red("Error: No conversation manager available"));
       process.exit(1);
     }
 
-    const queueManager = conversationManager.getExecutionQueueManager();
+    const queueManager = conversationCoordinator.getExecutionQueueManager();
 
     if (!queueManager) {
       console.error(chalk.red("Error: Execution queue management not enabled for this project"));

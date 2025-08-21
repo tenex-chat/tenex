@@ -393,7 +393,7 @@ const context = {
 ```typescript
 // In AgentExecutor.buildMessages()
 const projectCtx = getProjectContext();
-const conversation = conversationManager.getConversation(context.conversationId);
+const conversation = conversationCoordinator.getConversation(context.conversationId);
 const tagMap = new Map(project.tags.map(t => [t[0], t[1]]));
 ```
 

@@ -61,7 +61,8 @@ describe("StatusPublisher", () => {
   let publisher: StatusPublisher;
 
   beforeEach(() => {
-    publisher = new StatusPublisher();
+    const mockConversationCoordinator = {} as any; // Mock ConversationCoordinator for tests
+    publisher = new StatusPublisher(undefined, mockConversationCoordinator);
     // Clear all mock calls
     mockPublish.mockClear();
     mockSign.mockClear();

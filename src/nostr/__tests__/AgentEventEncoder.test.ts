@@ -34,6 +34,9 @@ import { getProjectContext } from "@/services";
 import { getNDK } from "@/nostr/ndkClient";
 
 describe("AgentEventEncoder", () => {
+  let encoder: AgentEventEncoder;
+  let mockConversationCoordinator: any;
+
   beforeEach(() => {
     // Setup default mock for getProjectContext
     const defaultProjectContext = {
@@ -43,6 +46,16 @@ describe("AgentEventEncoder", () => {
       },
     };
     (getProjectContext as ReturnType<typeof mock>).mockReturnValue(defaultProjectContext);
+
+    // Create mock ConversationCoordinator
+    mockConversationCoordinator = {
+      getConversation: mock(() => ({
+        history: [mockConversationEvent, mockTriggeringEvent]
+      }))
+    };
+
+    // Create AgentEventEncoder instance
+    encoder = new AgentEventEncoder(mockConversationCoordinator);
   });
   
   const mockAgent: AgentInstance = {
@@ -80,7 +93,7 @@ describe("AgentEventEncoder", () => {
         content: "Task completed successfully",
       };
 
-      const event = AgentEventEncoder.encodeCompletion(intent, baseContext);
+      const event = encoder.encodeCompletion(intent, baseContext);
 
       expect(event.kind).toBe(NDKKind.GenericReply);
       expect(event.content).toBe("Task completed successfully");
@@ -98,7 +111,7 @@ describe("AgentEventEncoder", () => {
         summary: "Found 3 issues",
       };
 
-      const event = AgentEventEncoder.encodeCompletion(intent, baseContext);
+      const event = encoder.encodeCompletion(intent, baseContext);
 
       expect(event.tagValue("summary")).toBe("Found 3 issues");
     });
@@ -121,7 +134,7 @@ describe("AgentEventEncoder", () => {
         content: "Done",
       };
 
-      const event = AgentEventEncoder.encodeCompletion(intent, contextWithMetadata);
+      const event = encoder.encodeCompletion(intent, contextWithMetadata);
 
       expect(event.tagValue("llm-model")).toBe("gpt-4");
       expect(event.tagValue("execution-time")).toBe("1500");
@@ -146,7 +159,7 @@ describe("AgentEventEncoder", () => {
         content: "Task completed successfully",
       };
 
-      const event = AgentEventEncoder.encodeCompletion(intent, contextWithCompleteTool);
+      const event = encoder.encodeCompletion(intent, contextWithCompleteTool);
 
       const toolTags = event.getMatchingTags("tool");
       expect(toolTags).toHaveLength(1);
@@ -165,7 +178,7 @@ describe("AgentEventEncoder", () => {
         content: "Implementation completed",
       };
 
-      const event = AgentEventEncoder.encodeCompletion(intent, contextWithPhase);
+      const event = encoder.encodeCompletion(intent, contextWithPhase);
 
       expect(event.tagValue("phase")).toBe("implementation");
     });
@@ -180,7 +193,7 @@ describe("AgentEventEncoder", () => {
         request: "Please review the authentication module",
       };
 
-      const tasks = AgentEventEncoder.encodeDelegation(intent, baseContext);
+      const tasks = encoder.encodeDelegation(intent, baseContext);
 
       expect(tasks).toHaveLength(2);
 
@@ -210,7 +223,7 @@ describe("AgentEventEncoder", () => {
         request: "Review implementation",
       };
 
-      const tasks = AgentEventEncoder.encodeDelegation(intent, contextWithPhase);
+      const tasks = encoder.encodeDelegation(intent, contextWithPhase);
 
       expect(tasks[0].tagValue("phase")).toBe("implementation");
     });
@@ -223,7 +236,7 @@ describe("AgentEventEncoder", () => {
         request: "Do something",
       };
 
-      const tasks = AgentEventEncoder.encodeDelegation(intent, baseContext);
+      const tasks = encoder.encodeDelegation(intent, baseContext);
 
       const eTags = tasks[0].getMatchingTags("e");
       expect(eTags).toContainEqual(["e", "conv123"]); // References conversation event
@@ -257,7 +270,7 @@ describe("AgentEventEncoder", () => {
         ],
       };
 
-      const event = AgentEventEncoder.encodeProjectStatus(intent);
+      const event = encoder.encodeProjectStatus(intent);
 
       // Check event kind
       expect(event.kind).toBe(EVENT_KINDS.PROJECT_STATUS);
@@ -299,7 +312,7 @@ describe("AgentEventEncoder", () => {
         queue: ["conv123", "conv456"],
       };
 
-      const event = AgentEventEncoder.encodeProjectStatus(intent);
+      const event = encoder.encodeProjectStatus(intent);
 
       const queueTags = event.getMatchingTags("queue");
       expect(queueTags).toHaveLength(2);
@@ -315,7 +328,7 @@ describe("AgentEventEncoder", () => {
         content: "I'm still working on this...",
       };
 
-      const event = AgentEventEncoder.encodeConversation(intent, baseContext);
+      const event = encoder.encodeConversation(intent, baseContext);
 
       expect(event.kind).toBe(NDKKind.GenericReply);
       expect(event.content).toBe("I'm still working on this...");

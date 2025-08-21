@@ -2,7 +2,8 @@
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 import type { AgentInstance } from "@/agents/types";
-import type { EventContext, StatusIntent } from "@/nostr/AgentEventEncoder";
+import type { ConversationCoordinator } from "@/conversations";
+import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
@@ -35,9 +36,11 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
   private executionQueueManager?: unknown; // Using unknown to avoid circular dependency
+  private conversationCoordinator: ConversationCoordinator;
 
-  constructor(executionQueueManager?: unknown) {
+  constructor(executionQueueManager: unknown, conversationCoordinator: ConversationCoordinator) {
     this.executionQueueManager = executionQueueManager;
+    this.conversationCoordinator = conversationCoordinator;
   }
 
   async startPublishing(projectPath: string): Promise<void> {
@@ -99,23 +102,10 @@ export class StatusPublisher {
         isGlobal: false,
       };
 
-      // Create event context
-      // Note: No conversationEvent since status events are system-level, not part of conversations
-      const context: EventContext = {
-        triggeringEvent: new NDKEvent(getNDK(), {
-          id: projectCtx.project.dTag,
-          pubkey: projectCtx.signer.pubkey,
-          created_at: Math.floor(Date.now() / 1000),
-          kind: 0,
-          tags: [],
-          content: "",
-        }),
-        // conversationEvent is intentionally omitted - status events don't belong to conversations
-      };
 
       // Use AgentPublisher to create and publish the event
-      const agentPublisher = new AgentPublisher(projectAgent);
-      await agentPublisher.status(intent, context);
+      const agentPublisher = new AgentPublisher(projectAgent, this.conversationCoordinator);
+      await agentPublisher.status(intent);
     } catch (err) {
       const errorMessage = formatAnyError(err);
       logWarning(`Failed to publish status event: ${errorMessage}`);

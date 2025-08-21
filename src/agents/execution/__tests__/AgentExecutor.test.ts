@@ -192,7 +192,7 @@ describe("AgentExecutor", () => {
       messages: [],
       tools: [],
       toolContext: {},
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       onStreamStart: mock(() => {}),
       onStreamToken: mock(() => {}),
       onStreamToolCall: mock(() => {}),
@@ -279,7 +279,7 @@ describe("AgentExecutor", () => {
         RoutingBackend: class {
           constructor(
             private llm: LLMService,
-            private conversationManager: ConversationCoordinator
+            private conversationCoordinator: ConversationCoordinator
           ) {}
           async execute(_messages: Message[], _tools: Tool[], context: ExecutionContext) {
             context.onStreamStart?.();

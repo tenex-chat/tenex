@@ -12,12 +12,12 @@ import { DelegationRegistry } from "../services/DelegationRegistry";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
-import { TaskCompletionHandler } from "./TaskCompletionHandler";
+import { DelegationCompletionHandler } from "./DelegationCompletionHandler";
 
 const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
-  conversationManager: ConversationCoordinator;
+  conversationCoordinator: ConversationCoordinator;
   agentExecutor: AgentExecutor;
 }
 
@@ -45,12 +45,12 @@ export const handleChatMessage = async (
     
     // Try to find and update the conversation this event belongs to
     const registry = DelegationRegistry.getInstance();
-    const resolver = new ConversationResolver(context.conversationManager, registry);
+    const resolver = new ConversationResolver(context.conversationCoordinator, registry);
     const result = await resolver.resolveConversationForEvent(event);
     
     if (result.conversation) {
       // Add the event to conversation history without triggering any agent processing
-      await context.conversationManager.addEvent(result.conversation.id, event);
+      await context.conversationCoordinator.addEvent(result.conversation.id, event);
       logger.debug(`Added agent response to conversation history: ${result.conversation.id.substring(0, 8)}`);
     } else {
       logger.debug(`Could not find conversation for agent event: ${event.id?.substring(0, 8)}`);
@@ -73,7 +73,7 @@ async function executeAgent(
   executionContext: ExecutionContext,
   agentExecutor: AgentExecutor,
   conversation: Conversation,
-  _conversationManager: ConversationCoordinator,
+  _conversationCoordinator: ConversationCoordinator,
   projectManager: AgentInstance,
   event: NDKEvent
 ): Promise<void> {
@@ -92,7 +92,7 @@ async function executeAgent(
 
     // Use AgentPublisher to publish error
     const { AgentPublisher } = await import("@/nostr/AgentPublisher");
-    const agentPublisher = new AgentPublisher(projectManager);
+    const agentPublisher = new AgentPublisher(projectManager, _conversationCoordinator);
 
     await agentPublisher.error(
       {
@@ -102,7 +102,8 @@ async function executeAgent(
       },
       {
         triggeringEvent: event,
-        conversationEvent: conversation.history[0], // Root event is first in history
+        rootEvent: conversation.history[0], // Root event is first in history
+        conversationId: conversation.id,
       }
     );
 
@@ -123,7 +124,7 @@ async function executeAgent(
  */
 async function handleReplyLogic(
   event: NDKEvent,
-  { conversationManager, agentExecutor }: EventHandlerContext
+  { conversationCoordinator, agentExecutor }: EventHandlerContext
 ): Promise<void> {
   const projectCtx = getProjectContext();
   const projectManager = projectCtx.getAgent("project-manager");
@@ -133,7 +134,7 @@ async function handleReplyLogic(
 
   // 1. Resolve conversation context
   const conversationResolver = new ConversationResolver(
-    conversationManager,
+    conversationCoordinator,
     DelegationRegistry.getInstance()
   );
   const {
@@ -153,7 +154,7 @@ async function handleReplyLogic(
 
   // 2. Add event to conversation history (if not new and not an internal message)
   if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
-    await conversationManager.addEvent(conversation.id, event);
+    await conversationCoordinator.addEvent(conversation.id, event);
   }
 
   // 3. Determine target agent
@@ -174,31 +175,34 @@ async function handleReplyLogic(
     return;
   }
 
-  // 5. Handle task completion if applicable
-  let isTaskCompletionReactivation = false;
+  // 5. Handle delegation completion if applicable (only for kind:1111 delegations)
+  let isDelegationCompletionReactivation = false;
   let replyTarget: NDKEvent | undefined = event;
 
-  if (AgentEventDecoder.isTaskCompletionEvent(event)) {
-    const taskCompletionResult = await TaskCompletionHandler.handleTaskCompletion(
+  // Only process delegation completions (kind:1111 with tool:complete)
+  // Task completions (kind:1934) don't need this handler since tools like claude_code
+  // return results synchronously via success()
+  if (AgentEventDecoder.isDelegationCompletion(event)) {
+    const delegationCompletionResult = await DelegationCompletionHandler.handleDelegationCompletion(
       event,
       conversation,
-      conversationManager
+      conversationCoordinator
     );
 
-    if (!taskCompletionResult.shouldReactivate) {
-      // Still waiting for more tasks or other reasons not to reactivate
+    if (!delegationCompletionResult.shouldReactivate) {
+      // Still waiting for more delegations or other reasons not to reactivate
       return;
     }
 
-    isTaskCompletionReactivation = true;
-    if (taskCompletionResult.targetAgent) {
-      targetAgent = taskCompletionResult.targetAgent;
+    isDelegationCompletionReactivation = true;
+    if (delegationCompletionResult.targetAgent) {
+      targetAgent = delegationCompletionResult.targetAgent;
     }
-    if (taskCompletionResult.replyTarget) {
-      replyTarget = taskCompletionResult.replyTarget;
+    if (delegationCompletionResult.replyTarget) {
+      replyTarget = delegationCompletionResult.replyTarget;
       logInfo(
         chalk.cyan(
-          `Task completion will reply to original user event: ${replyTarget.id?.substring(0, 8)}`
+          `Delegation completion will reply to original user event: ${replyTarget.id?.substring(0, 8)}`
         )
       );
     }
@@ -222,10 +226,10 @@ async function handleReplyLogic(
     projectPath: process.cwd(),
     triggeringEvent: event,
     replyTarget: replyTarget,
-    conversationManager,
+    conversationCoordinator,
     claudeSessionId,
     agentExecutor,
-    isTaskCompletionReactivation,
+    isTaskCompletionReactivation: isDelegationCompletionReactivation,
   };
 
   // 8. Execute agent
@@ -233,7 +237,7 @@ async function handleReplyLogic(
     executionContext,
     agentExecutor,
     conversation,
-    conversationManager,
+    conversationCoordinator,
     projectManager,
     event
   );

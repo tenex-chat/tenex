@@ -462,7 +462,7 @@ interface ExecutionContext {
     triggeringEvent: NDKEvent;
     handoff?: HandoffContext;
     publisher: NostrPublisher;
-    conversationManager: ConversationCoordinator;
+    conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
     claudeSessionId?: string;
 }
@@ -653,7 +653,7 @@ llmService.stream({
     agent,
     phase,
     publisher,
-    conversationManager,
+    conversationCoordinator,
     agentExecutor,  // For continue() tool
     triggeringEvent
 }

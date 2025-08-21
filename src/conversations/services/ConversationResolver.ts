@@ -21,7 +21,7 @@ export interface ConversationResolutionResult {
  */
 export class ConversationResolver {
   constructor(
-    private conversationManager: ConversationCoordinator,
+    private conversationCoordinator: ConversationCoordinator,
     private delegationRegistry: DelegationRegistry
   ) {}
 
@@ -56,7 +56,7 @@ export class ConversationResolver {
     const convRoot = AgentEventDecoder.getConversationRoot(event);
 
     let conversation = convRoot
-      ? this.conversationManager.getConversationByEvent(convRoot)
+      ? this.conversationCoordinator.getConversationByEvent(convRoot)
       : undefined;
     let mappedClaudeSessionId: string | undefined;
 
@@ -70,7 +70,7 @@ export class ConversationResolver {
         // Use DelegationRegistry to find the parent conversation
         const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
         if (delegationContext) {
-          const parentConversation = this.conversationManager.getConversation(
+          const parentConversation = this.conversationCoordinator.getConversation(
             delegationContext.delegatingAgent.conversationId
           );
           if (parentConversation) {
@@ -100,7 +100,7 @@ export class ConversationResolver {
         const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
 
         if (delegationContext) {
-          conversation = this.conversationManager.getConversation(
+          conversation = this.conversationCoordinator.getConversation(
             delegationContext.delegatingAgent.conversationId
           );
 
@@ -118,7 +118,7 @@ export class ConversationResolver {
         } else {
           logger.debug("No delegation context found, falling back to task as conversation root");
           // Fallback: The task itself might be the conversation root
-          conversation = this.conversationManager.getConversation(taskId);
+          conversation = this.conversationCoordinator.getConversation(taskId);
 
           if (conversation) {
             const claudeSession = AgentEventDecoder.getClaudeSessionId(event);
@@ -172,11 +172,11 @@ export class ConversationResolver {
       tags: event.tags.filter((tag) => tag[0] !== "E" && tag[0] !== "e"), // Remove reply tags
     } as NDKEvent;
 
-    const conversation = await this.conversationManager.createConversation(syntheticRootEvent);
+    const conversation = await this.conversationCoordinator.createConversation(syntheticRootEvent);
 
     // Add the actual reply event to the conversation history
     if (conversation && event.id !== conversation.id) {
-      await this.conversationManager.addEvent(conversation.id, event);
+      await this.conversationCoordinator.addEvent(conversation.id, event);
     }
 
     return conversation;

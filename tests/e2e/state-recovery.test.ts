@@ -100,7 +100,7 @@ describe("State Recovery E2E Tests", () => {
     
     it("should persist conversation state after each agent response", async () => {
         // Create conversation manager with test persistence
-        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
+        const conversationCoordinator = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create initial event
         const triggeringEvent = createMockNDKEvent({
@@ -110,7 +110,7 @@ describe("State Recovery E2E Tests", () => {
         });
         
         // Create conversation
-        const conversation = await conversationManager.createConversation(triggeringEvent);
+        const conversation = await conversationCoordinator.createConversation(triggeringEvent);
         expect(conversation).toBeDefined();
         expect(conversation.phase).toBe("chat");
         
@@ -139,7 +139,7 @@ describe("State Recovery E2E Tests", () => {
         });
         
         // Save the updated state
-        await conversationManager.saveConversation(conversation.id);
+        await conversationCoordinator.saveConversation(conversation.id);
         
         // Verify state after first execution
         const savedConv2 = await testPersistence.load(conversation.id);
@@ -155,7 +155,7 @@ describe("State Recovery E2E Tests", () => {
     
     it("should recover conversation state from persistence", async () => {
         // Create first conversation manager instance
-        const conversationManager1 = new ConversationCoordinator(projectPath, testPersistence);
+        const conversationCoordinator1 = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create and execute initial conversation
         const triggeringEvent = createMockNDKEvent({
@@ -164,7 +164,7 @@ describe("State Recovery E2E Tests", () => {
             tags: [["t", "task"]]
         });
         
-        const conversation = await conversationManager1.createConversation(triggeringEvent);
+        const conversation = await conversationCoordinator1.createConversation(triggeringEvent);
         const conversationId = conversation.id;
         
         // Add some agent context
@@ -175,10 +175,10 @@ describe("State Recovery E2E Tests", () => {
         });
         
         // Update phase
-        await conversationManager1.updatePhase(conversationId, "plan", "Moving to planning phase");
+        await conversationCoordinator1.updatePhase(conversationId, "plan", "Moving to planning phase");
         
         // Update the conversation object in memory to set execution time
-        const updatedConv = conversationManager1.getConversation(conversationId);
+        const updatedConv = conversationCoordinator1.getConversation(conversationId);
         if (updatedConv) {
             updatedConv.executionTime = {
                 totalSeconds: 120,
@@ -190,14 +190,14 @@ describe("State Recovery E2E Tests", () => {
         }
         
         // Save the updated conversation
-        await conversationManager1.saveConversation(conversationId);
+        await conversationCoordinator1.saveConversation(conversationId);
         
         // Simulate system restart - create new conversation manager
-        const conversationManager2 = new ConversationCoordinator(projectPath, testPersistence);
-        await conversationManager2.initialize();
+        const conversationCoordinator2 = new ConversationCoordinator(projectPath, testPersistence);
+        await conversationCoordinator2.initialize();
         
         // Load conversation from persistence
-        const recoveredConversation = conversationManager2.getConversation(conversationId);
+        const recoveredConversation = conversationCoordinator2.getConversation(conversationId);
         
         // Verify all state is recovered correctly
         expect(recoveredConversation).toBeDefined();
@@ -214,7 +214,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should handle recovery from incomplete agent execution", async () => {
-        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
+        const conversationCoordinator = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
@@ -223,7 +223,7 @@ describe("State Recovery E2E Tests", () => {
             tags: [["t", "task"]]
         });
         
-        const conversation = await conversationManager.createConversation(triggeringEvent);
+        const conversation = await conversationCoordinator.createConversation(triggeringEvent);
         
         // Simulate partial agent execution
         conversation.agentContexts.set("Planner", {
@@ -233,7 +233,7 @@ describe("State Recovery E2E Tests", () => {
         });
         
         // Mark conversation as in PLAN phase but incomplete
-        await conversationManager.updatePhase(conversation.id, "plan", "Planning started");
+        await conversationCoordinator.updatePhase(conversation.id, "plan", "Planning started");
         
         // Add partial history
         conversation.history.push({
@@ -243,7 +243,7 @@ describe("State Recovery E2E Tests", () => {
         });
         
         // Save incomplete state
-        await conversationManager.saveConversation(conversation.id);
+        await conversationCoordinator.saveConversation(conversation.id);
         
         // Simulate recovery - create new manager and load conversation
         const recoveredManager = new ConversationCoordinator(projectPath, testPersistence);
@@ -271,7 +271,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should maintain conversation integrity during concurrent updates", async () => {
-        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
+        const conversationCoordinator = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
@@ -280,7 +280,7 @@ describe("State Recovery E2E Tests", () => {
             tags: [["t", "task"]]
         });
         
-        const conversation = await conversationManager.createConversation(triggeringEvent);
+        const conversation = await conversationCoordinator.createConversation(triggeringEvent);
         const conversationId = conversation.id;
         
         // First ensure we can do a simple update
@@ -289,34 +289,34 @@ describe("State Recovery E2E Tests", () => {
             summary: "Working on task A",
             toolCalls: ["analyze"]
         });
-        await conversationManager.saveConversation(conversationId);
+        await conversationCoordinator.saveConversation(conversationId);
         
         // Verify the simple update worked
-        const afterFirst = conversationManager.getConversation(conversationId);
+        const afterFirst = conversationCoordinator.getConversation(conversationId);
         expect(afterFirst?.agentContexts.size).toBe(1);
         
         // Now test concurrent updates
         const updates = [
             async () => {
-                const conv = conversationManager.getConversation(conversationId);
+                const conv = conversationCoordinator.getConversation(conversationId);
                 if (conv) {
                     conv.agentContexts.set("Agent2", {
                         lastActive: Date.now(),
                         summary: "Working on task B",
                         toolCalls: ["continue"]
                     });
-                    await conversationManager.saveConversation(conversationId);
+                    await conversationCoordinator.saveConversation(conversationId);
                 }
             },
             async () => {
-                const conv = conversationManager.getConversation(conversationId);
+                const conv = conversationCoordinator.getConversation(conversationId);
                 if (conv) {
                     conv.history.push({
                         role: "assistant",
                         content: "Processing concurrent request",
                         timestamp: Date.now()
                     });
-                    await conversationManager.saveConversation(conversationId);
+                    await conversationCoordinator.saveConversation(conversationId);
                 }
             }
         ];
@@ -325,7 +325,7 @@ describe("State Recovery E2E Tests", () => {
         await Promise.all(updates);
         
         // Verify final state
-        const finalConversation = conversationManager.getConversation(conversationId);
+        const finalConversation = conversationCoordinator.getConversation(conversationId);
         
         expect(finalConversation).toBeDefined();
         // We should have both agent contexts
@@ -335,7 +335,7 @@ describe("State Recovery E2E Tests", () => {
     });
     
     it("should properly archive and restore conversations", async () => {
-        const conversationManager = new ConversationCoordinator(projectPath, testPersistence);
+        const conversationCoordinator = new ConversationCoordinator(projectPath, testPersistence);
         
         // Create multiple conversations
         const conversations = [];
@@ -345,7 +345,7 @@ describe("State Recovery E2E Tests", () => {
                 content: `Task ${i}`,
                 tags: [["t", "task"]]
             });
-            const conv = await conversationManager.createConversation(event);
+            const conv = await conversationCoordinator.createConversation(event);
             conversations.push(conv);
         }
         

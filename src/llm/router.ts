@@ -316,6 +316,15 @@ export class LLMRouter implements LLMService {
           }
         } else if (chunk.type === "usage") {
           hasUsageChunk = true;
+          
+          // ============ TRACE LOGGING: Usage Chunk ============
+          console.log("🔍 [TRACE] router.ts stream() - USAGE CHUNK DETECTED");
+          console.log("  Full chunk data:", JSON.stringify(chunk, null, 2));
+          console.log("  Usage object:", JSON.stringify(chunk.usage, null, 2));
+          console.log("  Config key:", configKey);
+          console.log("  Model:", config.model);
+          console.log("================================================");
+          
           logger.debug("[LLM Stream] Found usage chunk", {
             agentName: request.options?.agentName,
             configKey,

@@ -1,4 +1,4 @@
-import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
+import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -10,23 +10,18 @@ const delegateSchema = z.object({
     .describe(
       "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) of the recipient agent(s)"
     ),
-  title: z
-    .string()
-    .describe(
-      "Brief title/summary of the task (e.g., 'Design authentication flow', 'Review database schema')"
-    ),
   fullRequest: z
     .string()
     .describe("The complete request or question to delegate to the recipient agent(s)"),
 });
 
 /**
- * Delegate tool - enables agents to communicate with each other by publishing NDKTask events
+ * Delegate tool - enables agents to communicate with each other via kind:1111 conversation events
  *
- * This tool allows an agent to delegate a task or question to one or more agents by:
+ * This tool allows an agent to delegate a request or question to one or more agents by:
  * 1. Resolving each recipient (agent slug or pubkey) to a pubkey
- * 2. Publishing an NDKTask event for each recipient with p-tag assignment
- * 3. Setting up delegation state so the agent waits for all task completions
+ * 2. Publishing a kind:1111 conversation event for each recipient with p-tag assignment
+ * 3. Setting up delegation state so the agent waits for all responses
  *
  * Recipients can be:
  * - A single recipient or array of recipients
@@ -37,19 +32,22 @@ const delegateSchema = z.object({
  *
  * If any recipient cannot be resolved, the tool fails with an error.
  *
- * When delegating to multiple recipients, the agent will wait for all task completions
+ * When delegating to multiple recipients, the agent will wait for all responses
  * before continuing. The agent should NOT call complete() after delegating.
  *
- * Each delegation creates a formal NDKTask (Nostr kind 1934) event that:
- * - Is assigned to a specific agent via p-tag
- * - Links to the conversation root via e-tag
- * - Tracks status (pending/complete)
- * - Enables parallel execution of sub-tasks
+ * Each delegation creates a kind:1111 conversation event (following NIP-22) that:
+ * - Is addressed to a specific agent via p-tag
+ * - Maintains conversation threading via E/e tags
+ * - Enables natural agent-to-agent communication
+ * - Supports parallel execution when delegating to multiple agents
  */
-export const delegateTool = createToolDefinition<z.input<typeof delegateSchema>, DelegationIntent>({
+export const delegateTool = createToolDefinition<
+  z.input<typeof delegateSchema>,
+  DelegationResponses
+>({
   name: "delegate",
   description:
-    "Delegate a task or question to one or more agents by publishing a reply event with their p-tags",
+    "Delegate a task or question to one or more agents and wait for their responses",
   promptFragment: `DELEGATE TOOL:
 Use this to communicate with other agents by delegating tasks or questions.
 IMPORTANT: recipients must ALWAYS be an array, even for a single recipient.
@@ -60,14 +58,11 @@ Examples:
 - delegate(["npub1abc..."], "Review this implementation for security issues")
 - delegate(["executor", "npub1xyz..."], "Implement and test this feature")
 
-IMPORTANT: When you use delegate(), you are handing off work to other agents.
-- DO NOT call complete() after delegating - you haven't completed the work yet
-- The delegated agents will respond back to you
-- Once all responses are received, you'll be invoked again to process them
-- THEN you can call complete() with your final answer`,
+The delegate() tool will wait for all responses and return them to you.
+You can then process the responses and continue with your task.`,
   schema: delegateSchema as z.ZodType<z.input<typeof delegateSchema>>,
   execute: async (input, context) => {
-    const { recipients, fullRequest, title } = input.value;
+    const { recipients, fullRequest } = input.value;
 
     // Recipients is always an array due to schema validation
     if (!Array.isArray(recipients)) {
@@ -103,20 +98,28 @@ IMPORTANT: When you use delegate(), you are handing off work to other agents.
         throw new Error("No valid recipients provided.");
       }
 
-      // Return delegation intent for RAL to handle
-      const intent: DelegationIntent = {
-        type: "delegation",
-        recipients: resolvedPubkeys,
-        title: title,
-        request: fullRequest,
-      };
-
-      logger.debug("[delegate() tool] Returning delegation intent", {
+      logger.info("[delegate() tool] 🎯 Starting synchronous delegation", {
         fromAgent: context.agent.slug,
         recipientCount: resolvedPubkeys.length,
+        mode: "synchronous",
       });
 
-      return success(intent);
+      // Use DelegationService to execute the delegation
+      const delegationService = new DelegationService(
+        context.agent,
+        context.conversationId,
+        context.conversationCoordinator,
+        context.triggeringEvent,
+        context.phase
+      );
+      
+      const responses = await delegationService.execute({
+        type: "delegation",
+        recipients: resolvedPubkeys,
+        request: fullRequest,
+      });
+      
+      return success(responses);
     } catch (error) {
       logger.error("Failed to create delegation tasks", {
         fromAgent: context.agent.slug,

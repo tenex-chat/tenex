@@ -9,7 +9,7 @@ import { logger } from "../utils/logger";
 const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
-  conversationManager: ConversationCoordinator;
+  conversationCoordinator: ConversationCoordinator;
   agentExecutor: AgentExecutor;
 }
 
@@ -19,7 +19,7 @@ export const handleNewConversation = async (
 ): Promise<void> => {
   try {
     // Create conversation
-    const conversation = await context.conversationManager.createConversation(event);
+    const conversation = await context.conversationCoordinator.createConversation(event);
 
     // Get project context
     const projectCtx = getProjectContext();
@@ -56,7 +56,7 @@ export const handleNewConversation = async (
       phase: conversation.phase,
       projectPath: process.cwd(),
       triggeringEvent: event,
-      conversationManager: context.conversationManager,
+      conversationCoordinator: context.conversationCoordinator,
     });
 
     logInfo(chalk.green("✅ Conversation routed successfully"));

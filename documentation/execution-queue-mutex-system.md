@@ -452,7 +452,7 @@ interface ExecutionPermission {
 ```typescript
 async enqueueForExecution(conversationId: string): Promise<ExecutionPermission> {
   // 1. Validate conversation exists and is eligible
-  const conversation = await this.conversationManager.getConversation(conversationId);
+  const conversation = await this.conversationCoordinator.getConversation(conversationId);
   if (!conversation) {
     throw new Error(`Conversation ${conversationId} not found`);
   }
@@ -467,7 +467,7 @@ async enqueueForExecution(conversationId: string): Promise<ExecutionPermission> 
   
   // 4. If granted, transition to execute phase
   if (permission.granted) {
-    await this.conversationManager.transitionPhase(
+    await this.conversationCoordinator.transitionPhase(
       conversationId,
       PHASES.EXECUTE,
       { reason: "Execution lock acquired" }
@@ -489,7 +489,7 @@ async processNextInQueue(): Promise<void> {
 
   try {
     // Verify conversation still exists and wants to execute
-    const conversation = await this.conversationManager.getConversation(
+    const conversation = await this.conversationCoordinator.getConversation(
       nextEntry.conversationId
     );
     
@@ -503,7 +503,7 @@ async processNextInQueue(): Promise<void> {
     await this.acquireLock(nextEntry.conversationId);
     
     // Transition to execute phase
-    await this.conversationManager.transitionPhase(
+    await this.conversationCoordinator.transitionPhase(
       nextEntry.conversationId,
       PHASES.EXECUTE,
       { reason: "Queue promotion - execution lock acquired" }
@@ -880,7 +880,7 @@ async recoverQueue(): Promise<void> {
 
 ```typescript
 async handleExecutionTimeout(conversationId: string): Promise<void> {
-  const conversation = await this.conversationManager.getConversation(conversationId);
+  const conversation = await this.conversationCoordinator.getConversation(conversationId);
   
   if (!conversation || conversation.phase !== PHASES.EXECUTE) {
     // Conversation already finished or moved on
@@ -888,7 +888,7 @@ async handleExecutionTimeout(conversationId: string): Promise<void> {
   }
   
   // Add timeout message to conversation
-  await this.conversationManager.addSystemMessage(conversationId, {
+  await this.conversationCoordinator.addSystemMessage(conversationId, {
     role: 'system',
     content: `⏰ Execution timeout reached. The execution lock has been automatically released. If your work was complete, you can continue to the next phase. If not, you may request execution again.`
   });
@@ -897,7 +897,7 @@ async handleExecutionTimeout(conversationId: string): Promise<void> {
   await this.executionQueueManager.forceRelease(conversationId, 'timeout');
   
   // Optionally transition to a safe phase
-  await this.conversationManager.transitionPhase(
+  await this.conversationCoordinator.transitionPhase(
     conversationId,
     PHASES.CHAT,
     { reason: 'Execution timeout - lock released' }
@@ -1172,14 +1172,14 @@ describe('Queue Integration', () => {
     const conversation = await createTestConversation();
     
     // Request execute phase
-    await conversationManager.transitionPhase(
+    await conversationCoordinator.transitionPhase(
       conversation.id,
       PHASES.EXECUTE,
       { reason: 'Test execution' }
     );
     
     // Should acquire lock and transition
-    const updatedConversation = await conversationManager.getConversation(conversation.id);
+    const updatedConversation = await conversationCoordinator.getConversation(conversation.id);
     expect(updatedConversation.phase).toBe(PHASES.EXECUTE);
     
     const currentLock = await queueManager.getCurrentLock();
@@ -1200,9 +1200,9 @@ describe('Queue E2E', () => {
     
     // Request execution for all
     await Promise.all([
-      conversationManager.transitionPhase(conv1.id, PHASES.EXECUTE),
-      conversationManager.transitionPhase(conv2.id, PHASES.EXECUTE),
-      conversationManager.transitionPhase(conv3.id, PHASES.EXECUTE)
+      conversationCoordinator.transitionPhase(conv1.id, PHASES.EXECUTE),
+      conversationCoordinator.transitionPhase(conv2.id, PHASES.EXECUTE),
+      conversationCoordinator.transitionPhase(conv3.id, PHASES.EXECUTE)
     ]);
     
     // First should execute, others should queue
@@ -1210,7 +1210,7 @@ describe('Queue E2E', () => {
     expect(await getQueueLength()).toBe(2);
     
     // Complete first execution
-    await conversationManager.transitionPhase(conv1.id, PHASES.VERIFICATION);
+    await conversationCoordinator.transitionPhase(conv1.id, PHASES.VERIFICATION);
     
     // Second should start executing
     expect(await getCurrentExecution()).toBe(conv2.id);
@@ -1244,7 +1244,7 @@ describe('Queue E2E', () => {
 
 ```typescript
 async validateLockOwnership(conversationId: string, claimantPubkey: string): Promise<boolean> {
-  const conversation = await this.conversationManager.getConversation(conversationId);
+  const conversation = await this.conversationCoordinator.getConversation(conversationId);
   if (!conversation) {
     return false;
   }
@@ -1275,7 +1275,7 @@ async validateQueueRequest(conversationId: string, agentPubkey: string): Promise
   }
   
   // Verify conversation is in valid state
-  const conversation = await this.conversationManager.getConversation(conversationId);
+  const conversation = await this.conversationCoordinator.getConversation(conversationId);
   if (!conversation || !this.isValidForExecution(conversation)) {
     return false;
   }

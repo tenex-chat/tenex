@@ -34,7 +34,7 @@ export class AgentStreamer {
    * Returns a handle that RAL can use to stream content.
    */
   createStreamHandle(context: EventContext): StreamHandle {
-    const streamId = `${context.conversationEvent?.id || context.triggeringEvent?.id || "stream"}-${Date.now()}`;
+    const streamId = `${context.rootEvent?.id || context.triggeringEvent?.id || "stream"}-${Date.now()}`;
 
     const state: StreamState = {
       context,

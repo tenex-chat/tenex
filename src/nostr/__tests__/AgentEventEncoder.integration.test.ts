@@ -98,8 +98,16 @@ describe("AgentEventEncoder Integration Tests", () => {
           },
         };
 
+        // Create mock ConversationCoordinator and encoder
+        const mockConversationCoordinator = {
+          getConversation: mock(() => ({
+            history: [conversationEvent, triggeringEvent]
+          }))
+        };
+        const encoder = new AgentEventEncoder(mockConversationCoordinator);
+
         // Encode the completion
-        const event = AgentEventEncoder.encodeCompletion(intent, context);
+        const event = encoder.encodeCompletion(intent, context);
 
         // Verify event structure
         expect(event.kind).toBe(NDKKind.GenericReply);
@@ -175,8 +183,16 @@ describe("AgentEventEncoder Integration Tests", () => {
           },
         };
 
+        // Create mock ConversationCoordinator and encoder
+        const mockConversationCoordinator = {
+          getConversation: mock(() => ({
+            history: [conversationEvent, triggeringEvent]
+          }))
+        };
+        const encoder = new AgentEventEncoder(mockConversationCoordinator);
+
         // Create delegation events
-        const delegationEvents = AgentEventEncoder.encodeDelegation(delegationIntent, context);
+        const delegationEvents = encoder.encodeDelegation(delegationIntent, context);
         
         expect(delegationEvents).toHaveLength(2);
         
@@ -226,8 +242,12 @@ describe("AgentEventEncoder Integration Tests", () => {
           queuedAgents: ["analyzer", "validator"],
         };
 
+        // Create mock ConversationCoordinator and encoder
+        const mockConversationCoordinator = {};
+        const encoder = new AgentEventEncoder(mockConversationCoordinator as any);
+
         // Encode status
-        const event = AgentEventEncoder.encodeProjectStatus(statusIntent);
+        const event = encoder.encodeProjectStatus(statusIntent);
         
         // Verify status event
         expect(event.kind).toBe(NDKKind.Text);

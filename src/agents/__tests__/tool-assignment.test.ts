@@ -62,7 +62,7 @@ describe("Tool assignment", () => {
       expect(tools).toContain("claude_code");
     });
 
-    it("project-manager agent should have special tools including delegate_phase", () => {
+    it("project-manager agent should have special tools including delegate", () => {
       const mockProjectManager = {
         isBuiltIn: true,
         slug: "project-manager",
@@ -70,8 +70,7 @@ describe("Tool assignment", () => {
       const tools = getDefaultToolsForAgent(mockProjectManager);
 
       expect(tools).toContain("complete");
-      expect(tools).toContain("delegate_phase"); // PM has delegate_phase instead of delegate
-      expect(tools).not.toContain("delegate"); // PM doesn't have regular delegate
+      expect(tools).toContain("delegate"); // PM uses delegate with phase support
       expect(tools).toContain("write_context_file");
       expect(tools).toContain("shell");
       expect(tools).toContain("discover_capabilities");

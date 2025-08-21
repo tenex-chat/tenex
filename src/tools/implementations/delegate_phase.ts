@@ -1,5 +1,5 @@
 import { PHASES } from "@/conversations/phases";
-import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
+import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -21,11 +21,6 @@ const delegatePhaseSchema = z.object({
     .string()
     .describe(
       "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey to delegate to in this phase"
-    ),
-  title: z
-    .string()
-    .describe(
-      "Brief title/summary of the task (e.g., 'Design authentication flow', 'Review database schema')"
     ),
   fullRequest: z
     .string()
@@ -49,133 +44,96 @@ const delegatePhaseSchema = z.object({
  * Recipient can be:
  * - Agent slug (e.g., "architect", "planner") - resolved from project agents
  * - Agent name (e.g., "Architect", "Planner") - resolved from project agents
- * - Npub (e.g., "npub1...") - decoded to hex pubkeys
+ * - Npub (e.g., "npub1...") - decoded to hex pubkey
  * - Hex pubkey (64 characters) - used directly
  *
- * The PM will wait for the task completion before continuing.
- * The PM should NOT call complete() after delegating.
+ * If recipient cannot be resolved, the tool fails with an error.
  *
- * Each delegation creates a formal NDKTask (Nostr kind 1934) event that:
- * - Is assigned to specific agent(s) via p-tag
- * - Links to the conversation root via e-tag
- * - Tracks status (pending/complete)
- * - Enables parallel execution of sub-tasks
+ * The agent should NOT call complete() after using delegate_phase.
  */
 export const delegatePhaseTool = createToolDefinition<
   z.input<typeof delegatePhaseSchema>,
-  DelegationIntent
+  DelegationResponses
 >({
   name: "delegate_phase",
   description:
-    "Switch conversation phase and delegate work to specialist agents atomically. Only available to the Project Manager.",
-  promptFragment: `DELEGATE PHASE TOOL:
-Use this to switch phases AND delegate work to specialist agents in one atomic operation.
-This ensures proper workflow coordination and phase leadership.
-
-IMPORTANT: 
-- recipient is a single agent string (not an array)
-- The fullRequest serves as both the phase reason AND the delegation content
-- DO NOT call complete() after delegating - wait for agents to respond
+    "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
+  promptFragment: `DELEGATE_PHASE TOOL (Project Manager ONLY):
+Use this to atomically switch phases and delegate work to specialist agents.
+This tool combines phase transition with task delegation.
 
 Examples:
-- delegate_phase("PLAN", "planner", "Design authentication system", "Create implementation plan for user authentication with OAuth2 and JWT")
-- delegate_phase("EXECUTE", "executor", "Implement password reset", "Implement the password reset functionality as planned")
-- delegate_phase("VERIFICATION", "executor", "Verify deployment", "Verify the deployment pipeline works correctly")
+- delegate_phase("PLAN", "planner", "Add user authentication system")
+- delegate_phase("EXECUTE", "executor", "The API is returning 500 errors")
+- delegate_phase("VERIFICATION", "qa-expert", "Verify the login flow works correctly")
 
-Phase Leadership Pattern:
-- PLAN phase → delegate to planner
-- EXECUTE phase → delegate to executor  
-- VERIFICATION phase → delegate to executor or QA specialist
-- REFLECTION phase → you handle this yourself
-
-After delegating:
-- You go dormant and wait for responses
-- When all tasks complete, you're reactivated
-- Then decide the next phase transition`,
+IMPORTANT: When you use delegate_phase(), you are:
+1. Switching the conversation to a new phase
+2. Delegating work to a specialist agent
+3. Setting up callbacks to be notified when the task completes
+- DO NOT call complete() after delegating - wait for the response
+- The delegated agent will handle the work and respond back`,
   schema: delegatePhaseSchema as z.ZodType<z.input<typeof delegatePhaseSchema>>,
   execute: async (input, context) => {
-    const { phase, recipient, fullRequest, title } = input.value;
-
-    // Verify this is the PM (belt and suspenders - should already be restricted by toolset)
-    if (context.agent.slug !== "project-manager") {
-      logger.warn("[delegate_phase] Non-PM agent attempted to use delegate_phase", {
-        agent: context.agent.name,
-        slug: context.agent.slug,
-      });
-      return failure({
-        kind: "execution",
-        tool: "delegate_phase",
-        message: "Only the Project Manager can use delegate_phase",
-      });
-    }
-
-    // Validate recipient is a string
-    if (typeof recipient !== "string" || !recipient.trim()) {
-      return failure({
-        kind: "execution",
-        tool: "delegate_phase",
-        message: "Recipient must be a non-empty string",
-      });
-    }
+    const { phase, recipient, fullRequest } = input.value;
 
     try {
-      // Step 1: Switch the phase
-      logger.info("[delegate_phase] PM switching phase", {
-        fromPhase: context.phase,
-        toPhase: phase,
-        reason: fullRequest,
-        agent: context.agent.name,
-        conversationId: context.conversationId,
+      // Resolve recipient to pubkey
+      const pubkey = resolveRecipientToPubkey(recipient);
+      if (!pubkey) {
+        throw new Error(`Could not resolve recipient: ${recipient}`);
+      }
+
+      logger.info("[delegate_phase() tool] 🎯 Starting phase delegation", {
+        fromAgent: context.agent.slug,
+        phase: phase,
+        recipient: recipient,
+        mode: "synchronous",
       });
 
-      // Update conversation phase through ConversationCoordinator
-      const updateResult = await context.conversationManager.updatePhase(
+      // First, update the conversation phase
+      await context.conversationCoordinator.updatePhase(
         context.conversationId,
         phase,
-        fullRequest, // The delegation request becomes the phase transition message
+        fullRequest, // Use the fullRequest as the phase transition message
         context.agent.pubkey,
         context.agent.name
       );
 
-      if (!updateResult) {
-        return failure({
-          kind: "execution",
-          tool: "delegate_phase",
-          message: `Failed to switch to ${phase} phase`,
-        });
-      }
-
-      // Step 2: Resolve recipient to pubkey
-      const pubkey = resolveRecipientToPubkey(recipient);
-      if (!pubkey) {
-        return failure({
-          kind: "execution",
-          tool: "delegate_phase",
-          message: `Cannot resolve recipient to pubkey: ${recipient}. Must be valid agent slug, npub, or hex pubkey.`,
-        });
-      }
-
-      // Return delegation intent for RAL to handle
-      const intent: DelegationIntent = {
-        type: "delegation",
-        recipients: [pubkey],
-        title: title,
-        request: fullRequest,
-        phase: phase, // Include phase in the intent
-      };
-
-      logger.debug("[delegate_phase() tool] Returning delegation intent with phase", {
-        fromAgent: context.agent.slug,
-        toRecipient: recipient,
-        toPubkey: pubkey,
-        phase: phase,
+      logger.info("[delegate_phase() tool] 🔄 Phase updated, initiating synchronous delegation", {
+        newPhase: phase,
+        recipient: recipient,
+        mode: "synchronous-wait",
       });
 
-      return success(intent);
-    } catch (error) {
-      logger.error("Failed to execute phase delegation", {
+      // Use DelegationService to execute the delegation
+      const delegationService = new DelegationService(
+        context.agent,
+        context.conversationId,
+        context.conversationCoordinator,
+        context.triggeringEvent,
+        phase // Pass the new phase as context
+      );
+      
+      const responses = await delegationService.execute({
+        type: "delegation",
+        recipients: [pubkey],
+        request: fullRequest,
+        phase: phase, // Include phase in the delegation intent
+      });
+      
+      logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
         phase: phase,
+        recipient: recipient,
+        responseCount: responses.responses.length,
+        mode: "synchronous",
+      });
+      
+      return success(responses);
+    } catch (error) {
+      logger.error("Failed to create phase delegation", {
         fromAgent: context.agent.slug,
+        phase: phase,
         toRecipient: recipient,
         error,
       });
@@ -183,7 +141,7 @@ After delegating:
       return failure({
         kind: "execution",
         tool: "delegate_phase",
-        message: `Failed to execute phase delegation: ${error instanceof Error ? error.message : String(error)}`,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   },

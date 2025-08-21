@@ -21,7 +21,7 @@ export interface E2ETestContext {
     projectPath: string;
     tempDir: string;
     mockLLM: MockLLMService;
-    conversationManager: ConversationCoordinator;
+    conversationCoordinator: ConversationCoordinator;
     agentRegistry: AgentRegistry;
     configService: typeof ConfigService;
     services: {
@@ -268,8 +268,8 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
     
     // Initialize services with test persistence adapter
     const testPersistenceAdapter = new TestPersistenceAdapter();
-    const conversationManager = new ConversationCoordinator(projectPath, testPersistenceAdapter);
-    await conversationManager.initialize();
+    const conversationCoordinator = new ConversationCoordinator(projectPath, testPersistenceAdapter);
+    await conversationCoordinator.initialize();
     
     const agentRegistry = new AgentRegistry(projectPath);
     await agentRegistry.loadFromProject();
@@ -293,7 +293,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         projectPath,
         tempDir,
         mockLLM,
-        conversationManager,
+        conversationCoordinator,
         agentRegistry,
         configService: ConfigService,
         services: {
@@ -352,7 +352,7 @@ export async function createConversation(
         created_at: Math.floor(Date.now() / 1000)
     });
     
-    const conversation = await context.conversationManager.createConversation(event);
+    const conversation = await context.conversationCoordinator.createConversation(event);
     return conversation.id;
 }
 
@@ -363,7 +363,7 @@ export async function getConversationState(
     context: E2ETestContext,
     conversationId: string
 ) {
-    const conversation = await context.conversationManager.getConversation(conversationId);
+    const conversation = await context.conversationCoordinator.getConversation(conversationId);
     if (!conversation) {
         throw new Error(`Conversation not found: ${conversationId}`);
     }
@@ -525,7 +525,7 @@ export async function executeConversationFlow(
         
         // Update conversation phase if specified in routing decision
         if (routingDecision.phase && routingDecision.phase !== currentPhase) {
-            await context.conversationManager.updatePhase(
+            await context.conversationCoordinator.updatePhase(
                 conversationId,
                 routingDecision.phase as any,
                 routingDecision.reason,
@@ -673,7 +673,7 @@ async function executeAgentWithResult(
         throw new Error(`Agent not found: ${agentName}`);
     }
     
-    const conversation = await context.conversationManager.getConversation(conversationId);
+    const conversation = await context.conversationCoordinator.getConversation(conversationId);
     if (!conversation) {
         throw new Error(`Conversation not found: ${conversationId}`);
     }

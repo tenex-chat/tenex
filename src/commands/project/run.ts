@@ -64,9 +64,10 @@ async function runProjectListener(projectPath: string, ndk: NDK): Promise<void> 
     const subscriptionManager = new SubscriptionManager(eventHandler, projectPath);
     await subscriptionManager.start();
 
-    // Start status publisher with ExecutionQueueManager from event handler
+    // Start status publisher with ExecutionQueueManager and ConversationCoordinator from event handler
     const executionQueueManager = eventHandler.getExecutionQueueManager();
-    const statusPublisher = new StatusPublisher(executionQueueManager);
+    const conversationCoordinator = eventHandler.getConversationCoordinator();
+    const statusPublisher = new StatusPublisher(executionQueueManager, conversationCoordinator);
     await statusPublisher.startPublishing(projectPath);
 
     // Set up graceful shutdown

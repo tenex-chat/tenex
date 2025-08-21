@@ -71,7 +71,7 @@ describe("handleNewConversation with NDK utilities", () => {
     mock.module("@/services", () => ({
       getProjectContext: () => ({
         agentRegistry: mockAgentRegistry,
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agents: new Map([
           [
             "orchestrator",

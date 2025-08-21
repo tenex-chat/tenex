@@ -81,7 +81,7 @@ export async function runDebugChat(
 
     // Create conversation state for AgentExecutor
     const conversationId = uuidv4();
-    const _conversationManager = new ConversationCoordinator(projectPath);
+    const _conversationCoordinator = new ConversationCoordinator(projectPath);
     const conversation: Conversation = {
       id: conversationId,
       title: "Debug Chat Session",
@@ -107,7 +107,7 @@ export async function runDebugChat(
     const llmService = createAgentAwareLLMService(llmRouter, agent.name);
 
     // Initialize AgentExecutor
-    const agentExecutor = new AgentExecutor(llmService, _conversationManager);
+    const agentExecutor = new AgentExecutor(llmService, _conversationCoordinator);
 
     // Track messages separately for interactive mode
     const messages: Array<{ role: string; content: string }> = [];
@@ -147,7 +147,7 @@ export async function runDebugChat(
         phase: PHASES.CHAT,
         projectPath,
         triggeringEvent: mockEvent,
-        conversationManager: _conversationManager,
+        conversationCoordinator: _conversationCoordinator,
       };
 
       // Execute using AgentExecutor without parent tracing context
@@ -250,7 +250,7 @@ export async function runDebugChat(
           phase: PHASES.CHAT,
           projectPath,
           triggeringEvent: mockEvent,
-          conversationManager: _conversationManager,
+          conversationCoordinator: _conversationCoordinator,
         };
 
         // Execute using AgentExecutor without parent tracing context

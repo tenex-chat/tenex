@@ -47,7 +47,7 @@ export class ProjectContext {
   /**
    * Conversation manager for the project (optional, initialized when needed)
    */
-  public conversationManager?: ConversationCoordinator;
+  public conversationCoordinator?: ConversationCoordinator;
 
   constructor(project: NDKProject, agents: Map<string, AgentInstance>) {
     this.project = project;

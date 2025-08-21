@@ -108,31 +108,45 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
       };
 
       // Get conversation for the event context
-      const conversation = context.conversationManager.getConversation(context.conversationId);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
       // Create event context
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        conversationEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
+        rootEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
+        conversationId: context.conversationId,
       };
 
       // Use AgentPublisher to create and publish the lesson
-      const agentPublisher = new AgentPublisher(context.agent);
+      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
       const lessonEvent = await agentPublisher.lesson(intent, eventContext);
 
+      // Publish status message with the Nostr reference
+      try {
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        if (conversation?.history?.[0]) {
+          const nostrReference = `nostr:${lessonEvent.encode()}`;
+          await agentPublisher.conversation(
+            { type: "conversation", content: `📚 Learning lesson: ${nostrReference}` },
+            {
+              triggeringEvent: context.triggeringEvent,
+              rootEvent: conversation.history[0],
+              conversationId: context.conversationId,
+            }
+          );
+        }
+      } catch (error) {
+        // Don't fail the tool if we can't publish the status
+        console.warn("Failed to publish learn status:", error);
+      }
+
       const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
-      
-      // Create Nostr reference to the lesson event
-      const nostrReference = `nostr:${lessonEvent.encode()}`;
 
       return success({
         message,
         eventId: lessonEvent.encode(),
         title,
         hasDetailed: !!detailed,
-        metadata: {
-          displayMessage: `📚 Learning lesson: ${nostrReference}`,
-        },
       });
     } catch (error) {
       logger.error("❌ Learn tool failed", {

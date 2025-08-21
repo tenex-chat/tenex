@@ -43,15 +43,11 @@ export class AgentEventDecoder {
   }
 
   /**
-   * Check if this is a task completion event
+   * Check if this is a task completion event (for NDKTask kind:1934)
+   * Note: This is different from delegation completions (kind:1111)
    */
   static isTaskCompletionEvent(event: NDKEvent): boolean {
-    // Method 1: Status complete with tool complete tag
-    if (event.tagValue("status") === "complete" && event.tagValue("tool") === "complete") {
-      return true;
-    }
-
-    // Method 2: Reply to a task (K=1934) where P tag matches p tag
+    // Only for actual NDKTask completions, not delegations
     if (
       event.tagValue("K") === NDKTask.kind.toString() &&
       event.tagValue("P") === event.tagValue("p")
@@ -146,7 +142,52 @@ export class AgentEventDecoder {
   }
 
   /**
-   * Check if event is a delegation
+   * Check if event is a delegation request (kind:1111 from agent to agent)
+   */
+  static isDelegationRequest(event: NDKEvent, systemAgents?: Map<string, AgentInstance>): boolean {
+    // Must be kind:1111
+    if (event.kind !== 1111) return false;
+    
+    // If we have system agents, verify it's from an agent
+    if (systemAgents) {
+      const isFromAgent = this.isEventFromAgent(event, systemAgents);
+      if (!isFromAgent) return false;
+      
+      // Check if p-tag points to another agent
+      const pTag = event.tagValue("p");
+      if (pTag && Array.from(systemAgents.values()).some(a => a.pubkey === pTag)) {
+        return true;
+      }
+    } else {
+      // Fallback: just check if it has a p-tag (less accurate)
+      return !!event.tagValue("p");
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Check if event is a delegation completion (kind:1111 with tool:complete)
+   */
+  static isDelegationCompletion(event: NDKEvent): boolean {
+    return event.kind === 1111 && 
+           event.tagValue("tool") === "complete";
+  }
+  
+  /**
+   * Get the delegation request ID from a completion event
+   */
+  static getDelegationRequestId(event: NDKEvent): string | undefined {
+    if (this.isDelegationCompletion(event)) {
+      // The delegation request ID is in the e tag (what we're replying to)
+      return event.tagValue("e");
+    }
+    return undefined;
+  }
+  
+  /**
+   * Check if event is a delegation (legacy - for backward compatibility)
+   * @deprecated Use isDelegationRequest instead
    */
   static isDelegation(event: NDKEvent): boolean {
     return event.tagValue("tool") === "delegate" || event.tagValue("tool") === "delegate_phase";

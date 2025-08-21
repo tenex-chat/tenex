@@ -137,7 +137,7 @@ export function createMockExecutionContext(
     projectPath: "/mock/project",
     triggeringEvent: mockEvent,
     publisher: mockPublisher,
-    conversationManager: mockConversationCoordinator,
+    conversationCoordinator: mockConversationCoordinator,
     ...overrides,
   } as ExecutionContext;
 }

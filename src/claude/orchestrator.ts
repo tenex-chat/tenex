@@ -19,7 +19,7 @@ export interface ClaudeTaskOptions {
   branch?: string;
   conversationRootEventId?: string;
   conversation?: Conversation;
-  conversationManager?: ConversationCoordinator;
+  conversationCoordinator?: ConversationCoordinator;
   abortSignal?: AbortSignal;
   resumeSessionId?: string;
   agentName?: string;
@@ -52,7 +52,7 @@ export class ClaudeTaskOrchestrator {
       prompt: options.prompt,
       branch: options.branch,
       conversationRootEventId: options.conversationRootEventId,
-      conversationManager: options.conversationManager,
+      conversationCoordinator: options.conversationCoordinator,
       claudeSessionId: options.resumeSessionId,
       // Provide delegation context for Claude Code tasks so they get registered
       delegationContext: options.conversation ? {

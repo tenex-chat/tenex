@@ -19,7 +19,8 @@ describe("StatusPublisher with NDK utilities", () => {
 
   beforeEach(() => {
     fixture = new TENEXTestFixture();
-    publisher = new StatusPublisher();
+    const mockConversationCoordinator = {} as any; // Mock ConversationCoordinator for tests
+    publisher = new StatusPublisher(undefined, mockConversationCoordinator);
   });
 
   afterEach(() => {

@@ -13,7 +13,7 @@ export interface ExecutionContext {
   projectPath: string;
   triggeringEvent: NDKEvent;
   replyTarget?: NDKEvent; // Optional: what to reply to (if different from trigger)
-  conversationManager: ConversationCoordinator;
+  conversationCoordinator: ConversationCoordinator;
   previousPhase?: Phase;
   claudeSessionId?: string;
   agentExecutor?: AgentExecutor;

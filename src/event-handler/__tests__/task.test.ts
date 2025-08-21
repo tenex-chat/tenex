@@ -72,7 +72,7 @@ describe("handleTask", () => {
 
   it("should create conversation and route to orchestrator when no p-tags", async () => {
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -96,7 +96,7 @@ describe("handleTask", () => {
     mockEvent.tags = [["p", "agent-pubkey-123"]];
 
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -114,7 +114,7 @@ describe("handleTask", () => {
     mockEvent.tags = [["p", "unknown-pubkey"]];
 
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -132,7 +132,7 @@ describe("handleTask", () => {
     ];
 
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -153,7 +153,7 @@ describe("handleTask", () => {
     // Should not throw
     await expect(
       handleTask(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       })
     ).resolves.toBeUndefined();
@@ -169,7 +169,7 @@ describe("handleTask", () => {
     // Should not throw
     await expect(
       handleTask(mockEvent, {
-        conversationManager: mockConversationCoordinator,
+        conversationCoordinator: mockConversationCoordinator,
         agentExecutor: mockAgentExecutor,
       })
     ).resolves.toBeUndefined();
@@ -180,7 +180,7 @@ describe("handleTask", () => {
 
   it("should pass claude session ID when present", async () => {
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -196,7 +196,7 @@ describe("handleTask", () => {
     mockEvent.tagValue = mock(() => undefined);
 
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -212,7 +212,7 @@ describe("handleTask", () => {
     mockEvent.content = "a".repeat(200);
 
     await handleTask(mockEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 

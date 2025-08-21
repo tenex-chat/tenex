@@ -10,7 +10,7 @@ import { logger } from "../utils/logger";
 const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
-  conversationManager: ConversationCoordinator;
+  conversationCoordinator: ConversationCoordinator;
   agentExecutor: AgentExecutor;
 }
 
@@ -34,7 +34,7 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
 
   try {
     // Create conversation from NDKTask
-    const conversation = await context.conversationManager.createConversation(event);
+    const conversation = await context.conversationCoordinator.createConversation(event);
 
     // Log the claude-session tag if present
     const claudeSession = event.tagValue("claude-session");
@@ -79,7 +79,7 @@ export const handleTask = async (event: NDKTask, context: EventHandlerContext): 
       phase: conversation.phase,
       projectPath: process.cwd(),
       triggeringEvent: event,
-      conversationManager: context.conversationManager,
+      conversationCoordinator: context.conversationCoordinator,
       claudeSessionId: claudeSession,
     });
   } catch (error) {

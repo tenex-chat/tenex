@@ -35,13 +35,13 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
       const projectPath = process.cwd();
 
       // Initialize conversation manager
-      const conversationManager = new ConversationCoordinator(projectPath);
-      await conversationManager.initialize();
+      const conversationCoordinator = new ConversationCoordinator(projectPath);
+      await conversationCoordinator.initialize();
 
       // Get conversation ID either from argument or selector
       let conversationId = argv.conversationId;
       if (!conversationId) {
-        const selectedId = await selectConversation(conversationManager);
+        const selectedId = await selectConversation(conversationCoordinator);
         if (!selectedId) {
           logWarning("No conversation selected.");
           process.exit(0);
@@ -52,7 +52,7 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
       logInfo(chalk.bold.blue(`\n📊 Timeline Analysis for Conversation: ${conversationId}\n`));
 
       // Get conversation data
-      const conversation = conversationManager.getConversation(conversationId);
+      const conversation = conversationCoordinator.getConversation(conversationId);
       if (!conversation) {
         logError(`Conversation ${conversationId} not found`);
         process.exit(1);

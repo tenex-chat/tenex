@@ -61,9 +61,6 @@ export class ToolStreamHandler {
     // Check if this tool never sent a tool_start event
     await this.handleMissingToolStart(event.tool, toolResult, tracingLogger, context);
 
-    // Publish status message if tool provided one (as kind:1111 chat message)
-    await this.publishToolStatus(toolResult, tracingLogger, context);
-
     // Add result to state
     this.stateManager.addToolResult(toolResult);
 
@@ -148,42 +145,6 @@ export class ToolStreamHandler {
   }
 
   /**
-   * Publish tool status message if provided in metadata
-   */
-  private async publishToolStatus(
-    toolResult: ToolExecutionResult,
-    tracingLogger: TracingLogger,
-    context: ExecutionContext
-  ): Promise<void> {
-    // Check if tool provided a displayMessage in metadata
-    if (toolResult.success && toolResult.metadata?.displayMessage) {
-      try {
-        const agentPublisher = new AgentPublisher(context.agent);
-        const eventContext = {
-          triggeringEvent: context.triggeringEvent,
-          conversationEvent: context.conversation ? context.conversation.history[0] : undefined,
-        };
-        
-        // Publish as a regular conversation message (kind:1111 based on encodeConversation)
-        await agentPublisher.conversation(
-          { type: "conversation", content: toolResult.metadata.displayMessage },
-          eventContext
-        );
-        
-        tracingLogger.debug("Published tool status message", {
-          tool: toolResult.toolName,
-          message: toolResult.metadata.displayMessage,
-        });
-      } catch (error) {
-        tracingLogger.warning("Failed to publish tool status message", {
-          tool: toolResult.toolName,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  }
-
-  /**
    * Publish tool error if execution failed
    */
   private async publishToolError(
@@ -208,16 +169,18 @@ export class ToolStreamHandler {
         }
 
         // Use AgentPublisher.error() instead of legacy approach
-        const agentPublisher = new AgentPublisher(context.agent);
+        const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
         const errorIntent: ErrorIntent = {
           type: "error",
           message: `Tool "${toolName}" failed: ${errorMessage}`,
           errorType: "tool_execution",
         };
 
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         const eventContext: EventContext = {
           triggeringEvent: context.triggeringEvent,
-          conversationEvent: context.triggeringEvent, // Use triggering event as conversation context
+          rootEvent: conversation?.history?.[0], // Get the actual root event from conversation
+          conversationId: context.conversationId,
         };
 
         await agentPublisher.error(errorIntent, eventContext);
@@ -272,14 +235,5 @@ export class ToolStreamHandler {
     const output = result.output as Record<string, unknown>;
     // Check for terminal intent types (new format)
     return output.type === "completion" || output.type === "delegation";
-  }
-
-  /**
-   * Check if a tool is terminal by name (before execution)
-   * This allows us to skip subsequent tools if a terminal tool is queued
-   */
-  isTerminalTool(toolName: string): boolean {
-    const terminalTools = ["complete", "delegate", "delegate_phase"];
-    return terminalTools.includes(toolName.toLowerCase());
   }
 }

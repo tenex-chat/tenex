@@ -272,7 +272,7 @@ describe("E2E: State Persistence and Recovery", () => {
         // Create updated context with new manager
         const updatedContext = {
             ...context,
-            conversationManager: newConversationCoordinator,
+            conversationCoordinator: newConversationCoordinator,
             agentRegistry: newAgentRegistry
         };
         
@@ -478,7 +478,7 @@ describe("E2E: State Persistence and Recovery", () => {
         // Continue execution with updated context
         const updatedContext = {
             ...context,
-            conversationManager: newConversationCoordinator
+            conversationCoordinator: newConversationCoordinator
         };
         
         // Add continuation response
@@ -588,7 +588,7 @@ describe("E2E: State Persistence and Recovery", () => {
         );
         
         // Get state before restart
-        const conversation = await context.conversationManager.getConversation(conversationId);
+        const conversation = await context.conversationCoordinator.getConversation(conversationId);
         const historyBeforeRestart = conversation?.history || [];
         
         expect(historyBeforeRestart.length).toBeGreaterThan(0);

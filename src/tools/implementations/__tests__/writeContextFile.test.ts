@@ -148,7 +148,7 @@ describe("writeContextFile tool", () => {
         pubkey: "pubkey123",
         signer: mock(() => {}),
       },
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
     } as any;
   });
 

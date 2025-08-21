@@ -40,6 +40,15 @@ export async function buildLLMMetadata(
   const model = responseWithUsage.model || "unknown";
   const cost = await calculateCost(responseWithUsage, model);
 
+  // TEMPORARY LOGGING: Trace cost calculation
+  console.log("[TRACE] llmMetadata.ts buildLLMMetadata - Calculated cost:", {
+    cost,
+    model,
+    promptTokens: response.usage.prompt_tokens,
+    completionTokens: response.usage.completion_tokens,
+    hasProviderMetadata: !!responseWithUsage.experimental_providerMetadata
+  });
+
   const systemPrompt = messages.find((m) => m.role === "system")?.content;
   const userPrompt = messages.find((m) => m.role === "user")?.content;
 

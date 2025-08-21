@@ -5,26 +5,25 @@ describe("delegateTool", () => {
   it("should have correct metadata", () => {
     expect(delegateTool.name).toBe("delegate");
     expect(delegateTool.description).toBe(
-      "Delegate a task or question to one or more agents by publishing a reply event with their p-tags"
+      "Delegate a task or question to one or more agents and wait for their responses"
     );
     expect(delegateTool.promptFragment).toContain("DELEGATE TOOL");
-    expect(delegateTool.promptFragment).toContain("DO NOT call complete() after delegating");
+    expect(delegateTool.promptFragment).toContain("will wait for all responses");
   });
 
-  it("should accept single recipient", () => {
+  it("should accept single recipient in array", () => {
     const schema = delegateTool.parameters;
     expect(schema).toBeDefined();
     expect(schema.shape).toBeDefined();
 
-    // Validate single recipient as string
+    // Validate single recipient in array
     const validated = schema.validate({
-      recipients: "architect",
+      recipients: ["architect"],
       fullRequest: "Design a database schema",
     });
 
     expect(validated.ok).toBe(true);
     if (validated.ok) {
-      // Should transform single string to array
       expect(validated.value.value).toEqual({
         recipients: ["architect"],
         fullRequest: "Design a database schema",
@@ -61,7 +60,7 @@ describe("delegateTool", () => {
 
     // Missing fullRequest
     const result2 = schema.validate({
-      recipients: "architect",
+      recipients: ["architect"],
     });
     expect(result2.ok).toBe(false);
 
@@ -76,7 +75,6 @@ describe("delegateTool", () => {
     // Empty array should be valid structurally (will fail in execution)
     const validated = schema.validate({
       recipients: [],
-      title: "Empty Test",
       fullRequest: "Test message",
     });
 

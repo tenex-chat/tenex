@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { PROJECT_MANAGER_AGENT } from "@/agents/constants";
 import { ExecutionConfig } from "@/agents/execution/constants";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
@@ -62,6 +63,26 @@ export const shellTool: Tool<
       timeout,
     });
 
+    // Publish status message about what command we're running
+    try {
+      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      
+      if (conversation?.history?.[0]) {
+        await agentPublisher.conversation(
+          { type: "conversation", content: `⚡ Executing: ${command}` },
+          {
+            triggeringEvent: context.triggeringEvent,
+            rootEvent: conversation.history[0],
+            conversationId: context.conversationId,
+          }
+        );
+      }
+    } catch (error) {
+      // Don't fail the tool if we can't publish the status
+      console.warn("Failed to publish shell status:", error);
+    }
+
     try {
       const { stdout, stderr } = await execAsync(command, {
         cwd: workingDir,
@@ -82,9 +103,7 @@ export const shellTool: Tool<
         hasStderr: !!stderr,
       });
 
-      return success(output, {
-        displayMessage: `⚡ Executing: ${command}`,
-      });
+      return success(output);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
 

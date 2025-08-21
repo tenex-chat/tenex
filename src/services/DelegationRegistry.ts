@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentInstance } from "@/agents/types";
@@ -24,7 +25,6 @@ interface DelegationRecord {
 
   // Task details
   content: {
-    title: string;
     fullRequest: string;
     phase?: string;
   };
@@ -73,7 +73,6 @@ const DelegationRecordSchema = z.object({
     slug: z.string().optional(),
   }),
   content: z.object({
-    title: z.string(),
     fullRequest: z.string(),
     phase: z.string().optional(),
   }),
@@ -110,7 +109,7 @@ const PersistedDataSchema = z.object({
   version: z.literal(1),
 });
 
-export class DelegationRegistry {
+export class DelegationRegistry extends EventEmitter {
   private static instance: DelegationRegistry;
   private static isInitialized = false;
 
@@ -119,6 +118,9 @@ export class DelegationRegistry {
 
   // Index: batch ID -> batch info
   private batches: Map<string, DelegationBatch> = new Map();
+  
+  // Track batches that were handled synchronously to prevent double processing
+  private syncHandledBatches = new Set<string>();
 
   // Index: agent pubkey -> active task IDs
   private agentTasks: Map<string, Set<string>> = new Map();
@@ -135,6 +137,7 @@ export class DelegationRegistry {
   private isShuttingDown = false;
 
   private constructor() {
+    super();
     this.persistencePath = path.join(process.cwd(), ".tenex", "delegations.json");
     this.backupPath = path.join(process.cwd(), ".tenex", "delegations.backup.json");
   }
@@ -195,7 +198,6 @@ export class DelegationRegistry {
     tasks: Array<{
       taskId: string;
       assignedToPubkey: string;
-      title: string;
       fullRequest: string;
       phase?: string;
     }>;
@@ -230,7 +232,6 @@ export class DelegationRegistry {
           pubkey: task.assignedToPubkey,
         },
         content: {
-          title: task.title,
           fullRequest: task.fullRequest,
           phase: task.phase,
         },
@@ -266,7 +267,6 @@ export class DelegationRegistry {
         fullTaskId: task.taskId,
         delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
         assignedToPubkey: task.assignedToPubkey.substring(0, 16),
-        title: task.title,
         phase: task.phase,
       });
     }
@@ -323,10 +323,35 @@ export class DelegationRegistry {
 
     if (allComplete) {
       batch.allCompleted = true;
-      logger.info("Delegation batch completed", {
+      
+      // Check if there's a synchronous listener waiting
+      const hasListener = this.listenerCount(`${batch.batchId}:completion`) > 0;
+      
+      logger.info("🎯 Delegation batch completed - emitting completion event", {
         batchId: batch.batchId,
         taskCount: batch.taskIds.length,
         conversationId: record.delegatingAgent.conversationId.substring(0, 8),
+        hasListeners: hasListener,
+        mode: hasListener ? "synchronous" : "async-fallback",
+      });
+      
+      // If there's a sync listener, mark this batch as sync-handled
+      if (hasListener) {
+        this.syncHandledBatches.add(batch.batchId);
+        // Auto-cleanup after 10 seconds to prevent memory leak
+        setTimeout(() => {
+          this.syncHandledBatches.delete(batch.batchId);
+          logger.debug("Cleaned up sync-handled batch", { batchId: batch.batchId });
+        }, 10000);
+      }
+      
+      // Emit completion event for synchronous waiting
+      const completions = this.getBatchCompletions(batch.batchId);
+      this.emit(`${batch.batchId}:completion`, {
+        batchId: batch.batchId,
+        completions,
+        conversationId: record.delegatingAgent.conversationId,
+        delegatingAgent: record.delegatingAgent.pubkey,
       });
     } else {
       logger.debug("Task completed, batch still pending", {
@@ -382,6 +407,13 @@ export class DelegationRegistry {
   }
 
   /**
+   * Check if a batch was handled synchronously
+   */
+  isBatchSyncHandled(batchId: string): boolean {
+    return this.syncHandledBatches.has(batchId);
+  }
+
+  /**
    * Get all completions for a batch
    * Used when synthesizing responses after all tasks complete
    */
@@ -409,6 +441,56 @@ export class DelegationRegistry {
         summary: record.completion.summary,
         assignedTo: record.assignedTo.pubkey,
       }));
+  }
+
+  /**
+   * Wait for a delegation batch to complete.
+   * Used by delegate() tool to synchronously wait for responses.
+   * 
+   * @param batchId - The batch ID to wait for
+   * @param timeout - Maximum time to wait in milliseconds (default 5 minutes)
+   * @returns The batch completions when all delegations are done
+   */
+  async waitForBatchCompletion(
+    batchId: string,
+    timeout = 300000
+  ): Promise<Array<{
+    taskId: string;
+    response: string;
+    summary?: string;
+    assignedTo: string;
+  }>> {
+    // Check if already complete
+    const batch = this.batches.get(batchId);
+    if (batch?.allCompleted) {
+      logger.debug("Batch already completed, returning immediately", { batchId });
+      return this.getBatchCompletions(batchId);
+    }
+
+    // Wait for completion event
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.off(`${batchId}:completion`, handler);
+        logger.warn("Delegation batch timed out", { batchId, timeout });
+        reject(new Error(`Delegation batch ${batchId} timed out after ${timeout}ms`));
+      }, timeout);
+
+      const handler = (data: { completions: Array<any> }) => {
+        clearTimeout(timer);
+        logger.debug("Batch completion event received", { 
+          batchId, 
+          completionCount: data.completions.length 
+        });
+        resolve(data.completions);
+      };
+
+      this.once(`${batchId}:completion`, handler);
+      logger.debug("🕑 Setting up synchronous wait listener", { 
+        batchId, 
+        timeout,
+        mode: "synchronous" 
+      });
+    });
   }
 
   /**

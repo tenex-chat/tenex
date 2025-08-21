@@ -123,7 +123,7 @@ describe("Task Reply Routing", () => {
 
     // Call the handler
     await handleChatMessage(replyToTaskEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -190,7 +190,7 @@ describe("Task Reply Routing", () => {
 
     // Call the handler
     await handleChatMessage(replyToTaskEvent, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -251,7 +251,7 @@ describe("Task Reply Routing", () => {
 
     // Call the handler
     await handleChatMessage(replyWithSessionTag, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 
@@ -285,7 +285,7 @@ describe("Task Reply Routing", () => {
 
     // Call the handler
     await handleChatMessage(replyToNonExistentTask, {
-      conversationManager: mockConversationCoordinator,
+      conversationCoordinator: mockConversationCoordinator,
       agentExecutor: mockAgentExecutor,
     });
 

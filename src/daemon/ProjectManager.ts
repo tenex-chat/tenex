@@ -200,8 +200,8 @@ export class ProjectManager implements IProjectManager {
       const ExecutionQueueManager = (await import("@/conversations/executionQueue"))
         .ExecutionQueueManager;
 
-      const conversationManager = new ConversationCoordinator(projectPath);
-      await conversationManager.initialize();
+      const conversationCoordinator = new ConversationCoordinator(projectPath);
+      await conversationCoordinator.initialize();
 
       // Create and attach ExecutionQueueManager
       const projectPubkey = projectCtx.pubkey;
@@ -209,8 +209,8 @@ export class ProjectManager implements IProjectManager {
       const queueManager = new ExecutionQueueManager(projectPath, projectPubkey, projectIdentifier);
       await queueManager.initialize();
 
-      conversationManager.setExecutionQueueManager(queueManager);
-      projectCtx.conversationManager = conversationManager;
+      conversationCoordinator.setExecutionQueueManager(queueManager);
+      projectCtx.conversationCoordinator = conversationCoordinator;
 
       // Republish kind:0 events for all agents on project load
       await agentRegistry.republishAllAgentProfiles(project);

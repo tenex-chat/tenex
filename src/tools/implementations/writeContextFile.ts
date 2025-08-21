@@ -1,6 +1,7 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { getNDK } from "@/nostr";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getProjectContext } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -78,7 +79,7 @@ Example workflow:
       const fullPath = path.join(contextDir, filename);
 
       // Check if this file was recently read from persisted conversation metadata
-      const conversation = context.conversationManager.getConversation(context.conversationId);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       const readFiles = conversation?.metadata?.readFiles || [];
       const contextPath = `context/${filename}`;
       const wasRecentlyRead = readFiles.includes(contextPath);
@@ -134,6 +135,27 @@ Example workflow:
 
         logger.debug("Published NDKArticle for context file", { filename, dTag });
 
+        // Publish status message with the Nostr reference to the article
+        try {
+          const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+          const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+          
+          if (conversation?.history?.[0]) {
+            const nostrReference = `nostr:${article.encode()}`;
+            await agentPublisher.conversation(
+              { type: "conversation", content: `📝 Writing context file: ${nostrReference}` },
+              {
+                triggeringEvent: context.triggeringEvent,
+                rootEvent: conversation.history[0],
+                conversationId: context.conversationId,
+              }
+            );
+          }
+        } catch (statusError) {
+          // Don't fail the tool if we can't publish the status
+          console.warn("Failed to publish write_context_file status:", statusError);
+        }
+
         // If changelog is provided, create a NIP-22 reply
         if (changelog) {
           try {
@@ -164,9 +186,6 @@ Example workflow:
         ok: true,
         value: {
           message: `Successfully wrote to context/${filename}`,
-        },
-        metadata: {
-          displayMessage: `📝 Writing context/${filename}`,
         },
       };
     } catch (error) {

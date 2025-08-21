@@ -39,7 +39,7 @@ describe("readPath tool", () => {
       conversationId: "test-conv-123",
       phase: "EXECUTE",
       agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-      conversationManager: mockConversationCoordinator as any,
+      conversationCoordinator: mockConversationCoordinator as any,
     };
   });
 
@@ -337,7 +337,7 @@ describe("readPath tool", () => {
       // Context without conversation manager
       const minimalContext = {
         ...context,
-        conversationManager: undefined,
+        conversationCoordinator: undefined,
       };
 
       const result = await readPathTool.execute(

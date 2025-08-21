@@ -38,7 +38,7 @@ export interface StandaloneAgentContext {
 export class AgentExecutor {
   constructor(
     private llmService: LLMService,
-    private conversationManager: ConversationCoordinator,
+    private conversationCoordinator: ConversationCoordinator,
     private standaloneContext?: StandaloneAgentContext
   ) {}
 
@@ -67,7 +67,7 @@ export class AgentExecutor {
     const messages = await this.buildMessages(context, context.triggeringEvent);
 
     // Get the Claude session ID from the conversation state
-    const conversation = this.conversationManager.getConversation(context.conversationId);
+    const conversation = this.conversationCoordinator.getConversation(context.conversationId);
     const agentState = conversation?.agentStates.get(context.agent.slug);
     const claudeSessionId =
       context.claudeSessionId || agentState?.claudeSessionsByPhase?.[context.phase];
@@ -84,17 +84,17 @@ export class AgentExecutor {
     // Build full context with additional properties
     const fullContext: ExecutionContext = {
       ...context,
-      conversationManager: context.conversationManager || this.conversationManager,
+      conversationCoordinator: context.conversationCoordinator || this.conversationCoordinator,
       agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
       claudeSessionId, // Pass the determined session ID
     };
 
     // Create AgentPublisher for typing indicators
-    const agentPublisher = new AgentPublisher(context.agent);
+    const agentPublisher = new AgentPublisher(context.agent, fullContext.conversationCoordinator);
 
     try {
       // Get fresh conversation data for execution time tracking
-      const conversation = context.conversationManager.getConversation(context.conversationId);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       if (!conversation) {
         throw new Error(`Conversation ${context.conversationId} not found`);
       }
@@ -114,7 +114,8 @@ export class AgentExecutor {
       // Publish typing indicator start using AgentPublisher
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        conversationEvent: conversation.history[0], // Root event is first in history
+        rootEvent: conversation.history[0], // Root event is first in history
+        conversationId: context.conversationId,
       };
       await agentPublisher.typing({ type: "typing", state: "start" }, eventContext);
 
@@ -143,7 +144,7 @@ export class AgentExecutor {
         success: false,
       });
       // Stop execution time tracking even on error
-      const conversation = context.conversationManager.getConversation(context.conversationId);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       if (conversation) {
         stopExecutionTime(conversation);
       }
@@ -152,7 +153,8 @@ export class AgentExecutor {
       try {
         const eventContext: EventContext = {
           triggeringEvent: context.triggeringEvent,
-          conversationEvent: conversation ? conversation.history[0] : undefined,
+          rootEvent: conversation ? conversation.history[0] : undefined,
+          conversationId: context.conversationId,
         };
         await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
       } catch (typingError) {
@@ -173,7 +175,7 @@ export class AgentExecutor {
     const messages: Message[] = [];
 
     // Get fresh conversation data
-    const conversation = context.conversationManager.getConversation(context.conversationId);
+    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${context.conversationId} not found`);
     }
@@ -261,13 +263,14 @@ export class AgentExecutor {
 
     // Add special instruction if this is a reactivation after task completion
     if (context.isTaskCompletionReactivation) {
-      logger.info("[AgentExecutor] Agent reactivated after task completion", {
+      logger.info("[AgentExecutor] 🔄 ASYNC REACTIVATION: Agent resumed after delegation", {
         agent: context.agent.name,
         hasReplyTarget: !!context.replyTarget,
         replyTargetId: context.replyTarget?.id?.substring(0, 8),
         replyTargetPubkey: context.replyTarget?.pubkey?.substring(0, 8),
         triggeringEventId: context.triggeringEvent?.id?.substring(0, 8),
         triggeringEventPubkey: context.triggeringEvent?.pubkey?.substring(0, 8),
+        mode: "async-fallback",
       });
 
       const taskCompletionInstruction = `
@@ -290,9 +293,11 @@ ONLY use complete().
 === END CRITICAL NOTIFICATION ===`;
 
       messages.push(new Message("system", taskCompletionInstruction));
-      logger.info(`[AgentExecutor] Task completion reactivation mode for ${context.agent.name}`, {
+      logger.info(`[AgentExecutor] 🔁 Starting async reactivation flow for ${context.agent.name}`, {
         conversationId: context.conversationId,
         agentSlug: context.agent.slug,
+        mode: "async-fallback",
+        reason: "delegation-completion",
       });
     }
 
@@ -325,7 +330,7 @@ Be completely transparent about your internal process. If you made a mistake or 
     }
 
     // All agents now get conversation transcript
-    const { messages: agentMessages } = await context.conversationManager.buildAgentMessages(
+    const { messages: agentMessages } = await context.conversationCoordinator.buildAgentMessages(
       context.conversationId,
       context.agent,
       context.triggeringEvent

@@ -10,9 +10,9 @@ interface ConversationChoice {
 }
 
 export async function selectConversation(
-  conversationManager: ConversationCoordinator
+  conversationCoordinator: ConversationCoordinator
 ): Promise<string | null> {
-  const conversations = conversationManager.getAllConversations();
+  const conversations = conversationCoordinator.getAllConversations();
 
   if (conversations.length === 0) {
     console.log(chalk.yellow("No conversations found."));
