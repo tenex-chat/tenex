@@ -29,6 +29,7 @@ export interface SerializedToolResult {
       kind: string;
       message: string;
     };
+    metadata?: Record<string, unknown>;
   };
 }
 
@@ -49,6 +50,7 @@ export function serializeToolResult(result: ToolExecutionResult): SerializedTool
             message: result.error.message,
           }
         : undefined,
+      metadata: result.metadata,
     },
   };
 }
@@ -116,5 +118,6 @@ export function deserializeToolResult(serialized: SerializedToolResult): ToolExe
     toolArgs: serialized.toolArgs,
     output: serialized.data.output,
     error: deserializeToolError(serialized.data.error),
+    metadata: serialized.data.metadata as ToolExecutionResult['metadata'],
   };
 }

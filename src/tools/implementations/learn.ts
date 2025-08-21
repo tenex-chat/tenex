@@ -121,12 +121,18 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
       const lessonEvent = await agentPublisher.lesson(intent, eventContext);
 
       const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
+      
+      // Create Nostr reference to the lesson event
+      const nostrReference = `nostr:${lessonEvent.encode()}`;
 
       return success({
         message,
         eventId: lessonEvent.encode(),
         title,
         hasDetailed: !!detailed,
+        metadata: {
+          displayMessage: `📚 Learning lesson: ${nostrReference}`,
+        },
       });
     } catch (error) {
       logger.error("❌ Learn tool failed", {

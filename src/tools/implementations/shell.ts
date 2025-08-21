@@ -82,7 +82,9 @@ export const shellTool: Tool<
         hasStderr: !!stderr,
       });
 
-      return success(output);
+      return success(output, {
+        displayMessage: `⚡ Executing: ${command}`,
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
 

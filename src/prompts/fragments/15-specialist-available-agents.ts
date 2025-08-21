@@ -38,7 +38,7 @@ export const specialistAvailableAgentsFragment: PromptFragment<SpecialistAvailab
       .join("\n\n");
 
     return `## Available Agents
-You are part of a multi-agent system, here are your coworkers:
+You are part of a multi-agent system, these are agents immediately available in the system:
 
 ${agentList}`;
   },

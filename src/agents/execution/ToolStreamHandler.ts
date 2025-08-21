@@ -1,6 +1,6 @@
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import type { ExecutionLogger } from "@/logging/ExecutionLogger";
-import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import type { ConversationIntent, ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
 import type { ToolExecutionResult } from "@/tools/executor";
@@ -60,6 +60,9 @@ export class ToolStreamHandler {
 
     // Check if this tool never sent a tool_start event
     await this.handleMissingToolStart(event.tool, toolResult, tracingLogger, context);
+
+    // Publish status message if tool provided one (as kind:1111 chat message)
+    await this.publishToolStatus(toolResult, tracingLogger, context);
 
     // Add result to state
     this.stateManager.addToolResult(toolResult);
@@ -142,6 +145,42 @@ export class ToolStreamHandler {
         error: toolResult.error ? formatToolError(toolResult.error) : undefined,
       }
     );
+  }
+
+  /**
+   * Publish tool status message if provided in metadata
+   */
+  private async publishToolStatus(
+    toolResult: ToolExecutionResult,
+    tracingLogger: TracingLogger,
+    context: ExecutionContext
+  ): Promise<void> {
+    // Check if tool provided a displayMessage in metadata
+    if (toolResult.success && toolResult.metadata?.displayMessage) {
+      try {
+        const agentPublisher = new AgentPublisher(context.agent);
+        const eventContext = {
+          triggeringEvent: context.triggeringEvent,
+          conversationEvent: context.conversation ? context.conversation.history[0] : undefined,
+        };
+        
+        // Publish as a regular conversation message (kind:1111 based on encodeConversation)
+        await agentPublisher.conversation(
+          { type: "conversation", content: toolResult.metadata.displayMessage },
+          eventContext
+        );
+        
+        tracingLogger.debug("Published tool status message", {
+          tool: toolResult.toolName,
+          message: toolResult.metadata.displayMessage,
+        });
+      } catch (error) {
+        tracingLogger.warning("Failed to publish tool status message", {
+          tool: toolResult.toolName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**

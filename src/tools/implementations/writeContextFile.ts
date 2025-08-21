@@ -165,6 +165,9 @@ Example workflow:
         value: {
           message: `Successfully wrote to context/${filename}`,
         },
+        metadata: {
+          displayMessage: `📝 Writing context/${filename}`,
+        },
       };
     } catch (error) {
       return {
