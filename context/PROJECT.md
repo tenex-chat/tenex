@@ -1,4 +1,3 @@
-
 # Project Name: TENEX
 
 ## 1. Core Concept
@@ -11,6 +10,7 @@ The fundamental shift is from traditional coding in a text editor to managing an
 
 *   **Multi-Agent Architecture:** The system is composed of specialized AI agents, each with a distinct role (e.g., Planner, Executor, Project Manager, human-replica).
 *   **Invisible Orchestrator:** A central component that intelligently routes user requests and agent responses to the most appropriate agent, creating a seamless workflow.
+*   **External Delegation:** A `delegate_external` tool allows agents to communicate and delegate tasks to agents outside the current project. This functions by sending Nostr events (`kind:11` for new messages, `kind:1111` for replies). This tool is available to all agents by default.
 *   **Phase-Based Workflow:** Every development task follows a structured, cyclical process:
     1.  **CHAT:** Requirements gathering and clarification.
     2.  **BRAINSTORM:** Idea exploration and refinement.

@@ -1,6 +1,6 @@
 import { formatAnyError } from "@/utils/error-formatter";
 import type NDK from "@nostr-dev-kit/ndk";
-import { type NDKEvent, NDKKind, NDKProject, NDKTask } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
@@ -13,7 +13,6 @@ import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
-import { handleTask } from "./task";
 
 const logInfo = logger.info.bind(logger);
 
@@ -131,10 +130,10 @@ export class EventHandler {
         break;
 
       case NDKTask.kind: // kind 1934
-        await handleTask(NDKTask.from(event), {
-          conversationCoordinator: this.conversationCoordinator,
-          agentExecutor: this.agentExecutor,
-        });
+        // Task events are historical records of claude_code executions
+        // They are published for visibility but don't need routing
+        // The claude_code tool executes synchronously and already has the result
+        logInfo(chalk.gray(`Skipping task event (already executed): ${event.id?.substring(0, 8)}`));
         break;
 
       case NDKProject.kind: // kind 31933

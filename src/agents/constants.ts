@@ -1,3 +1,4 @@
+import { delegateExternalTool } from "@/tools/implementations/delegate_external";
 import { claudeCode } from "@/tools/implementations/claude_code";
 import { completeTool } from "../tools/implementations/complete";
 import { delegateTool } from "../tools/implementations/delegate";
@@ -21,6 +22,7 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       lessonLearnTool.name,
       claudeCode.name,
       completeTool.name,
+      delegateExternalTool.name,
       "write_context_file",
       "shell",
       "discover_capabilities",
@@ -38,6 +40,7 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       lessonLearnTool.name,
       claudeCode.name,
       completeTool.name,
+      delegateExternalTool.name,
       delegateTool.name,
       "agents_list",
       "agents_discover",
@@ -54,6 +57,7 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     // analyze.name,
     claudeCode.name,
     completeTool.name, // All agents can complete tasks
+    delegateExternalTool.name, // All agents can delegate to external agents
     delegateTool.name, // Non-PM agents use regular delegate
   ];
 

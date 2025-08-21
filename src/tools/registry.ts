@@ -12,6 +12,7 @@ import { agentsList } from "./implementations/agents-list.js";
 import { agentsRead } from "./implementations/agents-read.js";
 import { agentsWrite } from "./implementations/agents-write.js";
 import { analyze } from "./implementations/analyze.js";
+import { delegateExternalTool } from "./implementations/delegate_external.js";
 import { claudeCode } from "./implementations/claude_code.js";
 import { completeTool } from "./implementations/complete.js";
 import { delegateTool } from "./implementations/delegate.js";
@@ -53,6 +54,7 @@ export type ToolName =
   | "delegate_phase"
   | "nostr_projects"
   | "claude_code"
+  | "delegate_external"
   | "report_write"
   | "report_read"
   | "reports_list"
@@ -82,6 +84,7 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["delegate_phase", delegatePhaseTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
+  ["delegate_external", delegateExternalTool],
   ["report_write", reportWriteTool],
   ["report_read", reportReadTool],
   ["reports_list", reportsListTool],
