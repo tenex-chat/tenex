@@ -123,8 +123,14 @@ export class AgentEventEncoder {
     event.tag(["K", rootEventKind.toString()]);
     event.tag(["P", rootEventPubkey]);
 
+    const triggeringEventFromOP = context.triggeringEvent.pubkey === rootEventPubkey;
+    const triggeringEventFirstLevelReply = context.triggeringEvent.tagValue("e") === rootEventId;
+    const replyToOP = triggeringEventFromOP && triggeringEventFirstLevelReply;
+
+    const replyToEvent = replyToOP ? context.rootEvent : context.triggeringEvent;
+
     // Add reply to triggering event (e tag) - what we're directly replying to
-    event.tag(["e", context.triggeringEvent.id]);
+    event.tag(["e", replyToEvent.id]);
   }
   
   /**
@@ -292,11 +298,15 @@ export class AgentEventEncoder {
     }
     // Add cost metadata if available
     if (context.cost !== undefined) {
-      event.tag(["llm-cost-usd", context.cost.toString()]);
+      // Format cost to avoid scientific notation and ensure proper decimal representation
+      // Use toFixed with enough precision (10 decimal places) then remove trailing zeros
+      const formattedCost = context.cost.toFixed(10).replace(/\.?0+$/, '');
+      event.tag(["llm-cost-usd", formattedCost]);
       
       // ============ TRACE LOGGING: Cost Tag Added ============
       console.log("🔍 [TRACE] AgentEventEncoder.ts - COST TAG ADDED");
       console.log("  Cost value:", context.cost);
+      console.log("  Formatted cost:", formattedCost);
       console.log("  Event kind:", event.kind);
       console.log("  All tags:", event.tags);
       console.log("================================================");

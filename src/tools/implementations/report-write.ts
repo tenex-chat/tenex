@@ -1,3 +1,4 @@
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { ReportManager } from "@/services/ReportManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -82,6 +83,26 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
         articleId,
         agent: context.agent.name,
       });
+
+      // Publish status message with the Nostr reference to the article
+      try {
+        const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        
+        if (conversation?.history?.[0]) {
+          await agentPublisher.conversation(
+            { type: "conversation", content: `📄 Writing report: ${articleId}` },
+            {
+              triggeringEvent: context.triggeringEvent,
+              rootEvent: conversation.history[0],
+              conversationId: context.conversationId,
+            }
+          );
+        }
+      } catch (statusError) {
+        // Don't fail the tool if we can't publish the status
+        console.warn("Failed to publish report_write status:", statusError);
+      }
 
       return {
         ok: true,
