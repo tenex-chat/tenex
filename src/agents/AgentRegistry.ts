@@ -513,12 +513,6 @@ export class AgentRegistry {
       return false;
     }
 
-    // Project Manager always keeps its hardcoded tools
-    if (agent.slug === "project-manager") {
-      logger.info("Ignoring tool configuration change for project-manager agent");
-      return false;
-    }
-
     // Ensure complete() is always present
     if (!newToolNames.includes("complete")) {
       newToolNames.push("complete");
