@@ -61,22 +61,6 @@ debug
     );
   });
 debug
-  .command("tool")
-  .argument("claude_code", "Tool name (only claude_code is supported)")
-  .argument("<prompt>", "Prompt to send to Claude Code")
-  .description("Debug a tool execution (currently only claude_code)")
-  .option("-t, --timeout <ms>", "Timeout in milliseconds", Number.parseInt)
-  .action((tool, prompt, options) => {
-    if (tool !== "claude_code") {
-      logError("Only 'claude_code' tool is supported for debugging");
-      process.exit(1);
-    }
-    import("./commands/debug/claudeCode").then(({ runDebugClaudeCode }) =>
-      runDebugClaudeCode(prompt, options)
-    );
-  });
-
-debug
   .command("timeline [conversationId]")
   .description("Display a timeline of all events in a conversation")
   .action((conversationId) => {
