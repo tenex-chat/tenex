@@ -129,13 +129,6 @@ export class EventHandler {
         });
         break;
 
-      case NDKTask.kind: // kind 1934
-        // Task events are historical records of claude_code executions
-        // They are published for visibility but don't need routing
-        // The claude_code tool executes synchronously and already has the result
-        logInfo(chalk.gray(`Skipping task event (already executed): ${event.id?.substring(0, 8)}`));
-        break;
-
       case NDKProject.kind: // kind 31933
         if (this.isUpdatingProject) {
           logger.warn("Project update already in progress, skipping event", {

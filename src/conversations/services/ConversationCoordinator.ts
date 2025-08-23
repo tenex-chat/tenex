@@ -97,7 +97,22 @@ export class ConversationCoordinator {
    * Get a conversation by ID
    */
   getConversation(id: string): Conversation | undefined {
-    return this.store.get(id);
+    const conversation = this.store.get(id);
+    
+    // Debug logging to trace session usage
+    if (conversation?.agentStates) {
+      for (const [agentSlug, state] of conversation.agentStates.entries()) {
+        if (state.claudeSessionsByPhase) {
+          logger.debug(`[ConversationCoordinator] Conversation ${id.substring(0, 8)} has sessions for agent ${agentSlug}:`, {
+            conversationId: id,
+            agentSlug,
+            sessions: state.claudeSessionsByPhase,
+          });
+        }
+      }
+    }
+    
+    return conversation;
   }
 
   /**

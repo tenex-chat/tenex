@@ -29,14 +29,14 @@ export async function getModelsForProvider(
     
     // For Ollama, pass the custom URL if provided
     if (provider === "ollama" && ollamaUrl) {
-      return await loadModels(mappedProvider, { baseUrl: ollamaUrl });
+      return await loadModels(mappedProvider, { baseURL: ollamaUrl });
     }
     
     // For OpenAI Compatible, try to fetch models from the endpoint
     if (provider === "openai-compatible" && ollamaUrl) {
       // Use OpenAI provider with custom baseUrl
       try {
-        return await loadModels("openai", { baseUrl: ollamaUrl });
+        return await loadModels("openai", { baseURL: ollamaUrl });
       } catch {
         // If fetching fails, return empty to allow manual entry
         return null;

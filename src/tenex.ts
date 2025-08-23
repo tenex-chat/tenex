@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 import { handleCliError } from "@/utils/cli-error";
-import { logError } from "@/utils/logger";
 // CLI entry point for TENEX
 import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
@@ -40,18 +39,6 @@ debug
     PHASES.CHAT
   )
   .action((options) => runDebugSystemPrompt(options));
-debug
-  .command("chat [agent]")
-  .description("Start an interactive debug chat session with an agent")
-  .option("-s, --system-prompt", "Show the agent's system prompt on first request")
-  .option("-m, --message <message>", "Initial message to send")
-  .option(
-    "-l, --llm [config]",
-    "LLM configuration to use (shows available configs if no value provided)"
-  )
-  .action((agent, options) => {
-    import("./commands/debug/chat").then(({ runDebugChat }) => runDebugChat(agent, options));
-  });
 debug
   .command("conversation <nevent>")
   .description("Fetch and display a Nostr conversation thread")

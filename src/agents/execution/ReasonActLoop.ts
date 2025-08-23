@@ -191,8 +191,14 @@ export class ReasonActLoop {
         throw error;
       }
 
-      // Check if agent completed properly (just log, don't retry)
-      terminationHandler.checkTermination(context, tracingLogger);
+      // Check if agent completed properly and publish completion if needed
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      const eventContext: EventContext = {
+        triggeringEvent: context.triggeringEvent,
+        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+        conversationId: context.conversationId,
+      };
+      await terminationHandler.checkTermination(context, tracingLogger, eventContext);
 
       yield this.createFinalEvent(stateManager);
     } catch (error) {
@@ -333,24 +339,6 @@ export class ReasonActLoop {
         case "done":
           if (event.response) {
             stateManager.setFinalResponse(event.response);
-            
-            // ============ TRACE LOGGING: Full LLM Response ============
-            console.log("🔍 [TRACE] ReasonActLoop.ts - DONE EVENT WITH FULL LLM RESPONSE");
-            console.log("  Full response object:", JSON.stringify(event.response, null, 2));
-            console.log("  Model:", event.response.model);
-            console.log("  Has usage?:", !!event.response.usage);
-            if (event.response.usage) {
-              console.log("  Usage details:", {
-                prompt_tokens: event.response.usage.prompt_tokens,
-                completion_tokens: event.response.usage.completion_tokens,
-                total_tokens: event.response.usage.prompt_tokens + event.response.usage.completion_tokens
-              });
-            }
-            console.log("  Has cost?:", "cost" in event.response);
-            if ("cost" in event.response) {
-              console.log("  Cost:", (event.response as any).cost);
-            }
-            console.log("================================================");
             
             // Log LLM metadata for debugging
             tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
@@ -544,7 +532,7 @@ export class ReasonActLoop {
     // Build event context for streaming
     const eventContext: EventContext = {
       triggeringEvent: context.triggeringEvent,
-      rootEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
+      rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
       conversationId: context.conversationId,
     };
 
@@ -593,7 +581,7 @@ export class ReasonActLoop {
       const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation ? conversation.history[0] : undefined,
+        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
         conversationId: context.conversationId,
       };
       await this.agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
@@ -699,7 +687,7 @@ export class ReasonActLoop {
     
     const eventContext: EventContext = {
       triggeringEvent: context.triggeringEvent,
-      rootEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
+      rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
       conversationId: context.conversationId,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       executionTime: this.startTime ? Date.now() - this.startTime : undefined,
@@ -714,29 +702,6 @@ export class ReasonActLoop {
       cost,
       phase: context.phase,
     };
-
-    // ============ TRACE LOGGING: EventContext Before Publishing ============
-    console.log("🔍 [TRACE] ReasonActLoop.ts - EVENTCONTEXT BEFORE PUBLISH");
-    // Serialize NDKEvent objects to avoid cyclic references
-    const serializedContext = {
-      ...eventContext,
-      triggeringEvent: eventContext.triggeringEvent?.serialize?.(true, true) || eventContext.triggeringEvent,
-      rootEvent: eventContext.rootEvent?.serialize?.(true, true) || eventContext.rootEvent
-    };
-    console.log("  Full EventContext:", JSON.stringify(serializedContext, null, 2));
-    console.log("  Model:", eventContext.model);
-    console.log("  Has usage?:", !!eventContext.usage);
-    if (eventContext.usage) {
-      console.log("  Usage details:", eventContext.usage);
-    }
-    console.log("  Has cost?:", eventContext.cost !== undefined);
-    if (eventContext.cost !== undefined) {
-      console.log("  Cost:", eventContext.cost);
-    }
-    console.log("  Phase:", eventContext.phase);
-    console.log("  Execution time:", eventContext.executionTime);
-    console.log("  Tool calls count:", eventContext.toolCalls?.length || 0);
-    console.log("================================================");
 
     // Publish completion intent (delegation is no longer terminal)
     const event = await agentPublisher.complete(intent as CompletionIntent, eventContext);

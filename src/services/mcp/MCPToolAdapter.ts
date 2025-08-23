@@ -4,8 +4,8 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 
-// Import MCPPropertyDefinition type
-interface MCPPropertyDefinition {
+// Export MCPPropertyDefinition type for use in MCPService
+export interface MCPPropertyDefinition {
   type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
   description?: string;
   enum?: string[];

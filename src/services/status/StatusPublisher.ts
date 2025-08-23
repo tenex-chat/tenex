@@ -1,10 +1,9 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
+import { EVENT_KINDS } from "@/llm/types";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
@@ -36,11 +35,10 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
   private executionQueueManager?: unknown; // Using unknown to avoid circular dependency
-  private conversationCoordinator: ConversationCoordinator;
 
-  constructor(executionQueueManager: unknown, conversationCoordinator: ConversationCoordinator) {
+  constructor(executionQueueManager: unknown, _conversationCoordinator: ConversationCoordinator) {
     this.executionQueueManager = executionQueueManager;
-    this.conversationCoordinator = conversationCoordinator;
+    // conversationCoordinator no longer needed since we're self-contained
   }
 
   async startPublishing(projectPath: string): Promise<void> {
@@ -56,6 +54,47 @@ export class StatusPublisher {
       clearInterval(this.statusInterval);
       this.statusInterval = undefined;
     }
+  }
+
+  /**
+   * Create a status event from the intent.
+   * Directly creates the event without depending on AgentPublisher.
+   */
+  private createStatusEvent(intent: StatusIntent): NDKEvent {
+    const event = new NDKEvent(getNDK());
+    event.kind = EVENT_KINDS.PROJECT_STATUS;
+    event.content = "";
+
+    // Add project tag
+    const projectCtx = getProjectContext();
+    event.tag(projectCtx.project.tagReference());
+
+    // Add p-tag for the project owner's pubkey
+    event.tag(["p", projectCtx.project.pubkey]);
+
+    // Add agent pubkeys
+    for (const agent of intent.agents) {
+      event.tag(["agent", agent.pubkey, agent.slug]);
+    }
+
+    // Add model access tags
+    for (const model of intent.models) {
+      event.tag(["model", model.slug, ...model.agents]);
+    }
+
+    // Add tool access tags
+    for (const tool of intent.tools) {
+      event.tag(["tool", tool.name, ...tool.agents]);
+    }
+
+    // Add queue tags if present
+    if (intent.queue) {
+      for (const conversationId of intent.queue) {
+        event.tag(["queue", conversationId]);
+      }
+    }
+
+    return event;
   }
 
   private async publishStatusEvent(projectPath: string): Promise<void> {
@@ -90,22 +129,12 @@ export class StatusPublisher {
       // Gather queue info
       await this.gatherQueueInfo(intent);
 
-      // Create a minimal agent for status publishing
-      // Status events are published by the project itself
-      const projectAgent: AgentInstance = {
-        pubkey: projectCtx.signer.pubkey,
-        signer: projectCtx.signer,
-        name: "Project",
-        role: "System",
-        tools: [],
-        llm: null,
-        isGlobal: false,
-      };
-
-
-      // Use AgentPublisher to create and publish the event
-      const agentPublisher = new AgentPublisher(projectAgent, this.conversationCoordinator);
-      await agentPublisher.status(intent);
+      // Create and publish the status event directly
+      const event = this.createStatusEvent(intent);
+      
+      // Sign and publish with project signer
+      await event.sign(projectCtx.signer);
+      await event.publish();
     } catch (err) {
       const errorMessage = formatAnyError(err);
       logWarning(`Failed to publish status event: ${errorMessage}`);
@@ -232,7 +261,7 @@ export class StatusPublisher {
       }
 
       // Get the execution queue state
-      const queueState = await this.executionQueueManager.getExecutionQueueState();
+      const queueState = await (this.executionQueueManager as { getExecutionQueueState: () => Promise<{ active?: string; queued: string[] }> }).getExecutionQueueState();
 
       // Add queue entries in order
       // First: the active conversation (if any)

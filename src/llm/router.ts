@@ -3,6 +3,9 @@ import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
 import { getLLMLogger, initializeLLMLogger } from "./callLogger";
+import { getExecutionLogger, initializeExecutionLogger } from "@/utils/executionLogger";
+import { createMockLLMProvider } from "./providers/MockProvider";
+import { createSimpleMockProvider } from "./providers/SimpleMockProvider";
 import type {
   CompletionRequest,
   CompletionResponse,
@@ -197,6 +200,18 @@ export class LLMRouter implements LLMService {
           { startTime, endTime }
         );
       }
+      
+      // Also log to execution logger
+      const executionLogger = getExecutionLogger();
+      if (executionLogger) {
+        await executionLogger.logLLMCall(
+          configKey,
+          config,
+          request,
+          { response },
+          { startTime, endTime }
+        );
+      }
 
       return response;
     } catch (caughtError) {
@@ -215,6 +230,12 @@ export class LLMRouter implements LLMService {
       const llmLogger = getLLMLogger();
       if (llmLogger) {
         await llmLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
+      }
+      
+      // Also log to execution logger
+      const executionLogger = getExecutionLogger();
+      if (executionLogger) {
+        await executionLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
       }
 
       throw error;
@@ -316,20 +337,6 @@ export class LLMRouter implements LLMService {
           }
         } else if (chunk.type === "usage") {
           hasUsageChunk = true;
-          
-          // ============ TRACE LOGGING: Usage Chunk ============
-          console.log("🔍 [TRACE] router.ts stream() - USAGE CHUNK DETECTED");
-          console.log("  Full chunk data:", JSON.stringify(chunk, null, 2));
-          console.log("  Usage object:", JSON.stringify(chunk.usage, null, 2));
-          console.log("  Config key:", configKey);
-          console.log("  Model:", config.model);
-          console.log("================================================");
-          
-          logger.debug("[LLM Stream] Found usage chunk", {
-            agentName: request.options?.agentName,
-            configKey,
-            usage: chunk.usage,
-          });
 
           // Build the final response with model information
           lastResponse = {
@@ -450,10 +457,46 @@ export class LLMRouter implements LLMService {
 /**
  * Load LLM router from configuration file
  */
-export async function loadLLMRouter(projectPath: string): Promise<LLMRouter> {
+export async function loadLLMRouter(projectPath: string): Promise<LLMRouter | LLMService> {
   try {
+    // Check if we should use mock provider (for testing)
+    if (process.env.LLM_PROVIDER === "mock" || process.env.LLM_PROVIDER === "mocked") {
+      logger.info("Using mock LLM provider for testing");
+      
+      // Use simple mock by default, or complex mock if scenarios are specified
+      if (process.env.MOCK_SCENARIOS) {
+        // Complex mock with scenarios and event publishing
+        const scenariosType = process.env.MOCK_SCENARIOS;
+        let scenarios: any[] = [];
+        
+        if (scenariosType.startsWith("ios-")) {
+          // iOS compatibility testing scenarios
+          const { getIOSScenarios } = await import("./providers/mock-scenarios/ios-testing");
+          const testType = scenariosType.replace("ios-", "") || "all";
+          scenarios = getIOSScenarios(testType);
+          logger.info(`Loaded ${scenarios.length} iOS testing scenarios (type: ${testType})`);
+        }
+        
+        return createMockLLMProvider({
+          scenarios,
+          publishEvents: true,
+          debug: process.env.DEBUG === "true",
+          defaultResponse: {
+            content: "This is a mock response. Please configure MOCK_SCENARIOS environment variable.",
+          },
+        }) as LLMService;
+      } else {
+        // Simple mock - just returns predetermined responses
+        logger.info("Using SimpleMockProvider - backend logic preserved, only LLM calls mocked");
+        return createSimpleMockProvider() as LLMService;
+      }
+    }
+
     // Initialize comprehensive LLM logger
     initializeLLMLogger(projectPath);
+    
+    // Initialize execution logger
+    initializeExecutionLogger(projectPath);
 
     // Use configService to load merged global and project-specific configuration
     const { llms: tenexLLMs } = await configService.loadConfig(projectPath);

@@ -83,7 +83,8 @@ describe("AgentEventEncoder", () => {
 
   const baseContext: EventContext = {
     triggeringEvent: mockTriggeringEvent,
-    conversationEvent: mockConversationEvent,
+    rootEvent: mockConversationEvent,
+    conversationId: "conv123",
   };
 
   describe("encodeCompletion", () => {

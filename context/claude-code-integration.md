@@ -60,7 +60,6 @@ TENEX integrates Claude Code (Anthropic's code generation and execution model) t
 Both patterns share the same underlying implementation:
 - `ClaudeTaskOrchestrator` handles the actual Claude Code execution
 - Manages NDKTask lifecycle for auditing and progress tracking
-- Uses DelayedMessageBuffer for smooth UI updates
 - Tracks execution time for metrics
 - Publishes task events to Nostr
 

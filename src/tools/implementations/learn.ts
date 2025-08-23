@@ -113,7 +113,7 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
       // Create event context
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation ? conversation.history[0] : undefined, // Root event is first in history
+        rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
         conversationId: context.conversationId,
       };
 

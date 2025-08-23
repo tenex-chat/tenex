@@ -42,12 +42,6 @@ export class AgentExecutor {
     private standaloneContext?: StandaloneAgentContext
   ) {}
 
-  /**
-   * Get the execution backend - all agents now use ReasonActLoop
-   */
-  private getBackend(): ReasonActLoop {
-    return new ReasonActLoop(this.llmService);
-  }
 
   /**
    * Execute an agent's assignment for a conversation with streaming
@@ -114,7 +108,7 @@ export class AgentExecutor {
       // Publish typing indicator start using AgentPublisher
       const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation.history[0], // Root event is first in history
+        rootEvent: conversation.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
         conversationId: context.conversationId,
       };
       await agentPublisher.typing({ type: "typing", state: "start" }, eventContext);
@@ -153,7 +147,7 @@ export class AgentExecutor {
       try {
         const eventContext: EventContext = {
           triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation ? conversation.history[0] : undefined,
+          rootEvent: conversation?.history[0] ?? context.triggeringEvent,
           conversationId: context.conversationId,
         };
         await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
@@ -363,10 +357,10 @@ Be completely transparent about your internal process. If you made a mistake or 
     // Add claude_code tool for agents that explicitly have it in their tools list
     // This is now handled through agent configuration directly
 
-    // Get the backend - all agents use ReasonActLoop now
-    const backend = this.getBackend();
+    // All agents use ReasonActLoop now
+    const backend = new ReasonActLoop(this.llmService);
 
-    // Execute using the backend - all backends now use the same interface
+    // Execute using the backend
     await backend.execute(messages, allTools, context);
   }
 }

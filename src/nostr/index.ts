@@ -13,7 +13,6 @@ export { AgentPublisher } from "./AgentPublisher";
 export type { StreamHandle } from "./AgentStreamer";
 export { AgentStreamer } from "./AgentStreamer";
 export { getNDK } from "./ndkClient";
-export { TaskPublisher } from "./TaskPublisher";
 export * from "./tags";
 export {
   getAgentSlugFromEvent,

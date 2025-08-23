@@ -185,13 +185,6 @@ export class AgentEventDecoder {
     return undefined;
   }
   
-  /**
-   * Check if event is a delegation (legacy - for backward compatibility)
-   * @deprecated Use isDelegationRequest instead
-   */
-  static isDelegation(event: NDKEvent): boolean {
-    return event.tagValue("tool") === "delegate" || event.tagValue("tool") === "delegate_phase";
-  }
 
   /**
    * Check if event is a status event

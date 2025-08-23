@@ -1,6 +1,6 @@
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import type { ExecutionLogger } from "@/logging/ExecutionLogger";
-import type { ConversationIntent, ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
 import type { ToolExecutionResult } from "@/tools/executor";
@@ -179,7 +179,7 @@ export class ToolStreamHandler {
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         const eventContext: EventContext = {
           triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation?.history?.[0], // Get the actual root event from conversation
+          rootEvent: conversation?.history?.[0] ?? context.triggeringEvent, // Use triggering event as fallback
           conversationId: context.conversationId,
         };
 

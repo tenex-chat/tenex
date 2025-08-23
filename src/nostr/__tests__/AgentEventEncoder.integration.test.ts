@@ -75,8 +75,8 @@ describe("AgentEventEncoder Integration Tests", () => {
         // Create context
         const context: EventContext = {
           triggeringEvent,
-          conversationEvent,
-          agent,
+          rootEvent: conversationEvent,
+          conversationId: conversationEvent.id || "conv123",
         };
 
         // Create completion intent
@@ -171,16 +171,8 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         const context: EventContext = {
           triggeringEvent: userRequest,
-          conversationEvent: userRequest,
-          agent: {
-            name: "Orchestrator",
-            pubkey: orchestrator.pubkey,
-            slug: "orchestrator",
-            signer: orchestratorSigner as any,
-            llmConfig: "gpt-4",
-            tools: [],
-            role: "orchestrator",
-          },
+          rootEvent: userRequest,
+          conversationId: userRequest.id || "conv123",
         };
 
         // Create mock ConversationCoordinator and encoder

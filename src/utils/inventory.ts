@@ -1,12 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { loadLLMRouter } from "@/llm";
-import { TaskPublisher, getNDK } from "@/nostr";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKTask } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import { generateRepomixOutput } from "./repomix.js";
 import "@/prompts"; // This ensures all fragments are registered
@@ -54,29 +52,6 @@ export async function generateInventory(
   // Ensure context directory exists
   await fs.mkdir(path.dirname(inventoryPath), { recursive: true });
 
-  // Create NDK task if context is available
-  let task: NDKTask | undefined;
-  let taskPublisher: TaskPublisher | undefined;
-
-  if (options?.agent) {
-    const ndk = getNDK();
-    if (ndk) {
-      taskPublisher = new TaskPublisher(ndk, options.agent);
-
-      task = await taskPublisher.createTask({
-        title: "Generating Project Inventory",
-        prompt:
-          "Analyzing the codebase structure to create a comprehensive inventory with repomix + LLM",
-        conversationRootEventId: options.conversationRootEventId,
-      });
-
-      // Initial status update
-      await taskPublisher.publishTaskProgress(
-        "🔍 Getting a general sense of the project structure and architecture..."
-      );
-    }
-  }
-
   // Step 1: Generate repomix content once for efficiency
   const repomixResult = await generateRepomixOutput(projectPath);
 
@@ -92,8 +67,6 @@ export async function generateInventory(
     await fs.writeFile(inventoryPath, inventoryResult.content, "utf-8");
     logger.info("Main inventory saved", { inventoryPath });
 
-    // Progress tracking handled by TaskPublisher
-
     // Step 4: Generate individual module guides for complex modules (max MAX_COMPLEX_MODULES)
     const modulesToProcess = inventoryResult.complexModules.slice(0, MAX_COMPLEX_MODULES);
 
@@ -105,15 +78,9 @@ export async function generateInventory(
       const definedModule: ComplexModule = module;
 
       try {
-        if (task && taskPublisher) {
-          await taskPublisher.publishTaskProgress(
-            `🔬 Inspecting complex module: ${definedModule.name} at ${definedModule.path}`
-          );
-        }
+        logger.debug(`🔬 Inspecting complex module: ${definedModule.name} at ${definedModule.path}`);
 
         await generateModuleGuide(projectPath, definedModule, repomixResult.content);
-
-        // Progress tracking handled by TaskPublisher
       } catch (error) {
         logger.warn("Failed to generate module guide", {
           module: definedModule.name,
@@ -122,14 +89,9 @@ export async function generateInventory(
       }
     }
 
-    // Final completion update
-    if (task && taskPublisher) {
-      // Task completion handled by TaskPublisher
-
-      await taskPublisher.publishTaskProgress(
-        `✅ Project inventory generation completed!\n\n📋 Main inventory: ${inventoryPath}\n📚 Complex module guides: ${modulesToProcess.length} generated\n\nThe codebase is now thoroughly documented and ready for analysis.`
-      );
-    }
+    logger.info(
+      `✅ Project inventory generation completed!\n\n📋 Main inventory: ${inventoryPath}\n📚 Complex module guides: ${modulesToProcess.length} generated`
+    );
 
     logger.info("Inventory generation completed", {
       inventoryPath,
@@ -162,7 +124,7 @@ async function generateMainInventory(
 
   // Debug: Log the router configuration
   logger.debug("[inventory] LLM Router loaded", {
-    availableConfigs: llmRouter.getConfigKeys(),
+    availableConfigs: 'getConfigKeys' in llmRouter ? llmRouter.getConfigKeys() : [],
   });
 
   const userMessage = new Message("user", prompt);

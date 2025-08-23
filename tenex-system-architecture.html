@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX System Architecture</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .mermaid {
+            text-align: center;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .description {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>TENEX System Architecture - Complete Integration Map</h1>
+    
+    <div class="mermaid">
+graph TB
+    %% External Interfaces
+    subgraph "External Interfaces"
+        CLI[CLI Commands<br/>tenex.ts]
+        NostrNetwork[Nostr Network<br/>Relays]
+        WebClient[Web/iOS Clients]
+        LLMProviders[LLM Providers<br/>OpenAI/Anthropic/etc]
+        MCPServers[MCP Servers]
+    end
+
+    %% Core System Entry Points
+    subgraph "System Entry Points"
+        CLI --> ProjectCmd[project run]
+        CLI --> DaemonCmd[daemon]
+        CLI --> SetupCmd[setup]
+        CLI --> AgentCmd[agent]
+        CLI --> MCPCmd[mcp]
+        
+        NostrNetwork --> EventMonitor[EventMonitor<br/>Daemon Mode]
+        WebClient --> NostrNetwork
+    end
+
+    %% Event Processing Layer
+    subgraph "Event Processing Layer"
+        EventHandler[EventHandler<br/>Event Router]
+        EventHandler --> NewConvHandler[New Conversation<br/>Handler]
+        EventHandler --> ReplyHandler[Reply Handler]
+        EventHandler --> TaskHandler[Task Handler]
+        EventHandler --> ProjectHandler[Project Handler]
+        EventHandler --> ConfigUpdateHandler[Config Update<br/>Handler]
+        
+        NostrNetwork --> EventHandler
+        EventMonitor --> ProcessManager[ProcessManager]
+        ProcessManager --> EventHandler
+    end
+
+    %% Conversation Management
+    subgraph "Conversation Management"
+        ConvCoord[ConversationCoordinator<br/>Central State Manager]
+        ConvStore[ConversationStore<br/>In-Memory Cache]
+        FSAdapter[FileSystemAdapter<br/>Persistence]
+        PhaseManager[PhaseManager<br/>Workflow Control]
+        MessageBuilder[MessageBuilder<br/>Context Assembly]
+        
+        ConvCoord --> ConvStore
+        ConvCoord --> FSAdapter
+        ConvCoord --> PhaseManager
+        ConvCoord --> MessageBuilder
+        
+        NewConvHandler --> ConvCoord
+        ReplyHandler --> ConvCoord
+        TaskHandler --> ConvCoord
+    end
+
+    %% Agent System
+    subgraph "Agent System"
+        AgentRegistry[AgentRegistry<br/>Agent Management]
+        AgentExecutor[AgentExecutor<br/>Execution Orchestrator]
+        ReasonActLoop[ReasonActLoop<br/>Streaming Backend]
+        
+        subgraph "Built-in Agents"
+            Orchestrator[Orchestrator<br/>Routing Agent]
+            Planner[Planner Agent]
+            Executor[Executor Agent]
+            ProjectManager[Project Manager]
+        end
+        
+        AgentRegistry --> Orchestrator
+        AgentRegistry --> Planner
+        AgentRegistry --> Executor
+        AgentRegistry --> ProjectManager
+        
+        EventHandler --> AgentExecutor
+        AgentExecutor --> ReasonActLoop
+    end
+
+    %% Execution Pipeline
+    subgraph "Execution Pipeline"
+        StreamStateManager[StreamStateManager<br/>State Tracking]
+        ToolStreamHandler[ToolStreamHandler<br/>Tool Events]
+        TerminationHandler[TerminationHandler<br/>Completion]
+        ToolRepetitionDetector[Tool Repetition<br/>Detector]
+        
+        ReasonActLoop --> StreamStateManager
+        ReasonActLoop --> ToolStreamHandler
+        ReasonActLoop --> TerminationHandler
+        ReasonActLoop --> ToolRepetitionDetector
+    end
+
+    %% LLM Integration
+    subgraph "LLM Integration Layer"
+        LLMRouter[LLMRouter<br/>Provider Orchestration]
+        ConfigService[ConfigService<br/>Config Management]
+        ModelSelector[ModelSelector<br/>Model Discovery]
+        LLMTester[LLMTester<br/>Validation]
+        PricingService[Pricing Service<br/>Cost Optimization]
+        CallLogger[CallLogger<br/>Observability]
+        
+        LLMRouter --> ConfigService
+        LLMRouter --> ModelSelector
+        LLMRouter --> LLMTester
+        LLMRouter --> PricingService
+        LLMRouter --> CallLogger
+        
+        AgentExecutor --> LLMRouter
+        LLMRouter --> LLMProviders
+    end
+
+    %% Tool System
+    subgraph "Tool System"
+        ToolRegistry[ToolRegistry<br/>Tool Management]
+        ToolExecutor[ToolExecutor<br/>Execution Engine]
+        ToolPlugin[ToolPlugin<br/>LLM Adapter]
+        
+        subgraph "Built-in Tools"
+            FileTools[File Tools<br/>read/write]
+            ControlTools[Control Tools<br/>complete/continue]
+            AnalysisTools[Analysis Tools<br/>analyze/learn]
+            ExecutionTools[Execution Tools<br/>shell/inventory]
+            DelegationTools[Delegation Tools<br/>delegate/delegate_external]
+        end
+        
+        subgraph "External Tools"
+            MCPToolAdapter[MCPToolAdapter<br/>MCP Bridge]
+            MCPService[MCPService<br/>Server Management]
+        end
+        
+        ToolRegistry --> FileTools
+        ToolRegistry --> ControlTools
+        ToolRegistry --> AnalysisTools
+        ToolRegistry --> ExecutionTools
+        ToolRegistry --> DelegationTools
+        
+        MCPService --> MCPToolAdapter
+        MCPToolAdapter --> ToolRegistry
+        MCPServers --> MCPService
+        
+        ToolStreamHandler --> ToolExecutor
+        ToolExecutor --> ToolRegistry
+        LLMRouter --> ToolPlugin
+        ToolPlugin --> ToolExecutor
+    end
+
+    %% Publishing System
+    subgraph "Publishing System"
+        NostrPublisher[NostrPublisher<br/>Event Publisher]
+        StreamPublisher[StreamPublisher<br/>Real-time Streaming]
+        StatusPublisher[StatusPublisher<br/>Heartbeat]
+        TypingIndicatorMgr[TypingIndicator<br/>Manager]
+        AgentEventEncoder[AgentEventEncoder<br/>Event Serialization]
+        
+        NostrPublisher --> StreamPublisher
+        NostrPublisher --> TypingIndicatorMgr
+        NostrPublisher --> AgentEventEncoder
+        
+        AgentExecutor --> NostrPublisher
+        ProjectCmd --> StatusPublisher
+        
+        NostrPublisher --> NostrNetwork
+        StatusPublisher --> NostrNetwork
+    end
+
+    %% Learning System
+    subgraph "Learning & Context"
+        LessonStorage[Agent Lessons<br/>NDKAgentLesson]
+        ProjectContext[ProjectContext<br/>PROJECT.md/INVENTORY.md]
+        PromptBuilder[PromptBuilder<br/>System Prompts]
+        FragmentRegistry[FragmentRegistry<br/>Prompt Fragments]
+        
+        AnalysisTools --> LessonStorage
+        ProjectManager --> ProjectContext
+        AgentExecutor --> PromptBuilder
+        PromptBuilder --> FragmentRegistry
+        
+        LessonStorage --> NostrNetwork
+    end
+
+    %% Persistence & State
+    subgraph "Persistence Layer"
+        ConvPersistence[Conversation Files<br/>.tenex/state/conversations/]
+        ConfigFiles[Config Files<br/>.tenex/llms.json]
+        LogFiles[Log Files<br/>.tenex/logs/]
+        MCPCache[MCP Cache<br/>.tenex/cache/]
+        
+        FSAdapter --> ConvPersistence
+        ConfigService --> ConfigFiles
+        CallLogger --> LogFiles
+        MCPService --> MCPCache
+    end
+
+    %% Data Flow Connections
+    ConvCoord --> AgentExecutor
+    PhaseManager --> AgentExecutor
+    MessageBuilder --> ReasonActLoop
+    
+    %% Control Flow
+    Orchestrator -.->|routes to| Planner
+    Orchestrator -.->|routes to| Executor
+    Orchestrator -.->|routes to| ProjectManager
+    
+    ControlTools -.->|returns control to| Orchestrator
+    DelegationTools -.->|delegates to| AgentRegistry
+    
+    %% Styling
+    classDef external fill:#f9f,stroke:#333,stroke-width:2px
+    classDef core fill:#9cf,stroke:#333,stroke-width:3px
+    classDef agent fill:#fc9,stroke:#333,stroke-width:2px
+    classDef tool fill:#cf9,stroke:#333,stroke-width:2px
+    classDef nostr fill:#f9c,stroke:#333,stroke-width:2px
+    
+    class CLI,NostrNetwork,WebClient,LLMProviders,MCPServers external
+    class ConvCoord,AgentExecutor,LLMRouter,ToolExecutor core
+    class Orchestrator,Planner,Executor,ProjectManager agent
+    class FileTools,ControlTools,AnalysisTools,ExecutionTools,DelegationTools tool
+    class NostrPublisher,EventHandler,StatusPublisher nostr
+    </div>
+
+    <div class="description">
+        <h2>System Integration Summary</h2>
+        
+        <h3>Core Integration Points</h3>
+        
+        <ol>
+            <li><strong>Event-Driven Architecture</strong>
+                <ul>
+                    <li>Nostr protocol serves as the communication backbone</li>
+                    <li>All interactions flow through event handlers</li>
+                    <li>Asynchronous, decentralized message passing</li>
+                </ul>
+            </li>
+            
+            <li><strong>Conversation-Centric Design</strong>
+                <ul>
+                    <li>ConversationCoordinator manages all state</li>
+                    <li>Phase-based workflow (Chat → Brainstorm → Plan → Execute → Verify → Chores → Reflection)</li>
+                    <li>Persistent state with file-based storage</li>
+                </ul>
+            </li>
+            
+            <li><strong>Multi-Agent Orchestration</strong>
+                <ul>
+                    <li>Orchestrator agent routes tasks to specialized agents</li>
+                    <li>Each agent has specific capabilities and tool access</li>
+                    <li>Unified execution through ReasonActLoop</li>
+                </ul>
+            </li>
+            
+            <li><strong>LLM Provider Abstraction</strong>
+                <ul>
+                    <li>LLMRouter provides unified interface across providers</li>
+                    <li>Context-aware configuration selection</li>
+                    <li>Cost optimization and performance monitoring</li>
+                </ul>
+            </li>
+            
+            <li><strong>Type-Safe Tool System</strong>
+                <ul>
+                    <li>Zod-validated tool parameters</li>
+                    <li>Result monad error handling</li>
+                    <li>MCP integration for extensibility</li>
+                </ul>
+            </li>
+            
+            <li><strong>Streaming Execution</strong>
+                <ul>
+                    <li>Real-time response streaming</li>
+                    <li>Tool execution with UI feedback</li>
+                    <li>Termination enforcement for task completion</li>
+                </ul>
+            </li>
+            
+            <li><strong>Learning and Context</strong>
+                <ul>
+                    <li>Agents learn from interactions</li>
+                    <li>Project context maintained in PROJECT.md/INVENTORY.md</li>
+                    <li>Lessons stored as Nostr events</li>
+                </ul>
+            </li>
+            
+            <li><strong>Security Layers</strong>
+                <ul>
+                    <li>Agent-based tool restrictions</li>
+                    <li>Project boundary enforcement</li>
+                    <li>Credential separation in configuration</li>
+                </ul>
+            </li>
+        </ol>
+        
+        <p>This architecture enables TENEX to function as a sophisticated multi-agent development environment where AI agents collaborate autonomously through a decentralized, event-driven system to build software based on human-provided context.</p>
+    </div>
+
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { delegateTool } from "../delegate";
+import type { ToolContext } from "../../types";
 
 describe("delegateTool", () => {
   it("should have correct metadata", () => {
@@ -83,4 +84,7 @@ describe("delegateTool", () => {
       expect(validated.value.value.recipients).toEqual([]);
     }
   });
+
+  // Note: Self-delegation prevention is tested in integration tests
+  // as it requires mocking the agent resolution which is not easily testable in unit tests
 });

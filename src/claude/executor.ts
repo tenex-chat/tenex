@@ -12,7 +12,7 @@ export interface ClaudeCodeExecutorOptions {
   timeout?: number;
   abortSignal?: AbortSignal;
   resumeSessionId?: string;
-  agentName?: string;
+  agentName: string;
 }
 
 export interface ClaudeCodeResult {
@@ -77,9 +77,8 @@ export class ClaudeCodeExecutor {
     const request: CompletionRequest = {
       messages,
       options: {
-        agentName: this.options.agentName || "claude-backend",
+        agentName: this.options.agentName,
         configName: "claude-code",
-        // resumeSessionId is handled separately via claudeSessionId
       },
     };
 
@@ -134,6 +133,24 @@ export class ClaudeCodeExecutor {
           if (content) {
             metrics.assistantMessages.push(content);
           }
+        } else {
+          // Log non-assistant messages to understand what other data is available
+          const typeColors: Record<string, string> = {
+            user: "\x1b[36m",      // Cyan
+            tool_use: "\x1b[33m",  // Yellow
+            tool_result: "\x1b[32m", // Green
+            result: "\x1b[35m",    // Magenta
+            error: "\x1b[31m",     // Red
+            thinking: "\x1b[34m",  // Blue
+          };
+          const color = typeColors[message.type] || "\x1b[37m"; // Default to white
+          const reset = "\x1b[0m";
+          
+          logger.debug(`[ClaudeCodeExecutor] Non-assistant message received: ${color}${message.type}${reset}`, {
+            type: message.type,
+            message: JSON.stringify(message, null, 2),
+            sessionId: metrics.sessionId,
+          });
         }
 
         if (message.type === "result" && "total_cost_usd" in message) {

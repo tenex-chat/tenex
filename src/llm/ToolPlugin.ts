@@ -1,4 +1,5 @@
 import { getToolLogger } from "@/tools/toolLogger";
+import { getExecutionLogger } from "@/utils/executionLogger";
 import type {
   ExecutionContext,
   Tool,
@@ -201,6 +202,21 @@ export class ToolPlugin extends Plugin {
           }
         );
       }
+      
+      // Also log to execution logger
+      const executionLogger = getExecutionLogger();
+      if (executionLogger) {
+        await executionLogger.logToolCall(
+          this.tool.name,
+          parameters,
+          this.tenexContext,
+          result,
+          {
+            startTime,
+            endTime,
+          }
+        );
+      }
 
       logger.debug(`Tool execution completed: ${this.tool.name}`, {
         tool: this.tool.name,
@@ -233,6 +249,15 @@ export class ToolPlugin extends Plugin {
       const toolLogger = getToolLogger();
       if (toolLogger) {
         await toolLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
+          startTime,
+          endTime,
+        });
+      }
+      
+      // Also log to execution logger
+      const executionLogger = getExecutionLogger();
+      if (executionLogger) {
+        await executionLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
           startTime,
           endTime,
         });

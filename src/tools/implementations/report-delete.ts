@@ -60,7 +60,7 @@ Note: This is a soft delete - the article still exists but is marked as deleted.
         ok: true,
         value: {
           success: true,
-          articleId,
+          articleId: `nostr:${articleId}`,
           slug,
           message: `Report "${slug}" marked as deleted`,
         },

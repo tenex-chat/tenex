@@ -30,12 +30,10 @@ interface NostrProjectsOutput {
     id: string;
     title?: string;
     description?: string;
-    website?: string;
     repository?: string;
     image?: string;
     online: boolean;
     agents?: Record<string, string>;
-    pubkey: string;
     date?: number;
     specs: Array<{
       title?: string;
@@ -239,7 +237,6 @@ Use this to understand what projects exist for a given user or the current proje
       const projects = Array.from(projectEvents).map((projectEvent) => {
         const title = projectEvent.tagValue("title") || projectEvent.tagValue("name");
         const description = projectEvent.tagValue("description");
-        const website = projectEvent.tagValue("website");
         const repository = projectEvent.tagValue("repository");
         const image = projectEvent.tagValue("image");
 
@@ -262,12 +259,10 @@ Use this to understand what projects exist for a given user or the current proje
           id: projectId,
           title,
           description,
-          website,
           repository,
           image,
           online: isOnline,
           agents: onlineAgents,
-          pubkey: projectEvent.pubkey,
           date: projectEvent.created_at,
           specs: projectSpecs,
         };

@@ -1,6 +1,5 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { fileExists, readFile } from "@/lib/fs";
-import { getProjectContext } from "@/services/ProjectContext";
 import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";

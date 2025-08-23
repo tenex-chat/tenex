@@ -1,5 +1,4 @@
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
-import { getProjectContext } from "@/services/ProjectContext";
 import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -61,8 +60,7 @@ export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
         });
       }
 
-      // Get project context
-      const projectContext = getProjectContext();
+      // Get project path
       const projectPath = process.cwd();
       
       // Determine agents directory

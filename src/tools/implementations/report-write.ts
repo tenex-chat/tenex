@@ -90,8 +90,9 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         
         if (conversation?.history?.[0]) {
+          const nostrReference = `nostr:${articleId}`;
           await agentPublisher.conversation(
-            { type: "conversation", content: `📄 Writing report: ${articleId}` },
+            { type: "conversation", content: `📄 Writing report: ${nostrReference}` },
             {
               triggeringEvent: context.triggeringEvent,
               rootEvent: conversation.history[0],
@@ -108,7 +109,7 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
         ok: true,
         value: {
           success: true,
-          articleId,
+          articleId: `nostr:${articleId}`,
           slug,
           message: `Report "${title}" published successfully`,
         },

@@ -1,5 +1,4 @@
 import { fileExists, readFile } from "@/lib/fs";
-import { getProjectContext } from "@/services/ProjectContext";
 import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -100,12 +99,14 @@ export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
         ? path.join(path.dirname(agentsDir), "agents.json")
         : path.join(projectPath, ".tenex", "agents.json");
       
-      let registryEntry: any = null;
       if (await fileExists(registryPath)) {
         try {
           const content = await readFile(registryPath);
           const registry = JSON.parse(content);
-          registryEntry = registry[slug];
+          // Check if agent exists in registry
+          if (registry[slug]) {
+            logger.debug("Agent found in registry", { slug });
+          }
         } catch (error) {
           logger.debug("Failed to read agents registry", { error });
         }

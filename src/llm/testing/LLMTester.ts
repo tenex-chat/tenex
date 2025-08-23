@@ -1,6 +1,6 @@
 import { LLMRouter } from "@/llm/router";
 import type { CompletionRequest, ResolvedLLMConfig } from "@/llm/types";
-import type { TenexLLMCredentials, TenexLLMs } from "@/services/config/types";
+import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 
 /**
@@ -18,12 +18,10 @@ export class LLMTester {
         defaults: { agents: "test" },
       });
 
+      const { Message } = await import("multi-llm-ts");
       const request: CompletionRequest = {
         messages: [
-          {
-            role: "user",
-            content: "Say 'test successful' if you can read this.",
-          },
+          new Message("user", "Say 'test successful' if you can read this."),
         ],
         options: {
           configName: "test",
@@ -45,7 +43,7 @@ export class LLMTester {
   async testExistingConfiguration(
     configName: string,
     configurations: TenexLLMs["configurations"],
-    credentials?: TenexLLMCredentials
+    credentials?: Record<string, { apiKey?: string; baseUrl?: string }>
   ): Promise<boolean> {
     const config = configurations[configName];
     if (!config) {

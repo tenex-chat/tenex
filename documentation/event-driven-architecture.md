@@ -50,12 +50,6 @@ The central event processing hub that routes incoming events to appropriate hand
 
 #### Specialized Event Handlers
 
-**Task Handler** (`src/event-handler/task.ts`):
-- Processes NDKTask events for structured task assignments
-- Identifies target agents through p-tags
-- Creates conversations from tasks
-- Routes to appropriate agent or orchestrator
-
 **Reply Handler** (`src/event-handler/reply.ts`):
 - Manages conversation continuity
 - Finds existing conversations through E-tags
@@ -100,14 +94,6 @@ Handles real-time streaming of agent responses:
 - **Sequence Management**: Maintains ordered stream delivery
 - **Finalization**: Publishes complete response with metadata
 
-#### TaskPublisher (`src/nostr/TaskPublisher.ts`)
-Manages NDKTask lifecycle events:
-
-- **Task Creation**: Publishes new tasks with metadata
-- **Progress Updates**: Reports intermediate progress
-- **Task Completion**: Publishes success/failure status
-- **Cost Tracking**: Reports execution costs
-- **Session Linking**: Maintains claude-session continuity
 
 #### TypingIndicatorManager (`src/nostr/TypingIndicatorManager.ts`)
 Sophisticated typing state management:
@@ -181,12 +167,7 @@ Reply Event (kind: 1111)
 ```
 Task Event (kind: 1934)
     → EventHandler
-    → handleTask
-    → Create conversation from task
-    → Identify target agent via p-tags
-    → TaskPublisher.createTask
-    → AgentExecutor.execute
-    → TaskPublisher.completeTask
+    → Logged/skipped (handled via claude_code tool)
 ```
 
 ### 4. Streaming Response Flow

@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "projectName": "iOS Test Project",
+  "description": "Test project for iOS app validation",
+  "agents": {
+    "executor": {
+      "name": "executor",
+      "description": "Executes implementation tasks",
+      "llmConfig": "mock"
+    },
+    "planner": {
+      "name": "planner", 
+      "description": "Plans and designs solutions",
+      "llmConfig": "mock"
+    }
+  }
+}

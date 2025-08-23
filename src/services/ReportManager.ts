@@ -91,8 +91,8 @@ export class ReportManager {
     await article.sign(agent.signer);
     await article.publish();
     
-    // Return the encoded article ID with nostr: prefix
-    return `nostr:${article.encode()}`;
+    // Return the encoded article ID
+    return article.encode();
   }
 
   /**
@@ -263,7 +263,7 @@ export class ReportManager {
       articleId: deletedArticle.encode(),
     });
     
-    return `nostr:${deletedArticle.encode()}`;
+    return deletedArticle.encode();
   }
 
   /**

@@ -190,7 +190,7 @@ export class LLMCallLogger {
         }
 
         logEntry.response = {
-          content: responseContent,
+          content: responseContent as string | undefined,
           contentLength: result.response.content?.length || 0,
           toolCalls: result.response.toolCalls?.map((tc) => ({
             name: tc.name,

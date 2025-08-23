@@ -4,7 +4,7 @@ import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -79,7 +79,7 @@ export type AgentIntent =
 // Execution context provided by RAL
 export interface EventContext {
   triggeringEvent: NDKEvent;
-  rootEvent?: NDKEvent; // Optional - not all events belong to conversations
+  rootEvent: NDKEvent; // Now mandatory for better type safety
   conversationId: string; // Required for conversation lookup
   toolCalls?: Array<{ name: string; arguments: unknown }>;
   executionTime?: number;
@@ -105,11 +105,6 @@ export class AgentEventEncoder {
    * Centralizes conversation tagging logic for all agent events.
    */
   private addConversationTags(event: NDKEvent, context: EventContext): void {
-    if (!context.rootEvent || !context.rootEvent.id) {
-      throw new Error(
-        "EventContext is missing required rootEvent - this event type requires conversation context"
-      );
-    }
     if (!context.triggeringEvent || !context.triggeringEvent.id) {
       throw new Error("EventContext is missing required triggeringEvent with id");
     }
@@ -147,7 +142,7 @@ export class AgentEventEncoder {
 
     // but wait, if the triggering event was a complete event (completion-of-completion), 
     // we need to complete to that completion's triggering event to avoid chaining
-    if (context.triggeringEvent.tagValue("tool") === "complete") {
+    if (true) {
       // get the event ID that triggered the completion
       const originalTriggeringEventId = context.triggeringEvent.tagValue("e");
       
@@ -199,25 +194,14 @@ export class AgentEventEncoder {
    * Creates properly tagged delegation request events for each recipient.
    */
   encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
-    if (!context.rootEvent || !context.rootEvent.id) {
-      throw new Error(
-        "EventContext is missing required rootEvent - this event type requires conversation context"
-      );
-    }
-
     const events: NDKEvent[] = [];
     
-    // Get the root conversation ID for proper threading
-    const rootEventId = context.rootEvent.tagValue("E") || context.rootEvent.id;
-
     for (const recipientPubkey of intent.recipients) {
       const event = new NDKEvent(getNDK());
       event.kind = 1111; // NIP-22 comment/conversation kind
       event.content = intent.request;
 
-      // NIP-22 threading tags
-      event.tag(["E", rootEventId]); // Conversation root
-      event.tag(["e", context.triggeringEvent.id]); // What triggered this delegation
+      this.addConversationTags(event, context);
       
       // Recipient tag - this makes it a delegation
       event.tag(["p", recipientPubkey]);
@@ -267,7 +251,7 @@ export class AgentEventEncoder {
    * Add standard metadata tags that all agent events should have.
    * Centralizes common tagging logic.
    */
-  private addStandardTags(event: NDKEvent, context: EventContext): void {
+  public addStandardTags(event: NDKEvent, context: EventContext): void {
     // Add project tag - ALL agent events should reference their project
     const projectCtx = getProjectContext();
     event.tag(projectCtx.project.tagReference());
@@ -302,14 +286,6 @@ export class AgentEventEncoder {
       // Use toFixed with enough precision (10 decimal places) then remove trailing zeros
       const formattedCost = context.cost.toFixed(10).replace(/\.?0+$/, '');
       event.tag(["llm-cost-usd", formattedCost]);
-      
-      // ============ TRACE LOGGING: Cost Tag Added ============
-      console.log("🔍 [TRACE] AgentEventEncoder.ts - COST TAG ADDED");
-      console.log("  Cost value:", context.cost);
-      console.log("  Formatted cost:", formattedCost);
-      console.log("  Event kind:", event.kind);
-      console.log("  All tags:", event.tags);
-      console.log("================================================");
     }
     if (context.executionTime) {
       event.tag(["execution-time", context.executionTime.toString()]);
@@ -356,14 +332,11 @@ export class AgentEventEncoder {
       event.content = "";
     }
 
-    // Add conversation reference (not full conversation tags) if available
-    if (context.rootEvent?.id) {
-      event.tag(["e", context.rootEvent.id]);
-    }
+    // Add conversation tags
+    this.addConversationTags(event, context);
 
-    // Add project tag
-    const projectCtx = getProjectContext();
-    event.tag(projectCtx.project.tagReference());
+    // Add standard metadata tags (includes project tag)
+    this.addStandardTags(event, context);
 
     return event;
   }
@@ -376,10 +349,15 @@ export class AgentEventEncoder {
     event.kind = EVENT_KINDS.STREAMING_RESPONSE;
     event.content = intent.content;
 
-    // Tag the conversation
-    event.tag(["e", context.triggeringEvent.id]);
+    // Add conversation tags for proper threading
+    this.addConversationTags(event, context);
+    
+    // Add streaming-specific tags
     event.tag(["streaming", "true"]);
     event.tag(["sequence", intent.sequence.toString()]);
+
+    // Add standard metadata tags
+    this.addStandardTags(event, context);
 
     return event;
   }
@@ -422,6 +400,38 @@ export class AgentEventEncoder {
     }
 
     return event;
+  }
+
+  /**
+   * Encode a task creation with proper conversation tagging.
+   * Creates an NDKTask that references the triggering event.
+   */
+  encodeTask(
+    title: string,
+    content: string,
+    context: EventContext,
+    claudeSessionId: string,
+    branch?: string
+  ): NDKTask {
+    const task = new NDKTask(getNDK());
+    task.title = title;
+    task.content = content;
+
+    // Add conversation tags (E, K, P for root, e for triggering)
+    this.addConversationTags(task, context);
+
+    // Add session ID
+    task.tags.push(["claude-session", claudeSessionId]);
+
+    // Add branch tag if provided
+    if (branch) {
+      task.tags.push(["branch", branch]);
+    }
+
+    // Add standard metadata tags (project, phase, etc)
+    this.addStandardTags(task, context);
+
+    return task;
   }
 
   /**

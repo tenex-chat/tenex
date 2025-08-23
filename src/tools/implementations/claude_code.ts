@@ -1,10 +1,9 @@
 import { ClaudeTaskOrchestrator } from "@/claude/orchestrator";
 import type { Phase } from "@/conversations/phases";
-import { TaskPublisher } from "@/nostr/TaskPublisher";
-import { getNDK } from "@/nostr/ndkClient";
-import { getRootConversationId } from "@/utils/conversation-utils";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { createToolDefinition, failure, success } from "../types";
 
@@ -22,10 +21,7 @@ const claudeCodeSchema = z.object({
     .string()
     .optional()
     .describe("Optional system prompt to provide additional context or constraints"),
-  title: z
-    .string()
-    .optional()
-    .describe("Optional title for the task (defaults to 'Claude Code Execution')"),
+  title: z.string().describe("Title for the task"),
   branch: z.string().optional().describe("Optional branch name for the task"),
 });
 
@@ -49,22 +45,6 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
     const cleanedPrompt = stripThinkingBlocks(prompt);
     const cleanedSystemPrompt = systemPrompt ? stripThinkingBlocks(systemPrompt) : undefined;
 
-    // Log if we stripped any thinking blocks
-    if (cleanedPrompt !== prompt) {
-      logger.debug("[claude_code] Stripped thinking blocks from prompt", {
-        originalLength: prompt.length,
-        cleanedLength: cleanedPrompt.length,
-        agent: context.agent.name,
-      });
-    }
-    if (systemPrompt && cleanedSystemPrompt && cleanedSystemPrompt !== systemPrompt) {
-      logger.debug("[claude_code] Stripped thinking blocks from system prompt", {
-        originalLength: systemPrompt.length,
-        cleanedLength: cleanedSystemPrompt.length,
-        agent: context.agent.name,
-      });
-    }
-
     logger.debug("Running claude_code tool", {
       prompt: cleanedPrompt.substring(0, 100),
       hasSystemPrompt: !!cleanedSystemPrompt,
@@ -72,44 +52,88 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
     });
 
     try {
-      // Get the root conversation ID (handles delegations)
-      const rootConversationId = getRootConversationId(context);
+      // Always use the current conversation for session management
+      // The conversation ID is already the root - delegations work within the same conversation
+      logger.debug(`[claude_code] Starting session lookup`, {
+        conversationId: context.conversationId,
+        conversationIdShort: context.conversationId.substring(0, 8),
+        agent: context.agent.slug,
+        phase: context.phase,
+        triggeringEventKind: context.triggeringEvent.kind,
+        triggeringEventId: context.triggeringEvent.id?.substring(0, 8),
+      });
 
-      // Get the root conversation's agent state
-      const rootConversation = context.conversationCoordinator.getConversation(rootConversationId);
-      const agentState = rootConversation?.agentStates.get(context.agent.slug);
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      
+      logger.debug(`[claude_code] Conversation lookup result`, {
+        conversationFound: !!conversation,
+        conversationId: conversation?.id?.substring(0, 8),
+        agentStatesCount: conversation?.agentStates?.size || 0,
+        agentStatesKeys: conversation ? Array.from(conversation.agentStates.keys()) : [],
+      });
+
+      const agentState = conversation?.agentStates.get(context.agent.slug);
+      
+      logger.debug(`[claude_code] Agent state lookup`, {
+        agentStateFound: !!agentState,
+        agent: context.agent.slug,
+        claudeSessionsByPhase: agentState?.claudeSessionsByPhase,
+        lastProcessedMessageIndex: agentState?.lastProcessedMessageIndex,
+      });
+
       const existingSessionId = agentState?.claudeSessionsByPhase?.[context.phase];
 
       if (existingSessionId) {
-        logger.debug(`[claude_code] Resuming Claude session for phase ${context.phase}`, {
+        logger.info(`[claude_code] Resuming existing Claude session`, {
           sessionId: existingSessionId,
           agent: context.agent.slug,
           phase: context.phase,
-          rootConversationId: rootConversationId.substring(0, 8),
+          conversationId: context.conversationId.substring(0, 8),
+        });
+      } else {
+        logger.debug(`[claude_code] No existing session ID, will create new session`, {
+          agent: context.agent.slug,
+          phase: context.phase,
+          conversationId: context.conversationId.substring(0, 8),
         });
       }
 
       // Create instances for Claude Code execution
-      const ndk = getNDK();
-      const taskPublisher = new TaskPublisher(ndk, context.agent);
-      const orchestrator = new ClaudeTaskOrchestrator(taskPublisher);
+      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+      const orchestrator = new ClaudeTaskOrchestrator(agentPublisher);
 
       // Create abort controller for this execution
       const abortController = new AbortController();
 
+      // Only use existing session ID for resumption, generate new one otherwise
+      const isResuming = !!existingSessionId;
+      const sessionId = existingSessionId || randomUUID();
+      
+      logger.info(`[claude_code] Session ID decision`, {
+        usingExistingSession: isResuming,
+        sessionId: sessionId,
+        agent: context.agent.slug,
+        phase: context.phase,
+        conversationId: context.conversationId.substring(0, 8),
+      });
+
       // Execute Claude Code through the orchestrator with cleaned prompts
+      // Pass resumeSessionId only when actually resuming
       const result = await orchestrator.execute({
         prompt: cleanedPrompt,
         systemPrompt: cleanedSystemPrompt,
         projectPath: context.projectPath,
-        title: title || `Claude Code Execution (via ${context.agent.name})`,
+        title,
         branch,
         conversationRootEventId: context.conversationId,
-        conversation: rootConversation,
+        conversation: conversation,
         conversationCoordinator: context.conversationCoordinator,
         abortSignal: abortController.signal,
-        resumeSessionId: existingSessionId,
+        claudeSessionId: sessionId,
+        resumeSessionId: isResuming ? sessionId : undefined, // Only pass for actual resumption
         agentName: context.agent.name,
+        triggeringEvent: context.triggeringEvent,
+        phase: context.phase,
       });
 
       if (!result.success) {
@@ -120,13 +144,12 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         });
       }
 
-      // Update the Claude session ID in the root conversation's agent state for this phase
+      // Update the Claude session ID in the conversation's agent state for this phase
       if (result.sessionId) {
-        const rootConversationId = getRootConversationId(context);
-        const rootConversation = context.conversationCoordinator.getConversation(rootConversationId);
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
-        if (rootConversation) {
-          const agentState = rootConversation.agentStates.get(context.agent.slug) || {
+        if (conversation) {
+          const agentState = conversation.agentStates.get(context.agent.slug) || {
             lastProcessedMessageIndex: 0,
           };
 
@@ -139,7 +162,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
           agentState.claudeSessionsByPhase[context.phase] = result.sessionId;
 
           await context.conversationCoordinator.updateAgentState(
-            rootConversationId,
+            context.conversationId,
             context.agent.slug,
             agentState
           );
@@ -148,19 +171,20 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
             sessionId: result.sessionId,
             agent: context.agent.slug,
             phase: context.phase,
-            rootConversationId: rootConversationId.substring(0, 8),
+            conversationId: context.conversationId.substring(0, 8),
           });
         }
       }
 
       // Return the result
-      const response = result.finalResponse || result.task.content || "Task completed successfully";
+      const response = result.finalResponse || result.taskEvent.content || "Task completed successfully";
 
       logger.info("Claude Code execution completed successfully", {
         sessionId: result.sessionId,
         cost: result.totalCost,
         messageCount: result.messageCount,
         duration: result.duration,
+        response
       });
 
       return success({

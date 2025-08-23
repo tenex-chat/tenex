@@ -8,7 +8,7 @@ import { logger } from "@/utils/logger";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
-import { adaptMCPTool } from "./MCPToolAdapter";
+import { adaptMCPTool, type MCPTool as MCPToolInterface, type MCPPropertyDefinition } from "./MCPToolAdapter";
 
 interface MCPClient {
   client: Client;
@@ -33,7 +33,6 @@ const MCPToolsListResponseSchema = z.object({
   tools: z.array(MCPToolSchema),
 });
 
-type MCPTool = z.infer<typeof MCPToolSchema>;
 
 const MCPContentSchema = z.object({
   type: z.string(),
@@ -230,10 +229,18 @@ export class MCPService {
     return tools;
   }
 
-  private convertMCPToolToTenexTool(serverName: string, mcpTool: MCPTool): Tool {
+  private convertMCPToolToTenexTool(serverName: string, mcpTool: any): Tool {
     // Use the adapter to create a type-safe tool with Zod schemas
-    // Cast to any to handle type mismatch between z.record(z.unknown()) and expected properties type
-    return adaptMCPTool(mcpTool as unknown, serverName, (args) =>
+    // Cast mcpTool to MCPTool interface for the adapter
+    const typedTool: MCPToolInterface = {
+      name: mcpTool.name,
+      description: mcpTool.description,
+      inputSchema: mcpTool.inputSchema ? {
+        properties: mcpTool.inputSchema.properties as Record<string, MCPPropertyDefinition>,
+        required: mcpTool.inputSchema.required
+      } : undefined
+    };
+    return adaptMCPTool(typedTool, serverName, (args) =>
       this.executeTool(serverName, mcpTool.name, args)
     ) as Tool;
   }

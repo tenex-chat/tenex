@@ -6,6 +6,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
 import {
   NDKEvent,
+  NDKTask,
   type NDKPrivateKeySigner,
   type NDKProject,
 } from "@nostr-dev-kit/ndk";
@@ -40,7 +41,7 @@ export class AgentPublisher {
    * Creates and publishes a properly tagged completion event.
    */
   async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-    logger.info("Dispatching completion", {
+    logger.debug("Dispatching completion", {
       agent: this.agent.name,
       contentLength: intent.content.length,
       summary: intent.summary,
@@ -52,7 +53,7 @@ export class AgentPublisher {
     await event.sign(this.agent.signer);
     await event.publish();
 
-    logger.info("Completion event published", {
+    logger.debug("Completion event published", {
       eventId: event.id,
       agent: this.agent.name,
     });
@@ -104,7 +105,7 @@ export class AgentPublisher {
       });
     }
 
-    logger.info("Delegation batch published", {
+    logger.debug("Delegation batch published", {
       batchId,
       eventCount: events.length,
     });
@@ -227,6 +228,70 @@ export class AgentPublisher {
     return lessonEvent;
   }
 
+  /**
+   * Create a task event that references the triggering event.
+   * Used for Claude Code and other task-based executions.
+   */
+  async createTask(
+    title: string,
+    content: string,
+    context: EventContext,
+    claudeSessionId: string,
+    branch?: string
+  ): Promise<NDKTask> {
+    // Use encoder to create task with proper tagging
+    const task = this.encoder.encodeTask(
+      title,
+      content,
+      context,
+      claudeSessionId,
+      branch
+    );
+
+    // Sign with agent's signer
+    await task.sign(this.agent.signer);
+    await task.publish();
+
+    logger.debug("Created task", {
+      taskId: task.id,
+      title,
+      agent: this.agent.name,
+      sessionId: claudeSessionId,
+    });
+
+    return task;
+  }
+
+  /**
+   * Publish a task update (progress or completion).
+   * Strips "p" tags to avoid notifications.
+   */
+  async publishTaskUpdate(
+    task: NDKTask,
+    content: string,
+    context: EventContext
+  ): Promise<NDKEvent> {
+    const update = task.reply();
+    update.content = content;
+
+    // Strip all "p" tags (no notifications)
+    update.tags = update.tags.filter(t => t[0] !== "p");
+
+    // Add standard tags using existing encoder methods
+    this.encoder.addStandardTags(update, context);
+
+    await update.sign(this.agent.signer);
+    await update.publish();
+
+    logger.debug("Published task update", {
+      taskId: task.id,
+      contentLength: content.length,
+      agent: this.agent.name,
+    });
+
+    return update;
+  }
+
   // ===== Agent Creation Events (from src/agents/AgentPublisher.ts) =====
 
   /**
@@ -248,7 +313,6 @@ export class AgentPublisher {
 
       const profile = {
         name: agentName,
-        role: agentRole,
         description: `${agentRole} agent for ${projectTitle}`,
         picture: avatarUrl,
         project: projectTitle,
@@ -262,19 +326,12 @@ export class AgentPublisher {
       });
 
       // Properly tag the project event (creates an "a" tag for kind:31933)
-      profileEvent.tag(projectEvent);
+      profileEvent.tag(projectEvent.tagReference());
 
       // Add e-tag for the agent definition event if it exists and is valid
-      if (agentDefinitionEventId && agentDefinitionEventId.trim() !== "") {
+      if (agentDefinitionEventId) {
         // Validate that it's a proper hex event ID (64 characters)
-        const trimmedId = agentDefinitionEventId.trim();
-        if (/^[a-f0-9]{64}$/i.test(trimmedId)) {
-          profileEvent.tags.push(["e", trimmedId, "", "agent-definition"]);
-        } else {
-          logger.warn("Invalid event ID format for agent definition, skipping e-tag", {
-            eventId: agentDefinitionEventId,
-          });
-        }
+        profileEvent.tags.push(["e", agentDefinitionEventId]);
       }
 
       await profileEvent.sign(signer);
@@ -331,7 +388,7 @@ export class AgentPublisher {
       await requestEvent.sign(signer);
       await requestEvent.publish();
 
-      logger.info("Published agent request", {
+      logger.debug("Published agent request", {
         agentName: agentConfig.name,
         pubkey: signer.pubkey,
         hasNDKAgentDefinitionEvent: !!ndkAgentEventId,

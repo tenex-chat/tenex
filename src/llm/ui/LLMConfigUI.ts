@@ -243,11 +243,7 @@ export class LLMConfigUI {
       });
     }
 
-    const responses = await inquirer.prompt<{
-      configName: string;
-      enableCaching?: boolean;
-      setAsDefault: boolean;
-    }>(basePrompts);
+    const responses = await inquirer.prompt(basePrompts as any);
 
     return {
       configName: responses.configName,

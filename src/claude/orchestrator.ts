@@ -1,14 +1,15 @@
 import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { PHASES } from "@/conversations/phases";
+import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
-import type { TaskPublisher } from "@/nostr/TaskPublisher";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import type { NDKEvent, NDKSubscription, NDKTask } from "@nostr-dev-kit/ndk";
-import { DelayedMessageBuffer } from "./DelayedMessageBuffer";
+import { NDKEvent, type NDKSubscription, type NDKTask } from "@nostr-dev-kit/ndk";
 import { ClaudeCodeExecutor } from "./executor";
 
 export interface ClaudeTaskOptions {
@@ -17,16 +18,19 @@ export interface ClaudeTaskOptions {
   projectPath: string;
   title: string;
   branch?: string;
-  conversationRootEventId?: string;
+  conversationRootEventId: string;
   conversation?: Conversation;
-  conversationCoordinator?: ConversationCoordinator;
+  conversationCoordinator: ConversationCoordinator;
   abortSignal?: AbortSignal;
-  resumeSessionId?: string;
-  agentName?: string;
+  claudeSessionId: string;
+  resumeSessionId?: string; // Only set when actually resuming an existing session
+  agentName: string;
+  triggeringEvent: NDKEvent;
+  phase?: Phase;
 }
 
 export interface ClaudeTaskResult {
-  task: NDKTask;
+  taskEvent: NDKTask;
   sessionId?: string;
   totalCost: number;
   messageCount: number;
@@ -37,45 +41,38 @@ export interface ClaudeTaskResult {
 }
 
 /**
- * Orchestrates Claude Code execution with Nostr task tracking
- * Single Responsibility: Coordinate Claude SDK execution with task lifecycle and Nostr publishing
+ * Orchestrates Claude Code execution with Nostr event publishing
+ * Single Responsibility: Coordinate Claude SDK execution with event lifecycle and Nostr publishing
  */
 export class ClaudeTaskOrchestrator {
-  constructor(private taskPublisher: TaskPublisher) {}
+  constructor(private agentPublisher: AgentPublisher) {}
 
   async execute(options: ClaudeTaskOptions): Promise<ClaudeTaskResult> {
     const startTime = Date.now();
 
-    // Create task with conversation mapping and delegation context
-    const task = await this.taskPublisher.createTask({
+    // Create base event context for task creation and updates
+    // Use the conversation's first event as root, or fall back to the triggering event
+    const rootEvent = options.conversation?.history[0] ?? options.triggeringEvent;
+    const baseEventContext: EventContext = {
+      triggeringEvent: options.triggeringEvent,
+      rootEvent: rootEvent,
+      conversationId: options.conversationRootEventId,
+      phase: options.phase || PHASES.EXECUTE,
+    };
+
+    // Create task through AgentPublisher with full context
+    const task = await this.agentPublisher.createTask(
+      options.title,
+      options.prompt,
+      baseEventContext,
+      options.claudeSessionId,
+      options.branch
+    );
+
+    logger.info("[ClaudeTaskOrchestrator] Created task", {
+      taskId: task.id,
+      sessionId: options.claudeSessionId,
       title: options.title,
-      prompt: options.prompt,
-      branch: options.branch,
-      conversationRootEventId: options.conversationRootEventId,
-      conversationCoordinator: options.conversationCoordinator,
-      claudeSessionId: options.resumeSessionId,
-      // Provide delegation context for Claude Code tasks so they get registered
-      delegationContext: options.conversation ? {
-        conversationId: options.conversation.id,
-        originalRequest: options.prompt,
-        phase: PHASES.EXECUTE, // Claude Code tasks are always in execution phase
-      } : undefined,
-    });
-
-    // Log if we're resuming a session
-    if (options.resumeSessionId) {
-      logger.info("[ClaudeTaskOrchestrator] Creating executor with resumeSessionId", {
-        resumeSessionId: options.resumeSessionId,
-      });
-    }
-
-    // Create message buffer for delayed publishing
-    const messageBuffer = new DelayedMessageBuffer({
-      delayMs: 500, // Configurable delay
-      onFlush: async (message) => {
-        // Publish as progress when timeout expires
-        await this.taskPublisher.publishTaskProgress(message.content, message.sessionId);
-      },
     });
 
     // Create executor
@@ -84,7 +81,7 @@ export class ClaudeTaskOrchestrator {
       systemPrompt: options.systemPrompt,
       projectPath: options.projectPath,
       abortSignal: options.abortSignal,
-      resumeSessionId: options.resumeSessionId,
+      resumeSessionId: options.resumeSessionId, // Use the explicit resume parameter
       agentName: options.agentName,
     });
 
@@ -111,11 +108,12 @@ export class ClaudeTaskOrchestrator {
         // Abort the executor
         executor.kill();
 
-        // Flush any pending message before interrupting
-        await messageBuffer.flush();
-
-        // Update task status to interrupted
-        await this.taskPublisher.publishTaskProgress("Task interrupted by user request");
+        // Publish task update for interruption
+        await this.agentPublisher.publishTaskUpdate(
+          task,
+          "Task interrupted by user request",
+          baseEventContext
+        );
       });
     }
 
@@ -135,7 +133,7 @@ export class ClaudeTaskOrchestrator {
 
       while (true) {
         const { value: message, done } = await generator.next();
-        logger.debug("Claude Orc", { message, done });
+        logger.info("Claude Orc", { message, done });
 
         if (done) {
           // The value is the final ClaudeCodeResult
@@ -146,22 +144,35 @@ export class ClaudeTaskOrchestrator {
             stopExecutionTime(options.conversation);
           }
 
-          // Consume buffered message if available
-          const bufferedMessage = messageBuffer.consume();
-          const finalMessage = bufferedMessage?.content || lastAssistantMessage;
+          const finalMessage = lastAssistantMessage || "Task completed";
 
-          // Complete task with the final message
-          await this.taskPublisher.completeTask(executionResult.success, {
-            sessionId: executionResult.sessionId,
-            totalCost: executionResult.totalCost,
-            messageCount: executionResult.messageCount,
-            duration: executionResult.duration,
-            error: executionResult.error,
-            finalMessage: executionResult.success ? finalMessage : undefined,
-          });
+          // Publish final task update with metadata
+          // const finalContext: EventContext = {
+          //   ...baseEventContext,
+          //   executionTime: executionResult.duration,
+          //   cost: executionResult.totalCost,
+          // };
+
+          // const statusEmoji = executionResult.success ? "✅" : "❌";
+          // const statusText = executionResult.success ? "completed" : "failed";
+          // const metadata = [
+          //   `Messages: ${executionResult.messageCount}`,
+          //   `Duration: ${Math.round(executionResult.duration / 1000)}s`,
+          //   `Cost: $${executionResult.totalCost.toFixed(4)}`,
+          // ].join(" • ");
+
+          // const finalContent = executionResult.success
+          //   ? `${finalMessage}\n\n---\n${statusEmoji} Task ${statusText} • ${metadata}`
+          //   : `${statusEmoji} Task ${statusText}\n\nError: ${executionResult.error}\n\n${metadata}`;
+
+          // const update = await this.agentPublisher.publishTaskUpdate(
+          //   task,
+          //   finalContent,
+          //   finalContext
+          // );
 
           result = {
-            task,
+            taskEvent: task,
             sessionId: executionResult.sessionId,
             totalCost: executionResult.totalCost,
             messageCount: executionResult.messageCount,
@@ -179,7 +190,7 @@ export class ClaudeTaskOrchestrator {
           logger.debug("Captured Claude session ID", { sessionId });
         }
 
-        // Process SDK message and buffer progress updates
+        // Process SDK message and publish progress updates immediately
         if (message && message.type === "assistant" && message.message?.content) {
           const textContent = message.message.content
             .filter((c: ContentBlock): c is TextBlock => c.type === "text")
@@ -189,8 +200,12 @@ export class ClaudeTaskOrchestrator {
           if (textContent) {
             lastAssistantMessage = textContent;
 
-            // Buffer the message instead of publishing immediately
-            await messageBuffer.buffer(textContent, sessionId);
+            // Publish progress update immediately
+            await this.agentPublisher.publishTaskUpdate(
+              task,
+              textContent,
+              baseEventContext
+            );
           }
         }
       }
@@ -205,25 +220,20 @@ export class ClaudeTaskOrchestrator {
         stopExecutionTime(options.conversation);
       }
 
-      // Clean up message buffer
-      messageBuffer.cleanup();
-
       const errorMessage = formatAnyError(error);
-
-      // Check if this was an abort
       const isAborted = errorMessage.includes("aborted") || errorMessage.includes("interrupted");
 
-      // Mark task as failed or interrupted
-      if (isAborted) {
-        await this.taskPublisher.completeTask(false, { error: "Task interrupted by user" });
-      } else {
-        await this.taskPublisher.completeTask(false, { error: errorMessage });
-      }
+      // Publish error task update
+      await this.agentPublisher.publishTaskUpdate(
+        task,
+        `❌ Task ${isAborted ? 'interrupted' : 'failed'}\n\nError: ${errorMessage}`,
+        baseEventContext
+      );
 
       logger.error("Claude task execution failed", { error: errorMessage, isAborted });
 
       return {
-        task,
+        taskEvent: task,
         totalCost: 0,
         messageCount: 0,
         duration: Date.now() - startTime,
@@ -231,9 +241,6 @@ export class ClaudeTaskOrchestrator {
         error: errorMessage,
       };
     } finally {
-      // Clean up resources
-      messageBuffer.cleanup();
-
       // Clean up abort subscription
       if (abortSubscription) {
         abortSubscription.stop();

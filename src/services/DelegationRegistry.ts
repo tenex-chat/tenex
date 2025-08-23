@@ -446,14 +446,13 @@ export class DelegationRegistry extends EventEmitter {
   /**
    * Wait for a delegation batch to complete.
    * Used by delegate() tool to synchronously wait for responses.
+   * This will wait indefinitely as delegations are long-running jobs.
    * 
    * @param batchId - The batch ID to wait for
-   * @param timeout - Maximum time to wait in milliseconds (default 5 minutes)
    * @returns The batch completions when all delegations are done
    */
   async waitForBatchCompletion(
-    batchId: string,
-    timeout = 300000
+    batchId: string
   ): Promise<Array<{
     taskId: string;
     response: string;
@@ -467,16 +466,9 @@ export class DelegationRegistry extends EventEmitter {
       return this.getBatchCompletions(batchId);
     }
 
-    // Wait for completion event
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.off(`${batchId}:completion`, handler);
-        logger.warn("Delegation batch timed out", { batchId, timeout });
-        reject(new Error(`Delegation batch ${batchId} timed out after ${timeout}ms`));
-      }, timeout);
-
+    // Wait for completion event - no timeout as delegations are long-running
+    return new Promise((resolve) => {
       const handler = (data: { completions: Array<any> }) => {
-        clearTimeout(timer);
         logger.debug("Batch completion event received", { 
           batchId, 
           completionCount: data.completions.length 
@@ -485,10 +477,10 @@ export class DelegationRegistry extends EventEmitter {
       };
 
       this.once(`${batchId}:completion`, handler);
-      logger.debug("🕑 Setting up synchronous wait listener", { 
+      logger.debug("🕑 Setting up synchronous wait listener for long-running delegation", { 
         batchId, 
-        timeout,
-        mode: "synchronous" 
+        mode: "synchronous",
+        timeout: "none - long-running job"
       });
     });
   }

@@ -44,13 +44,12 @@ export const reportsListTool: Tool<ReportsListInput, ReportsListOutput> = {
   promptFragment: `List reports (NDKArticles) from agents in the project.
 
 Options:
-- allAgents: false (default) - List only reports from the current agent
+- allAgents: false (default) - List only your reports
 - allAgents: true - List reports from all agents in the project
 
 The tool will return:
 - A list of report summaries with IDs, titles, and metadata
 - Articles are returned as bech32 encoded IDs (naddr1...)
-- Summary statistics by agent
 
 Use this to discover available reports for reading or analysis.`,
 
