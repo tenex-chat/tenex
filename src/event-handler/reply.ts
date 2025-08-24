@@ -177,7 +177,6 @@ async function handleReplyLogic(
 
   // 5. Handle delegation completion if applicable (only for kind:1111 delegations)
   let isDelegationCompletionReactivation = false;
-  let replyTarget: NDKEvent | undefined = event;
 
   // Only process delegation completions (kind:1111 with tool:complete)
   // Task completions (kind:1934) don't need this handler since tools like claude_code
@@ -199,10 +198,9 @@ async function handleReplyLogic(
       targetAgent = delegationCompletionResult.targetAgent;
     }
     if (delegationCompletionResult.replyTarget) {
-      replyTarget = delegationCompletionResult.replyTarget;
       logInfo(
         chalk.cyan(
-          `Delegation completion will reply to original user event: ${replyTarget.id?.substring(0, 8)}`
+          `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
         )
       );
     }
@@ -225,11 +223,9 @@ async function handleReplyLogic(
     phase: conversation.phase,
     projectPath: process.cwd(),
     triggeringEvent: event,
-    replyTarget: replyTarget,
     conversationCoordinator,
     claudeSessionId,
-    agentExecutor,
-    isTaskCompletionReactivation: isDelegationCompletionReactivation,
+    isDelegationCompletion: isDelegationCompletionReactivation,
   };
 
   // 8. Execute agent

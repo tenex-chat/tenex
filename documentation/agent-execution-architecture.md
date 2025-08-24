@@ -463,8 +463,8 @@ interface ExecutionContext {
     handoff?: HandoffContext;
     publisher: NostrPublisher;
     conversationCoordinator: ConversationCoordinator;
-    agentExecutor: AgentExecutor;
     claudeSessionId?: string;
+    isDelegationCompletion?: boolean;
 }
 ```
 

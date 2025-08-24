@@ -79,7 +79,6 @@ export class AgentExecutor {
     const fullContext: ExecutionContext = {
       ...context,
       conversationCoordinator: context.conversationCoordinator || this.conversationCoordinator,
-      agentExecutor: this, // Pass this AgentExecutor instance for continue() tool
       claudeSessionId, // Pass the determined session ID
     };
 
@@ -113,7 +112,7 @@ export class AgentExecutor {
       };
       await agentPublisher.typing({ type: "typing", state: "start" }, eventContext);
 
-      await this.executeWithStreaming(fullContext, messages, tracingContext);
+      await this.executeWithStreaming(fullContext, messages);
 
       // Log execution flow complete
       executionLogger.logEvent({
@@ -255,20 +254,17 @@ export class AgentExecutor {
       );
     }
 
-    // Add special instruction if this is a reactivation after task completion
-    if (context.isTaskCompletionReactivation) {
-      logger.info("[AgentExecutor] 🔄 ASYNC REACTIVATION: Agent resumed after delegation", {
+    // Add special instruction if this is a reactivation after delegation completion
+    if (context.isDelegationCompletion) {
+      logger.info("[AgentExecutor] 🔄 DELEGATION COMPLETION: Agent resumed after delegation", {
         agent: context.agent.name,
-        hasReplyTarget: !!context.replyTarget,
-        replyTargetId: context.replyTarget?.id?.substring(0, 8),
-        replyTargetPubkey: context.replyTarget?.pubkey?.substring(0, 8),
         triggeringEventId: context.triggeringEvent?.id?.substring(0, 8),
         triggeringEventPubkey: context.triggeringEvent?.pubkey?.substring(0, 8),
-        mode: "async-fallback",
+        mode: "delegation-completion",
       });
 
-      const taskCompletionInstruction = `
-=== CRITICAL: TASK COMPLETION NOTIFICATION ===
+      const delegationCompletionInstruction = `
+=== CRITICAL: DELEGATION COMPLETION NOTIFICATION ===
 
 STOP! A delegated task has JUST BEEN COMPLETED. The response is in the conversation above.
 
@@ -286,12 +282,12 @@ ONLY use complete().
 
 === END CRITICAL NOTIFICATION ===`;
 
-      messages.push(new Message("system", taskCompletionInstruction));
-      logger.info(`[AgentExecutor] 🔁 Starting async reactivation flow for ${context.agent.name}`, {
+      messages.push(new Message("system", delegationCompletionInstruction));
+      logger.info(`[AgentExecutor] 🔁 Starting delegation completion flow for ${context.agent.name}`, {
         conversationId: context.conversationId,
         agentSlug: context.agent.slug,
-        mode: "async-fallback",
-        reason: "delegation-completion",
+        mode: "delegation-completion",
+        reason: "delegation-completed",
       });
     }
 
@@ -341,8 +337,7 @@ Be completely transparent about your internal process. If you made a mistake or 
    */
   private async executeWithStreaming(
     context: ExecutionContext,
-    messages: Message[],
-    _tracingContext: TracingContext
+    messages: Message[]
   ): Promise<void> {
     // Get tools for response processing - use agent's configured tools
     const tools = context.agent.tools || [];
@@ -354,13 +349,7 @@ Be completely transparent about your internal process. If you made a mistake or 
       allTools = [...tools, ...mcpTools];
     }
 
-    // Add claude_code tool for agents that explicitly have it in their tools list
-    // This is now handled through agent configuration directly
-
-    // All agents use ReasonActLoop now
-    const backend = new ReasonActLoop(this.llmService);
-
-    // Execute using the backend
-    await backend.execute(messages, allTools, context);
+    const ral = new ReasonActLoop(this.llmService);
+    await ral.execute(messages, allTools, context);
   }
 }

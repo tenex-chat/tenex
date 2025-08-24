@@ -44,13 +44,9 @@ The `ExecutionContext` (src/agents/execution/types.ts) carries all necessary inf
 - **phase**: Current conversation phase (brainstorm, requirements, implementation, etc.)
 - **projectPath**: File system path to the project
 - **triggeringEvent**: The Nostr event that triggered this execution
-- **replyTarget**: Optional: what to reply to (if different from trigger)
 - **conversationCoordinator**: For conversation state management
-- **previousPhase**: For phase transition context
 - **claudeSessionId**: For resuming Claude Code sessions
-- **agentExecutor**: Reference to the AgentExecutor for recursive execution
-- **tracingContext**: For distributed tracing
-- **isTaskCompletionReactivation**: True when agent is reactivated after delegated task completion
+- **isDelegationCompletion**: True when agent is reactivated after a delegated task completes
 
 ### 3. AgentExecutor
 
