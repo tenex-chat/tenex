@@ -1,8 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
-import type { LLMCallLogEntry } from "@/llm/callLogger";
-import type { ToolCallLogEntry } from "@/tools/toolLogger";
+import type { UnifiedLogEvent } from "@/logging/UnifiedLogger";
 import { formatDuration } from "@/utils/formatting";
 import { logError, logInfo, logWarning } from "@/utils/logger";
 import chalk from "chalk";
@@ -90,71 +89,63 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
         });
       }
 
-      // 3. Load LLM calls
-      const llmLogPath = path.join(projectPath, ".tenex", "logs", "llms");
-      const llmLogFiles = await findLogFiles(llmLogPath, conversationId);
+      // 3. Load unified event logs
+      const eventLogPath = path.join(projectPath, ".tenex", "logs", "events");
+      const eventLogFiles = await findLogFiles(eventLogPath, conversationId);
 
-      for (const file of llmLogFiles) {
+      for (const file of eventLogFiles) {
         const content = await fs.readFile(file, "utf-8");
         const lines = content.split("\n").filter(Boolean);
 
         for (const line of lines) {
           try {
-            const entry: LLMCallLogEntry = JSON.parse(line);
-
-            // Only include entries for this conversation
-            if (entry.request.options?.conversationId !== conversationId) continue;
-
-            events.push({
-              timestamp: entry.timestampMs,
-              type: "llm_call",
-              agent: entry.agentName,
-              description: `LLM Call: ${entry.config.model}`,
-              details: {
-                model: entry.config.model,
-                provider: entry.config.provider,
-                messageCount: entry.request.messageCount,
-                status: entry.status,
-                tokensUsed: entry.response?.usage?.totalTokens,
-                reasoning: extractReasoning(entry.response?.content),
-              },
-              duration: entry.durationMs,
-            });
-          } catch {
-            // Skip invalid lines
-          }
-        }
-      }
-
-      // 4. Load tool calls
-      const toolLogPath = path.join(projectPath, ".tenex", "logs", "tools");
-      const toolLogFiles = await findLogFiles(toolLogPath, conversationId);
-
-      for (const file of toolLogFiles) {
-        const content = await fs.readFile(file, "utf-8");
-        const lines = content.split("\n").filter(Boolean);
-
-        for (const line of lines) {
-          try {
-            const entry: ToolCallLogEntry = JSON.parse(line);
+            const entry: UnifiedLogEvent = JSON.parse(line);
 
             // Only include entries for this conversation
             if (entry.conversationId !== conversationId) continue;
 
-            events.push({
-              timestamp: entry.timestampMs,
-              type: "tool_call",
-              agent: entry.agentName,
-              description: `Tool: ${entry.toolName}`,
-              details: {
-                tool: entry.toolName,
-                status: entry.status,
-                phase: entry.phase,
-                error: entry.error,
-                metadata: entry.metadata,
-              },
-              duration: entry.performance.durationMs,
-            });
+            if (entry.eventType === "llm_request" || entry.eventType === "llm_response") {
+              events.push({
+                timestamp: entry.timestampMs,
+                type: "llm_call",
+                agent: entry.agentName,
+                description: `LLM ${entry.eventType === "llm_request" ? "Request" : "Response"}: ${entry.data.model || "unknown"}`,
+                details: {
+                  model: entry.data.model,
+                  provider: entry.data.provider,
+                  messageCount: entry.data.messageCount,
+                  status: entry.error ? "error" : "success",
+                  tokensUsed: (entry.data.usage as any)?.totalTokens,
+                  reasoning: entry.data.content ? extractReasoning(entry.data.content as string) : undefined,
+                },
+                duration: entry.durationMs,
+              });
+            } else if (entry.eventType === "tool_call" || entry.eventType === "tool_result") {
+              events.push({
+                timestamp: entry.timestampMs,
+                type: "tool_call",
+                agent: entry.agentName,
+                description: `Tool ${entry.eventType === "tool_call" ? "Call" : "Result"}: ${entry.data.tool}`,
+                details: {
+                  tool: entry.data.tool,
+                  status: entry.data.status || (entry.error ? "error" : "success"),
+                  phase: entry.phase,
+                  error: entry.error?.message,
+                },
+                duration: entry.durationMs,
+              });
+            } else if (entry.eventType === "phase_transition") {
+              events.push({
+                timestamp: entry.timestampMs,
+                type: "phase_transition",
+                agent: entry.agentName,
+                description: `Phase: ${entry.data.from} → ${entry.data.to}`,
+                details: {
+                  from: entry.data.from,
+                  to: entry.data.to,
+                },
+              });
+            }
           } catch {
             // Skip invalid lines
           }

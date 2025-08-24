@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import { createExecutionLogger } from "@/logging/ExecutionLogger";
+import { createExecutionLogger } from "@/logging/UnifiedLogger";
 import {
   buildPhaseInstructions,
   formatPhaseTransitionMessage,
@@ -77,14 +77,13 @@ export class ConversationCoordinator {
     this.conversationContexts.set(conversation.id, tracingContext);
 
     const executionLogger = createExecutionLogger(tracingContext, "conversation");
-    executionLogger.logEvent({
-      type: "conversation_start",
-      timestamp: new Date(),
-      conversationId: conversation.id,
-      agent: "system",
-      userMessage: event.content || "",
-      eventId: event.id,
-    });
+    await executionLogger.logEvent(
+      "conversation_start",
+      {
+        userMessage: event.content || "",
+        eventId: event.id,
+      }
+    );
 
     // Store and persist
     this.store.set(conversation.id, conversation);
@@ -202,14 +201,13 @@ export class ConversationCoordinator {
       const phaseContext = createPhaseExecutionContext(tracingContext, phase);
       const executionLogger = createExecutionLogger(phaseContext, "conversation");
 
-      executionLogger.logEvent({
-        type: "phase_transition",
-        timestamp: new Date(),
-        conversationId: id,
-        agent: agentName,
-        from: previousPhase,
-        to: phase,
-      });
+      await executionLogger.logEvent(
+        "phase_transition",
+        {
+          from: previousPhase,
+          to: phase,
+        }
+      );
 
       await this.persistence.save(conversation);
       return true;
@@ -288,7 +286,7 @@ export class ConversationCoordinator {
 
     // Handle phase transitions
     if (needsPhaseInstructions) {
-      const phaseInstructions = buildPhaseInstructions(conversation.phase, conversation, false);
+      const phaseInstructions = buildPhaseInstructions(conversation.phase, conversation);
 
       let phaseMessage: string;
       if (agentState.lastSeenPhase) {
@@ -495,7 +493,7 @@ export class ConversationCoordinator {
     if (!queueManager) return;
 
     this.phaseManager.setupQueueListeners(
-      async (conversationId: string, agentPubkey: string) => {
+      async (conversationId: string, _agentPubkey: string) => {
         const conversation = this.store.get(conversationId);
         if (conversation?.metadata.queueStatus) {
           conversation.metadata.queueStatus = undefined;
@@ -504,13 +502,12 @@ export class ConversationCoordinator {
           const tracingContext = this.conversationContexts.get(conversationId);
           if (tracingContext) {
             const executionLogger = createExecutionLogger(tracingContext, "conversation");
-            executionLogger.logEvent({
-              type: "execution_start",
-              timestamp: new Date(),
-              conversationId,
-              agent: agentPubkey,
-              narrative: "Execution lock acquired - starting EXECUTE phase",
-            });
+            await executionLogger.logEvent(
+              "execution_start",
+              {
+                narrative: "Execution lock acquired - starting EXECUTE phase",
+              }
+            );
           }
         }
       },
@@ -534,13 +531,12 @@ export class ConversationCoordinator {
 
           // Log timeout warning using execution logger
           const executionLogger = createExecutionLogger(tracingContext, "conversation");
-          executionLogger.logEvent({
-            type: "execution_start",
-            timestamp: new Date(),
-            conversationId,
-            agent: "system",
-            narrative: warningMessage,
-          });
+          await executionLogger.logEvent(
+            "execution_start",
+            {
+              narrative: warningMessage,
+            }
+          );
         }
       }
     );

@@ -1,6 +1,6 @@
 import { MessageBuilder } from "@/conversations/MessageBuilder";
 import type { LLMService, StreamEvent, Tool } from "@/llm/types";
-import { type ExecutionLogger, createExecutionLogger } from "@/logging/ExecutionLogger";
+import { type ContextualLogger, createExecutionLogger } from "@/logging/UnifiedLogger";
 import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
@@ -27,7 +27,7 @@ const MAX_ITERATIONS = 20;
  * Iteratively calls the LLM, executes tools, and feeds results back for further reasoning.
  */
 export class ReasonActLoop {
-  private executionLogger?: ExecutionLogger;
+  private executionLogger?: ContextualLogger;
   private repetitionDetector: ToolRepetitionDetector;
   private messageBuilder: MessageBuilder;
   private startTime?: number;

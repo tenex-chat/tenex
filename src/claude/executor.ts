@@ -1,4 +1,4 @@
-import { getLLMLogger } from "@/llm/callLogger";
+import { getUnifiedLogger } from "@/logging/UnifiedLogger";
 import type { CompletionRequest, CompletionResponse, ResolvedLLMConfig } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { type SDKMessage, query } from "@anthropic-ai/claude-code";
@@ -64,7 +64,7 @@ export class ClaudeCodeExecutor {
     };
 
     // Prepare data for logging
-    const llmLogger = getLLMLogger();
+    const unifiedLogger = getUnifiedLogger();
     const startTime = Date.now();
 
     // Build request object for logging
@@ -168,7 +168,7 @@ export class ClaudeCodeExecutor {
       const endTime = Date.now();
 
       // Log successful completion to JSONL
-      if (llmLogger) {
+      if (unifiedLogger) {
         const response: CompletionResponse = {
           type: "text",
           content: metrics.assistantMessages.join("\n\n"),
@@ -188,7 +188,7 @@ export class ClaudeCodeExecutor {
           enableCaching: false,
         };
 
-        await llmLogger.logLLMCall(
+        await unifiedLogger.logLLMCall(
           "claude-code",
           config,
           request,
@@ -220,7 +220,7 @@ export class ClaudeCodeExecutor {
       logger.error("[ClaudeCodeExecutor] Execution failed", { error, duration });
 
       // Log error to JSONL
-      if (llmLogger) {
+      if (unifiedLogger) {
         const config = {
           provider: "anthropic" as const,
           model: "claude-code",
@@ -228,7 +228,7 @@ export class ClaudeCodeExecutor {
           enableCaching: false,
         };
 
-        await llmLogger.logLLMCall(
+        await unifiedLogger.logLLMCall(
           "claude-code",
           config,
           request,

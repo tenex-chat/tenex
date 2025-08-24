@@ -2,8 +2,7 @@ import { configService } from "@/services";
 import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
-import { getLLMLogger, initializeLLMLogger } from "./callLogger";
-import { getExecutionLogger, initializeExecutionLogger } from "@/utils/executionLogger";
+import { getUnifiedLogger, initializeUnifiedLogger } from "@/logging/UnifiedLogger";
 import { createMockLLMProvider } from "./providers/MockProvider";
 import { createSimpleMockProvider } from "./providers/SimpleMockProvider";
 import type {
@@ -189,22 +188,10 @@ export class LLMRouter implements LLMService {
         });
       }
 
-      // Log to comprehensive JSONL logger
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        await llmLogger.logLLMCall(
-          configKey,
-          config,
-          request,
-          { response },
-          { startTime, endTime }
-        );
-      }
-      
-      // Also log to execution logger
-      const executionLogger = getExecutionLogger();
-      if (executionLogger) {
-        await executionLogger.logLLMCall(
+      // Log to unified logger
+      const unifiedLogger = getUnifiedLogger();
+      if (unifiedLogger) {
+        await unifiedLogger.logLLMCall(
           configKey,
           config,
           request,
@@ -226,16 +213,10 @@ export class LLMRouter implements LLMService {
         stack: error.stack,
       });
 
-      // Log to comprehensive JSONL logger
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        await llmLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
-      }
-      
-      // Also log to execution logger
-      const executionLogger = getExecutionLogger();
-      if (executionLogger) {
-        await executionLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
+      // Log to unified logger
+      const unifiedLogger = getUnifiedLogger();
+      if (unifiedLogger) {
+        await unifiedLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
       }
 
       throw error;
@@ -363,15 +344,15 @@ export class LLMRouter implements LLMService {
       });
 
       if (lastResponse) {
-        // Log to comprehensive JSONL logger
-        const llmLogger = getLLMLogger();
-        if (llmLogger) {
+        // Log to unified logger
+        const unifiedLogger = getUnifiedLogger();
+        if (unifiedLogger) {
           logger.debug("[LLM Stream] Logging to JSONL", {
             agentName: request.options?.agentName,
             loggerExists: true,
           });
 
-          await llmLogger.logLLMCall(
+          await unifiedLogger.logLLMCall(
             configKey,
             config,
             request,
@@ -379,7 +360,7 @@ export class LLMRouter implements LLMService {
             { startTime, endTime }
           );
         } else {
-          logger.error("[LLM Stream] LLM Logger is not initialized (with usage)!", {
+          logger.error("[LLM Stream] Unified Logger is not initialized (with usage)!", {
             agentName: request.options?.agentName,
             configKey,
           });
@@ -403,13 +384,13 @@ export class LLMRouter implements LLMService {
         } as CompletionResponse & { model: string };
 
         // Log even without usage data
-        const llmLogger = getLLMLogger();
-        if (llmLogger) {
+        const unifiedLogger = getUnifiedLogger();
+        if (unifiedLogger) {
           logger.debug("[LLM Stream] Logging to JSONL (no usage data)", {
             agentName: request.options?.agentName,
           });
 
-          await llmLogger.logLLMCall(
+          await unifiedLogger.logLLMCall(
             configKey,
             config,
             request,
@@ -417,7 +398,7 @@ export class LLMRouter implements LLMService {
             { startTime, endTime }
           );
         } else {
-          logger.error("[LLM Stream] LLM Logger is not initialized!", {
+          logger.error("[LLM Stream] Unified Logger is not initialized!", {
             agentName: request.options?.agentName,
             configKey,
           });
@@ -437,10 +418,10 @@ export class LLMRouter implements LLMService {
         stack: errorObj.stack,
       });
 
-      // Log to comprehensive JSONL logger
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        await llmLogger.logLLMCall(
+      // Log to unified logger
+      const unifiedLogger = getUnifiedLogger();
+      if (unifiedLogger) {
+        await unifiedLogger.logLLMCall(
           configKey,
           config,
           request,
@@ -492,11 +473,8 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter | LL
       }
     }
 
-    // Initialize comprehensive LLM logger
-    initializeLLMLogger(projectPath);
-    
-    // Initialize execution logger
-    initializeExecutionLogger(projectPath);
+    // Initialize unified logger
+    initializeUnifiedLogger(projectPath);
 
     // Use configService to load merged global and project-specific configuration
     const { llms: tenexLLMs } = await configService.loadConfig(projectPath);

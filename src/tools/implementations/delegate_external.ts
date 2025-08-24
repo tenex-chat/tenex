@@ -1,6 +1,6 @@
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
+import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
@@ -207,16 +207,14 @@ async function waitForExternalResponse(params: {
   const { delegationEventId, expectedSenderPubkey } = params;
   const ndk = getNDK();
 
-  return new Promise<DelegationResponses>((resolve, reject) => {
+  return new Promise<DelegationResponses>((resolve) => {
     let subscription: NDKSubscription | undefined;
-    let resolved = false;
 
     // Cleanup function
     const cleanup = () => {
       if (subscription) {
         subscription.stop();
       }
-      resolved = true;
     };
 
     // Set up subscription filter

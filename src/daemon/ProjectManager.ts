@@ -7,8 +7,7 @@ import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { initializeToolLogger } from "@/tools/toolLogger";
-import { initializeExecutionLogger } from "@/utils/executionLogger";
+import { initializeUnifiedLogger } from "@/logging/UnifiedLogger";
 import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { ensureTenexInGitignore, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
@@ -216,11 +215,8 @@ export class ProjectManager implements IProjectManager {
       // Republish kind:0 events for all agents on project load
       await agentRegistry.republishAllAgentProfiles(project);
 
-      // Initialize tool logger for tracing tool executions
-      initializeToolLogger(projectPath);
-      
-      // Initialize execution logger for both LLM and tool calls
-      initializeExecutionLogger(projectPath);
+      // Initialize unified logger for all events
+      initializeUnifiedLogger(projectPath);
     } catch (error: unknown) {
       // Only log if it's not a missing project configuration error
       // The MCP server command will handle this specific error with a friendlier message

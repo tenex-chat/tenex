@@ -22,7 +22,7 @@ import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { createExecutionLogger } from "@/logging/ExecutionLogger";
+import { createExecutionLogger } from "@/logging/UnifiedLogger";
 
 /**
  * Minimal context for standalone agent execution
@@ -96,13 +96,12 @@ export class AgentExecutor {
       startExecutionTime(conversation);
 
       // Log execution flow start
-      executionLogger.logEvent({
-        type: "execution_start",
-        timestamp: new Date(),
-        conversationId: context.conversationId,
-        agent: context.agent.name,
-        narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
-      });
+      await executionLogger.logEvent(
+        "execution_start",
+        {
+          narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
+        }
+      );
 
       // Publish typing indicator start using AgentPublisher
       const eventContext: EventContext = {
@@ -115,27 +114,25 @@ export class AgentExecutor {
       await this.executeWithStreaming(fullContext, messages);
 
       // Log execution flow complete
-      executionLogger.logEvent({
-        type: "execution_complete",
-        timestamp: new Date(),
-        conversationId: context.conversationId,
-        agent: context.agent.name,
-        narrative: `Agent ${context.agent.name} completed execution successfully`,
-        success: true,
-      });
+      await executionLogger.logEvent(
+        "execution_complete",
+        {
+          narrative: `Agent ${context.agent.name} completed execution successfully`,
+          success: true,
+        }
+      );
 
       // Stop typing indicator after successful execution
       await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
     } catch (error) {
       // Log execution flow failure
-      executionLogger.logEvent({
-        type: "execution_complete",
-        timestamp: new Date(),
-        conversationId: context.conversationId,
-        agent: context.agent.name,
-        narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
-        success: false,
-      });
+      await executionLogger.logEvent(
+        "execution_complete",
+        {
+          narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
+          success: false,
+        }
+      );
       // Stop execution time tracking even on error
       const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       if (conversation) {

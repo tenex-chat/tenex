@@ -21,55 +21,67 @@ export class TerminationHandler {
     tracingLogger: TracingLogger,
     eventContext?: EventContext
   ): Promise<void> {
-    // Check if this agent requires termination
-    const isChat = context.phase === PHASES.CHAT;
-    const isBrainstormPhase = context.phase === PHASES.BRAINSTORM;
-    const requiresTermination = !isChat && !isBrainstormPhase;
-
-    // If terminated properly or termination not required, we're done
-    if (this.stateManager.hasTerminated() || !requiresTermination) {
+    // If agent already terminated properly, we're done
+    if (this.stateManager.hasTerminated()) {
       return;
     }
 
-    // Log that agent didn't terminate properly
-    const message = `Agent finished without calling terminal tool (${context.agent.name})`;
-
-    tracingLogger.info(`⚠️ ${message}`, {
-      agent: context.agent.name,
-      phase: context.phase,
-    });
-
-    // Publish the last response as a completion event
+    // Auto-complete for all phases that didn't explicitly terminate
     const fullContent = this.stateManager.getFullContent();
-    if (fullContent && eventContext) {
+    if (!fullContent || !eventContext) {
+      return;
+    }
+
+    // Determine if implicit completion is expected for this phase
+    const isChat = context.phase === PHASES.CHAT;
+    const isBrainstorm = context.phase === PHASES.BRAINSTORM;
+    const isExpectedImplicitCompletion = isChat || isBrainstorm;
+
+    // Log appropriately based on whether implicit completion is expected
+    if (!isExpectedImplicitCompletion) {
+      // Warn for phases where explicit completion is expected
+      const message = `Agent finished without calling terminal tool (${context.agent.name})`;
       tracingLogger.info(`⚠️ ${message}`, {
-        fullContent
+        agent: context.agent.name,
+        phase: context.phase,
+        contentPreview: fullContent.substring(0, 100),
       });
-      try {
-        const agentPublisher = new AgentPublisher(
-          context.agent, 
-          context.conversationCoordinator
-        );
-        
-        await agentPublisher.complete(
-          {
-            type: 'completion',
-            content: fullContent,
-          },
-          eventContext
-        );
-        
-        logger.info("Published auto-completion for unterminated agent", {
-          agent: context.agent.name,
-          phase: context.phase,
-          contentLength: fullContent.length,
-        });
-      } catch (error) {
-        logger.error("Failed to publish auto-completion", {
-          error,
-          agent: context.agent.name,
-        });
-      }
+    } else {
+      // Debug log for phases where implicit completion is normal
+      tracingLogger.debug("Auto-completing agent response", {
+        agent: context.agent.name,
+        phase: context.phase,
+        contentLength: fullContent.length,
+      });
+    }
+
+    // Publish the completion event
+    try {
+      const agentPublisher = new AgentPublisher(
+        context.agent, 
+        context.conversationCoordinator
+      );
+      
+      await agentPublisher.complete(
+        {
+          type: 'completion',
+          content: fullContent,
+        },
+        eventContext
+      );
+      
+      logger.info("Published auto-completion", {
+        agent: context.agent.name,
+        phase: context.phase,
+        wasExpected: isExpectedImplicitCompletion,
+        contentLength: fullContent.length,
+      });
+    } catch (error) {
+      logger.error("Failed to publish auto-completion", {
+        error,
+        agent: context.agent.name,
+        phase: context.phase,
+      });
     }
   }
 }

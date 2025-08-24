@@ -1,5 +1,4 @@
-import { getToolLogger } from "@/tools/toolLogger";
-import { getExecutionLogger } from "@/utils/executionLogger";
+import { getUnifiedLogger } from "@/logging/UnifiedLogger";
 import type {
   ExecutionContext,
   Tool,
@@ -189,28 +188,13 @@ export class ToolPlugin extends Plugin {
       };
 
       // Log the successful tool execution
-      const toolLogger = getToolLogger();
-      if (toolLogger) {
-        await toolLogger.logToolCall(
+      const unifiedLogger = getUnifiedLogger();
+      if (unifiedLogger) {
+        await unifiedLogger.logToolCall(
           this.tool.name,
           parameters,
           this.tenexContext,
           result, // Pass the original typed result
-          {
-            startTime,
-            endTime,
-          }
-        );
-      }
-      
-      // Also log to execution logger
-      const executionLogger = getExecutionLogger();
-      if (executionLogger) {
-        await executionLogger.logToolCall(
-          this.tool.name,
-          parameters,
-          this.tenexContext,
-          result,
           {
             startTime,
             endTime,
@@ -246,18 +230,9 @@ export class ToolPlugin extends Plugin {
       };
 
       // Log the failed tool execution
-      const toolLogger = getToolLogger();
-      if (toolLogger) {
-        await toolLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
-          startTime,
-          endTime,
-        });
-      }
-      
-      // Also log to execution logger
-      const executionLogger = getExecutionLogger();
-      if (executionLogger) {
-        await executionLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
+      const unifiedLogger = getUnifiedLogger();
+      if (unifiedLogger) {
+        await unifiedLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
           startTime,
           endTime,
         });

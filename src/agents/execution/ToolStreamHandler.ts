@@ -1,5 +1,5 @@
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
-import type { ExecutionLogger } from "@/logging/ExecutionLogger";
+import type { ContextualLogger } from "@/logging/UnifiedLogger";
 import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { StreamHandle } from "@/nostr/AgentStreamer";
@@ -19,7 +19,7 @@ import type { ExecutionContext } from "./types";
 export class ToolStreamHandler {
   constructor(
     private stateManager: StreamStateManager,
-    private executionLogger?: ExecutionLogger
+    private executionLogger?: ContextualLogger
   ) {}
 
   /**
@@ -38,7 +38,7 @@ export class ToolStreamHandler {
 
     // Log tool execution start
     if (this.executionLogger && context) {
-      this.executionLogger.toolStart(context.agent.name, toolName, toolArgs);
+      await this.executionLogger.toolStart(toolName, toolArgs);
     }
 
     // Note: StreamHandle doesn't have a flush method - it handles buffering internally
@@ -65,7 +65,7 @@ export class ToolStreamHandler {
     this.stateManager.addToolResult(toolResult);
 
     // Log tool execution complete
-    this.logToolComplete(toolResult, event.tool, context);
+    await this.logToolComplete(toolResult, event.tool);
 
     // Publish error if tool failed
     await this.publishToolError(toolResult, event.tool, tracingLogger, context);
@@ -120,20 +120,18 @@ export class ToolStreamHandler {
   }
 
   /**
-   * Log tool completion with ExecutionLogger
+   * Log tool completion with ContextualLogger
    */
-  private logToolComplete(
+  private async logToolComplete(
     toolResult: ToolExecutionResult,
-    toolName: string,
-    context: ExecutionContext
-  ): void {
+    toolName: string
+  ): Promise<void> {
     if (!this.executionLogger) return;
 
     // We don't have the exact start time, so use a reasonable estimate
     const duration = ExecutionConfig.DEFAULT_TOOL_DURATION_MS;
 
-    this.executionLogger.toolComplete(
-      context.agent.name,
+    await this.executionLogger.toolComplete(
       toolName,
       toolResult.success ? "success" : "error",
       duration,
