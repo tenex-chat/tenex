@@ -41,10 +41,10 @@ export interface ClaudeTaskResult {
 }
 
 /**
- * Orchestrates Claude Code execution with Nostr event publishing
+ * Executes Claude Code tasks with Nostr event publishing
  * Single Responsibility: Coordinate Claude SDK execution with event lifecycle and Nostr publishing
  */
-export class ClaudeTaskOrchestrator {
+export class ClaudeTaskExecutor {
   constructor(private agentPublisher: AgentPublisher) {}
 
   async execute(options: ClaudeTaskOptions): Promise<ClaudeTaskResult> {
@@ -69,7 +69,7 @@ export class ClaudeTaskOrchestrator {
       options.branch
     );
 
-    logger.info("[ClaudeTaskOrchestrator] Created task", {
+    logger.info("[ClaudeTaskExecutor] Created task", {
       taskId: task.id,
       sessionId: options.claudeSessionId,
       title: options.title,
@@ -133,7 +133,7 @@ export class ClaudeTaskOrchestrator {
 
       while (true) {
         const { value: message, done } = await generator.next();
-        logger.info("Claude Orc", { message, done });
+        logger.info("Claude Executor", { message, done });
 
         if (done) {
           // The value is the final ClaudeCodeResult

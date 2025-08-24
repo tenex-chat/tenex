@@ -24,7 +24,7 @@ export class TerminationHandler {
     // Check if this agent requires termination
     const isChat = context.phase === PHASES.CHAT;
     const isBrainstormPhase = context.phase === PHASES.BRAINSTORM;
-    const requiresTermination = true; //!isChat && !isBrainstormPhase;
+    const requiresTermination = !isChat && !isBrainstormPhase;
 
     // If terminated properly or termination not required, we're done
     if (this.stateManager.hasTerminated() || !requiresTermination) {

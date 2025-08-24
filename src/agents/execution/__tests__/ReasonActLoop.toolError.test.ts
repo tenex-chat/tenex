@@ -45,7 +45,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", isOrchestrator: false },
+      agent: { name: "test-agent", 
       phase: "execute",
     };
 
@@ -95,7 +95,7 @@ describe("ReasonActLoop - Tool Error Publishing", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", isOrchestrator: false },
+      agent: { name: "test-agent", 
       phase: "execute",
     };
 

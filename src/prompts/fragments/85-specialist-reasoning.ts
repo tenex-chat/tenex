@@ -2,8 +2,7 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Reasoning fragment for specialist agents ONLY.
- * No conditionals, no isOrchestrator checks.
+ * Reasoning fragment for specialist agents.
  */
 export const specialistReasoningFragment: PromptFragment = {
   id: "specialist-reasoning",

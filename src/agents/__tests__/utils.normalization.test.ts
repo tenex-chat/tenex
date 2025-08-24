@@ -15,7 +15,7 @@ describe("findAgentByName normalization", () => {
           pubkey: "pubkey1",
           npub: "npub1",
           role: "test",
-          isOrchestrator: false,
+          
         } as Agent,
       ],
       [
@@ -26,7 +26,7 @@ describe("findAgentByName normalization", () => {
           pubkey: "pubkey2",
           npub: "npub2",
           role: "test",
-          isOrchestrator: false,
+          
         } as Agent,
       ],
       [
@@ -37,7 +37,7 @@ describe("findAgentByName normalization", () => {
           pubkey: "pubkey3",
           npub: "npub3",
           role: "test",
-          isOrchestrator: false,
+          
         } as Agent,
       ],
     ]);

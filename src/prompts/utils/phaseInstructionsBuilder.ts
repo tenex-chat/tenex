@@ -16,14 +16,8 @@ import "@/prompts/fragments/35-specialist-completion-guidance";
  */
 export function buildPhaseInstructions(
   phase: Phase,
-  conversation?: Conversation,
-  isOrchestrator = false
+  conversation?: Conversation
 ): string {
-  // Orchestrators should not receive dynamic phase instructions
-  // as they output strict JSON and handle phases differently
-  if (isOrchestrator) {
-    return "";
-  }
 
   const builder = new PromptBuilder()
     .add("phase-context", {

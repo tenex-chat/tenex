@@ -3,9 +3,8 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Available agents fragment for SPECIALISTS.
+ * Available agents fragment for specialists.
  * Shows coworkers they can hand off to.
- * No conditionals, no isOrchestrator checks.
  */
 interface SpecialistAvailableAgentsArgs {
   agents: AgentInstance[];

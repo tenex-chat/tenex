@@ -36,7 +36,7 @@ describe("Task Reply Routing", () => {
       slug: "test-agent",
       name: "Test Agent",
       pubkey: agentPubkey,
-      isOrchestrator: false,
+      
     } as AgentInstance;
 
     // Create mock project context
@@ -47,7 +47,7 @@ describe("Task Reply Routing", () => {
         slug: "orchestrator",
         name: "Orchestrator",
         pubkey: projectPubkey,
-        isOrchestrator: true,
+        
       })),
       project: {
         tag: mock(() => {}),

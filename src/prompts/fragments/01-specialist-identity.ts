@@ -3,8 +3,7 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Identity fragment for specialist agents ONLY.
- * No conditionals, no isOrchestrator checks.
+ * Identity fragment for specialist agents.
  */
 interface SpecialistIdentityArgs {
   agent: AgentInstance;

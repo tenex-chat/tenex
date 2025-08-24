@@ -134,7 +134,7 @@ describe("AgentEventEncoder Integration Tests", () => {
     it("should handle multi-agent delegation chains", async () => {
       await withTestEnvironment(async (fixture) => {
         // Setup agents
-        const { user: orchestrator, signer: orchestratorSigner } = await getTestUserWithSigner("alice", fixture.ndk);
+        const { user: coordinator, signer: coordinatorSigner } = await getTestUserWithSigner("alice", fixture.ndk);
         const { user: worker1 } = await getTestUserWithSigner("bob", fixture.ndk);
         const { user: worker2 } = await getTestUserWithSigner("carol", fixture.ndk);
 
@@ -152,7 +152,7 @@ describe("AgentEventEncoder Integration Tests", () => {
           ["priority", "high"]
         );
 
-        // Orchestrator delegates to workers
+        // Coordinator delegates to workers
         const delegationIntent: DelegationIntent = {
           type: "delegation",
           tasks: [

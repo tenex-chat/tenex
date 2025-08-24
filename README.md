@@ -1,6 +1,6 @@
 # TENEX
 
-> **Orchestrate the orchestrators** - A revolutionary context-first development environment where AI agents collaborate autonomously to build software.
+> **Collaborative AI development** - A revolutionary context-first development environment where AI agents collaborate autonomously to build software.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built on Nostr](https://img.shields.io/badge/Built%20on-Nostr-purple)](https://nostr.com)
@@ -9,16 +9,16 @@
 
 TENEX represents a paradigm shift in software development. If LLMs have fundamentally changed how we write code, shouldn't our development environments evolve too? TENEX answers this by replacing the traditional text editor with a **context-first environment** where *context*, not code, becomes the primary building block.
 
-At its core, TENEX is a sophisticated **multi-agent orchestration system** built on the Nostr protocol. It enables autonomous AI agents to collaborate on complex software development tasks through intelligent routing, phase-based workflows, and continuous learning.
+At its core, TENEX is a sophisticated **multi-agent coordination system** built on the Nostr protocol. It enables autonomous AI agents to collaborate on complex software development tasks through intelligent routing, phase-based workflows, and continuous learning.
 
-### Key Innovation: Invisible Orchestration
+### Key Innovation: Intelligent Agent Coordination
 
-Unlike traditional AI assistants where you interact with a single entity, TENEX employs an **invisible orchestrator** pattern. The orchestrator silently routes your requests to specialized agents best suited for each task, creating a seamless experience where the right expertise appears exactly when needed.
+Unlike traditional AI assistants where you interact with a single entity, TENEX employs an **intelligent routing** pattern. The system automatically routes your requests to specialized agents best suited for each task, creating a seamless experience where the right expertise appears exactly when needed.
 
 ## ✨ Key Features
 
 ### 🤖 **Multi-Agent Architecture**
-- **Specialized Agents**: Built-in agents for orchestration, planning, execution, and project management
+- **Specialized Agents**: Built-in agents for planning, execution, and project management
 - **Dynamic Routing**: Intelligent task delegation based on agent capabilities and context
 - **Parallel Execution**: Multiple agents can work simultaneously on different aspects of your project
 - **Custom Agents**: Extensible system allowing you to define domain-specific experts
@@ -87,7 +87,7 @@ bun run start
 ```
 You: Create a REST API for a todo application with authentication
 
-TENEX: [Orchestrator routes to Planner]
+TENEX: [System routes to Planner]
 [Planner creates structured approach]
 [Executor implements the API]
 [Verification runs tests]
@@ -155,7 +155,7 @@ bun test --watch
 Traditional IDEs optimize for code editing. TENEX optimizes for context management, recognizing that in the LLM era, maintaining and utilizing context effectively is more valuable than syntax highlighting.
 
 ### **Invisible Complexity**
-The orchestrator operates behind the scenes, presenting a simple conversational interface while managing sophisticated multi-agent choreography underneath.
+The coordination system operates behind the scenes, presenting a simple conversational interface while managing sophisticated multi-agent collaboration underneath.
 
 ### **Quality by Design**
 Mandatory verification and reflection phases ensure every task meets quality standards and contributes to the system's collective knowledge.

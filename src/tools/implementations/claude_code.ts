@@ -1,4 +1,4 @@
-import { ClaudeTaskOrchestrator } from "@/claude/orchestrator";
+import { ClaudeTaskExecutor } from "@/claude/task-executor";
 import type { Phase } from "@/conversations/phases";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -100,7 +100,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
 
       // Create instances for Claude Code execution
       const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
-      const orchestrator = new ClaudeTaskOrchestrator(agentPublisher);
+      const taskExecutor = new ClaudeTaskExecutor(agentPublisher);
 
       // Create abort controller for this execution
       const abortController = new AbortController();
@@ -117,9 +117,9 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         conversationId: context.conversationId.substring(0, 8),
       });
 
-      // Execute Claude Code through the orchestrator with cleaned prompts
+      // Execute Claude Code through the task executor with cleaned prompts
       // Pass resumeSessionId only when actually resuming
-      const result = await orchestrator.execute({
+      const result = await taskExecutor.execute({
         prompt: cleanedPrompt,
         systemPrompt: cleanedSystemPrompt,
         projectPath: context.projectPath,

@@ -43,7 +43,6 @@ export interface TenexAgents {
     nsec: string;
     file: string;
     eventId?: string;
-    orchestratorAgent?: boolean;
   };
 }
 
@@ -52,7 +51,6 @@ export const TenexAgentsSchema = z.record(
     nsec: z.string(),
     file: z.string(),
     eventId: z.string().optional(),
-    orchestratorAgent: z.boolean().optional(),
   })
 );
 

@@ -5,6 +5,6 @@ export {
 } from "./executor";
 export {
   type ClaudeTaskOptions,
-  ClaudeTaskOrchestrator,
+  ClaudeTaskExecutor,
   type ClaudeTaskResult,
-} from "./orchestrator";
+} from "./task-executor";

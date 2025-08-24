@@ -83,7 +83,7 @@ describe("handleNewConversation", () => {
               systemPrompt: "You are the orchestrator agent",
               tools: [],
               backend: "routing",
-              isOrchestrator: true,
+              
             },
           ],
           [
@@ -107,7 +107,7 @@ describe("handleNewConversation", () => {
           systemPrompt: "You are the orchestrator agent",
           tools: [],
           backend: "routing",
-          isOrchestrator: true,
+          
         }),
       }),
     }));

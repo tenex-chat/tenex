@@ -6,7 +6,6 @@ import type { Tool } from "@/tools/types";
 /**
  * Tools fragment for specialist agents ONLY.
  * Combines agent tools and MCP tools into a single list.
- * No conditionals, no isOrchestrator checks.
  */
 interface SpecialistToolsArgs {
   agent: AgentInstance;

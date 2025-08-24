@@ -36,7 +36,7 @@ TENEX integrates Claude Code (Anthropic's code generation and execution model) t
 - **Automatically added to ALL agents using `reason-act-loop` backend** (as of latest update)
 - Agents can also explicitly include `"claude_code"` in their tools array
 - Agent makes an LLM call to decide when/how to use the tool
-- Tool wraps ClaudeTaskOrchestrator for consistent behavior
+- Tool wraps ClaudeTaskExecutor for consistent behavior
 
 **Benefits:**
 - **Composability** - Claude Code becomes one capability among many
@@ -55,10 +55,10 @@ TENEX integrates Claude Code (Anthropic's code generation and execution model) t
 
 ## Implementation Details
 
-### Shared Core: ClaudeTaskOrchestrator
+### Shared Core: ClaudeTaskExecutor
 
 Both patterns share the same underlying implementation:
-- `ClaudeTaskOrchestrator` handles the actual Claude Code execution
+- `ClaudeTaskExecutor` handles the actual Claude Code execution
 - Manages NDKTask lifecycle for auditing and progress tracking
 - Tracks execution time for metrics
 - Publishes task events to Nostr

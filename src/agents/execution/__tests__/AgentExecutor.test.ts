@@ -180,7 +180,7 @@ describe("AgentExecutor", () => {
       llmProvider: "anthropic",
       model: "claude-3-opus-20240229",
       temperature: 0.7,
-      isOrchestrator: false,
+      
     };
 
     // Create mock execution context

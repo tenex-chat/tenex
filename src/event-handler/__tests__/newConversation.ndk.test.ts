@@ -30,10 +30,10 @@ describe("handleNewConversation with NDK utilities", () => {
         backend: "claude",
       })),
       getDefaultAgent: mock(() => ({
-        id: "agent-orchestrator",
-        name: "orchestrator",
-        slug: "orchestrator",
-        systemPrompt: "You are the orchestrator agent",
+        id: "agent-coordinator",
+        name: "coordinator",
+        slug: "coordinator",
+        systemPrompt: "You are the coordinator agent",
         tools: [],
         backend: "routing",
       })),
@@ -58,7 +58,7 @@ describe("handleNewConversation with NDK utilities", () => {
       })),
       addMessage: mock(async () => {}),
       updatePhase: mock(async () => {}),
-      startOrchestratorTurn: mock(async () => "turn-123"),
+      startCoordinatorTurn: mock(async () => "turn-123"),
       addCompletionToTurn: mock(async () => {}),
     };
 
@@ -74,16 +74,15 @@ describe("handleNewConversation with NDK utilities", () => {
         conversationCoordinator: mockConversationCoordinator,
         agents: new Map([
           [
-            "orchestrator",
+            "coordinator",
             {
-              id: "agent-orchestrator",
-              name: "orchestrator",
-              slug: "orchestrator",
-              pubkey: "orchestrator-pubkey",
-              systemPrompt: "You are the orchestrator agent",
+              id: "agent-coordinator",
+              name: "coordinator",
+              slug: "coordinator",
+              pubkey: "coordinator-pubkey",
+              systemPrompt: "You are the coordinator agent",
               tools: [],
               backend: "routing",
-              isOrchestrator: true,
             },
           ],
           [

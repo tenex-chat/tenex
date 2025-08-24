@@ -5,7 +5,6 @@ import type { PromptFragment } from "../core/types";
 /**
  * Completion guidance for SPECIALISTS ONLY.
  * Orchestrator doesn't use complete() tool.
- * No conditionals, no isOrchestrator checks.
  */
 interface SpecialistCompletionGuidanceArgs {
   phase: Phase;

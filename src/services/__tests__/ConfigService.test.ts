@@ -76,7 +76,6 @@ describe("ConfigService", () => {
         agent2: {
           nsec: "nsec2test",
           file: "agent2.md",
-          orchestratorAgent: true,
         },
       };
 
