@@ -8,7 +8,7 @@ import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
+import type { ContentBlock, TextBlock, ToolUseBlock } from "@anthropic-ai/sdk/resources/messages/messages";
 import { NDKEvent, type NDKSubscription, type NDKTask } from "@nostr-dev-kit/ndk";
 import { ClaudeCodeExecutor } from "./executor";
 
@@ -192,6 +192,7 @@ export class ClaudeTaskExecutor {
 
         // Process SDK message and publish progress updates immediately
         if (message && message.type === "assistant" && message.message?.content) {
+          // Handle text content
           const textContent = message.message.content
             .filter((c: ContentBlock): c is TextBlock => c.type === "text")
             .map((c: TextBlock) => c.text)
@@ -206,6 +207,55 @@ export class ClaudeTaskExecutor {
               textContent,
               baseEventContext
             );
+          }
+
+          // Handle tool use content (like TodoWrite)
+          const toolUseBlocks = message.message.content
+            .filter((c: ContentBlock): c is ToolUseBlock => c.type === "tool_use");
+
+          for (const toolBlock of toolUseBlocks) {
+            let toolMessage = "";
+            
+            // Special formatting for TodoWrite tool
+            if (toolBlock.name === "TodoWrite" && toolBlock.input?.todos) {
+              const todos = toolBlock.input.todos as Array<{
+                content: string;
+                status: "pending" | "in_progress" | "completed";
+                activeForm?: string;
+              }>;
+              
+              const todoLines = todos.map(todo => {
+                let emoji = "☑️"; // pending
+                if (todo.status === "in_progress") {
+                  emoji = "➡️";
+                } else if (todo.status === "completed") {
+                  emoji = "✅";
+                }
+                // Use activeForm if in_progress, otherwise use content
+                const text = todo.status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content;
+                return `${emoji} ${text}`;
+              });
+              
+              toolMessage = todoLines.join("\n");
+            } else {
+              // Default formatting for other tools
+              toolMessage = `🔧 Using tool: ${toolBlock.name}\n\n${JSON.stringify(toolBlock.input, null, 2)}`;
+            }
+            
+            // Only publish if we have content
+            if (toolMessage) {
+              await this.agentPublisher.publishTaskUpdate(
+                task,
+                toolMessage,
+                baseEventContext
+              );
+
+              logger.debug("Published tool use to Nostr", {
+                tool: toolBlock.name,
+                id: toolBlock.id,
+                taskId: task.id,
+              });
+            }
           }
         }
       }

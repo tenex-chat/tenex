@@ -72,7 +72,7 @@ describe("ReasonActLoop - Error Recovery", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", 
+      agent: { name: "test-agent" }, 
       phase: "execute",
     };
 
@@ -111,7 +111,7 @@ describe("ReasonActLoop - Error Recovery", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", 
+      agent: { name: "test-agent" }, 
       phase: "execute",
     };
 
@@ -220,7 +220,7 @@ describe("ReasonActLoop - Error Recovery", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", 
+      agent: { name: "test-agent" }, 
       phase: "execute",
     };
 
@@ -258,7 +258,7 @@ describe("ReasonActLoop - Error Recovery", () => {
     };
 
     const context = {
-      agent: { name: "test-agent", 
+      agent: { name: "test-agent" }, 
       phase: "execute",
     };
 
@@ -322,7 +322,7 @@ describe("ReasonActLoop - Error Recovery", () => {
 
     // Test non-orchestrator agent
     const nonOrchestratorContext = {
-      agent: { name: "executor", 
+      agent: { name: "executor" }
     };
 
     handleErrorEvent(event, state, streamPublisher, tracingLogger, nonOrchestratorContext);
@@ -339,7 +339,7 @@ describe("ReasonActLoop - Error Recovery", () => {
 
     // Test orchestrator agent (should not add to stream)
     const orchestratorContext = {
-      agent: { name: "orchestrator", 
+      agent: { name: "orchestrator" }
     };
 
     handleErrorEvent(event, state, streamPublisher, tracingLogger, orchestratorContext);

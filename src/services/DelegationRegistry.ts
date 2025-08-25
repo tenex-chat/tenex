@@ -113,7 +113,8 @@ export class DelegationRegistry extends EventEmitter {
   private static instance: DelegationRegistry;
   private static isInitialized = false;
 
-  // Primary storage: task ID -> full record
+  // Primary storage: conversation key -> full record
+  // Key format: "${conversationId}:${fromPubkey}:${toPubkey}"
   private delegations: Map<string, DelegationRecord> = new Map();
 
   // Index: batch ID -> batch info
@@ -211,7 +212,7 @@ export class DelegationRegistry extends EventEmitter {
     const batch: DelegationBatch = {
       batchId,
       delegatingAgent: params.delegatingAgent.pubkey,
-      taskIds: params.tasks.map((t) => t.taskId),
+      taskIds: [], // Will store conversation keys instead of task IDs
       allCompleted: false,
       createdAt: Date.now(),
       originalRequest: params.originalRequest,
@@ -220,8 +221,10 @@ export class DelegationRegistry extends EventEmitter {
 
     // Create individual delegation records
     for (const task of params.tasks) {
+      const convKey = `${params.conversationId}:${params.delegatingAgent.pubkey}:${task.assignedToPubkey}`;
+      
       const record: DelegationRecord = {
-        taskId: task.taskId,
+        taskId: task.taskId, // Keep for audit trail
         delegationBatchId: batchId,
         delegatingAgent: {
           slug: params.delegatingAgent.slug,
@@ -241,7 +244,8 @@ export class DelegationRegistry extends EventEmitter {
         siblingTaskIds: params.tasks.filter((t) => t.taskId !== task.taskId).map((t) => t.taskId),
       };
 
-      this.delegations.set(task.taskId, record);
+      this.delegations.set(convKey, record);
+      batch.taskIds.push(convKey); // Store conversation key instead of task ID
       this.indexTask(record);
     }
 
@@ -279,11 +283,12 @@ export class DelegationRegistry extends EventEmitter {
    * Called when a task completion event is received
    */
   async recordTaskCompletion(params: {
-    taskId: string;
+    conversationId: string;
+    fromPubkey: string;
+    toPubkey: string;
     completionEventId: string;
     response: string;
     summary?: string;
-    completedBy: string;
   }): Promise<{
     batchComplete: boolean;
     batchId: string;
@@ -292,9 +297,10 @@ export class DelegationRegistry extends EventEmitter {
     remainingTasks: number;
     conversationId: string;
   }> {
-    const record = this.delegations.get(params.taskId);
+    const convKey = `${params.conversationId}:${params.fromPubkey}:${params.toPubkey}`;
+    const record = this.delegations.get(convKey);
     if (!record) {
-      throw new Error(`No delegation record for task ${params.taskId}`);
+      throw new Error(`No delegation record for ${convKey}`);
     }
 
     // Update record
@@ -304,7 +310,7 @@ export class DelegationRegistry extends EventEmitter {
       response: params.response,
       summary: params.summary,
       completedAt: Date.now(),
-      completedBy: params.completedBy,
+      completedBy: params.toPubkey,
     };
     record.updatedAt = Date.now();
 
@@ -317,7 +323,7 @@ export class DelegationRegistry extends EventEmitter {
       throw new Error(`No batch found for ${record.delegationBatchId}`);
     }
 
-    const batchTasks = batch.taskIds.map((id) => this.delegations.get(id));
+    const batchTasks = batch.taskIds.map((convKey) => this.delegations.get(convKey));
     const allComplete = batchTasks.every((t) => t?.status === "completed");
     const remainingTasks = batchTasks.filter((t) => t?.status === "pending").length;
 
@@ -374,22 +380,25 @@ export class DelegationRegistry extends EventEmitter {
   }
 
   /**
-   * Get delegation context from just a task ID
-   * This is the KEY improvement - no conversation lookup needed
+   * Get delegation context from conversation and agent pubkeys
    */
-  getDelegationContext(taskId: string): DelegationRecord | undefined {
+  getDelegationContext(conversationId: string, fromPubkey: string, toPubkey: string): DelegationRecord | undefined {
+    const convKey = `${conversationId}:${fromPubkey}:${toPubkey}`;
+    
     logger.debug("Looking up delegation context", {
-      taskId: taskId.substring(0, 8),
-      fullTaskId: taskId,
+      conversationId: conversationId.substring(0, 8),
+      fromPubkey: fromPubkey.substring(0, 16),
+      toPubkey: toPubkey.substring(0, 16),
+      convKey,
       totalDelegations: this.delegations.size,
-      hasRecord: this.delegations.has(taskId),
+      hasRecord: this.delegations.has(convKey),
     });
 
-    const record = this.delegations.get(taskId);
+    const record = this.delegations.get(convKey);
 
     if (record) {
       logger.debug("Found delegation context", {
-        taskId: taskId.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
         delegatingAgentSlug: record.delegatingAgent.slug,
         delegatingAgentPubkey: record.delegatingAgent.pubkey.substring(0, 16),
         status: record.status,
@@ -397,13 +406,28 @@ export class DelegationRegistry extends EventEmitter {
       });
     } else {
       logger.warn("No delegation context found", {
-        taskId: taskId.substring(0, 8),
-        fullTaskId: taskId,
-        availableTaskIds: Array.from(this.delegations.keys()).map((id) => id.substring(0, 8)),
+        conversationId: conversationId.substring(0, 8),
+        fromPubkey: fromPubkey.substring(0, 16),
+        toPubkey: toPubkey.substring(0, 16),
+        availableKeys: Array.from(this.delegations.keys()),
       });
     }
 
     return record;
+  }
+  
+  /**
+   * Legacy method for backward compatibility - looks up by task ID
+   * Used when we have an explicit task completion with e-tags
+   */
+  getDelegationContextByTaskId(taskId: string): DelegationRecord | undefined {
+    // Search through all delegations to find one with matching task ID
+    for (const record of this.delegations.values()) {
+      if (record.taskId === taskId) {
+        return record;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -427,7 +451,7 @@ export class DelegationRegistry extends EventEmitter {
     if (!batch) return [];
 
     return batch.taskIds
-      .map((id) => this.delegations.get(id))
+      .map((convKey) => this.delegations.get(convKey))
       .filter(
         (
           record

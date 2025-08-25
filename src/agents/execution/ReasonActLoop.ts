@@ -1,4 +1,5 @@
 import { MessageBuilder } from "@/conversations/MessageBuilder";
+import { PHASES } from "@/conversations/phases";
 import type { LLMService, StreamEvent, Tool } from "@/llm/types";
 import { type ContextualLogger, createExecutionLogger } from "@/logging/UnifiedLogger";
 import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
@@ -14,7 +15,6 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
-import { TerminationHandler } from "./TerminationHandler";
 import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
 import { ToolStreamHandler } from "./ToolStreamHandler";
 import type { ExecutionContext } from "./types";
@@ -73,25 +73,24 @@ export class ReasonActLoop {
     // Initialize handlers
     const stateManager = new StreamStateManager();
     const toolHandler = new ToolStreamHandler(stateManager, this.executionLogger);
-    const terminationHandler = new TerminationHandler(stateManager);
 
     this.logExecutionStart(tracingLogger, context, tools);
 
     // Track conversation messages for the iterative loop
     const conversationMessages = [...messages];
     let iterations = 0;
-    let isComplete = false;
+    let shouldContinueLoop = true;
 
     // Create a stream handle for the entire execution
     const streamHandle = this.createStreamHandle(context);
 
     try {
       // Main Reason-Act-Observe loop
-      while (!isComplete && iterations < MAX_ITERATIONS) {
+      while (shouldContinueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
         tracingLogger.debug("[ReasonActLoop] Starting iteration", {
           iteration: iterations,
-          isComplete,
+          shouldContinueLoop,
           messageCount: conversationMessages.length,
           lastMessage: conversationMessages[conversationMessages.length - 1].content.substring(
             0,
@@ -119,18 +118,18 @@ export class ReasonActLoop {
         }
 
         // Check if we should continue iterating
-        if (iterationResult.isTerminal) {
-          tracingLogger.debug("[ReasonActLoop] Terminal tool detected, ending loop", {
+        if (iterationResult.hasExplicitCompletion) {
+          tracingLogger.debug("[ReasonActLoop] Explicit completion detected, ending loop", {
             iteration: iterations,
             willExitLoop: true,
-            hasDeferredEvent: !!iterationResult.deferredTerminalEvent,
-            deferredType: iterationResult.deferredTerminalEvent?.type,
+            hasDeferredEvent: !!iterationResult.deferredCompletionEvent,
+            deferredType: iterationResult.deferredCompletionEvent?.type,
           });
 
-          // Handle deferred terminal event
-          if (iterationResult.deferredTerminalEvent) {
-            await this.publishTerminalIntent(
-              iterationResult.deferredTerminalEvent,
+          // Handle deferred completion event
+          if (iterationResult.deferredCompletionEvent) {
+            await this.publishCompletionIntent(
+              iterationResult.deferredCompletionEvent,
               tracingLogger,
               context,
               stateManager,
@@ -138,7 +137,7 @@ export class ReasonActLoop {
             );
           }
 
-          isComplete = true;
+          shouldContinueLoop = false;
         } else if (iterationResult.hasToolCalls) {
           // Add tool results to conversation for next iteration
           this.addToolResultsToConversation(
@@ -155,19 +154,23 @@ export class ReasonActLoop {
             iteration: iterations,
             contentLength: iterationResult.assistantMessage.length,
           });
-          isComplete = true; // Complete after generating a response
+          shouldContinueLoop = false; // Complete after generating a response
         } else {
           // No tool calls, no terminal tool, AND no content was generated
           // This indicates the agent truly has nothing further to do
           tracingLogger.debug("[ReasonActLoop] No tool calls, no content, ending loop", {
             iteration: iterations,
           });
-          isComplete = true;
+          shouldContinueLoop = false;
         }
 
         // Finalize stream for this iteration
-        // Skip finalization if a terminal tool already published its response
-        if (!iterationResult.isTerminal) {
+        // Skip finalization if:
+        // 1. The complete() tool was called (already published), OR
+        // 2. The loop is ending (will publish implicit completion instead)
+        const shouldSkipFinalization = iterationResult.hasExplicitCompletion || !shouldContinueLoop;
+        
+        if (!shouldSkipFinalization) {
           // Finalize the stream (single stable StreamHandle)
           await this.finalizeStream(streamHandle, stateManager, conversationMessages);
         }
@@ -175,11 +178,11 @@ export class ReasonActLoop {
 
       tracingLogger.debug("[ReasonActLoop] Exited main loop", {
         iterations,
-        isComplete,
-        reason: isComplete ? "completed" : "max iterations",
+        shouldContinueLoop,
+        reason: !shouldContinueLoop ? "completed" : "max iterations",
       });
 
-      if (iterations >= MAX_ITERATIONS && !isComplete) {
+      if (iterations >= MAX_ITERATIONS && shouldContinueLoop) {
         const error = new Error(
           `Agent ${context.agent.name} reached maximum iterations (${MAX_ITERATIONS}) without completing task`
         );
@@ -191,14 +194,58 @@ export class ReasonActLoop {
         throw error;
       }
 
-      // Check if agent completed properly and publish completion if needed
-      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-      const eventContext: EventContext = {
-        triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
-        conversationId: context.conversationId,
-      };
-      await terminationHandler.checkTermination(context, tracingLogger, eventContext);
+      // Handle implicit completion for ALL phases that didn't call complete()
+      if (!stateManager.hasExplicitCompletion()) {
+        const fullContent = stateManager.getFullContent();
+        
+        if (fullContent.trim().length > 0) {
+          // Build event context with all metadata
+          const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+          const eventContext: EventContext = {
+            triggeringEvent: context.triggeringEvent,
+            rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+            conversationId: context.conversationId,
+          };
+
+          // Get LLM metadata for the completion event
+          const finalResponse = stateManager.getFinalResponse();
+          if (finalResponse) {
+            const llmMetadata = await buildLLMMetadata(finalResponse, conversationMessages);
+            if (llmMetadata) {
+              eventContext.model = llmMetadata.model;
+              eventContext.cost = llmMetadata.cost;
+              eventContext.usage = {
+                prompt_tokens: llmMetadata.promptTokens,
+                completion_tokens: llmMetadata.completionTokens,
+                total_tokens: llmMetadata.totalTokens,
+              };
+            }
+          }
+
+          // Get tool calls from tool results
+          const toolResults = stateManager.getToolResults();
+          const toolCalls = toolResults.map((result) => ({
+            name: result.toolName,
+            arguments: result.toolArgs,
+          }));
+          eventContext.toolCalls = toolCalls.length > 0 ? toolCalls : undefined;
+          eventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
+          eventContext.phase = context.phase;
+
+          const implicitCompletionIntent: CompletionIntent = {
+            type: 'completion',
+            content: fullContent,
+          };
+
+          await this.agentPublisher.complete(implicitCompletionIntent, eventContext);
+          
+          tracingLogger.debug("[ReasonActLoop] Published implicit completion", {
+            agent: context.agent.name,
+            phase: context.phase,
+            contentLength: fullContent.length,
+          });
+        }
+      }
 
       yield this.createFinalEvent(stateManager);
     } catch (error) {
@@ -220,18 +267,18 @@ export class ReasonActLoop {
     messages: Message[]
   ): Promise<{
     events: StreamEvent[];
-    isTerminal: boolean;
+    hasExplicitCompletion: boolean;
     hasToolCalls: boolean;
     toolResults: ToolExecutionResult[];
     assistantMessage: string;
-    deferredTerminalEvent?: { type: string; intent: CompletionIntent };
+    deferredCompletionEvent?: { type: string; intent: CompletionIntent };
   }> {
     const events: StreamEvent[] = [];
-    let isTerminal = false;
+    let hasExplicitCompletion = false;
     let hasToolCalls = false;
     const toolResults: ToolExecutionResult[] = [];
     let assistantMessage = "";
-    let deferredTerminalEvent: {
+    let deferredCompletionEvent: {
       type: string;
       intent: CompletionIntent;
     } | null = null;
@@ -243,10 +290,10 @@ export class ReasonActLoop {
       });
       events.push(event);
 
-      // If we've already detected a terminal tool, break out of stream processing
-      if (isTerminal) {
+      // If we've already detected explicit completion, break out of stream processing
+      if (hasExplicitCompletion) {
         tracingLogger.debug(
-          "[processIterationStream] Breaking stream processing after terminal tool",
+          "[processIterationStream] Breaking stream processing after explicit completion",
           {
             eventType: event.type,
           }
@@ -302,15 +349,15 @@ export class ReasonActLoop {
             if (toolResult.success && toolResult.output) {
               const output = toolResult.output as { type?: string; [key: string]: unknown };
 
-              // Check if output is a completion intent (terminal)
+              // Check if output is a completion intent
               // Note: delegation is no longer terminal - it returns responses
               if (output.type === "completion") {
-                tracingLogger.debug("[ReasonActLoop] Terminal intent detected", {
+                tracingLogger.debug("[ReasonActLoop] Completion intent detected", {
                   tool: event.tool,
                   intentType: output.type,
                 });
-                isTerminal = true;
-                deferredTerminalEvent = {
+                hasExplicitCompletion = true;
+                deferredCompletionEvent = {
                   type: output.type,
                   intent: output as unknown as CompletionIntent,
                 };
@@ -318,15 +365,15 @@ export class ReasonActLoop {
             }
           }
 
-          // If the tool handler detected this as a terminal tool, mark as terminal
+          // If the tool handler detected this as the complete() tool, mark as explicit completion
           if (isTerminalTool) {
-            isTerminal = true;
+            hasExplicitCompletion = true;
 
             // If no deferred event was created, create a basic one
-            if (!deferredTerminalEvent && toolResult?.success && toolResult?.output) {
+            if (!deferredCompletionEvent && toolResult?.success && toolResult?.output) {
               const output = toolResult.output as { type?: string; [key: string]: unknown };
               if (output.type === "completion") {
-                deferredTerminalEvent = {
+                deferredCompletionEvent = {
                   type: output.type,
                   intent: output as unknown as CompletionIntent,
                 };
@@ -359,11 +406,11 @@ export class ReasonActLoop {
 
     return {
       events,
-      isTerminal,
+      hasExplicitCompletion,
       hasToolCalls,
       toolResults,
       assistantMessage: assistantMessage.trim(),
-      deferredTerminalEvent: deferredTerminalEvent || undefined,
+      deferredCompletionEvent: deferredCompletionEvent || undefined,
     };
   }
 
@@ -457,10 +504,10 @@ export class ReasonActLoop {
 
     // Build metadata for finalization
     const metadata: Record<string, unknown> = {};
-    const termination = stateManager.getTermination();
+    const explicitCompletion = stateManager.getExplicitCompletion();
 
-    if (termination) {
-      metadata.completeMetadata = termination;
+    if (explicitCompletion) {
+      metadata.completeMetadata = explicitCompletion;
     }
 
     if (llmMetadata) {
@@ -551,7 +598,7 @@ export class ReasonActLoop {
 
     // Add additional properties for AgentExecutor
     return Object.assign(baseEvent, {
-      termination: stateManager.getTermination(),
+      termination: stateManager.getExplicitCompletion(),
     }) as StreamEvent;
   }
 
@@ -610,9 +657,9 @@ export class ReasonActLoop {
   }
 
   /**
-   * Publish a terminal intent using AgentPublisher
+   * Publish a completion intent using AgentPublisher
    */
-  private async publishTerminalIntent(
+  private async publishCompletionIntent(
     deferredEvent: { type: string; intent: CompletionIntent },
     tracingLogger: TracingLogger,
     context: ExecutionContext,
@@ -630,9 +677,6 @@ export class ReasonActLoop {
       arguments: result.toolArgs,
     }));
 
-    // Check if this is completing a delegated task using DelegationRegistry
-    let delegatingAgentPubkey: string | undefined;
-
     tracingLogger.debug("[ReasonActLoop] Checking for delegation context", {
       triggeringEventKind: context.triggeringEvent.kind,
       triggeringEventId: context.triggeringEvent.id?.substring(0, 8),
@@ -640,44 +684,20 @@ export class ReasonActLoop {
       isNDKTask: context.triggeringEvent.kind === 1934,
     });
 
-    if (context.triggeringEvent.kind === 1934) {
-      // NDKTask.kind
-      const registry = DelegationRegistry.getInstance();
-      const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
-      if (delegationContext) {
-        delegatingAgentPubkey = delegationContext.delegatingAgent.pubkey;
-        tracingLogger.debug("[ReasonActLoop] Found delegation context", {
-          taskId: context.triggeringEvent.id.substring(0, 8),
-          delegatingAgent: delegationContext.delegatingAgent.slug,
-          delegatingAgentPubkey: delegatingAgentPubkey?.substring(0, 16),
-          batchId: delegationContext.delegationBatchId,
-        });
-      } else {
-        tracingLogger.warning("[ReasonActLoop] No delegation context found for NDKTask", {
-          taskId: context.triggeringEvent.id?.substring(0, 8),
-          fullTaskId: context.triggeringEvent.id,
-        });
-      }
-    } else {
-      tracingLogger.debug("[ReasonActLoop] Not an NDKTask, skipping delegation lookup", {
-        eventKind: context.triggeringEvent.kind,
-      });
-    }
-
     // Get conversation for the event context
     const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
     const responseUsage = stateManager.getFinalResponse()?.usage;
     
-    // Calculate cost for terminal intent 
+    // Calculate cost for completion intent 
     let cost: number | undefined;
     const finalResponse = stateManager.getFinalResponse();
     if (finalResponse) {
       const llmMetadata = await buildLLMMetadata(finalResponse, messages);
       cost = llmMetadata?.cost;
       
-      // ============ TRACE LOGGING: Terminal Intent Cost Calculation ============
-      console.log("🔍 [TRACE] ReasonActLoop.ts - TERMINAL INTENT COST CALC");
+      // ============ TRACE LOGGING: Completion Intent Cost Calculation ============
+      console.log("🔍 [TRACE] ReasonActLoop.ts - COMPLETION INTENT COST CALC");
       console.log("  Final response model:", finalResponse.model);
       console.log("  Final response usage:", finalResponse.usage);
       console.log("  LLM metadata calculated:", !!llmMetadata);

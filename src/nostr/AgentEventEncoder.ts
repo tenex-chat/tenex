@@ -166,7 +166,9 @@ export class AgentEventEncoder {
     
     // Add our corrected e-tag and p-tag
     event.tag(["e", completeToEvent.id]);
-    event.tag(["p", completeToEvent.pubkey]);
+
+    // but we always p-tag the agent that triggered us
+    event.tag(["p", context.triggeringEvent.pubkey]);
     
     // Mark as completion
     event.tag(["tool", "complete"]);

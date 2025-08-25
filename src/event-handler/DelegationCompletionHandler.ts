@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import type { DelegationRecord } from "@/services/DelegationRegistry";
 import { getProjectContext } from "@/services";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
@@ -22,37 +23,62 @@ export interface DelegationCompletionResult {
  */
 
 // biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
-export  class DelegationCompletionHandler {
+export class DelegationCompletionHandler {
   /**
    * Process a delegation completion event using the DelegationRegistry
    */
   static async handleDelegationCompletion(
     event: NDKEvent,
-    _conversation: Conversation,
+    conversation: Conversation,
     conversationCoordinator: ConversationCoordinator
   ): Promise<DelegationCompletionResult> {
-    // For delegation completions, the delegation request ID is what we're replying to
-    const delegationId = AgentEventDecoder.getDelegationRequestId(event);
-    logger.debug("[DelegationCompletionHandler] Delegation ID from event:", delegationId?.substring(0, 8) || "NONE");
-
-    if (!delegationId) {
-      logger.debug("[DelegationCompletionHandler] No delegation ID found - aborting");
-      return { shouldReactivate: false };
-    }
-
-    // Use DelegationRegistry to get context directly
     const registry = DelegationRegistry.getInstance();
-    const delegationContext = registry.getDelegationContext(delegationId);
-
+    let delegationContext: DelegationRecord | undefined;
+    
+    // Method 1: Check for explicit completion (tool:complete with e-tag)
+    if (event.tagValue("tool") === "complete") {
+      const delegationId = AgentEventDecoder.getDelegationRequestId(event);
+      if (delegationId) {
+        delegationContext = registry.getDelegationContextByTaskId(delegationId);
+        logger.debug("[DelegationCompletionHandler] Explicit completion detected", {
+          delegationId: delegationId?.substring(0, 8),
+          found: !!delegationContext
+        });
+      }
+    }
+    
+    // Method 2: Natural response detection - check all p-tags
     if (!delegationContext) {
-      logger.warn("[DelegationCompletionHandler] No delegation context found for delegation", {
-        delegationId: delegationId.substring(0, 8),
-      });
+      const pTags = event.tags.filter(tag => tag[0] === "p");
+      
+      for (const pTag of pTags) {
+        const delegatingAgentPubkey = pTag[1];
+        if (!delegatingAgentPubkey) continue;
+        
+        // Check if there's a pending delegation from p-tagged agent to sender
+        delegationContext = registry.getDelegationContext(
+          conversation.id,
+          delegatingAgentPubkey,  // who delegated
+          event.pubkey           // who is responding
+        );
+        
+        if (delegationContext && delegationContext.status === "pending") {
+          logger.info("[DelegationCompletionHandler] Natural delegation response detected", {
+            conversationId: conversation.id.substring(0, 8),
+            from: event.pubkey.substring(0, 16),
+            to: delegatingAgentPubkey.substring(0, 16),
+          });
+          break;
+        }
+      }
+    }
+    
+    if (!delegationContext) {
+      logger.debug("[DelegationCompletionHandler] No delegation context found");
       return { shouldReactivate: false };
     }
 
     logger.debug("[DelegationCompletionHandler] Found delegation context", {
-      delegationId: delegationId.substring(0, 8),
       delegatingAgent: delegationContext.delegatingAgent.slug,
       status: delegationContext.status,
       batchId: delegationContext.delegationBatchId,
@@ -61,18 +87,18 @@ export  class DelegationCompletionHandler {
     // Record the completion in the registry
     try {
       const result = await registry.recordTaskCompletion({
-        taskId: delegationId,
+        conversationId: delegationContext.delegatingAgent.conversationId,
+        fromPubkey: delegationContext.delegatingAgent.pubkey,
+        toPubkey: event.pubkey,
         completionEventId: event.id,
         response: event.content,
         summary: event.tagValue("summary"),
-        completedBy: event.pubkey,
       });
 
       // Check if this batch was already handled synchronously
       const wasSyncHandled = registry.isBatchSyncHandled(result.batchId);
       if (wasSyncHandled) {
         logger.info("[DelegationCompletionHandler] ✅ Batch was already handled synchronously, skipping reactivation", {
-          delegationId: delegationId.substring(0, 8),
           batchId: result.batchId,
         });
         return { shouldReactivate: false };
@@ -83,7 +109,6 @@ export  class DelegationCompletionHandler {
       logger.info(isAsyncFallback 
         ? "[DelegationCompletionHandler] 🔄 ASYNC FALLBACK: Processing completion (no sync listener)"
         : "[DelegationCompletionHandler] 🔁 Processing completion (sync listener active)", {
-        delegationId: delegationId.substring(0, 8),
         batchComplete: result.batchComplete,
         remainingTasks: result.remainingTasks,
         batchId: result.batchId,
@@ -143,13 +168,12 @@ export  class DelegationCompletionHandler {
       }
       logInfo(
         chalk.gray(
-          `Delegation ${delegationId.substring(0, 8)} completed. Waiting for ${result.remainingTasks} more delegations.`
+          `Delegation completed. Waiting for ${result.remainingTasks} more delegations.`
         )
       );
       return { shouldReactivate: false };
     } catch (error) {
       logger.error("[DelegationCompletionHandler] Failed to record delegation completion", {
-        delegationId: delegationId.substring(0, 8),
         error,
       });
       return { shouldReactivate: false };

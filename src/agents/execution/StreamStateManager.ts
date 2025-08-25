@@ -6,7 +6,7 @@ import type { Complete, ToolExecutionResult } from "@/tools/types";
  */
 export interface StreamingState {
   allToolResults: ToolExecutionResult[];
-  termination: Complete | undefined;
+  explicitCompletion: Complete | undefined;
   finalResponse: CompletionResponse | undefined;
   fullContent: string;
   startedTools: Set<string>;
@@ -30,7 +30,7 @@ export class StreamStateManager {
   private createInitialState(): StreamingState {
     return {
       allToolResults: [],
-      termination: undefined,
+      explicitCompletion: undefined,
       finalResponse: undefined,
       fullContent: "",
       startedTools: new Set<string>(),
@@ -89,24 +89,24 @@ export class StreamStateManager {
   }
 
   /**
-   * Set the termination (complete)
+   * Set that the complete() tool was called
    */
-  setTermination(termination: Complete): void {
-    this.state.termination = termination;
+  setExplicitCompletion(completion: Complete): void {
+    this.state.explicitCompletion = completion;
   }
 
   /**
-   * Get the termination
+   * Get the explicit completion if one was set
    */
-  getTermination(): Complete | undefined {
-    return this.state.termination;
+  getExplicitCompletion(): Complete | undefined {
+    return this.state.explicitCompletion;
   }
 
   /**
-   * Check if the stream has terminated
+   * Check if the complete() tool was called
    */
-  hasTerminated(): boolean {
-    return !!this.state.termination;
+  hasExplicitCompletion(): boolean {
+    return !!this.state.explicitCompletion;
   }
 
   /**
@@ -166,8 +166,8 @@ export class StreamStateManager {
       hasContent: this.state.fullContent.length > 0,
       contentLength: this.state.fullContent.length,
       toolResultCount: this.state.allToolResults.length,
-      hasTermination: !!this.state.termination,
-      terminationType: this.state.termination?.type,
+      hasExplicitCompletion: !!this.state.explicitCompletion,
+      completionType: this.state.explicitCompletion?.type,
       hasFinalResponse: !!this.state.finalResponse,
       startedToolsCount: this.state.startedTools.size,
     };

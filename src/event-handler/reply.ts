@@ -175,13 +175,14 @@ async function handleReplyLogic(
     return;
   }
 
-  // 5. Handle delegation completion if applicable (only for kind:1111 delegations)
+  // 5. Handle delegation completion if applicable
   let isDelegationCompletionReactivation = false;
 
-  // Only process delegation completions (kind:1111 with tool:complete)
-  // Task completions (kind:1934) don't need this handler since tools like claude_code
-  // return results synchronously via success()
-  if (AgentEventDecoder.isDelegationCompletion(event)) {
+  // Check for delegation completions:
+  // 1. Explicit completions (kind:1111 with tool:complete)
+  // 2. Natural responses (kind:1111 from agent p-tagging another agent in conversation)
+  if (event.kind === 1111 && AgentEventDecoder.isEventFromAgent(event, projectCtx.agents)) {
+    // This could be a delegation completion (explicit or natural)
     const delegationCompletionResult = await DelegationCompletionHandler.handleDelegationCompletion(
       event,
       conversation,
@@ -189,20 +190,28 @@ async function handleReplyLogic(
     );
 
     if (!delegationCompletionResult.shouldReactivate) {
-      // Still waiting for more delegations or other reasons not to reactivate
-      return;
-    }
-
-    isDelegationCompletionReactivation = true;
-    if (delegationCompletionResult.targetAgent) {
-      targetAgent = delegationCompletionResult.targetAgent;
-    }
-    if (delegationCompletionResult.replyTarget) {
-      logInfo(
-        chalk.cyan(
-          `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
-        )
-      );
+      // Either not a delegation completion or still waiting for more delegations
+      // Continue normal processing if it's not a delegation completion
+      if (!AgentEventDecoder.isDelegationCompletion(event)) {
+        // Not an explicit completion, check if it was a natural completion
+        // If handleDelegationCompletion didn't find a match, continue normal processing
+      } else {
+        // It was an explicit completion but shouldn't reactivate yet
+        return;
+      }
+    } else {
+      // This was a delegation completion and should reactivate
+      isDelegationCompletionReactivation = true;
+      if (delegationCompletionResult.targetAgent) {
+        targetAgent = delegationCompletionResult.targetAgent;
+      }
+      if (delegationCompletionResult.replyTarget) {
+        logInfo(
+          chalk.cyan(
+            `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
+          )
+        );
+      }
     }
   }
 
