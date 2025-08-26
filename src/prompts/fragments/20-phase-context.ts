@@ -19,6 +19,11 @@ export const phaseContextFragment: PromptFragment<PhaseContextArgs> = {
   template: ({ phase, phaseMetadata, conversation }) => {
     const parts: string[] = [];
 
+    // Add conversation title if available
+    if (conversation?.title) {
+      parts.push(`## Conversation: ${conversation.title}`);
+    }
+
     parts.push(`## Current Phase: ${phase.toUpperCase()}`);
 
     // Get phase context from phase transitions if available

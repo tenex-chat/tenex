@@ -114,7 +114,7 @@ export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapte
     this.conversations.set(conversation.id, conversation);
     this.metadata.set(conversation.id, {
       id: conversation.id,
-      title: conversation.title,
+      title: conversation.title || "",
       createdAt: conversation.history[0]?.created_at || Date.now(),
       updatedAt: Date.now(),
       phase: conversation.phase,

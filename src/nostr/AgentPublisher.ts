@@ -26,10 +26,19 @@ import {
 /**
  * Comprehensive publisher for all agent-related Nostr events.
  * Handles agent creation, responses, completions, and delegations.
+ * Also manages streaming buffer to ensure correct event ordering.
  */
 export class AgentPublisher {
   private agent: AgentInstance;
   private encoder: AgentEventEncoder;
+  
+  // Streaming state - ensures buffered content is published before tool events
+  private streamingBuffer?: {
+    content: string;
+    context: EventContext;
+    sequenceNumber: number;
+    metadata?: Record<string, unknown>;
+  };
 
   constructor(agent: AgentInstance, conversationCoordinator: ConversationCoordinator) {
     this.agent = agent;
@@ -37,10 +46,122 @@ export class AgentPublisher {
   }
 
   /**
+   * Add content to the streaming buffer and publish streaming progress events.
+   * Creates a new buffer if needed, or adds to existing buffer.
+   */
+  async addStreamContent(content: string, context?: EventContext): Promise<void> {
+    // Initialize buffer if needed
+    if (!this.streamingBuffer) {
+      if (!context) {
+        throw new Error("EventContext required when starting a new stream");
+      }
+      this.streamingBuffer = {
+        content: "",
+        context,
+        sequenceNumber: 0,
+        metadata: {},
+      };
+    }
+
+    // Add content to buffer
+    this.streamingBuffer.content += content;
+    this.streamingBuffer.sequenceNumber++;
+
+    // Publish streaming progress event (kind:21111)
+    const streamingIntent: StreamingIntent = {
+      type: "streaming",
+      content: this.streamingBuffer.content,
+      sequence: this.streamingBuffer.sequenceNumber,
+    };
+    
+    await this.streaming(streamingIntent, this.streamingBuffer.context);
+  }
+
+  /**
+   * Publish the buffered stream content as a final event.
+   * Clears the buffer after publishing.
+   */
+  async publishStreamContent(metadata?: Record<string, unknown>): Promise<NDKEvent | undefined> {
+    if (!this.streamingBuffer || !this.streamingBuffer.content.trim()) {
+      return undefined;
+    }
+
+    // Store metadata for later use if provided
+    if (metadata) {
+      this.streamingBuffer.metadata = { ...this.streamingBuffer.metadata, ...metadata };
+    }
+
+    // Create a conversation intent with the buffered content
+    const conversationIntent: ConversationIntent = {
+      type: "conversation",
+      content: this.streamingBuffer.content,
+    };
+
+    // Add metadata to context if available
+    const contextWithMetadata: EventContext = {
+      ...this.streamingBuffer.context,
+      ...(this.streamingBuffer.metadata || {}),
+    };
+
+    // Publish as kind:1111 conversation event
+    const event = this.encoder.encodeConversation(conversationIntent, contextWithMetadata);
+    
+    // Sign and publish
+    await event.sign(this.agent.signer);
+    await event.publish();
+
+    logger.debug("Stream content published", {
+      eventId: event.id,
+      contentLength: this.streamingBuffer.content.length,
+      sequenceCount: this.streamingBuffer.sequenceNumber,
+    });
+
+    // Clear the buffer
+    this.streamingBuffer = undefined;
+
+    return event;
+  }
+
+  /**
+   * Get the current buffered content without publishing it.
+   * Used by RAL for implicit completion.
+   */
+  getBufferedContent(): string {
+    return this.streamingBuffer?.content || "";
+  }
+
+  /**
+   * Check if there's buffered content.
+   */
+  hasBufferedContent(): boolean {
+    return !!(this.streamingBuffer && this.streamingBuffer.content.trim());
+  }
+
+  /**
+   * Clear the streaming buffer without publishing.
+   * Used to prevent double-publishing when content is handled elsewhere.
+   */
+  clearBuffer(): void {
+    this.streamingBuffer = undefined;
+  }
+
+  /**
+   * Flush any buffered streaming content before publishing other events.
+   * This ensures correct event ordering - buffered content is always published first.
+   */
+  private async flushStreamIfNeeded(): Promise<void> {
+    if (this.streamingBuffer && this.streamingBuffer.content.trim()) {
+      await this.publishStreamContent();
+    }
+  }
+
+  /**
    * Publish a completion event.
    * Creates and publishes a properly tagged completion event.
    */
   async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     logger.debug("Dispatching completion", {
       agent: this.agent.name,
       contentLength: intent.content.length,
@@ -72,6 +193,8 @@ export class AgentPublisher {
     events: NDKEvent[];
     batchId: string;
   }> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     const events = this.encoder.encodeDelegation(intent, context);
 
     // Sign all events first
@@ -118,6 +241,8 @@ export class AgentPublisher {
    * Creates and publishes a standard response event.
    */
   async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     logger.debug("Dispatching conversation response", {
       agent: this.agent.name,
       contentLength: intent.content.length,
@@ -137,6 +262,8 @@ export class AgentPublisher {
    * Creates and publishes an error notification event.
    */
   async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     logger.debug("Dispatching error", {
       agent: this.agent.name,
       error: intent.message,
@@ -161,6 +288,7 @@ export class AgentPublisher {
    * Publish a typing indicator event.
    */
   async typing(intent: TypingIntent, context: EventContext): Promise<NDKEvent> {
+    // Note: Don't flush stream for typing indicators as they're transient
     logger.debug("Dispatching typing indicator", {
       agent: this.agent.name,
       state: intent.state,
@@ -179,6 +307,7 @@ export class AgentPublisher {
    * Publish a streaming progress event.
    */
   async streaming(intent: StreamingIntent, context: EventContext): Promise<NDKEvent> {
+    // Note: Don't flush stream for streaming events as they ARE the stream
     const event = this.encoder.encodeStreamingProgress(intent, context);
 
     // Sign and publish
@@ -192,6 +321,8 @@ export class AgentPublisher {
    * Publish a project status event.
    */
   async status(intent: StatusIntent): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     logger.debug("Dispatching status", {
       agent: this.agent.name,
       agentCount: intent.agents.length,
@@ -210,6 +341,8 @@ export class AgentPublisher {
    * Publish a lesson learned event.
    */
   async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     logger.debug("Dispatching lesson", {
       agent: this.agent.name,
     });
@@ -239,6 +372,8 @@ export class AgentPublisher {
     claudeSessionId: string,
     branch?: string
   ): Promise<NDKTask> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     // Use encoder to create task with proper tagging
     const task = this.encoder.encodeTask(
       title,
@@ -271,6 +406,8 @@ export class AgentPublisher {
     content: string,
     context: EventContext
   ): Promise<NDKEvent> {
+    // Ensure any buffered stream content is published first
+    await this.flushStreamIfNeeded();
     const update = task.reply();
     update.content = content;
 

@@ -1,4 +1,3 @@
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK } from "@/nostr/ndkClient";
 import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -123,12 +122,12 @@ This tool allows you to:
 
       // Publish conversation status event
       try {
-        const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+        // Use shared AgentPublisher instance from context (guaranteed to be present)
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
         if (conversation?.history?.[0]) {
           const nostrReference = `nostr:${chatEvent.encode()}`;
-          await agentPublisher.conversation(
+          await context.agentPublisher.conversation(
             { type: "conversation", content: `🚀 External delegation sent: ${nostrReference}` },
             {
               triggeringEvent: context.triggeringEvent,

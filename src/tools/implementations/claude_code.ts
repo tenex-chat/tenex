@@ -1,6 +1,5 @@
 import { ClaudeTaskExecutor } from "@/claude/task-executor";
 import type { Phase } from "@/conversations/phases";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { randomUUID } from "crypto";
@@ -99,8 +98,8 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
       }
 
       // Create instances for Claude Code execution
-      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
-      const taskExecutor = new ClaudeTaskExecutor(agentPublisher);
+      // Use shared AgentPublisher instance from context (guaranteed to be present)
+      const taskExecutor = new ClaudeTaskExecutor(context.agentPublisher);
 
       // Create abort controller for this execution
       const abortController = new AbortController();

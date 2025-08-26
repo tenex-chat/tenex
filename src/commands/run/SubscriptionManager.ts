@@ -13,6 +13,7 @@ import { logger } from "@/utils/logger";
 import {
   type NDKEvent,
   type NDKFilter,
+  NDKKind,
   type NDKSubscription,
   filterAndRelaySetFromBech32,
 } from "@nostr-dev-kit/ndk";
@@ -43,6 +44,9 @@ export class SubscriptionManager {
 
     // 4. Subscribe to spec replies (kind 1111 with #K:30023)
     await this.subscribeToSpecReplies();
+
+    // 5. Subscribe to conversation metadata (kind 513)
+    await this.subscribeToConversationMetadata();
   }
 
   private async subscribeToProjectUpdates(): Promise<void> {
@@ -195,6 +199,41 @@ export class SubscriptionManager {
     );
 
     this.subscriptions.push(specReplySubscription);
+  }
+
+  private async subscribeToConversationMetadata(): Promise<void> {
+    const ndk = getNDK();
+    const projectCtx = getProjectContext();
+
+    // Get all agent pubkeys + project owner
+    const agentPubkeys = Array.from(projectCtx.agents.values()).map((agent) => agent.pubkey);
+    const projectOwnerPubkey = projectCtx.project.pubkey;
+    const allPubkeys = [...agentPubkeys, projectOwnerPubkey];
+
+    // Subscribe to metadata events from agents and project owner
+    const metadataFilter: NDKFilter = {
+      kinds: [513 as NDKKind],
+      authors: allPubkeys,
+      limit: 0, // Only new events, no historical fetch
+    };
+
+    logger.info(chalk.blue("  • Setting up conversation metadata subscription..."));
+    logger.debug("Metadata filter:", metadataFilter);
+
+    const metadataSubscription = ndk.subscribe(
+      metadataFilter,
+      {
+        closeOnEose: false,
+        groupable: false,
+      },
+      {
+        onEvent: (event: NDKEvent) => {
+          this.handleIncomingEvent(event, "conversation metadata");
+        },
+      }
+    );
+
+    this.subscriptions.push(metadataSubscription);
   }
 
   private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {

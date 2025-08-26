@@ -115,6 +115,25 @@ export class ConversationCoordinator {
   }
 
   /**
+   * Check if a conversation exists
+   */
+  hasConversation(id: string): boolean {
+    return this.store.has(id);
+  }
+
+  /**
+   * Set the title of a conversation
+   */
+  setTitle(conversationId: string, title: string): void {
+    const conversation = this.store.get(conversationId);
+    if (conversation) {
+      conversation.title = title;
+      // Note: Not persisting immediately to avoid race conditions
+      // Will be persisted on next save operation
+    }
+  }
+
+  /**
    * Get a conversation by event ID
    */
   getConversationByEvent(eventId: string): Conversation | undefined {

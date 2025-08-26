@@ -1,8 +1,7 @@
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
 import type { ContextualLogger } from "@/logging/UnifiedLogger";
 import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { StreamHandle } from "@/nostr/AgentStreamer";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { ToolExecutionResult } from "@/tools/executor";
 import type { TracingLogger } from "@/tracing";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
@@ -19,6 +18,7 @@ import type { ExecutionContext } from "./types";
 export class ToolStreamHandler {
   constructor(
     private stateManager: StreamStateManager,
+    private agentPublisher: AgentPublisher,
     private executionLogger?: ContextualLogger
   ) {}
 
@@ -26,15 +26,12 @@ export class ToolStreamHandler {
    * Handle a tool_start event
    */
   async handleToolStartEvent(
-    _streamHandle: StreamHandle | undefined,
     toolName: string,
     toolArgs: Record<string, unknown>,
     _tracingLogger: TracingLogger,
     context?: ExecutionContext
   ): Promise<void> {
-    // Create a unique ID for this tool call
-    const toolCallId = `${toolName}_${Date.now()}`;
-    this.stateManager.markToolStarted(toolCallId);
+    // Tools now handle their own state tracking
 
     // Log tool execution start
     if (this.executionLogger && context) {
@@ -51,18 +48,13 @@ export class ToolStreamHandler {
    */
   async handleToolCompleteEvent(
     event: { tool: string; result: unknown },
-    _streamHandle: StreamHandle | undefined,
     tracingLogger: TracingLogger,
     context: ExecutionContext
   ): Promise<boolean> {
     // Parse the tool result first to get metadata
     const toolResult = this.parseToolResult(event);
 
-    // Check if this tool never sent a tool_start event
-    await this.handleMissingToolStart(event.tool, toolResult, tracingLogger, context);
-
-    // Add result to state
-    this.stateManager.addToolResult(toolResult);
+    // Tools handle their own publishing now, no need to track
 
     // Log tool execution complete
     await this.logToolComplete(toolResult, event.tool);
@@ -83,21 +75,6 @@ export class ToolStreamHandler {
   /**
    * Check if tool never sent a start event and handle it
    */
-  private async handleMissingToolStart(
-    toolName: string,
-    _toolResult: ToolExecutionResult,
-    tracingLogger: TracingLogger,
-    _context: ExecutionContext
-  ): Promise<void> {
-    const toolCallPattern = `${toolName}_`;
-    const hasStarted = this.stateManager.hasToolStarted(toolCallPattern);
-
-    if (!hasStarted) {
-      tracingLogger.debug("Tool completed without corresponding tool_start event", {
-        tool: toolName,
-      });
-    }
-  }
 
   /**
    * Parse tool result from event
@@ -166,8 +143,7 @@ export class ToolStreamHandler {
           errorMessage = JSON.stringify(toolResult.error);
         }
 
-        // Use AgentPublisher.error() instead of legacy approach
-        const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+        // Use the injected AgentPublisher instance
         const errorIntent: ErrorIntent = {
           type: "error",
           message: `Tool "${toolName}" failed: ${errorMessage}`,
@@ -181,7 +157,7 @@ export class ToolStreamHandler {
           conversationId: context.conversationId,
         };
 
-        await agentPublisher.error(errorIntent, eventContext);
+        await this.agentPublisher.error(errorIntent, eventContext);
 
         tracingLogger.info("Tool error published", {
           tool: toolName,

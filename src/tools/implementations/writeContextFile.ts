@@ -1,7 +1,6 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { getNDK } from "@/nostr";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getProjectContext } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -137,12 +136,12 @@ Example workflow:
 
         // Publish status message with the Nostr reference to the article
         try {
-          const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+          // Use shared AgentPublisher instance from context (guaranteed to be present)
           const conversation = context.conversationCoordinator.getConversation(context.conversationId);
           
           if (conversation?.history?.[0]) {
             const nostrReference = `nostr:${article.encode()}`;
-            await agentPublisher.conversation(
+            await context.agentPublisher.conversation(
               { type: "conversation", content: `📝 Writing context file: ${nostrReference}` },
               {
                 triggeringEvent: context.triggeringEvent,

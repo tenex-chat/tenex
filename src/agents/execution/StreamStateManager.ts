@@ -5,11 +5,8 @@ import type { Complete, ToolExecutionResult } from "@/tools/types";
  * Represents the mutable state during stream processing
  */
 export interface StreamingState {
-  allToolResults: ToolExecutionResult[];
   explicitCompletion: Complete | undefined;
   finalResponse: CompletionResponse | undefined;
-  fullContent: string;
-  startedTools: Set<string>;
   loggedThinkingBlocks: Set<string>;
 }
 
@@ -29,11 +26,8 @@ export class StreamStateManager {
    */
   private createInitialState(): StreamingState {
     return {
-      allToolResults: [],
       explicitCompletion: undefined,
       finalResponse: undefined,
-      fullContent: "",
-      startedTools: new Set<string>(),
       loggedThinkingBlocks: new Set<string>(),
     };
   }
@@ -45,48 +39,7 @@ export class StreamStateManager {
     this.state = this.createInitialState();
   }
 
-  /**
-   * Append content to the accumulated full content
-   */
-  appendContent(content: string): void {
-    this.state.fullContent += content;
-  }
 
-  /**
-   * Get the current full content
-   */
-  getFullContent(): string {
-    return this.state.fullContent;
-  }
-
-  /**
-   * Add a tool execution result
-   */
-  addToolResult(result: ToolExecutionResult): void {
-    this.state.allToolResults.push(result);
-  }
-
-  /**
-   * Get all tool results
-   */
-  getToolResults(): ToolExecutionResult[] {
-    return this.state.allToolResults;
-  }
-
-  /**
-   * Get all tool results (alias for getToolResults)
-   */
-  getAllToolResults(): ToolExecutionResult[] {
-    return this.state.allToolResults;
-  }
-
-  /**
-   * Get the last tool result
-   */
-  getLastToolResult(): ToolExecutionResult | null {
-    const results = this.state.allToolResults;
-    return results.length > 0 ? results[results.length - 1] : null;
-  }
 
   /**
    * Set that the complete() tool was called
@@ -123,19 +76,6 @@ export class StreamStateManager {
     return this.state.finalResponse;
   }
 
-  /**
-   * Mark a tool as started
-   */
-  markToolStarted(toolCallId: string): void {
-    this.state.startedTools.add(toolCallId);
-  }
-
-  /**
-   * Check if a tool has been started
-   */
-  hasToolStarted(toolNamePattern: string): boolean {
-    return Array.from(this.state.startedTools).some((id) => id.startsWith(toolNamePattern));
-  }
 
   /**
    * Mark a thinking block as logged (using its content hash)
@@ -163,13 +103,9 @@ export class StreamStateManager {
    */
   getStateSummary(): Record<string, unknown> {
     return {
-      hasContent: this.state.fullContent.length > 0,
-      contentLength: this.state.fullContent.length,
-      toolResultCount: this.state.allToolResults.length,
       hasExplicitCompletion: !!this.state.explicitCompletion,
       completionType: this.state.explicitCompletion?.type,
       hasFinalResponse: !!this.state.finalResponse,
-      startedToolsCount: this.state.startedTools.size,
     };
   }
 

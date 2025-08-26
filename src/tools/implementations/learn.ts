@@ -1,5 +1,4 @@
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -117,16 +116,15 @@ The detailed version is CRITICAL to avoid losing nuance and detail; you should w
         conversationId: context.conversationId,
       };
 
-      // Use AgentPublisher to create and publish the lesson
-      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
-      const lessonEvent = await agentPublisher.lesson(intent, eventContext);
+      // Use shared AgentPublisher instance from context to create and publish the lesson
+      const lessonEvent = await context.agentPublisher.lesson(intent, eventContext);
 
       // Publish status message with the Nostr reference
       try {
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         if (conversation?.history?.[0]) {
           const nostrReference = `nostr:${lessonEvent.encode()}`;
-          await agentPublisher.conversation(
+          await context.agentPublisher.conversation(
             { type: "conversation", content: `📚 Learning lesson: ${nostrReference}` },
             {
               triggeringEvent: context.triggeringEvent,

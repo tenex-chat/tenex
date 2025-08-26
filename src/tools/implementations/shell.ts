@@ -65,7 +65,8 @@ export const shellTool: Tool<
 
     // Publish status message about what command we're running
     try {
-      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+      // Use AgentPublisher from context (guaranteed to be present)
+      const agentPublisher = context.agentPublisher;
       const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       
       if (conversation?.history?.[0]) {

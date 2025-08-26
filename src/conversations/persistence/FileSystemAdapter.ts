@@ -145,7 +145,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
 
       const conversation: Conversation = {
         id: data.id,
-        title: data.title,
+        title: data.title || undefined,
         phase: data.phase as Phase, // Phase validation happens in schema parsing
         history: deduplicatedHistory,
         agentStates: agentStatesMap,
@@ -338,7 +338,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
         const existing = metadata.conversations.findIndex((c) => c.id === conversation.id);
         const meta: ConversationMetadata = {
           id: conversation.id,
-          title: conversation.title,
+          title: conversation.title || "",
           createdAt: conversation.history[0]?.created_at || Date.now() / 1000,
           updatedAt: Date.now() / 1000,
           phase: conversation.phase,

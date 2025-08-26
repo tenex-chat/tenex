@@ -1,5 +1,4 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
 import type { Tool } from "../types";
@@ -31,11 +30,11 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
 
     // Publish status message about what we're doing
     try {
-      const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+      // Use shared AgentPublisher instance from context (guaranteed to be present)
       const conversation = context.conversationCoordinator.getConversation(context.conversationId);
       
       if (conversation?.history?.[0]) {
-        await agentPublisher.conversation(
+        await context.agentPublisher.conversation(
           { type: "conversation", content: `📖 Reading ${path}` },
           {
             triggeringEvent: context.triggeringEvent,

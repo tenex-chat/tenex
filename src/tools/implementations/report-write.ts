@@ -1,4 +1,3 @@
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { ReportManager } from "@/services/ReportManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -86,12 +85,12 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
 
       // Publish status message with the Nostr reference to the article
       try {
-        const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+        // Use shared AgentPublisher instance from context (guaranteed to be present)
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         
         if (conversation?.history?.[0]) {
           const nostrReference = `nostr:${articleId}`;
-          await agentPublisher.conversation(
+          await context.agentPublisher.conversation(
             { type: "conversation", content: `📄 Writing report: ${nostrReference}` },
             {
               triggeringEvent: context.triggeringEvent,

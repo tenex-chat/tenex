@@ -27,6 +27,10 @@ const delegatePhaseSchema = z.object({
     .describe(
       "The complete request or question to delegate - this becomes the phase reason and delegation content"
     ),
+  title: z
+    .string()
+    .optional()
+    .describe("Title for this conversation (if not already set)"),
 });
 
 /**
@@ -75,7 +79,7 @@ IMPORTANT: When you use delegate_phase(), you are:
 - The delegated agent will handle the work and respond back`,
   schema: delegatePhaseSchema as z.ZodType<z.input<typeof delegatePhaseSchema>>,
   execute: async (input, context) => {
-    const { phase, recipient, fullRequest } = input.value;
+    const { phase, recipient, fullRequest, title } = input.value;
 
     try {
       // Resolve recipient to pubkey
@@ -99,6 +103,24 @@ IMPORTANT: When you use delegate_phase(), you are:
         context.agent.pubkey,
         context.agent.name
       );
+
+      // Set title if provided
+      if (title) {
+        const { NDKEventMetadata } = await import("@/events/NDKEventMetadata");
+        const { getNDK } = await import("@/nostr/ndkClient");
+        const ndk = getNDK();
+        
+        const metadataEvent = new NDKEventMetadata(ndk);
+        metadataEvent.kind = 513;
+        metadataEvent.setConversationId(context.conversationId);
+        metadataEvent.title = title;
+        
+        await metadataEvent.sign(context.agent.signer);
+        await metadataEvent.publish();
+        
+        context.conversationCoordinator.setTitle(context.conversationId, title);
+        logger.info(`Set conversation title: ${title}`);
+      }
 
       logger.info("[delegate_phase() tool] 🔄 Phase updated, initiating synchronous delegation", {
         newPhase: phase,

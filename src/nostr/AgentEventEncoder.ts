@@ -105,29 +105,35 @@ export class AgentEventEncoder {
    * Centralizes conversation tagging logic for all agent events.
    */
   private addConversationTags(event: NDKEvent, context: EventContext): void {
-    if (!context.triggeringEvent || !context.triggeringEvent.id) {
-      throw new Error("EventContext is missing required triggeringEvent with id");
-    }
+    this.tagConversation(event, context.rootEvent);
+    this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
+  }
 
-    const rootEventId = context.rootEvent.id;
-    const rootEventKind = context.rootEvent.kind;
-    const rootEventPubkey = context.rootEvent.pubkey;
+  /**
+   * Tags the root of the conversation
+   */
+  tagConversation(event: NDKEvent, rootEvent: NDKEvent): void {
+    event.tag(["E", rootEvent.id]);
+    event.tag(["K", rootEvent.kind.toString()]);
+    event.tag(["P", rootEvent.pubkey]);
+  }
 
-    // Add conversation root tag (E tag) - using the conversation event's ID
-    event.tag(["E", rootEventId]);
-    event.tag(["K", rootEventKind.toString()]);
-    event.tag(["P", rootEventPubkey]);
-
-    const triggeringEventFromOP = context.triggeringEvent.pubkey === rootEventPubkey;
-    const triggeringEventFirstLevelReply = context.triggeringEvent.tagValue("e") === rootEventId;
+  /**
+   * "e"-tags this reply in the proper context.
+   * 
+   * When the triggering event has the same author as the conversation root AND
+   * when the triggering event, we want to publish to the root, and not thread it in
+   * the triggering event; otherwise we thread inside the triggering event.
+   */
+  eTagParentEvent(event: NDKEvent, rootEvent: NDKEvent, triggeringEvent: NDKEvent): void {
+    const triggeringEventFromOP = triggeringEvent.pubkey === rootEvent.pubkey;
+    const triggeringEventFirstLevelReply = triggeringEvent.tagValue("e") === rootEvent.id;
     const replyToOP = triggeringEventFromOP && triggeringEventFirstLevelReply;
+    const replyToEvent = replyToOP ? rootEvent : triggeringEvent;
 
-    const replyToEvent = replyToOP ? context.rootEvent : context.triggeringEvent;
-
-    // Add reply to triggering event (e tag) - what we're directly replying to
     event.tag(["e", replyToEvent.id]);
   }
-  
+
   /**
    * Encode a completion intent into a tagged event.
    * Handles both regular completions and delegation completions.
@@ -159,15 +165,12 @@ export class AgentEventEncoder {
     }
 
     // Add conversation tags (E, K, P for root)
-    this.addConversationTags(event, context);
-    
-    // Remove the e-tag that addConversationTags added (we'll add our own)
-    event.tags = event.tags.filter(t => t[0] !== "e");
+    this.tagConversation(event, context.rootEvent);
     
     // Add our corrected e-tag and p-tag
     event.tag(["e", completeToEvent.id]);
 
-    // but we always p-tag the agent that triggered us
+    // but we always p-tag the agent that triggered us since that's the pubkey that asked for a response
     event.tag(["p", context.triggeringEvent.pubkey]);
     
     // Mark as completion
@@ -254,9 +257,7 @@ export class AgentEventEncoder {
    * Centralizes common tagging logic.
    */
   public addStandardTags(event: NDKEvent, context: EventContext): void {
-    // Add project tag - ALL agent events should reference their project
-    const projectCtx = getProjectContext();
-    event.tag(projectCtx.project.tagReference());
+    this.aTagProject(event);
 
     // Tool usage metadata
     if (context.toolCalls && context.toolCalls.length > 0) {
@@ -373,11 +374,9 @@ export class AgentEventEncoder {
     event.content = "";
 
     // Add project tag
-    const projectCtx = getProjectContext();
-    event.tag(projectCtx.project.tagReference());
+    this.aTagProject(event);
 
-    // Add p-tag for the project owner's pubkey
-    event.tag(["p", projectCtx.project.pubkey]);
+    this.pTagProjectOwner(event);
 
     // Add agent pubkeys
     for (const agent of intent.agents) {
@@ -404,6 +403,19 @@ export class AgentEventEncoder {
     return event;
   }
 
+  aTagProject(event: NDKEvent): undefined {
+    const projectCtx = getProjectContext();
+    event.tag(projectCtx.project.tagReference());
+  }
+
+  /**
+   * p-tags the project owner
+   */
+  pTagProjectOwner(event: NDKEvent): undefined {
+    const projectCtx = getProjectContext();
+    event.tag(["p", projectCtx.project.pubkey]);
+  }
+  
   /**
    * Encode a task creation with proper conversation tagging.
    * Creates an NDKTask that references the triggering event.

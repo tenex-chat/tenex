@@ -4,8 +4,6 @@ import type { LLMService, StreamEvent, Tool } from "@/llm/types";
 import { type ContextualLogger, createExecutionLogger } from "@/logging/UnifiedLogger";
 import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { StreamHandle } from "@/nostr/AgentStreamer";
-import { AgentStreamer } from "@/nostr/AgentStreamer";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ToolExecutionResult } from "@/tools/executor";
@@ -32,7 +30,6 @@ export class ReasonActLoop {
   private messageBuilder: MessageBuilder;
   private startTime?: number;
   private agentPublisher!: AgentPublisher;
-  private agentStreamer!: AgentStreamer;
 
   constructor(private llmService: LLMService) {
     this.repetitionDetector = new ToolRepetitionDetector();
@@ -48,9 +45,8 @@ export class ReasonActLoop {
     const tracingContext = createTracingContext(context.conversationId);
     this.executionLogger = createExecutionLogger(tracingContext, "agent");
 
-    // Initialize AgentPublisher and AgentStreamer with the agent from context
+    // Initialize AgentPublisher with the agent from context
     this.agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
-    this.agentStreamer = new AgentStreamer(this.agentPublisher);
 
     // Execute the streaming loop
     const generator = this.executeStreamingInternal(context, messages, tracingContext, tools);
@@ -72,7 +68,7 @@ export class ReasonActLoop {
 
     // Initialize handlers
     const stateManager = new StreamStateManager();
-    const toolHandler = new ToolStreamHandler(stateManager, this.executionLogger);
+    const toolHandler = new ToolStreamHandler(stateManager, this.agentPublisher, this.executionLogger);
 
     this.logExecutionStart(tracingLogger, context, tools);
 
@@ -81,14 +77,20 @@ export class ReasonActLoop {
     let iterations = 0;
     let shouldContinueLoop = true;
 
-    // Create a stream handle for the entire execution
-    const streamHandle = this.createStreamHandle(context);
+    // Build event context for streaming
+    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+    const eventContext: EventContext = {
+      triggeringEvent: context.triggeringEvent,
+      rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+      conversationId: context.conversationId,
+      phase: context.phase,
+    };
 
     try {
       // Main Reason-Act-Observe loop
       while (shouldContinueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
-        tracingLogger.debug("[ReasonActLoop] Starting iteration", {
+        tracingLogger.info("[ReasonActLoop] Starting iteration", {
           iteration: iterations,
           shouldContinueLoop,
           messageCount: conversationMessages.length,
@@ -106,7 +108,7 @@ export class ReasonActLoop {
           stream,
           stateManager,
           toolHandler,
-          streamHandle,
+          eventContext,
           tracingLogger,
           context,
           conversationMessages
@@ -119,7 +121,7 @@ export class ReasonActLoop {
 
         // Check if we should continue iterating
         if (iterationResult.hasExplicitCompletion) {
-          tracingLogger.debug("[ReasonActLoop] Explicit completion detected, ending loop", {
+          tracingLogger.info("[ReasonActLoop] Explicit completion detected, ending loop", {
             iteration: iterations,
             willExitLoop: true,
             hasDeferredEvent: !!iterationResult.deferredCompletionEvent,
@@ -146,37 +148,31 @@ export class ReasonActLoop {
             iterationResult.assistantMessage,
             tracingLogger
           );
-        } else if (iterationResult.assistantMessage.trim().length > 0) {
+        } else if (this.agentPublisher.hasBufferedContent()) {
           // Agent generated content but no tool calls or terminal tool
           // This means the agent has provided a textual response - we should complete
-          conversationMessages.push(new Message("assistant", iterationResult.assistantMessage));
-          tracingLogger.debug("[ReasonActLoop] Agent generated content, completing", {
+          const bufferedContent = this.agentPublisher.getBufferedContent();
+          conversationMessages.push(new Message("assistant", bufferedContent));
+          tracingLogger.info("[ReasonActLoop] Agent generated content, completing", {
             iteration: iterations,
-            contentLength: iterationResult.assistantMessage.length,
+            contentLength: bufferedContent.length,
           });
           shouldContinueLoop = false; // Complete after generating a response
         } else {
           // No tool calls, no terminal tool, AND no content was generated
           // This indicates the agent truly has nothing further to do
-          tracingLogger.debug("[ReasonActLoop] No tool calls, no content, ending loop", {
+          tracingLogger.info("[ReasonActLoop] No tool calls, no content, ending loop", {
             iteration: iterations,
           });
           shouldContinueLoop = false;
         }
 
-        // Finalize stream for this iteration
-        // Skip finalization if:
-        // 1. The complete() tool was called (already published), OR
-        // 2. The loop is ending (will publish implicit completion instead)
-        const shouldSkipFinalization = iterationResult.hasExplicitCompletion || !shouldContinueLoop;
-        
-        if (!shouldSkipFinalization) {
-          // Finalize the stream (single stable StreamHandle)
-          await this.finalizeStream(streamHandle, stateManager, conversationMessages);
-        }
+        // Stream finalization is no longer needed here
+        // The streaming buffer is only for kind:21111 events
+        // Final kind:1111 events come from StreamStateManager.fullContent via implicit/explicit completion
       }
 
-      tracingLogger.debug("[ReasonActLoop] Exited main loop", {
+      tracingLogger.info("[ReasonActLoop] Exited main loop", {
         iterations,
         shouldContinueLoop,
         reason: !shouldContinueLoop ? "completed" : "max iterations",
@@ -196,7 +192,9 @@ export class ReasonActLoop {
 
       // Handle implicit completion for ALL phases that didn't call complete()
       if (!stateManager.hasExplicitCompletion()) {
-        const fullContent = stateManager.getFullContent();
+        // Get the buffered content and immediately clear it to prevent double-publishing
+        const fullContent = this.agentPublisher.getBufferedContent();
+        this.agentPublisher.clearBuffer();
         
         if (fullContent.trim().length > 0) {
           // Build event context with all metadata
@@ -222,13 +220,7 @@ export class ReasonActLoop {
             }
           }
 
-          // Get tool calls from tool results
-          const toolResults = stateManager.getToolResults();
-          const toolCalls = toolResults.map((result) => ({
-            name: result.toolName,
-            arguments: result.toolArgs,
-          }));
-          eventContext.toolCalls = toolCalls.length > 0 ? toolCalls : undefined;
+          // Tools publish their own events now, no need to track them here
           eventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
           eventContext.phase = context.phase;
 
@@ -239,7 +231,7 @@ export class ReasonActLoop {
 
           await this.agentPublisher.complete(implicitCompletionIntent, eventContext);
           
-          tracingLogger.debug("[ReasonActLoop] Published implicit completion", {
+          tracingLogger.info("[ReasonActLoop] Published implicit completion", {
             agent: context.agent.name,
             phase: context.phase,
             contentLength: fullContent.length,
@@ -249,7 +241,7 @@ export class ReasonActLoop {
 
       yield this.createFinalEvent(stateManager);
     } catch (error) {
-      yield* this.handleError(error, tracingLogger, context, streamHandle);
+      yield* this.handleError(error, tracingLogger, context);
       throw error;
     }
   }
@@ -261,7 +253,7 @@ export class ReasonActLoop {
     stream: AsyncIterable<StreamEvent>,
     stateManager: StreamStateManager,
     toolHandler: ToolStreamHandler,
-    streamHandle: StreamHandle | undefined,
+    eventContext: EventContext,
     tracingLogger: TracingLogger,
     context: ExecutionContext,
     messages: Message[]
@@ -284,15 +276,16 @@ export class ReasonActLoop {
     } | null = null;
 
     for await (const event of stream) {
-      tracingLogger.debug("[processIterationStream]", {
+      tracingLogger.info("[processIterationStream]", {
         agent: context.agent.name,
         type: event.type,
+        content: event.content
       });
       events.push(event);
 
       // If we've already detected explicit completion, break out of stream processing
       if (hasExplicitCompletion) {
-        tracingLogger.debug(
+        tracingLogger.info(
           "[processIterationStream] Breaking stream processing after explicit completion",
           {
             eventType: event.type,
@@ -303,7 +296,7 @@ export class ReasonActLoop {
 
       switch (event.type) {
         case "content":
-          this.handleContentEvent(event, stateManager, streamHandle, context);
+          await this.handleContentEvent(event, stateManager, eventContext, context);
           // Buffer content instead of streaming immediately
           // We'll decide whether to output it after processing all events
           assistantMessage += event.content;
@@ -323,7 +316,6 @@ export class ReasonActLoop {
           }
 
           await toolHandler.handleToolStartEvent(
-            streamHandle,
             event.tool,
             event.args,
             tracingLogger,
@@ -335,50 +327,16 @@ export class ReasonActLoop {
         case "tool_complete": {
           const isTerminalTool = await toolHandler.handleToolCompleteEvent(
             event,
-            streamHandle,
             tracingLogger,
             context
           );
 
-          // Collect tool result for next iteration
-          const toolResult = stateManager.getLastToolResult();
-          if (toolResult) {
-            toolResults.push(toolResult);
-
-            // Check if this tool result contains an intent
-            if (toolResult.success && toolResult.output) {
-              const output = toolResult.output as { type?: string; [key: string]: unknown };
-
-              // Check if output is a completion intent
-              // Note: delegation is no longer terminal - it returns responses
-              if (output.type === "completion") {
-                tracingLogger.debug("[ReasonActLoop] Completion intent detected", {
-                  tool: event.tool,
-                  intentType: output.type,
-                });
-                hasExplicitCompletion = true;
-                deferredCompletionEvent = {
-                  type: output.type,
-                  intent: output as unknown as CompletionIntent,
-                };
-              }
-            }
-          }
-
           // If the tool handler detected this as the complete() tool, mark as explicit completion
           if (isTerminalTool) {
             hasExplicitCompletion = true;
-
-            // If no deferred event was created, create a basic one
-            if (!deferredCompletionEvent && toolResult?.success && toolResult?.output) {
-              const output = toolResult.output as { type?: string; [key: string]: unknown };
-              if (output.type === "completion") {
-                deferredCompletionEvent = {
-                  type: output.type,
-                  intent: output as unknown as CompletionIntent,
-                };
-              }
-            }
+            tracingLogger.info("[ReasonActLoop] Complete tool detected", {
+              tool: event.tool,
+            });
           }
           break;
         }
@@ -388,7 +346,7 @@ export class ReasonActLoop {
             stateManager.setFinalResponse(event.response);
             
             // Log LLM metadata for debugging
-            tracingLogger.debug("[ReasonActLoop] Received 'done' event", {
+            tracingLogger.info("[ReasonActLoop] Received 'done' event", {
               hasResponse: !!event.response,
               model: event.response.model,
               hasUsage: !!event.response.usage,
@@ -399,7 +357,7 @@ export class ReasonActLoop {
           break;
 
         case "error":
-          this.handleErrorEvent(event, stateManager, streamHandle, tracingLogger);
+          await this.handleErrorEvent(event, stateManager, eventContext, tracingLogger);
           break;
       }
     }
@@ -465,73 +423,31 @@ export class ReasonActLoop {
    * Handle the done event with metadata processing
    */
 
-  private handleContentEvent(
+  private async handleContentEvent(
     event: { content: string },
     stateManager: StreamStateManager,
-    streamHandle?: StreamHandle,
+    eventContext: EventContext,
     context?: ExecutionContext
-  ): void {
-    stateManager.appendContent(event.content);
+  ): Promise<void> {
+    // Add content to streaming buffer in AgentPublisher (single source of truth)
+    await this.agentPublisher.addStreamContent(event.content, eventContext);
 
     // Extract and log reasoning if present
-    this.extractAndLogReasoning(stateManager.getFullContent(), context, stateManager);
-
-    // Add content to the stream handle
-    streamHandle?.addContent(event.content);
+    this.extractAndLogReasoning(this.agentPublisher.getBufferedContent(), context, stateManager);
   }
 
-  private handleErrorEvent(
+  private async handleErrorEvent(
     event: { error: string },
     stateManager: StreamStateManager,
-    streamHandle: StreamHandle | undefined,
+    eventContext: EventContext,
     tracingLogger: TracingLogger
-  ): void {
-    tracingLogger.error("Stream error", { error: event.error });
-    stateManager.appendContent(`\n\nError: ${event.error}`);
-
-    streamHandle?.addContent(`\n\nError: ${event.error}`);
-  }
-
-  private async finalizeStream(
-    streamHandle: StreamHandle | undefined,
-    stateManager: StreamStateManager,
-    messages: Message[]
   ): Promise<void> {
-    if (!streamHandle) return;
-
-    const finalResponse = stateManager.getFinalResponse();
-    const llmMetadata = finalResponse ? await buildLLMMetadata(finalResponse, messages) : undefined;
-
-    // Build metadata for finalization
-    const metadata: Record<string, unknown> = {};
-    const explicitCompletion = stateManager.getExplicitCompletion();
-
-    if (explicitCompletion) {
-      metadata.completeMetadata = explicitCompletion;
-    }
-
-    if (llmMetadata) {
-      metadata.model = llmMetadata.model;
-      metadata.cost = llmMetadata.cost;
-      metadata.promptTokens = llmMetadata.promptTokens;
-      metadata.completionTokens = llmMetadata.completionTokens;
-      metadata.totalTokens = llmMetadata.totalTokens;
-
-      // Get tool calls from tool results
-      const toolResults = stateManager.getToolResults();
-      const toolCalls = toolResults.map((result) => ({
-        name: result.toolName,
-        arguments: result.toolArgs,
-      }));
-      metadata.toolCalls = toolCalls.length > 0 ? toolCalls : undefined;
-      metadata.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
-      console.log(metadata);
-    } else {
-      console.log('no LLM metadata')
-    }
-
-    await streamHandle.finalize(metadata);
+    tracingLogger.error("Stream error", { error: event.error });
+    // Add error to streaming buffer
+    await this.agentPublisher.addStreamContent(`\n\nError: ${event.error}`, eventContext);
   }
+
+  // Remove finalizeStream method as it's no longer needed
 
   private createLLMStream(
     context: ExecutionContext,
@@ -568,23 +484,12 @@ export class ReasonActLoop {
       toolContext: {
         ...context,
         conversationCoordinator: context.conversationCoordinator,
+        agentPublisher: this.agentPublisher,
       },
     });
   }
 
-  private createStreamHandle(context: ExecutionContext): StreamHandle | undefined {
-    // Get conversation for the event context
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-
-    // Build event context for streaming
-    const eventContext: EventContext = {
-      triggeringEvent: context.triggeringEvent,
-      rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
-      conversationId: context.conversationId,
-    };
-
-    return this.agentStreamer.createStreamHandle(eventContext);
-  }
+  // Remove createStreamHandle method as it's no longer needed
 
   private createFinalEvent(stateManager: StreamStateManager): StreamEvent {
     const baseEvent: StreamEvent = {
@@ -605,22 +510,20 @@ export class ReasonActLoop {
   private async *handleError(
     error: unknown,
     tracingLogger: TracingLogger,
-    context: ExecutionContext,
-    streamHandle?: StreamHandle
+    context: ExecutionContext
   ): AsyncGenerator<StreamEvent> {
     tracingLogger.error("Streaming error", {
       error: formatAnyError(error),
       agent: context.agent.name,
     });
 
-    if (streamHandle) {
-      try {
-        await streamHandle.finalize({});
-      } catch (finalizeError) {
-        tracingLogger.error("Failed to finalize stream on error", {
-          error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
-        });
-      }
+    // Try to flush any pending stream content
+    try {
+      await this.agentPublisher.publishStreamContent();
+    } catch (finalizeError) {
+      tracingLogger.error("Failed to publish stream on error", {
+        error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
+      });
     }
 
     // Stop typing indicator using AgentPublisher
@@ -649,7 +552,7 @@ export class ReasonActLoop {
     context: ExecutionContext,
     tools?: Tool[]
   ): void {
-    tracingLogger.debug("🔄 Starting ReasonActLoop", {
+    tracingLogger.info("🔄 Starting ReasonActLoop", {
       agent: context.agent.name,
       phase: context.phase,
       tools: tools?.map((t) => t.name).join(", "),
@@ -670,18 +573,9 @@ export class ReasonActLoop {
     const intent = deferredEvent.intent;
 
     // Build event context with execution metadata
-    // Get tool calls from tool results
-    const toolResults = stateManager.getToolResults();
-    const toolCalls = toolResults.map((result) => ({
-      name: result.toolName,
-      arguments: result.toolArgs,
-    }));
-
-    tracingLogger.debug("[ReasonActLoop] Checking for delegation context", {
+    tracingLogger.info("[ReasonActLoop] Publishing completion intent", {
       triggeringEventKind: context.triggeringEvent.kind,
-      triggeringEventId: context.triggeringEvent.id?.substring(0, 8),
       fullTriggeringEventId: context.triggeringEvent.id,
-      isNDKTask: context.triggeringEvent.kind === 1934,
     });
 
     // Get conversation for the event context
@@ -709,7 +603,6 @@ export class ReasonActLoop {
       triggeringEvent: context.triggeringEvent,
       rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
       conversationId: context.conversationId,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       executionTime: this.startTime ? Date.now() - this.startTime : undefined,
       model: stateManager.getFinalResponse()?.model,
       usage: responseUsage

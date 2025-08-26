@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
 import { ExecutionQueueManager } from "../conversations/executionQueue";
+import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
 import { getProjectContext } from "../services";
@@ -111,7 +112,7 @@ export class EventHandler {
     }
 
     logger.info(
-      `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers})`
+      `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.encode()})`
     );
 
     switch (event.kind) {
@@ -149,8 +150,31 @@ export class EventHandler {
         await this.handleAgentConfigUpdate(event);
         break;
 
+      case 513: // NDKEventMetadata
+        await this.handleMetadataEvent(event);
+        break;
+
       default:
         this.handleDefaultEvent(event);
+    }
+  }
+
+  private async handleMetadataEvent(event: NDKEvent): Promise<void> {
+    const metadata = event as NDKEventMetadata;
+    const conversationId = metadata.conversationId;
+    
+    if (!conversationId) {
+      logger.error("Metadata event missing conversation ID", event);
+      return;
+    }
+    
+    // Only update if we know this conversation
+    if (this.conversationCoordinator.hasConversation(conversationId)) {
+      const title = metadata.title;
+      if (title) {
+        this.conversationCoordinator.setTitle(conversationId, title);
+        logger.info(`Updated conversation title: ${title} for ${conversationId.substring(0, 8)}`);
+      }
     }
   }
 

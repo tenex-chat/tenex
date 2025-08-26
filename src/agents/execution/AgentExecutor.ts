@@ -75,15 +75,19 @@ export class AgentExecutor {
       });
     }
 
+    // Create AgentPublisher first so we can include it in context
+    const agentPublisher = new AgentPublisher(
+      context.agent, 
+      context.conversationCoordinator || this.conversationCoordinator
+    );
+
     // Build full context with additional properties
     const fullContext: ExecutionContext = {
       ...context,
       conversationCoordinator: context.conversationCoordinator || this.conversationCoordinator,
+      agentPublisher, // Include the shared AgentPublisher instance
       claudeSessionId, // Pass the determined session ID
     };
-
-    // Create AgentPublisher for typing indicators
-    const agentPublisher = new AgentPublisher(context.agent, fullContext.conversationCoordinator);
 
     try {
       // Get fresh conversation data for execution time tracking
