@@ -143,34 +143,23 @@ export class AgentEventEncoder {
     event.kind = 1111;
     event.content = intent.content;
 
-    // we complete to the event that triggered this event
-    let completeToEvent = context.triggeringEvent;
-
-    // but wait, if the triggering event was a complete event (completion-of-completion), 
-    // we need to complete to that completion's triggering event to avoid chaining
-    if (true) {
-      // get the event ID that triggered the completion
-      const originalTriggeringEventId = context.triggeringEvent.tagValue("e");
-      
-      if (originalTriggeringEventId) {
-        // Fetch the actual event from conversation history
-        const conversation = this.conversationCoordinator.getConversation(context.conversationId);
-        if (conversation?.history) {
-          const originalEvent = conversation.history.find(e => e.id === originalTriggeringEventId);
-          if (originalEvent) {
-            completeToEvent = originalEvent;
-          }
-        }
-      }
-    }
-
     // Add conversation tags (E, K, P for root)
     this.tagConversation(event, context.rootEvent);
     
-    // Add our corrected e-tag and p-tag
-    event.tag(["e", completeToEvent.id]);
+    // Simply e-tag the triggering event
+    event.tag(["e", context.triggeringEvent.id, "", "reply"]);
 
-    // but we always p-tag the agent that triggered us since that's the pubkey that asked for a response
+    // if the triggering event is authored by the same as the root event
+    // and the triggering event is e-tagging the root event, let's also e-tag the root
+    // event. This is so that this completion event also shows up in the main thread.
+    const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
+    const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
+
+    if (pTagsMatch && triggerTagsRoot) {
+      event.tag(["e", context.rootEvent.id, "", "root"])
+    }
+
+    // p-tag the agent that triggered us
     event.tag(["p", context.triggeringEvent.pubkey]);
     
     // Mark as completion
@@ -187,8 +176,8 @@ export class AgentEventEncoder {
     logger.debug("Encoded completion event", {
       eventId: event.id,
       summary: intent.summary,
-      completingTo: completeToEvent.id?.substring(0, 8),
-      completingToPubkey: completeToEvent.pubkey?.substring(0, 8),
+      completingTo: context.triggeringEvent.id?.substring(0, 8),
+      completingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
     });
 
     return event;

@@ -51,6 +51,7 @@ export const delegateTool = createToolDefinition<
   promptFragment: `DELEGATE TOOL:
 Use this to communicate with other agents by delegating tasks or questions.
 IMPORTANT: recipients must ALWAYS be an array, even for a single recipient.
+IMPORTANT: NEVER Delegate to yourself.
 
 Examples:
 - delegate(["architect"], "Design a database schema for user authentication")
@@ -110,7 +111,8 @@ You can then process the responses and continue with your task.`,
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.phase
+        context.phase,
+        context.agentPublisher // Pass the shared AgentPublisher
       );
       
       const responses = await delegationService.execute({

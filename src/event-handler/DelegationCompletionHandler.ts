@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import type { DelegationRecord } from "@/services/DelegationRegistry";
 import { getProjectContext } from "@/services";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
@@ -37,38 +36,53 @@ export class DelegationCompletionHandler {
     
     // Method 1: Check for explicit completion (tool:complete with e-tag)
     if (event.tagValue("tool") === "complete") {
-      const delegationId = AgentEventDecoder.getDelegationRequestId(event);
-      if (delegationId) {
-        delegationContext = registry.getDelegationContextByTaskId(delegationId);
-        logger.debug("[DelegationCompletionHandler] Explicit completion detected", {
-          delegationId: delegationId?.substring(0, 8),
-          found: !!delegationContext
+      // For explicit completions, check all e-tags to find the matching delegation
+      const eTags = event.getMatchingTags("e");
+      for (const eTagArray of eTags) {
+        const eTag = eTagArray[1]; // e-tag value is at index 1
+        if (!eTag) continue;
+        
+        const potentialContext = registry.getDelegationContextByTaskId(eTag);
+        if (potentialContext) {
+          delegationContext = potentialContext;
+          logger.debug("[DelegationCompletionHandler] Explicit completion detected", {
+            delegationId: eTag.substring(0, 8),
+            found: true
+          });
+          break;
+        }
+      }
+      
+      if (!delegationContext && eTags.length > 0) {
+        logger.debug("[DelegationCompletionHandler] Explicit completion but no matching delegation found", {
+          checkedTags: eTags.map(tag => tag[1]?.substring(0, 8))
         });
       }
     }
     
-    // Method 2: Natural response detection - check all p-tags
+    // Method 2: Natural response detection - check if this event e-tags a delegation request
     if (!delegationContext) {
-      const pTags = event.tags.filter(tag => tag[0] === "p");
+      const eTags = event.getMatchingTags("e");
       
-      for (const pTag of pTags) {
-        const delegatingAgentPubkey = pTag[1];
-        if (!delegatingAgentPubkey) continue;
+      // Check all e-tags to find a matching delegation request
+      for (const eTagArray of eTags) {
+        const eTag = eTagArray[1]; // e-tag value is at index 1
+        if (!eTag) continue;
         
-        // Check if there's a pending delegation from p-tagged agent to sender
-        delegationContext = registry.getDelegationContext(
-          conversation.id,
-          delegatingAgentPubkey,  // who delegated
-          event.pubkey           // who is responding
-        );
+        // Check if this e-tag points to a delegation request we're tracking
+        const potentialContext = registry.getDelegationContextByTaskId(eTag);
         
-        if (delegationContext && delegationContext.status === "pending") {
+        if (potentialContext && 
+            potentialContext.status === "pending" && 
+            potentialContext.assignedTo.pubkey === event.pubkey) {
+          delegationContext = potentialContext;
           logger.info("[DelegationCompletionHandler] Natural delegation response detected", {
             conversationId: conversation.id.substring(0, 8),
             from: event.pubkey.substring(0, 16),
-            to: delegatingAgentPubkey.substring(0, 16),
+            to: delegationContext.delegatingAgent.pubkey.substring(0, 16),
+            taskId: eTag.substring(0, 8),
           });
-          break;
+          break; // Found a match, stop checking
         }
       }
     }

@@ -176,11 +176,17 @@ export class AgentEventDecoder {
   
   /**
    * Get the delegation request ID from a completion event
+   * Checks all e-tags to find the first valid delegation request ID
    */
   static getDelegationRequestId(event: NDKEvent): string | undefined {
     if (this.isDelegationCompletion(event)) {
-      // The delegation request ID is in the e tag (what we're replying to)
-      return event.tagValue("e");
+      // Check all e-tags to find a delegation request ID
+      // For explicit completions, we return the first e-tag as the most likely candidate
+      // The DelegationCompletionHandler will validate if it's actually a tracked delegation
+      const eTags = event.getMatchingTags("e");
+      if (eTags.length > 0 && eTags[0][1]) {
+        return eTags[0][1]; // Return the first e-tag value
+      }
     }
     return undefined;
   }

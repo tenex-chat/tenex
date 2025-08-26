@@ -12,12 +12,13 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 import type { ToolName } from "@/tools/registry";
+import type { Tool } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getBuiltInAgents } from "./builtInAgents";
-import { getDefaultToolsForAgent } from "./constants";
+import { CORE_AGENT_TOOLS, getDefaultToolsForAgent } from "./constants";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -287,8 +288,19 @@ export class AgentRegistry {
       }
     }
 
-    // Create NDKPrivateKeySigner
-    const signer = new NDKPrivateKeySigner(registryEntry.nsec);
+    // Create NDKPrivateKeySigner - generate new if nsec is empty
+    let nsec = registryEntry.nsec;
+    if (!nsec || nsec === "") {
+      logger.warn(`Agent "${name}" has empty nsec, generating new one`);
+      const newSigner = NDKPrivateKeySigner.generate();
+      nsec = newSigner.privateKey;
+      
+      // Update the registry with the new nsec
+      registryEntry.nsec = nsec;
+      this.registry[name] = registryEntry;
+      await this.saveRegistry();
+    }
+    const signer = new NDKPrivateKeySigner(nsec);
 
     // Use the helper to build the agent instance
     const agent = await this.buildAgentInstance(
@@ -324,6 +336,10 @@ export class AgentRegistry {
 
   getAgentByName(name: string): AgentInstance | undefined {
     return Array.from(this.agents.values()).find((agent) => agent.name === name);
+  }
+
+  getRegistryData(): TenexAgents {
+    return this.registry;
   }
 
   private async saveRegistry(): Promise<void> {
@@ -786,15 +802,85 @@ export class AgentRegistry {
     const toolNames =
       agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
 
-    // CRITICAL: Ensure 'complete' tool is always included for ALL agents
-    // This is a core requirement - all agents must be able to complete tasks
-    if (!toolNames.includes("complete")) {
-      toolNames.push("complete");
+    // CRITICAL: Ensure core tools are always included for ALL agents
+    // These are fundamental tools that every agent needs access to
+    for (const coreTool of CORE_AGENT_TOOLS) {
+      if (!toolNames.includes(coreTool)) {
+        toolNames.push(coreTool);
+      }
     }
 
     // Convert tool names to Tool instances
-    const { getTools } = await import("@/tools/registry");
-    agent.tools = getTools(toolNames as ToolName[]);
+    const { getTool } = await import("@/tools/registry");
+    
+    // Process each tool name individually to track unknown tools
+    const availableTools: Tool[] = [];
+    const unknownTools: string[] = [];
+    const requestedMcpTools: string[] = [];
+    const unknownNonMcpTools: string[] = [];
+    
+    for (const toolName of toolNames) {
+      const tool = getTool(toolName as ToolName);
+      if (tool) {
+        availableTools.push(tool);
+      } else {
+        // Check if it's an MCP tool (starts with "mcp__")
+        if (toolName.startsWith("mcp__")) {
+          requestedMcpTools.push(toolName);
+        } else {
+          unknownNonMcpTools.push(toolName);
+          unknownTools.push(toolName);
+        }
+      }
+    }
+    
+    // Handle MCP tools if agent has MCP access
+    if (agent.mcp !== false && requestedMcpTools.length > 0) {
+      try {
+        const { mcpService } = await import("@/services/mcp/MCPService");
+        const allMcpTools = mcpService.getCachedTools();
+        
+        // Filter to only include requested MCP tools
+        const filteredMcpTools = allMcpTools.filter(tool => 
+          requestedMcpTools.includes(tool.name)
+        );
+        
+        // Add available MCP tools
+        availableTools.push(...filteredMcpTools);
+        
+        // Track which MCP tools are not yet available
+        const availableMcpToolNames = new Set(filteredMcpTools.map(t => t.name));
+        const unavailableMcpTools = requestedMcpTools.filter(name => !availableMcpToolNames.has(name));
+        
+        if (unavailableMcpTools.length > 0) {
+          logger.info(`Agent "${slug}" requested MCP tools not yet available:`, unavailableMcpTools);
+        }
+      } catch (error) {
+        logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
+      }
+    } else if (agent.mcp !== false) {
+      // Agent has MCP access but didn't request specific tools - give access to all
+      try {
+        const { mcpService } = await import("@/services/mcp/MCPService");
+        const allMcpTools = mcpService.getCachedTools();
+        availableTools.push(...allMcpTools);
+      } catch (error) {
+        logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
+      }
+    }
+    
+    // Log warnings for unknown non-MCP tools
+    if (unknownNonMcpTools.length > 0) {
+      logger.warn(`Agent "${slug}" requested unknown tools:`, unknownNonMcpTools);
+    }
+    
+    agent.tools = availableTools;
+    
+    // Store the full list of requested tools (including unknown ones) in the agent definition
+    // This ensures MCP tools are preserved even if not currently installed
+    if (agentDefinition.tools !== undefined) {
+      agentDefinition.tools = toolNames;
+    }
 
     return agent;
   }
@@ -808,8 +894,19 @@ export class AgentRegistry {
     config: AgentConfig,
     registryEntry: TenexAgents[string]
   ): Promise<AgentInstance> {
-    // Create NDKPrivateKeySigner
-    const signer = new NDKPrivateKeySigner(registryEntry.nsec);
+    // Create NDKPrivateKeySigner - generate new if nsec is empty
+    let nsec = registryEntry.nsec;
+    if (!nsec || nsec === "") {
+      logger.warn(`Agent "${slug}" has empty nsec in createAgentInstance, generating new one`);
+      const newSigner = NDKPrivateKeySigner.generate();
+      nsec = newSigner.privateKey;
+      
+      // Update the registry with the new nsec
+      registryEntry.nsec = nsec;
+      this.registry[slug] = registryEntry;
+      await this.saveRegistry();
+    }
+    const signer = new NDKPrivateKeySigner(nsec);
 
     // Create agent definition from config
     const agentDefinition: StoredAgentData = {

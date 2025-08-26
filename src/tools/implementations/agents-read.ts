@@ -60,7 +60,7 @@ export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
       
       // Try to read from project agents first
       let agentsDir = path.join(projectPath, ".tenex", "agents");
-      let fileName = `${slug}.json`;
+      const fileName = `${slug}.json`;
       let filePath = path.join(agentsDir, fileName);
       let isGlobal = false;
 

@@ -100,6 +100,27 @@ The tool will return both the summary and detailed version (if available) of the
       const lessonEvents = Array.from(events).map((e) => NDKAgentLesson.from(e));
       const lesson = lessonEvents.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
 
+      // Publish status update about reading the lesson
+      try {
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        
+        if (conversation?.history?.[0]) {
+          const lessonTitle = lesson.title || title;
+          const lessonNaddr = lesson.encode();
+          await context.agentPublisher.conversation(
+            { type: "conversation", content: `Reading [${lessonTitle}](nostr:${lessonNaddr})` },
+            {
+              triggeringEvent: context.triggeringEvent,
+              rootEvent: conversation.history[0],
+              conversationId: context.conversationId,
+            }
+          );
+        }
+      } catch (error) {
+        // Don't fail the tool if we can't publish the status
+        logger.warn("Failed to publish lesson_get status:", error);
+      }
+
       return {
         ok: true,
         value: {

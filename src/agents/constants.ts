@@ -10,6 +10,20 @@ import type { AgentInstance } from "./types";
 export const PROJECT_MANAGER_AGENT = "project-manager" as const;
 
 /**
+ * Core tools that ALL agents must have access to regardless of configuration.
+ * These are fundamental capabilities that every agent needs.
+ */
+export const CORE_AGENT_TOOLS = [
+  "complete",      // All agents must be able to complete tasks
+  "lesson_get",    // All agents should access lessons
+  "lesson_learn",  // All agents should be able to learn
+  "delegate",      // All agents should be able to delegate
+  "read_path",     // All agents need file system access
+  "reports_list",  // All agents should see available reports
+  "report_read",   // All agents should read reports
+] as const;
+
+/**
  * Get all available tools for an agent based on their role
  * All agents now have access to delegate for peer-to-peer collaboration
  */

@@ -10,6 +10,10 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 export class NDKEventMetadata extends NDKEvent {
     static kind = 513;
 
+    static from(event: NDKEvent): NDKEventMetadata {
+        return new NDKEventMetadata(event.ndk, event);
+    }
+
     get conversationId(): string | undefined {
         return this.tagValue("e");
     }

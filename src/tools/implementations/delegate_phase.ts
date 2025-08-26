@@ -134,7 +134,8 @@ IMPORTANT: When you use delegate_phase(), you are:
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        phase // Pass the new phase as context
+        phase, // Pass the new phase as context
+        context.agentPublisher // Pass the shared AgentPublisher
       );
       
       const responses = await delegationService.execute({

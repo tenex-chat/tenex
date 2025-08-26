@@ -1,5 +1,3 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentRegistry } from "../agents/AgentRegistry";
 import type { AgentInstance } from "../agents/types";
@@ -12,9 +10,8 @@ import {
   installMCPServerFromEvent,
   removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
-import { fetchAgentDefinition } from "../utils/agentFetcher";
+import { installAgentsFromEvents } from "../utils/agentInstaller";
 import { logger } from "../utils/logger";
-import { toKebabCase } from "../utils/string";
 
 /**
  * Handles project update events by syncing agent and MCP tool definitions.
@@ -109,46 +106,10 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
       }
     }
 
-    // Fetch and save new agent definitions
-    const agentsDir = path.join(projectPath, ".tenex", "agents");
-    await fs.mkdir(agentsDir, { recursive: true });
-
-    for (const eventId of newAgentEventIds) {
-      try {
-        const agentDef = await fetchAgentDefinition(eventId, getNDK());
-        if (agentDef) {
-          // Save agent definition file
-          const filePath = path.join(agentsDir, `${eventId}.json`);
-          const agentData = {
-            name: agentDef.title,
-            role: agentDef.role,
-            description: agentDef.description,
-            instructions: agentDef.instructions,
-            useCriteria: agentDef.useCriteria,
-            tools: [],
-          };
-          await fs.writeFile(filePath, JSON.stringify(agentData, null, 2));
-          logger.info("Saved agent definition", { eventId, name: agentDef.title });
-
-          // Generate a slug for the agent
-          const slug = toKebabCase(agentDef.title);
-
-          // Ensure the agent is registered
-          await agentRegistry.ensureAgent(slug, {
-            name: agentDef.title,
-            role: agentDef.role,
-            description: agentDef.description,
-            instructions: agentDef.instructions,
-            useCriteria: agentDef.useCriteria,
-            tools: [],
-            eventId,
-          });
-
-          logger.info("Registered new agent", { slug, name: agentDef.title });
-        }
-      } catch (error) {
-        logger.error("Failed to fetch or register agent", { error, eventId });
-      }
+    // Fetch and install new agent definitions using shared function
+    if (newAgentEventIds.length > 0) {
+      const ndkProject = event as NDKProject;
+      await installAgentsFromEvents(newAgentEventIds, projectPath, ndkProject, getNDK());
     }
 
     // Process MCP tool changes

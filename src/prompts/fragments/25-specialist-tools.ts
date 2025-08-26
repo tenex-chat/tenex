@@ -6,6 +6,14 @@ import type { Tool } from "@/tools/types";
 /**
  * Tools fragment for specialist agents ONLY.
  * Combines agent tools and MCP tools into a single list.
+ * 
+ * Tool Assignment Guide:
+ * - All agents automatically receive core tools: complete, lesson_get, lesson_learn, 
+ *   delegate, read_path, reports_list, report_read
+ * - Additional tools can be assigned based on agent responsibilities
+ * - Use agents_write tool to configure agent tools
+ * - MCP tools follow format: mcp__servername__toolname
+ * - Agents can request specific MCP tools or get access to all if mcp=true
  */
 interface SpecialistToolsArgs {
   agent: AgentInstance;
@@ -34,15 +42,91 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
     // Add agent-specific tools
     if (hasAgentTools) {
       sections.push("### Core Tools\n");
+      
+      // Group tools by category for better organization
+      const coreTools: Tool[] = [];
+      const agentTools: Tool[] = [];
+      const delegationTools: Tool[] = [];
+      const reportTools: Tool[] = [];
+      const otherTools: Tool[] = [];
+      
       for (const tool of agent.tools) {
-        sections.push(`**${tool.name}**`);
-        sections.push(`${tool.description}`);
-
-        // Add custom prompt fragment if available
-        if (tool.promptFragment) {
-          sections.push(`\n${tool.promptFragment}`);
+        if (["complete", "lesson_get", "lesson_learn", "read_path"].includes(tool.name)) {
+          coreTools.push(tool);
+        } else if (tool.name.startsWith("agents_")) {
+          agentTools.push(tool);
+        } else if (tool.name.includes("delegate")) {
+          delegationTools.push(tool);
+        } else if (tool.name.includes("report")) {
+          reportTools.push(tool);
+        } else {
+          otherTools.push(tool);
         }
-        sections.push("");
+      }
+      
+      // Display core tools first
+      if (coreTools.length > 0) {
+        sections.push("#### Essential Tools (Available to All Agents)\n");
+        for (const tool of coreTools) {
+          sections.push(`**${tool.name}**`);
+          sections.push(`${tool.description}`);
+          if (tool.promptFragment) {
+            sections.push(`\n${tool.promptFragment}`);
+          }
+          sections.push("");
+        }
+      }
+      
+      // Display delegation tools
+      if (delegationTools.length > 0) {
+        sections.push("#### Delegation Tools\n");
+        for (const tool of delegationTools) {
+          sections.push(`**${tool.name}**`);
+          sections.push(`${tool.description}`);
+          if (tool.promptFragment) {
+            sections.push(`\n${tool.promptFragment}`);
+          }
+          sections.push("");
+        }
+      }
+      
+      // Display agent management tools
+      if (agentTools.length > 0) {
+        sections.push("#### Agent Management Tools\n");
+        for (const tool of agentTools) {
+          sections.push(`**${tool.name}**`);
+          sections.push(`${tool.description}`);
+          if (tool.promptFragment) {
+            sections.push(`\n${tool.promptFragment}`);
+          }
+          sections.push("");
+        }
+      }
+      
+      // Display report tools
+      if (reportTools.length > 0) {
+        sections.push("#### Report Tools\n");
+        for (const tool of reportTools) {
+          sections.push(`**${tool.name}**`);
+          sections.push(`${tool.description}`);
+          if (tool.promptFragment) {
+            sections.push(`\n${tool.promptFragment}`);
+          }
+          sections.push("");
+        }
+      }
+      
+      // Display other specialized tools
+      if (otherTools.length > 0) {
+        sections.push("#### Specialized Tools\n");
+        for (const tool of otherTools) {
+          sections.push(`**${tool.name}**`);
+          sections.push(`${tool.description}`);
+          if (tool.promptFragment) {
+            sections.push(`\n${tool.promptFragment}`);
+          }
+          sections.push("");
+        }
       }
     }
 

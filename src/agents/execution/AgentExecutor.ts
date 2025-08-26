@@ -343,12 +343,8 @@ Be completely transparent about your internal process. If you made a mistake or 
     // Get tools for response processing - use agent's configured tools
     const tools = context.agent.tools || [];
 
-    // Add MCP tools if available and agent has MCP access
-    let allTools = tools;
-    if (context.agent.mcp !== false) {
-      const mcpTools = mcpService.getCachedTools();
-      allTools = [...tools, ...mcpTools];
-    }
+    // Use the agent's tools directly - AgentRegistry has already resolved all tools including MCP
+    const allTools = tools;
 
     const ral = new ReasonActLoop(this.llmService);
     await ral.execute(messages, allTools, context);

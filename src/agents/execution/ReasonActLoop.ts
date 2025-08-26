@@ -45,8 +45,8 @@ export class ReasonActLoop {
     const tracingContext = createTracingContext(context.conversationId);
     this.executionLogger = createExecutionLogger(tracingContext, "agent");
 
-    // Initialize AgentPublisher with the agent from context
-    this.agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+    // Use the shared AgentPublisher from context
+    this.agentPublisher = context.agentPublisher;
 
     // Execute the streaming loop
     const generator = this.executeStreamingInternal(context, messages, tracingContext, tools);
@@ -270,7 +270,7 @@ export class ReasonActLoop {
     let hasToolCalls = false;
     const toolResults: ToolExecutionResult[] = [];
     let assistantMessage = "";
-    let deferredCompletionEvent: {
+    const deferredCompletionEvent: {
       type: string;
       intent: CompletionIntent;
     } | null = null;
@@ -496,7 +496,7 @@ export class ReasonActLoop {
       type: "done",
       response: stateManager.getFinalResponse() || {
         type: "text",
-        content: stateManager.getFullContent(),
+        content: this.agentPublisher.getBufferedContent(),
         toolCalls: [],
       },
     };
@@ -569,7 +569,7 @@ export class ReasonActLoop {
     stateManager: StreamStateManager,
     messages: Message[]
   ): Promise<void> {
-    const agentPublisher = new AgentPublisher(context.agent, context.conversationCoordinator);
+    // Use the shared AgentPublisher from the class instance
     const intent = deferredEvent.intent;
 
     // Build event context with execution metadata
@@ -617,7 +617,7 @@ export class ReasonActLoop {
     };
 
     // Publish completion intent (delegation is no longer terminal)
-    const event = await agentPublisher.complete(intent as CompletionIntent, eventContext);
+    const event = await this.agentPublisher.complete(intent as CompletionIntent, eventContext);
     tracingLogger.info("[ReasonActLoop] Published completion event", {
       eventId: event.id,
     });

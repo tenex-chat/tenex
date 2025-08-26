@@ -203,16 +203,20 @@ export class StatusPublisher {
       const projectCtx = getProjectContext();
       const toolAgentMap = new Map<string, Set<string>>();
 
-      // Build a map of tool name -> set of agent slugs that have access
+      // First, add ALL tools from the registry (even if unassigned)
+      const { getAllTools } = await import("@/tools/registry");
+      const allTools = getAllTools();
+      for (const tool of allTools) {
+        toolAgentMap.set(tool.name, new Set());
+      }
+
+      // Then build a map of tool name -> set of agent slugs that have access
       for (const [agentSlug, agent] of projectCtx.agents) {
         // Get the agent's configured tools
         const agentTools = agent.tools || [];
 
         for (const tool of agentTools) {
           const toolName = tool.name;
-          if (!toolAgentMap.has(toolName)) {
-            toolAgentMap.set(toolName, new Set());
-          }
           const toolAgents = toolAgentMap.get(toolName);
           if (toolAgents) {
             toolAgents.add(agentSlug);

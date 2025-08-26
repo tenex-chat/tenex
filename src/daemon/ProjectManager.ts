@@ -8,6 +8,7 @@ import { configService, setProjectContext } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { initializeUnifiedLogger } from "@/logging/UnifiedLogger";
+import { initializeLLMLogger } from "@/logging/LLMLogger";
 import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { ensureTenexInGitignore, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
@@ -217,6 +218,8 @@ export class ProjectManager implements IProjectManager {
 
       // Initialize unified logger for all events
       initializeUnifiedLogger(projectPath);
+      // Initialize LLM logger for clear request/response logging
+      initializeLLMLogger(projectPath);
     } catch (error: unknown) {
       // Only log if it's not a missing project configuration error
       // The MCP server command will handle this specific error with a friendlier message

@@ -5,7 +5,7 @@ import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 
-interface DelegationRecord {
+export interface DelegationRecord {
   // Core identifiers
   taskId: string; // NDKTask event ID (kind 1934)
   delegationBatchId: string; // Groups tasks delegated together
@@ -361,7 +361,7 @@ export class DelegationRegistry extends EventEmitter {
       });
     } else {
       logger.debug("Task completed, batch still pending", {
-        taskId: params.taskId.substring(0, 8),
+        taskId: record.taskId.substring(0, 8),
         batchId: batch.batchId,
         remainingTasks,
       });

@@ -160,11 +160,11 @@ export class EventHandler {
   }
 
   private async handleMetadataEvent(event: NDKEvent): Promise<void> {
-    const metadata = event as NDKEventMetadata;
+    const metadata = NDKEventMetadata.from(event);
     const conversationId = metadata.conversationId;
     
     if (!conversationId) {
-      logger.error("Metadata event missing conversation ID", event);
+      logger.error("Metadata event missing conversation ID", event.inspect);
       return;
     }
     

@@ -1,7 +1,10 @@
+import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
+import { getProjectContext } from "@/services/ProjectContext";
 import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as path from "node:path";
 import { z } from "zod";
 
@@ -14,8 +17,8 @@ const agentsWriteSchema = z.object({
   instructions: z.string().optional().describe("System instructions that guide agent behavior"),
   useCriteria: z.string().optional().describe("Criteria for when this agent should be selected"),
   llmConfig: z.string().optional().describe("LLM configuration identifier"),
-  tools: z.array(z.string()).optional().describe("List of tool names available to this agent"),
-  mcp: z.boolean().optional().describe("Whether this agent has access to MCP tools"),
+  tools: z.array(z.string()).optional().describe("List of tool names available to this agent. All agents automatically get core tools: complete, lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, delegate_external, delegate_phase, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
+  mcp: z.boolean().optional().describe("Whether this agent has access to MCP tools (defaults to true)"),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
@@ -26,16 +29,21 @@ interface AgentsWriteOutput {
   message?: string;
   error?: string;
   filePath?: string;
+  agent?: {
+    slug: string;
+    name: string;
+    pubkey: string;
+  };
 }
 
 /**
  * Tool: agents_write
- * Write or update a local agent definition JSON file without publishing to Nostr
+ * Write or update a local agent definition and activate it in the project
  */
 export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
   name: "agents_write",
   description:
-    "Write or update a local agent definition JSON file in the project without publishing to Nostr",
+    "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (complete, delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
   parameters: createZodSchema(agentsWriteSchema),
   execute: async (
     input: Validated<AgentsWriteInput>,
@@ -114,21 +122,59 @@ export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
         }
       }
 
+      // Generate nsec if needed (check for both missing and empty string)
+      let nsec = registry[slug]?.nsec;
+      if (!nsec || nsec === "") {
+        const signer = NDKPrivateKeySigner.generate();
+        nsec = signer.privateKey;
+        logger.info(`Generated new nsec for agent "${slug}"`);
+      }
+
       // Add or update the agent in the registry
       registry[slug] = {
         file: fileName,
-        nsec: registry[slug]?.nsec || "", // Preserve existing nsec if updating
+        nsec: nsec,
       };
 
       await writeJsonFile(registryPath, registry);
 
-      logger.info(`Successfully wrote agent definition for "${name}" (${slug})`);
+      // Load the agent using AgentRegistry to ensure it's properly initialized
+      const projectContext = getProjectContext();
+      const agentRegistry = new AgentRegistry(projectPath, false);
+      await agentRegistry.loadFromProject();
+      
+      // Ensure the agent is registered with all proper initialization
+      const agentConfig = {
+        name,
+        role,
+        description,
+        instructions,
+        useCriteria,
+        llmConfig,
+        tools,
+        mcp,
+      };
+      
+      const agent = await agentRegistry.ensureAgent(slug, agentConfig, projectContext.project);
+      
+      // Update the ProjectContext with the new/updated agent to trigger 24010 event
+      const updatedAgents = new Map(projectContext.agents);
+      updatedAgents.set(slug, agent);
+      await projectContext.updateProjectData(projectContext.project, updatedAgents);
+
+      logger.info(`Successfully wrote and activated agent "${name}" (${slug})`);
       logger.info(`  File: ${filePath}`);
+      logger.info(`  Pubkey: ${agent.pubkey}`);
 
       return success({
         success: true,
-        message: `Successfully wrote agent definition for "${name}"`,
+        message: `Successfully wrote and activated agent "${name}"`,
         filePath,
+        agent: {
+          slug,
+          name,
+          pubkey: agent.pubkey,
+        },
       });
     } catch (error) {
       logger.error("Failed to write agent definition", { error });

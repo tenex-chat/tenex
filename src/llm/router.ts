@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
 import { getUnifiedLogger, initializeUnifiedLogger } from "@/logging/UnifiedLogger";
+import { getLLMLogger, initializeLLMLogger } from "@/logging/LLMLogger";
 import { createMockLLMProvider } from "./providers/MockProvider";
 import { createSimpleMockProvider } from "./providers/SimpleMockProvider";
 import type {
@@ -200,6 +201,27 @@ export class LLMRouter implements LLMService {
         );
       }
 
+      // Log to LLM logger for clear debugging
+      const llmLogger = getLLMLogger();
+      if (llmLogger) {
+        const toolContext = request.toolContext;
+        await llmLogger.logLLMInteraction({
+          agent: request.options?.agentName || "unknown",
+          rootEvent: undefined, // Could be derived from conversation history
+          triggeringEvent: toolContext?.triggeringEvent,
+          conversationId: toolContext?.conversationId,
+          phase: toolContext?.phase,
+          configKey,
+          provider: config.provider,
+          model: config.model,
+          messages: request.messages,
+          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+          response,
+          startTime,
+          endTime
+        });
+      }
+
       return response;
     } catch (caughtError) {
       const endTime = Date.now();
@@ -217,6 +239,27 @@ export class LLMRouter implements LLMService {
       const unifiedLogger = getUnifiedLogger();
       if (unifiedLogger) {
         await unifiedLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
+      }
+
+      // Log to LLM logger for clear debugging
+      const llmLogger = getLLMLogger();
+      if (llmLogger) {
+        const toolContext = request.toolContext;
+        await llmLogger.logLLMInteraction({
+          agent: request.options?.agentName || "unknown",
+          rootEvent: undefined, // Could be derived from conversation history
+          triggeringEvent: toolContext?.triggeringEvent,
+          conversationId: toolContext?.conversationId,
+          phase: toolContext?.phase,
+          configKey,
+          provider: config.provider,
+          model: config.model,
+          messages: request.messages,
+          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+          error,
+          startTime,
+          endTime
+        });
       }
 
       throw error;
@@ -366,6 +409,27 @@ export class LLMRouter implements LLMService {
           });
         }
 
+        // Log to LLM logger for clear debugging
+        const llmLogger = getLLMLogger();
+        if (llmLogger) {
+          const toolContext = request.toolContext;
+          await llmLogger.logLLMInteraction({
+            agent: request.options?.agentName || "unknown",
+            rootEvent: undefined, // Could be derived from conversation history
+            triggeringEvent: toolContext?.triggeringEvent,
+            conversationId: toolContext?.conversationId,
+            phase: toolContext?.phase,
+            configKey,
+            provider: config.provider,
+            model: config.model,
+            messages: request.messages,
+            tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+            response: lastResponse,
+            startTime,
+            endTime
+          });
+        }
+
         yield { type: "done", response: lastResponse };
       } else {
         // No usage chunk received - create a response anyway for logging
@@ -404,6 +468,27 @@ export class LLMRouter implements LLMService {
           });
         }
 
+        // Log to LLM logger for clear debugging
+        const llmLogger = getLLMLogger();
+        if (llmLogger) {
+          const toolContext = request.toolContext;
+          await llmLogger.logLLMInteraction({
+            agent: request.options?.agentName || "unknown",
+            rootEvent: undefined, // Could be derived from conversation history
+            triggeringEvent: toolContext?.triggeringEvent,
+            conversationId: toolContext?.conversationId,
+            phase: toolContext?.phase,
+            configKey,
+            provider: config.provider,
+            model: config.model,
+            messages: request.messages,
+            tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+            response: fallbackResponse,
+            startTime,
+            endTime
+          });
+        }
+
         yield { type: "done", response: fallbackResponse };
       }
     } catch (error) {
@@ -428,6 +513,27 @@ export class LLMRouter implements LLMService {
           { error: errorObj },
           { startTime, endTime }
         );
+      }
+
+      // Log to LLM logger for clear debugging
+      const llmLogger = getLLMLogger();
+      if (llmLogger) {
+        const toolContext = request.toolContext;
+        await llmLogger.logLLMInteraction({
+          agent: request.options?.agentName || "unknown",
+          rootEvent: undefined, // Could be derived from conversation history
+          triggeringEvent: toolContext?.triggeringEvent,
+          conversationId: toolContext?.conversationId,
+          phase: toolContext?.phase,
+          configKey,
+          provider: config.provider,
+          model: config.model,
+          messages: request.messages,
+          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+          error: errorObj,
+          startTime,
+          endTime
+        });
       }
 
       yield { type: "error", error: errorObj.message };
@@ -475,6 +581,8 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter | LL
 
     // Initialize unified logger
     initializeUnifiedLogger(projectPath);
+    // Initialize LLM logger for clear request/response logging
+    initializeLLMLogger(projectPath);
 
     // Use configService to load merged global and project-specific configuration
     const { llms: tenexLLMs } = await configService.loadConfig(projectPath);

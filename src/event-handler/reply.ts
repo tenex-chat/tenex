@@ -178,40 +178,42 @@ async function handleReplyLogic(
   // 5. Handle delegation completion if applicable
   let isDelegationCompletionReactivation = false;
 
-  // Check for delegation completions:
-  // 1. Explicit completions (kind:1111 with tool:complete)
-  // 2. Natural responses (kind:1111 from agent p-tagging another agent in conversation)
+  // Check for delegation completions only if:
+  // 1. It's explicitly marked as complete (tool:complete), OR
+  // 2. It e-tags a known delegation request
   if (event.kind === 1111 && AgentEventDecoder.isEventFromAgent(event, projectCtx.agents)) {
-    // This could be a delegation completion (explicit or natural)
-    const delegationCompletionResult = await DelegationCompletionHandler.handleDelegationCompletion(
-      event,
-      conversation,
-      conversationCoordinator
-    );
+    // Only check for delegation completion if it has markers suggesting it might be one
+    const hasCompletionMarker = AgentEventDecoder.isDelegationCompletion(event);
+    const eTags = event.getMatchingTags("e");
+    
+    // Only proceed if there's evidence this might be a delegation completion
+    if (hasCompletionMarker || eTags.length > 0) {
+      const delegationCompletionResult = await DelegationCompletionHandler.handleDelegationCompletion(
+        event,
+        conversation,
+        conversationCoordinator
+      );
 
-    if (!delegationCompletionResult.shouldReactivate) {
-      // Either not a delegation completion or still waiting for more delegations
-      // Continue normal processing if it's not a delegation completion
-      if (!AgentEventDecoder.isDelegationCompletion(event)) {
-        // Not an explicit completion, check if it was a natural completion
-        // If handleDelegationCompletion didn't find a match, continue normal processing
-      } else {
-        // It was an explicit completion but shouldn't reactivate yet
+      if (delegationCompletionResult.shouldReactivate) {
+        // This was a delegation completion and we should reactivate
+        isDelegationCompletionReactivation = true;
+        if (delegationCompletionResult.targetAgent) {
+          targetAgent = delegationCompletionResult.targetAgent;
+        }
+        if (delegationCompletionResult.replyTarget) {
+          logInfo(
+            chalk.cyan(
+              `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
+            )
+          );
+          // Override the triggering event to be the original user request
+          event = delegationCompletionResult.replyTarget;
+        }
+      } else if (hasCompletionMarker) {
+        // It was an explicit completion but shouldn't reactivate yet (waiting for more delegations)
         return;
       }
-    } else {
-      // This was a delegation completion and should reactivate
-      isDelegationCompletionReactivation = true;
-      if (delegationCompletionResult.targetAgent) {
-        targetAgent = delegationCompletionResult.targetAgent;
-      }
-      if (delegationCompletionResult.replyTarget) {
-        logInfo(
-          chalk.cyan(
-            `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
-          )
-        );
-      }
+      // If it wasn't a delegation completion at all, continue normal processing
     }
   }
 

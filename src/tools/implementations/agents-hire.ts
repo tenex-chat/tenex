@@ -1,9 +1,8 @@
-import { AgentRegistry } from "@/agents/AgentRegistry";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
 import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
-import { fetchAgentDefinition } from "@/utils/agentFetcher";
+import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { logger } from "@/utils/logger";
 import { filterAndRelaySetFromBech32 } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
@@ -84,73 +83,50 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
         });
       }
 
-      // Fetch the NDKAgentDefinition from the network
-      // fetchAgentDefinition handles both hex and nevent formats
-      const agentDefinition = await fetchAgentDefinition(eventId, ndk);
-
-      if (!agentDefinition) {
-        return success({
-          success: false,
-          error: `Agent event not found: ${eventId}. Please ensure you provide a valid agent event ID from the Nostr network (e.g., nevent1qqsfryd2uw56t9jv3x29de0t5dwyzq5...).`,
-        });
-      }
-
-      // Generate slug from name if not provided
-      const agentSlug =
-        slug ||
-        agentDefinition.title
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/[^a-z0-9-]/g, "");
-
-      // Get project context and registry
+      // Get project context
       const projectContext = getProjectContext();
       const projectPath = process.cwd();
-      const registry = new AgentRegistry(projectPath, false);
-      await registry.loadFromProject();
 
-      // Check if agent already exists
-      const existingAgent = registry.getAgent(agentSlug);
-      if (existingAgent) {
-        if (existingAgent.eventId === agentDefinition.id) {
-          return success({
-            success: true,
-            message: `Agent "${agentDefinition.title}" is already installed in the project`,
-            agent: {
-              slug: agentSlug,
-              name: existingAgent.name,
-              pubkey: existingAgent.pubkey,
-            },
-          });
-        }
+      // Use the shared function to install the agent
+      const result = await installAgentFromEvent(
+        eventId,
+        projectPath,
+        projectContext.project,
+        slug,
+        ndk
+      );
+
+      if (!result.success) {
         return success({
           success: false,
-          error: `An agent with slug "${agentSlug}" already exists but with a different event ID`,
+          error: result.error || "Failed to install agent",
         });
       }
 
-      // Create agent configuration from NDKAgentDefinition definition
-      const agentConfig = {
-        name: agentDefinition.title,
-        role: agentDefinition.role,
-        description: agentDefinition.description,
-        instructions: agentDefinition.instructions,
-        useCriteria: agentDefinition.useCriteria,
-        eventId: agentDefinition.id, // Use the hex ID from the fetched event
-      };
+      if (result.alreadyExists) {
+        return success({
+          success: true,
+          message: result.message,
+          agent: result.agent ? {
+            slug: result.slug!,
+            name: result.agent.name,
+            pubkey: result.agent.pubkey,
+          } : undefined,
+        });
+      }
 
-      // Add the agent to the project
-      const agent = await registry.ensureAgent(agentSlug, agentConfig, projectContext.project);
+      const agent = result.agent!;
+      const agentSlug = result.slug!;
 
       // Update the project event to add the new agent reference
       const project = projectContext.project;
       
       // Check if agent is already in project (shouldn't be, but let's be safe)
-      const hasAgent = project.tags.some(tag => tag[0] === "agent" && tag[1] === agentDefinition.id);
+      const hasAgent = project.tags.some(tag => tag[0] === "agent" && tag[1] === agent.eventId);
       
       if (!hasAgent) {
         // Add the agent tag to the project
-        project.tags.push(["agent", agentDefinition.id]);
+        project.tags.push(["agent", agent.eventId!]);
         
         // Sign and publish the updated project event
         await project.sign(projectContext.signer);
@@ -164,21 +140,19 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
       updatedAgents.set(agentSlug, agent);
       await projectContext.updateProjectData(projectContext.project, updatedAgents);
 
-      logger.info(
-        `Successfully hired NDKAgentDefinition "${agentDefinition.title}" (${agentDefinition.id})`
-      );
+      logger.info(`Successfully hired agent "${agent.name}" (${agent.eventId})`);
       logger.info(`  Slug: ${agentSlug}`);
       logger.info(`  Pubkey: ${agent.pubkey}`);
 
       return success({
         success: true,
-        message: `Successfully hired agent "${agentDefinition.title}"`,
+        message: result.message,
         agent: {
           slug: agentSlug,
           name: agent.name,
           role: agent.role,
           pubkey: agent.pubkey,
-          eventId: agentDefinition.id,
+          eventId: agent.eventId,
         },
       });
     } catch (error) {

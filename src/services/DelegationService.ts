@@ -27,9 +27,11 @@ export class DelegationService {
     private conversationId: string,
     private conversationCoordinator: ConversationCoordinator,
     private triggeringEvent: NDKEvent,
-    private phase?: string
+    private phase?: string,
+    agentPublisher?: AgentPublisher
   ) {
-    this.publisher = new AgentPublisher(agent, conversationCoordinator);
+    // Use provided publisher or create a new one
+    this.publisher = agentPublisher || new AgentPublisher(agent, conversationCoordinator);
   }
 
   /**
