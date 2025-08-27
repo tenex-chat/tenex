@@ -43,11 +43,9 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 
 describe("MessageBuilder - Message Targeting", () => {
-  let messageBuilder: MessageBuilder;
   let mockProjectContext: any;
   
   beforeEach(() => {
-    messageBuilder = new MessageBuilder();
     
     // Setup mock project context with agents
     mockProjectContext = {
@@ -95,7 +93,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format broadcast message as 'user' role for all agents", async () => {
       const event = createEvent("user-pubkey", []); // No p-tags means broadcast
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Hello everyone",
         "code-writer"
@@ -110,7 +108,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"] // Targeting code-writer
       ]);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Please write some code",
         "code-writer"
@@ -125,7 +123,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"] // Targeting code-writer
       ]);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Please write some code",
         "reviewer" // Different agent viewing the message
@@ -142,7 +140,7 @@ describe("MessageBuilder - Message Targeting", () => {
       ]);
       
       // For a targeted agent
-      const message1 = await messageBuilder.formatEventAsMessage(
+      const message1 = await MessageBuilder.formatEventAsMessage(
         event,
         "Please collaborate on this",
         "code-writer"
@@ -152,7 +150,7 @@ describe("MessageBuilder - Message Targeting", () => {
       expect(message1.content).toBe("Please collaborate on this");
       
       // For a non-targeted agent
-      const message2 = await messageBuilder.formatEventAsMessage(
+      const message2 = await MessageBuilder.formatEventAsMessage(
         event,
         "Please collaborate on this",
         "project-manager"
@@ -168,7 +166,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"]  // code-writer
       ]);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Mixed p-tags message",
         "reviewer"
@@ -184,7 +182,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format agent's own message as 'assistant' role", async () => {
       const event = createEvent("agent1-pubkey", []); // code-writer's pubkey
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "I've written the code",
         "code-writer"
@@ -197,7 +195,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format broadcast agent message as 'system' role with attribution", async () => {
       const event = createEvent("agent1-pubkey", []); // code-writer's pubkey, no p-tags (broadcast)
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "I've written the code",
         "reviewer" // Different agent viewing
@@ -212,7 +210,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent2-pubkey"] // code-writer targeting reviewer
       ]);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Can you review this code?",
         "reviewer" // Targeted agent viewing
@@ -227,7 +225,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent2-pubkey"] // code-writer targeting reviewer
       ]);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Can you review this code?",
         "project-manager" // Non-targeted agent observing
@@ -244,7 +242,7 @@ describe("MessageBuilder - Message Targeting", () => {
       ]);
       
       // For one of the targeted agents
-      const message1 = await messageBuilder.formatEventAsMessage(
+      const message1 = await MessageBuilder.formatEventAsMessage(
         event,
         "Need input from both of you",
         "reviewer"
@@ -254,7 +252,7 @@ describe("MessageBuilder - Message Targeting", () => {
       expect(message1.content).toBe("[code-writer → @reviewer]: Need input from both of you");
       
       // For the other targeted agent
-      const message2 = await messageBuilder.formatEventAsMessage(
+      const message2 = await MessageBuilder.formatEventAsMessage(
         event,
         "Need input from both of you",
         "project-manager"
@@ -270,7 +268,7 @@ describe("MessageBuilder - Message Targeting", () => {
       const event = createEvent("", []); // Empty pubkey
       event.pubkey = undefined as any; // Force undefined
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Anonymous message",
         "code-writer"
@@ -284,7 +282,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should handle unknown non-user pubkeys gracefully", async () => {
       const event = createEvent("unknown-agent-pubkey", []);
       
-      const message = await messageBuilder.formatEventAsMessage(
+      const message = await MessageBuilder.formatEventAsMessage(
         event,
         "Message from unknown",
         "code-writer"

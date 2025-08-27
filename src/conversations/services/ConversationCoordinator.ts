@@ -29,9 +29,6 @@ export class ConversationCoordinator {
   private phaseManager: PhaseManager;
   private eventProcessor: ConversationEventProcessor;
 
-  // Agent message contexts (for building conversation history per agent)
-  private agentContexts: Map<string, AgentConversationContext> = new Map();
-
   constructor(
     projectPath: string,
     persistence?: ConversationPersistenceAdapter,
@@ -255,8 +252,8 @@ export class ConversationCoordinator {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Get or create the agent context (now stateless)
-    const context = this.getOrCreateAgentContext(conversationId, targetAgent.slug);
+    // Create a stateless agent context on-demand
+    const context = new AgentConversationContext(conversationId, targetAgent.slug);
 
     // Get or initialize the agent's state
     let agentState = conversation.agentStates.get(targetAgent.slug);
@@ -348,17 +345,6 @@ export class ConversationCoordinator {
   async archiveConversation(conversationId: string): Promise<void> {
     await this.persistence.archive(conversationId);
     this.store.delete(conversationId);
-    
-    // Clean up agent contexts for this conversation
-    const keysToDelete = [];
-    for (const [key] of this.agentContexts) {
-      if (key.startsWith(`${conversationId}:`)) {
-        keysToDelete.push(key);
-      }
-    }
-    for (const key of keysToDelete) {
-      this.agentContexts.delete(key);
-    }
   }
 
   /**
@@ -390,17 +376,6 @@ export class ConversationCoordinator {
 
     this.eventProcessor.cleanupMetadata(conversation);
     this.store.delete(conversationId);
-    
-    // Clean up agent contexts for this conversation
-    const keysToDelete = [];
-    for (const [key] of this.agentContexts) {
-      if (key.startsWith(`${conversationId}:`)) {
-        keysToDelete.push(key);
-      }
-    }
-    for (const key of keysToDelete) {
-      this.agentContexts.delete(key);
-    }
 
     await this.persistence.save(conversation);
   }
@@ -464,20 +439,6 @@ export class ConversationCoordinator {
   }
 
 
-  private getOrCreateAgentContext(
-    conversationId: string,
-    agentSlug: string
-  ): AgentConversationContext {
-    const key = `${conversationId}:${agentSlug}`;
-    let context = this.agentContexts.get(key);
-
-    if (!context) {
-      context = new AgentConversationContext(conversationId, agentSlug);
-      this.agentContexts.set(key, context);
-    }
-
-    return context;
-  }
 
   private setupQueueListeners(): void {
     const queueManager = this.getExecutionQueueManager();

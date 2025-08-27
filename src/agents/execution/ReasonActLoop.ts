@@ -1,16 +1,10 @@
-import { MessageBuilder } from "@/conversations/MessageBuilder";
-import { PHASES } from "@/conversations/phases";
 import type { LLMService, StreamEvent, Tool } from "@/llm/types";
-import { type ContextualLogger, createExecutionLogger } from "@/logging/UnifiedLogger";
 import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ToolExecutionResult } from "@/tools/executor";
-import type { TracingContext, TracingLogger } from "@/tracing";
-import { createTracingContext, createTracingLogger } from "@/tracing";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logger } from "@/utils/logger";
+import { logger, logInfo, logError, logWarning, logDebug } from "@/utils/logger";
 import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
@@ -25,15 +19,12 @@ const MAX_ITERATIONS = 20;
  * Iteratively calls the LLM, executes tools, and feeds results back for further reasoning.
  */
 export class ReasonActLoop {
-  private executionLogger?: ContextualLogger;
   private repetitionDetector: ToolRepetitionDetector;
-  private messageBuilder: MessageBuilder;
   private startTime?: number;
   private agentPublisher!: AgentPublisher;
 
   constructor(private llmService: LLMService) {
     this.repetitionDetector = new ToolRepetitionDetector();
-    this.messageBuilder = new MessageBuilder();
     // AgentPublisher and AgentStreamer will be initialized in execute() when we have the agent
   }
 
@@ -42,14 +33,12 @@ export class ReasonActLoop {
    */
   async execute(messages: Array<Message>, tools: Tool[], context: ExecutionContext): Promise<void> {
     this.startTime = Date.now();
-    const tracingContext = createTracingContext(context.conversationId);
-    this.executionLogger = createExecutionLogger(tracingContext, "agent");
 
     // Use the shared AgentPublisher from context
     this.agentPublisher = context.agentPublisher;
 
     // Execute the streaming loop
-    const generator = this.executeStreamingInternal(context, messages, tracingContext, tools);
+    const generator = this.executeStreamingInternal(context, messages, tools);
 
     // Drain the generator
     let iterResult: IteratorResult<StreamEvent, void>;
@@ -61,16 +50,14 @@ export class ReasonActLoop {
   async *executeStreamingInternal(
     context: ExecutionContext,
     messages: Message[],
-    tracingContext: TracingContext,
     tools?: Tool[]
   ): AsyncGenerator<StreamEvent, void, unknown> {
-    const tracingLogger = createTracingLogger(tracingContext, "agent");
 
     // Initialize handlers
     const stateManager = new StreamStateManager();
-    const toolHandler = new ToolStreamHandler(stateManager, this.agentPublisher, this.executionLogger);
+    const toolHandler = new ToolStreamHandler(stateManager, this.agentPublisher);
 
-    this.logExecutionStart(tracingLogger, context, tools);
+    this.logExecutionStart(context, tools);
 
     // Track conversation messages for the iterative loop
     const conversationMessages = [...messages];
@@ -314,7 +301,7 @@ export class ReasonActLoop {
           break;
 
         case "error":
-          await this.handleErrorEvent(event, stateManager, eventContext, tracingLogger);
+          await this.handleErrorEvent(event, stateManager, eventContext);
           break;
       }
     }
@@ -394,10 +381,9 @@ export class ReasonActLoop {
   private async handleErrorEvent(
     event: { error: string },
     stateManager: StreamStateManager,
-    eventContext: EventContext,
-    tracingLogger: TracingLogger
+    eventContext: EventContext
   ): Promise<void> {
-    tracingLogger.error("Stream error", { error: event.error });
+    logError("Stream error", event.error, "agent");
     // Add error to streaming buffer
     await this.agentPublisher.addStreamContent(`\n\nError: ${event.error}`, eventContext);
   }
@@ -503,15 +489,19 @@ export class ReasonActLoop {
   }
 
   private logExecutionStart(
-    tracingLogger: TracingLogger,
     context: ExecutionContext,
     tools?: Tool[]
   ): void {
-    tracingLogger.info("🔄 Starting ReasonActLoop", {
-      agent: context.agent.name,
-      phase: context.phase,
-      tools: tools?.map((t) => t.name).join(", "),
-    });
+    logInfo(
+      "🔄 Starting ReasonActLoop",
+      "agent",
+      "verbose",
+      {
+        agent: context.agent.name,
+        phase: context.phase,
+        tools: tools?.map((t) => t.name).join(", "),
+      }
+    );
   }
 
   private extractAndLogReasoning(
