@@ -1,4 +1,3 @@
-import { getUnifiedLogger } from "@/logging/UnifiedLogger";
 import type { CompletionRequest, CompletionResponse, ResolvedLLMConfig } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { type SDKMessage, query } from "@anthropic-ai/claude-code";
@@ -64,7 +63,6 @@ export class ClaudeCodeExecutor {
     };
 
     // Prepare data for logging
-    const unifiedLogger = getUnifiedLogger();
     const startTime = Date.now();
 
     // Build request object for logging

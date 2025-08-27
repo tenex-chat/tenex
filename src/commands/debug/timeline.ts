@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ConversationCoordinator } from "@/conversations";
-import type { UnifiedLogEvent } from "@/logging/UnifiedLogger";
 import { formatDuration } from "@/utils/formatting";
 import { logError, logInfo, logWarning } from "@/utils/logger";
 import chalk from "chalk";

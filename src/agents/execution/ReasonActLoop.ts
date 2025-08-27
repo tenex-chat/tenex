@@ -509,7 +509,7 @@ export class ReasonActLoop {
     context?: ExecutionContext,
     stateManager?: StreamStateManager
   ): void {
-    if (!this.executionLogger || !context || !stateManager) return;
+    if (!context || !stateManager) return;
 
     // Extract thinking content
     const thinkingMatch = content.match(/<thinking>([\s\S]*?)<\/thinking>/g);

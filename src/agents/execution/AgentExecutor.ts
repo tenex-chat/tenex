@@ -111,10 +111,13 @@ export class AgentExecutor {
       await this.executeWithStreaming(fullContext, messages);
 
       // Log execution flow complete
-      await executionLogger.logEvent(
-        "execution_complete",
+      logInfo(
+        `Agent ${context.agent.name} completed execution successfully`,
+        "agent",
+        "verbose",
         {
-          narrative: `Agent ${context.agent.name} completed execution successfully`,
+          conversationId: context.conversationId,
+          agent: context.agent.name,
           success: true,
         }
       );
@@ -123,10 +126,12 @@ export class AgentExecutor {
       await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
     } catch (error) {
       // Log execution flow failure
-      await executionLogger.logEvent(
-        "execution_complete",
+      logger.error(
+        `Agent ${context.agent.name} execution failed`,
         {
-          narrative: `Agent ${context.agent.name} execution failed: ${formatAnyError(error)}`,
+          conversationId: context.conversationId,
+          agent: context.agent.name,
+          error: formatAnyError(error),
           success: false,
         }
       );

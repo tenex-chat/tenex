@@ -1,12 +1,9 @@
 import type { AgentInstance } from "@/agents/types";
-import {
-  buildPhaseInstructions,
-  formatPhaseTransitionMessage,
-} from "@/prompts/utils/phaseInstructionsBuilder";
 import { logger, logInfo, logWarning } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";
+import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
@@ -296,9 +293,9 @@ export class ConversationCoordinator {
     let phaseInstructions: string | undefined;
     
     if (needsPhaseInstructions) {
-      const instructions = buildPhaseInstructions(conversation.phase, conversation);
+      const instructions = MessageBuilder.buildPhaseInstructions(conversation.phase, conversation);
       if (agentState.lastSeenPhase) {
-        phaseInstructions = formatPhaseTransitionMessage(
+        phaseInstructions = MessageBuilder.formatPhaseTransitionMessage(
           agentState.lastSeenPhase,
           conversation.phase,
           instructions
@@ -419,14 +416,14 @@ export class ConversationCoordinator {
    * Get execution queue manager (if available)
    */
   getExecutionQueueManager(): ExecutionQueueManager | undefined {
-    return this.phaseManager.getExecutionQueueManager();
+    return this.executionQueueManager;
   }
 
   /**
    * Set execution queue manager
    */
   setExecutionQueueManager(manager: ExecutionQueueManager): void {
-    this.phaseManager.setExecutionQueueManager(manager);
+    this.executionQueueManager = manager;
     this.setupQueueListeners();
   }
 
@@ -470,23 +467,22 @@ export class ConversationCoordinator {
     const queueManager = this.getExecutionQueueManager();
     if (!queueManager) return;
 
-    this.phaseManager.setupQueueListeners(
-      async (conversationId: string, _agentPubkey: string) => {
-        const conversation = this.store.get(conversationId);
-        if (conversation?.metadata.queueStatus) {
-          conversation.metadata.queueStatus = undefined;
-          await this.persistence.save(conversation);
+    queueManager.on("lock-acquired", async (conversationId: string, _agentPubkey: string) => {
+      const conversation = this.store.get(conversationId);
+      if (conversation?.metadata.queueStatus) {
+        conversation.metadata.queueStatus = undefined;
+        await this.persistence.save(conversation);
 
-          logInfo(
-            "Execution lock acquired - starting EXECUTE phase",
-            "conversation",
-            "verbose",
-            { conversationId }
-          );
-        }
+        logInfo(
+          "Execution lock acquired - starting EXECUTE phase",
+          "conversation",
+          "verbose",
+          { conversationId }
+        );
+      }
     });
 
-    this.executionQueueManager.on("timeout", async (conversationId: string) => {
+    queueManager.on("timeout", async (conversationId: string) => {
       const conversation = this.store.get(conversationId);
       if (conversation && conversation.phase === PHASES.EXECUTE) {
         await this.updatePhase(
@@ -499,7 +495,7 @@ export class ConversationCoordinator {
       }
     });
 
-    this.executionQueueManager.on("timeout-warning", async (conversationId: string, remainingMs: number) => {
+    queueManager.on("timeout-warning", async (conversationId: string, remainingMs: number) => {
       const minutes = Math.floor(remainingMs / 60000);
       logWarning(
         `Execution timeout warning: ${minutes} minutes remaining`,

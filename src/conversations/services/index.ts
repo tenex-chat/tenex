@@ -13,8 +13,3 @@ export {
   InMemoryPersistenceAdapter,
 } from "./ConversationPersistenceService";
 export { ConversationStore } from "./ConversationStore";
-export {
-  PhaseManager,
-  type PhaseTransitionContext,
-  type PhaseTransitionResult,
-} from "./PhaseManager";

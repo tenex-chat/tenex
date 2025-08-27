@@ -1,4 +1,3 @@
-import { getUnifiedLogger } from "@/logging/UnifiedLogger";
 import type {
   ExecutionContext,
   Tool,
@@ -188,19 +187,7 @@ export class ToolPlugin extends Plugin {
       };
 
       // Log the successful tool execution
-      const unifiedLogger = getUnifiedLogger();
-      if (unifiedLogger) {
-        await unifiedLogger.logToolCall(
-          this.tool.name,
-          parameters,
-          this.tenexContext,
-          result, // Pass the original typed result
-          {
-            startTime,
-            endTime,
-          }
-        );
-      }
+      // UnifiedLogger removed - logging handled elsewhere
 
       logger.debug(`Tool execution completed: ${this.tool.name}`, {
         tool: this.tool.name,
@@ -230,13 +217,7 @@ export class ToolPlugin extends Plugin {
       };
 
       // Log the failed tool execution
-      const unifiedLogger = getUnifiedLogger();
-      if (unifiedLogger) {
-        await unifiedLogger.logToolCall(this.tool.name, parameters, this.tenexContext, errorResult, {
-          startTime,
-          endTime,
-        });
-      }
+      // UnifiedLogger removed - logging handled elsewhere
 
       logger.error(`Tool execution failed: ${this.tool.name}`, {
         tool: this.tool.name,
