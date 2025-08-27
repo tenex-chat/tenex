@@ -64,7 +64,6 @@ describe("mcpDiscover tool", () => {
     ];
 
     // Override the encode method to avoid accessing NDK internals
-    const _originalEncode = NDKMCPTool.prototype.encode;
     NDKMCPTool.prototype.encode = function (this: NDKMCPTool) {
       return `nevent1${this.id}`;
     };

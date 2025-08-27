@@ -120,27 +120,7 @@ export class ReasonActLoop {
         }
 
         // Check if we should continue iterating
-        if (iterationResult.hasExplicitCompletion) {
-          tracingLogger.info("[ReasonActLoop] Explicit completion detected, ending loop", {
-            iteration: iterations,
-            willExitLoop: true,
-            hasDeferredEvent: !!iterationResult.deferredCompletionEvent,
-            deferredType: iterationResult.deferredCompletionEvent?.type,
-          });
-
-          // Handle deferred completion event
-          if (iterationResult.deferredCompletionEvent) {
-            await this.publishCompletionIntent(
-              iterationResult.deferredCompletionEvent,
-              tracingLogger,
-              context,
-              stateManager,
-              conversationMessages
-            );
-          }
-
-          shouldContinueLoop = false;
-        } else if (iterationResult.hasToolCalls) {
+        if (iterationResult.hasToolCalls) {
           // Add tool results to conversation for next iteration
           this.addToolResultsToConversation(
             conversationMessages,
@@ -190,53 +170,50 @@ export class ReasonActLoop {
         throw error;
       }
 
-      // Handle implicit completion for ALL phases that didn't call complete()
-      if (!stateManager.hasExplicitCompletion()) {
-        // Get the buffered content and immediately clear it to prevent double-publishing
-        const fullContent = this.agentPublisher.getBufferedContent();
-        this.agentPublisher.clearBuffer();
-        
-        if (fullContent.trim().length > 0) {
-          // Build event context with all metadata
-          const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-          const eventContext: EventContext = {
-            triggeringEvent: context.triggeringEvent,
-            rootEvent: conversation?.history[0] ?? context.triggeringEvent,
-            conversationId: context.conversationId,
-          };
+      // Handle natural completion for ALL phases
+      const fullContent = this.agentPublisher.getBufferedContent();
+      this.agentPublisher.clearBuffer();
+      
+      if (fullContent.trim().length > 0) {
+        // Build event context with all metadata
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        const eventContext: EventContext = {
+          triggeringEvent: context.triggeringEvent,
+          rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+          conversationId: context.conversationId,
+        };
 
-          // Get LLM metadata for the completion event
-          const finalResponse = stateManager.getFinalResponse();
-          if (finalResponse) {
-            const llmMetadata = await buildLLMMetadata(finalResponse, conversationMessages);
-            if (llmMetadata) {
-              eventContext.model = llmMetadata.model;
-              eventContext.cost = llmMetadata.cost;
-              eventContext.usage = {
-                prompt_tokens: llmMetadata.promptTokens,
-                completion_tokens: llmMetadata.completionTokens,
-                total_tokens: llmMetadata.totalTokens,
-              };
-            }
+        // Get LLM metadata for the completion event
+        const finalResponse = stateManager.getFinalResponse();
+        if (finalResponse) {
+          const llmMetadata = await buildLLMMetadata(finalResponse, conversationMessages);
+          if (llmMetadata) {
+            eventContext.model = llmMetadata.model;
+            eventContext.cost = llmMetadata.cost;
+            eventContext.usage = {
+              prompt_tokens: llmMetadata.promptTokens,
+              completion_tokens: llmMetadata.completionTokens,
+              total_tokens: llmMetadata.totalTokens,
+            };
           }
-
-          // Tools publish their own events now, no need to track them here
-          eventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
-          eventContext.phase = context.phase;
-
-          const implicitCompletionIntent: CompletionIntent = {
-            type: 'completion',
-            content: fullContent,
-          };
-
-          await this.agentPublisher.complete(implicitCompletionIntent, eventContext);
-          
-          tracingLogger.info("[ReasonActLoop] Published implicit completion", {
-            agent: context.agent.name,
-            phase: context.phase,
-            contentLength: fullContent.length,
-          });
         }
+
+        // Tools publish their own events now, no need to track them here
+        eventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
+        eventContext.phase = context.phase;
+
+        const naturalCompletionIntent: CompletionIntent = {
+          type: 'completion',
+          content: fullContent,
+        };
+
+        await this.agentPublisher.complete(naturalCompletionIntent, eventContext);
+        
+        tracingLogger.info("[ReasonActLoop] Published natural completion", {
+          agent: context.agent.name,
+          phase: context.phase,
+          contentLength: fullContent.length,
+        });
       }
 
       yield this.createFinalEvent(stateManager);
@@ -259,21 +236,14 @@ export class ReasonActLoop {
     messages: Message[]
   ): Promise<{
     events: StreamEvent[];
-    hasExplicitCompletion: boolean;
     hasToolCalls: boolean;
     toolResults: ToolExecutionResult[];
     assistantMessage: string;
-    deferredCompletionEvent?: { type: string; intent: CompletionIntent };
   }> {
     const events: StreamEvent[] = [];
-    let hasExplicitCompletion = false;
     let hasToolCalls = false;
     const toolResults: ToolExecutionResult[] = [];
     let assistantMessage = "";
-    const deferredCompletionEvent: {
-      type: string;
-      intent: CompletionIntent;
-    } | null = null;
 
     for await (const event of stream) {
       tracingLogger.info("[processIterationStream]", {
@@ -282,17 +252,6 @@ export class ReasonActLoop {
         content: event.content
       });
       events.push(event);
-
-      // If we've already detected explicit completion, break out of stream processing
-      if (hasExplicitCompletion) {
-        tracingLogger.info(
-          "[processIterationStream] Breaking stream processing after explicit completion",
-          {
-            eventType: event.type,
-          }
-        );
-        break;
-      }
 
       switch (event.type) {
         case "content":
@@ -325,19 +284,11 @@ export class ReasonActLoop {
         }
 
         case "tool_complete": {
-          const isTerminalTool = await toolHandler.handleToolCompleteEvent(
+          await toolHandler.handleToolCompleteEvent(
             event,
             tracingLogger,
             context
           );
-
-          // If the tool handler detected this as the complete() tool, mark as explicit completion
-          if (isTerminalTool) {
-            hasExplicitCompletion = true;
-            tracingLogger.info("[ReasonActLoop] Complete tool detected", {
-              tool: event.tool,
-            });
-          }
           break;
         }
 
@@ -364,11 +315,9 @@ export class ReasonActLoop {
 
     return {
       events,
-      hasExplicitCompletion,
       hasToolCalls,
       toolResults,
       assistantMessage: assistantMessage.trim(),
-      deferredCompletionEvent: deferredCompletionEvent || undefined,
     };
   }
 
@@ -503,7 +452,7 @@ export class ReasonActLoop {
 
     // Add additional properties for AgentExecutor
     return Object.assign(baseEvent, {
-      termination: stateManager.getExplicitCompletion(),
+      termination: undefined,
     }) as StreamEvent;
   }
 
@@ -556,70 +505,6 @@ export class ReasonActLoop {
       agent: context.agent.name,
       phase: context.phase,
       tools: tools?.map((t) => t.name).join(", "),
-    });
-  }
-
-  /**
-   * Publish a completion intent using AgentPublisher
-   */
-  private async publishCompletionIntent(
-    deferredEvent: { type: string; intent: CompletionIntent },
-    tracingLogger: TracingLogger,
-    context: ExecutionContext,
-    stateManager: StreamStateManager,
-    messages: Message[]
-  ): Promise<void> {
-    // Use the shared AgentPublisher from the class instance
-    const intent = deferredEvent.intent;
-
-    // Build event context with execution metadata
-    tracingLogger.info("[ReasonActLoop] Publishing completion intent", {
-      triggeringEventKind: context.triggeringEvent.kind,
-      fullTriggeringEventId: context.triggeringEvent.id,
-    });
-
-    // Get conversation for the event context
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-
-    const responseUsage = stateManager.getFinalResponse()?.usage;
-    
-    // Calculate cost for completion intent 
-    let cost: number | undefined;
-    const finalResponse = stateManager.getFinalResponse();
-    if (finalResponse) {
-      const llmMetadata = await buildLLMMetadata(finalResponse, messages);
-      cost = llmMetadata?.cost;
-      
-      // ============ TRACE LOGGING: Completion Intent Cost Calculation ============
-      console.log("🔍 [TRACE] ReasonActLoop.ts - COMPLETION INTENT COST CALC");
-      console.log("  Final response model:", finalResponse.model);
-      console.log("  Final response usage:", finalResponse.usage);
-      console.log("  LLM metadata calculated:", !!llmMetadata);
-      console.log("  Calculated cost:", cost);
-      console.log("================================================");
-    }
-    
-    const eventContext: EventContext = {
-      triggeringEvent: context.triggeringEvent,
-      rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
-      conversationId: context.conversationId,
-      executionTime: this.startTime ? Date.now() - this.startTime : undefined,
-      model: stateManager.getFinalResponse()?.model,
-      usage: responseUsage
-        ? {
-            prompt_tokens: responseUsage.prompt_tokens,
-            completion_tokens: responseUsage.completion_tokens,
-            total_tokens: responseUsage.prompt_tokens + responseUsage.completion_tokens,
-          }
-        : undefined,
-      cost,
-      phase: context.phase,
-    };
-
-    // Publish completion intent (delegation is no longer terminal)
-    const event = await this.agentPublisher.complete(intent as CompletionIntent, eventContext);
-    tracingLogger.info("[ReasonActLoop] Published completion event", {
-      eventId: event.id,
     });
   }
 

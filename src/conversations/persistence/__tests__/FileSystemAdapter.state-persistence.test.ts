@@ -53,12 +53,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
   it("should persist and recover complete conversation state", async () => {
     // Create a complex conversation with multiple agent contexts
     const conversationId = "test-state-persistence-1";
-    const _mockEvent = createMockNDKEvent({
-      id: "event-123",
-      content: "Create an authentication system",
-      tags: [["title", "Auth System"]],
-      created_at: Math.floor(Date.now() / 1000),
-    });
 
     const agentContext1: AgentContext = {
       agentSlug: "orchestrator",

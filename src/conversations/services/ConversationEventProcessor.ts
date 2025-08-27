@@ -173,8 +173,10 @@ export class ConversationEventProcessor {
     message: string;
     timestamp?: number;
   } | null {
-    // Check if event has ["tool", "complete"] tag
-    const isCompletion = event.tags?.some((tag) => tag[0] === "tool" && tag[1] === "complete");
+    // Check if event has ["status", "completed"] tag
+    const isCompletion = event.tags?.some((tag) => 
+      tag[0] === "status" && tag[1] === "completed"
+    );
 
     if (!isCompletion || !event.content) return null;
 

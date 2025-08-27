@@ -8,7 +8,7 @@ import type { Tool } from "@/tools/types";
  * Combines agent tools and MCP tools into a single list.
  * 
  * Tool Assignment Guide:
- * - All agents automatically receive core tools: complete, lesson_get, lesson_learn, 
+ * - All agents automatically receive core tools: lesson_get, lesson_learn, 
  *   delegate, read_path, reports_list, report_read
  * - Additional tools can be assigned based on agent responsibilities
  * - Use agents_write tool to configure agent tools
@@ -51,7 +51,7 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       const otherTools: Tool[] = [];
       
       for (const tool of agent.tools) {
-        if (["complete", "lesson_get", "lesson_learn", "read_path"].includes(tool.name)) {
+        if (["lesson_get", "lesson_learn", "read_path"].includes(tool.name)) {
           coreTools.push(tool);
         } else if (tool.name.startsWith("agents_")) {
           agentTools.push(tool);
@@ -185,7 +185,7 @@ Call MCP tools with full namespace: \`server-name/tool-name\`
 | Execution | One tool at a time, sequential only |
 | Results | Wait for actual output, no assumptions |
 | Syntax | Use function calls, not text descriptions |
-| Completion | Use \`complete()\` when done (except CHAT/BRAINSTORM phases) |`);
+| Completion | Your work completes naturally when you finish responding |`);
 
     return sections.join("\n");
   },

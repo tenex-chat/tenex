@@ -14,7 +14,7 @@ import { agentsWrite } from "./implementations/agents-write.js";
 import { analyze } from "./implementations/analyze.js";
 import { delegateExternalTool } from "./implementations/delegate_external.js";
 import { claudeCode } from "./implementations/claude_code.js";
-import { completeTool } from "./implementations/complete.js";
+import { createProjectTool } from "./implementations/create_project.js";
 import { delegateTool } from "./implementations/delegate.js";
 import { delegatePhaseTool } from "./implementations/delegate_phase.js";
 import { generateInventoryTool } from "./implementations/generateInventory.js";
@@ -38,7 +38,6 @@ import type { Tool } from "./types.js";
 export type ToolName =
   | "read_path"
   | "write_context_file"
-  | "complete"
   | "analyze"
   | "generate_inventory"
   | "lesson_learn"
@@ -54,6 +53,7 @@ export type ToolName =
   | "delegate_phase"
   | "nostr_projects"
   | "claude_code"
+  | "create_project"
   | "delegate_external"
   | "report_write"
   | "report_read"
@@ -68,7 +68,6 @@ export type ToolName =
 const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["read_path", readPathTool],
   ["write_context_file", writeContextFileTool],
-  ["complete", completeTool],
   ["analyze", analyze],
   ["generate_inventory", generateInventoryTool],
   ["lesson_learn", lessonLearnTool],
@@ -84,6 +83,7 @@ const toolsMap = new Map<ToolName, Tool<any, any>>([
   ["delegate_phase", delegatePhaseTool],
   ["nostr_projects", nostrProjectsTool],
   ["claude_code", claudeCode],
+  ["create_project", createProjectTool],
   ["delegate_external", delegateExternalTool],
   ["report_write", reportWriteTool],
   ["report_read", reportReadTool],

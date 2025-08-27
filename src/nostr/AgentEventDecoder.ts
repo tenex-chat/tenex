@@ -171,7 +171,7 @@ export class AgentEventDecoder {
    */
   static isDelegationCompletion(event: NDKEvent): boolean {
     return event.kind === 1111 && 
-           event.tagValue("tool") === "complete";
+           event.tagValue("status") === "completed";
   }
   
   /**

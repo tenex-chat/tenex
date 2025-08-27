@@ -19,10 +19,7 @@ interface LLMLogEntry {
       role: string;
       content: string;
     }>;
-    tools?: Array<{
-      name: string;
-      description?: string;
-    }>;
+    tools?: string[];
   };
   response?: {
     content?: string;
@@ -53,7 +50,7 @@ export class LLMLogger {
   private readonly logDir: string;
 
   constructor(projectPath: string) {
-    this.logDir = join(projectPath, ".tenex", "logs", "llm");
+    this.logDir = join(projectPath, ".tenex", "logs", "llms");
   }
 
   private async ensureLogDirectory(): Promise<void> {
@@ -69,8 +66,12 @@ export class LLMLogger {
   private getLogFileName(): string {
     const now = new Date();
     const date = now.toISOString().split("T")[0];
-    const time = now.toTimeString().split(" ")[0].replace(/:/g, "-");
-    return `${date}_${time}.json`;
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    // Round down to nearest 5-minute increment
+    const roundedMinutes = Math.floor(minutes / 5) * 5;
+    const timeStr = `${hours.toString().padStart(2, '0')}:${roundedMinutes.toString().padStart(2, '0')}`;
+    return `${date}_${timeStr}.jsonl`;
   }
 
   private getLogFilePath(filename: string): string {
@@ -78,7 +79,112 @@ export class LLMLogger {
   }
 
   /**
-   * Log an LLM request and response
+   * Log an LLM request immediately, returns a unique ID for updating with response
+   */
+  async logLLMRequest(params: {
+    agent: string;
+    rootEvent?: NDKEvent;
+    triggeringEvent?: NDKEvent;
+    conversationId?: string;
+    phase?: string;
+    configKey: string;
+    provider: string;
+    model: string;
+    messages: Message[];
+    tools?: Array<{ name: string; description?: string }>;
+    startTime: number;
+  }): Promise<string> {
+    await this.ensureLogDirectory();
+
+    const requestId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const logEntry: LLMLogEntry = {
+      timestamp: new Date().toISOString(),
+      timestampMs: Date.now(),
+      agent: params.agent,
+      rootEventId: params.rootEvent?.id,
+      triggeringEventId: params.triggeringEvent?.id,
+      conversationId: params.conversationId,
+      phase: params.phase,
+      configKey: params.configKey,
+      provider: params.provider,
+      model: params.model,
+      request: {
+        messages: params.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        tools: params.tools?.map(t => t.name)
+      }
+    };
+
+    const filename = this.getLogFileName();
+    const filepath = this.getLogFilePath(filename);
+    
+    try {
+      // Append to JSONL file (one JSON object per line)
+      await fs.appendFile(filepath, JSON.stringify({ ...logEntry, requestId }) + "\n", "utf-8");
+      console.log(`[LLMLogger] Logged LLM request to ${filename}`);
+    } catch (error) {
+      console.error("[LLMLogger] Failed to write log:", error);
+    }
+
+    return requestId;
+  }
+
+  /**
+   * Update a previously logged request with its response
+   */
+  async logLLMResponse(params: {
+    requestId: string;
+    response?: CompletionResponse;
+    error?: Error;
+    endTime: number;
+    startTime: number;
+  }): Promise<void> {
+    const filename = this.getLogFileName();
+    const filepath = this.getLogFilePath(filename);
+
+    const responseEntry: Partial<LLMLogEntry> = {
+      timestamp: new Date().toISOString(),
+      timestampMs: Date.now(),
+      durationMs: params.endTime - params.startTime
+    };
+
+    if (params.response) {
+      responseEntry.response = {
+        content: params.response.content,
+        toolCalls: params.response.toolCalls?.map(tc => ({
+          name: tc.name,
+          params: tc.params
+        })),
+        usage: params.response.usage ? {
+          promptTokens: params.response.usage.prompt_tokens || 0,
+          completionTokens: params.response.usage.completion_tokens || 0,
+          totalTokens: (params.response.usage.prompt_tokens || 0) + (params.response.usage.completion_tokens || 0)
+        } : undefined,
+        model: params.response.model
+      };
+    }
+
+    if (params.error) {
+      responseEntry.error = {
+        message: params.error.message,
+        type: params.error.constructor.name,
+        stack: params.error.stack
+      };
+    }
+
+    try {
+      // Append response entry with the same requestId
+      await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, requestId: params.requestId, type: 'response' }) + "\n", "utf-8");
+      console.log(`[LLMLogger] Logged LLM response to ${filename}`);
+    } catch (error) {
+      console.error("[LLMLogger] Failed to write response log:", error);
+    }
+  }
+
+  /**
+   * Log an LLM request and response (backward compatibility)
    */
   async logLLMInteraction(params: {
     agent: string;
@@ -96,83 +202,30 @@ export class LLMLogger {
     startTime: number;
     endTime: number;
   }): Promise<void> {
-    await this.ensureLogDirectory();
-
-    const logEntry: LLMLogEntry = {
-      timestamp: new Date().toISOString(),
-      timestampMs: Date.now(),
+    // First log the request
+    const requestId = await this.logLLMRequest({
       agent: params.agent,
-      rootEventId: params.rootEvent?.id,
-      triggeringEventId: params.triggeringEvent?.id,
+      rootEvent: params.rootEvent,
+      triggeringEvent: params.triggeringEvent,
       conversationId: params.conversationId,
       phase: params.phase,
       configKey: params.configKey,
       provider: params.provider,
       model: params.model,
-      request: {
-        messages: params.messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-        tools: params.tools
-      },
-      durationMs: params.endTime - params.startTime
-    };
+      messages: params.messages,
+      tools: params.tools,
+      startTime: params.startTime
+    });
 
-    if (params.response) {
-      logEntry.response = {
-        content: params.response.content,
-        toolCalls: params.response.toolCalls?.map(tc => ({
-          name: tc.name,
-          params: tc.params
-        })),
-        usage: params.response.usage ? {
-          promptTokens: params.response.usage.prompt_tokens || 0,
-          completionTokens: params.response.usage.completion_tokens || 0,
-          totalTokens: (params.response.usage.prompt_tokens || 0) + (params.response.usage.completion_tokens || 0)
-        } : undefined,
-        model: params.response.model
-      };
-    }
-
-    if (params.error) {
-      logEntry.error = {
-        message: params.error.message,
-        type: params.error.constructor.name,
-        stack: params.error.stack
-      };
-    }
-
-    // Write to a new file for each interaction for clarity
-    const filename = this.getLogFileName();
-    const filepath = this.getLogFilePath(filename);
-    
-    try {
-      await fs.writeFile(filepath, JSON.stringify(logEntry, null, 2), "utf-8");
-      
-      // Also append a summary to a daily log file
-      const dailyLogFile = join(this.logDir, `${new Date().toISOString().split("T")[0]}_summary.jsonl`);
-      const summary = {
-        timestamp: logEntry.timestamp,
-        file: filename,
-        agent: logEntry.agent,
-        model: logEntry.model,
-        rootEventId: logEntry.rootEventId,
-        triggeringEventId: logEntry.triggeringEventId,
-        conversationId: logEntry.conversationId,
-        phase: logEntry.phase,
-        requestTokens: logEntry.response?.usage?.promptTokens,
-        responseTokens: logEntry.response?.usage?.completionTokens,
-        durationMs: logEntry.durationMs,
-        hasError: !!logEntry.error,
-        errorMessage: logEntry.error?.message
-      };
-      
-      await fs.appendFile(dailyLogFile, JSON.stringify(summary) + "\n", "utf-8");
-      
-      console.log(`[LLMLogger] Logged LLM interaction to ${filename}`);
-    } catch (error) {
-      console.error("[LLMLogger] Failed to write log:", error);
+    // Then log the response if we have one
+    if (params.response || params.error) {
+      await this.logLLMResponse({
+        requestId,
+        response: params.response,
+        error: params.error,
+        endTime: params.endTime,
+        startTime: params.startTime
+      });
     }
   }
 
@@ -183,12 +236,12 @@ export class LLMLogger {
     try {
       await this.ensureLogDirectory();
       const files = await fs.readdir(this.logDir);
-      const jsonFiles = files
-        .filter(f => f.endsWith('.json'))
+      const jsonlFiles = files
+        .filter(f => f.endsWith('.jsonl'))
         .sort()
         .reverse()
         .slice(0, limit);
-      return jsonFiles.map(f => this.getLogFilePath(f));
+      return jsonlFiles.map(f => this.getLogFilePath(f));
     } catch (error) {
       console.error("[LLMLogger] Failed to list logs:", error);
       return [];
@@ -196,13 +249,14 @@ export class LLMLogger {
   }
 
   /**
-   * Read a specific log file
+   * Read a specific log file (JSONL format)
    */
-  async readLog(filename: string): Promise<LLMLogEntry | null> {
+  async readLog(filename: string): Promise<LLMLogEntry[] | null> {
     try {
       const filepath = this.getLogFilePath(filename);
       const content = await fs.readFile(filepath, "utf-8");
-      return JSON.parse(content);
+      const lines = content.split('\n').filter(line => line.trim());
+      return lines.map(line => JSON.parse(line));
     } catch (error) {
       console.error(`[LLMLogger] Failed to read log ${filename}:`, error);
       return null;

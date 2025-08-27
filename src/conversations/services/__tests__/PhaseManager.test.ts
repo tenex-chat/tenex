@@ -86,7 +86,7 @@ describe("PhaseManager", () => {
       message: "Transitioning phase",
     };
 
-    it("should allow same-phase handoff", async () => {
+    it("should allow same-phase delegation", async () => {
       const result = await phaseManager.transition(mockConversation, PHASES.CHAT, context);
 
       expect(result.success).toBe(true);

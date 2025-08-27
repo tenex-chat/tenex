@@ -529,11 +529,6 @@ export class AgentRegistry {
       return false;
     }
 
-    // Ensure complete() is always present
-    if (!newToolNames.includes("complete")) {
-      newToolNames.push("complete");
-    }
-
     // Update the agent tools in memory
     const { getTools } = await import("@/tools/registry");
     // Filter to only valid tool names
@@ -542,7 +537,6 @@ export class AgentRegistry {
       const validTools: ToolName[] = [
         "read_path",
         "write_context_file",
-        "complete",
         "analyze",
         "generate_inventory",
         "lesson_learn",

@@ -23,11 +23,11 @@ describe("ConversationEventProcessor", () => {
   });
 
   describe("extractCompletionFromEvent", () => {
-    it("should extract completion from event with tool complete tag and valid pubkey", () => {
+    it("should extract completion from event with status completed tag and valid pubkey", () => {
       const event = {
         content: "Task completed successfully",
         pubkey: "executor-pubkey",
-        tags: [["tool", "complete"]],
+        tags: [["status", "completed"]],
         created_at: 1234567890,
       } as NDKEvent;
 
@@ -40,7 +40,7 @@ describe("ConversationEventProcessor", () => {
       });
     });
 
-    it("should return null if no tool complete tag", () => {
+    it("should return null if no status completed tag", () => {
       const event = {
         content: "Regular message",
         pubkey: "executor-pubkey",
@@ -57,7 +57,7 @@ describe("ConversationEventProcessor", () => {
       const event = {
         content: "Task completed",
         pubkey: "unknown-pubkey",
-        tags: [["tool", "complete"]],
+        tags: [["status", "completed"]],
         created_at: 1234567890,
       } as NDKEvent;
 
@@ -70,7 +70,7 @@ describe("ConversationEventProcessor", () => {
       const event = {
         content: "",
         pubkey: "executor-pubkey",
-        tags: [["tool", "complete"]],
+        tags: [["status", "completed"]],
         created_at: 1234567890,
       } as NDKEvent;
 
@@ -79,11 +79,11 @@ describe("ConversationEventProcessor", () => {
       expect(completion).toBeNull();
     });
 
-    it("should return null if tool tag is not 'complete'", () => {
+    it("should return null if status tag is not 'completed'", () => {
       const event = {
         content: "Using a tool",
         pubkey: "executor-pubkey",
-        tags: [["tool", "other-tool"]],
+        tags: [["status", "in-progress"]],
         created_at: 1234567890,
       } as NDKEvent;
 
@@ -96,7 +96,7 @@ describe("ConversationEventProcessor", () => {
       const event = {
         content: "Planning complete",
         pubkey: "planner-pubkey",
-        tags: [["tool", "complete"]],
+        tags: [["status", "completed"]],
         created_at: 1234567890,
       } as NDKEvent;
 

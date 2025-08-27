@@ -70,7 +70,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     if (agent) {
       const projectCtx = getProjectContext();
 
-      // Get all available agents for handoffs
+      // Get all available agents for delegations
       const availableAgents = Array.from(projectCtx.agents.values());
 
       // Validate phase

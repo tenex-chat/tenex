@@ -18,12 +18,9 @@ describe("ExecutionQueueManager", () => {
     testProjectPath = path.join(tmpdir(), `test-project-${Date.now()}`);
     await fs.mkdir(testProjectPath, { recursive: true });
 
-    // Create manager without Nostr service for unit tests
+    // Create manager for unit tests
     manager = new ExecutionQueueManager(
       testProjectPath,
-      undefined, // no projectPubkey
-      undefined, // no projectIdentifier
-      undefined, // no nostrService
       config
     );
 
@@ -192,9 +189,6 @@ describe("ExecutionQueueManager", () => {
 
       const timeoutManager = new ExecutionQueueManager(
         testProjectPath,
-        undefined,
-        undefined,
-        undefined,
         shortConfig
       );
 
@@ -262,9 +256,6 @@ describe("ExecutionQueueManager", () => {
       // Create new manager instance (simulating restart)
       const newManager = new ExecutionQueueManager(
         testProjectPath,
-        undefined,
-        undefined,
-        undefined,
         config
       );
       await newManager.initialize();
@@ -286,9 +277,6 @@ describe("ExecutionQueueManager", () => {
       // Create new manager instance
       const newManager = new ExecutionQueueManager(
         testProjectPath,
-        undefined,
-        undefined,
-        undefined,
         config
       );
       await newManager.initialize();
@@ -313,9 +301,6 @@ describe("ExecutionQueueManager", () => {
 
       const expireManager = new ExecutionQueueManager(
         testProjectPath,
-        undefined,
-        undefined,
-        undefined,
         expireConfig
       );
       await expireManager.initialize();
@@ -329,9 +314,6 @@ describe("ExecutionQueueManager", () => {
       // Create new manager
       const newManager = new ExecutionQueueManager(
         testProjectPath,
-        undefined,
-        undefined,
-        undefined,
         expireConfig
       );
       await newManager.initialize();

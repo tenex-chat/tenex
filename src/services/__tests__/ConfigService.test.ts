@@ -229,7 +229,7 @@ describe("ConfigService", () => {
 
       // First load
       const projectPath = service.getProjectPath(projectDir);
-      const _loaded1 = await service.loadTenexConfig(projectPath);
+      await service.loadTenexConfig(projectPath);
 
       // Modify file directly
       const configPath = path.join(projectDir, ".tenex", "config.json");

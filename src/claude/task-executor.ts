@@ -146,31 +146,6 @@ export class ClaudeTaskExecutor {
 
           const finalMessage = lastAssistantMessage || "Task completed";
 
-          // Publish final task update with metadata
-          // const finalContext: EventContext = {
-          //   ...baseEventContext,
-          //   executionTime: executionResult.duration,
-          //   cost: executionResult.totalCost,
-          // };
-
-          // const statusEmoji = executionResult.success ? "✅" : "❌";
-          // const statusText = executionResult.success ? "completed" : "failed";
-          // const metadata = [
-          //   `Messages: ${executionResult.messageCount}`,
-          //   `Duration: ${Math.round(executionResult.duration / 1000)}s`,
-          //   `Cost: $${executionResult.totalCost.toFixed(4)}`,
-          // ].join(" • ");
-
-          // const finalContent = executionResult.success
-          //   ? `${finalMessage}\n\n---\n${statusEmoji} Task ${statusText} • ${metadata}`
-          //   : `${statusEmoji} Task ${statusText}\n\nError: ${executionResult.error}\n\n${metadata}`;
-
-          // const update = await this.agentPublisher.publishTaskUpdate(
-          //   task,
-          //   finalContent,
-          //   finalContext
-          // );
-
           result = {
             taskEvent: task,
             sessionId: executionResult.sessionId,

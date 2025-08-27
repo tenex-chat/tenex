@@ -151,7 +151,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     priority: 5,
   },
 
-  // Orchestrator Phase 3: Implementation handoff for User A
+  // Orchestrator Phase 3: Implementation delegation for User A
   {
     trigger: {
       agentName: "orchestrator",
@@ -159,12 +159,12 @@ const concurrencyResponses: MockLLMResponse[] = [
       messageContains: /User A/,
     },
     response: {
-      content: "Handing off to Executor agent to implement authentication for User A.",
+      content: "Delegating to Executor agent to implement authentication for User A.",
       toolCalls: [
         {
           id: "3",
           message: null,
-          function: "handoff",
+          function: "delegate",
           args: JSON.stringify({
             toAgent: "executor",
             context: "Implement authentication system for User A as planned",
@@ -175,7 +175,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     priority: 5,
   },
 
-  // Orchestrator Phase 3: Implementation handoff for User B
+  // Orchestrator Phase 3: Implementation delegation for User B
   {
     trigger: {
       agentName: "orchestrator",
@@ -183,12 +183,12 @@ const concurrencyResponses: MockLLMResponse[] = [
       messageContains: /User B/,
     },
     response: {
-      content: "Handing off to Executor agent to implement payment processing for User B.",
+      content: "Delegating to Executor agent to implement payment processing for User B.",
       toolCalls: [
         {
           id: "3",
           message: null,
-          function: "handoff",
+          function: "delegate",
           args: JSON.stringify({
             toAgent: "executor",
             context: "Implement payment processing for User B as planned",
@@ -213,7 +213,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         {
           id: "4",
           message: null,
-          function: "handoff",
+          function: "delegate",
           args: JSON.stringify({
             toAgent: "orchestrator",
             context: "Authentication implementation completed for User A",
@@ -238,7 +238,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         {
           id: "4",
           message: null,
-          function: "handoff",
+          function: "delegate",
           args: JSON.stringify({
             toAgent: "orchestrator",
             context: "Payment implementation completed for User B",
@@ -393,7 +393,7 @@ const concurrencyResponses: MockLLMResponse[] = [
     priority: 5,
   },
 
-  // Orchestrator Phase 3: Implementation handoff for User C
+  // Orchestrator Phase 3: Implementation delegation for User C
   {
     trigger: {
       agentName: "orchestrator",
@@ -401,7 +401,7 @@ const concurrencyResponses: MockLLMResponse[] = [
       messageContains: /User C/,
     },
     response: {
-      content: "Handing off to Executor agent to implement payment processing for User C.",
+      content: "Delegating to Executor agent to implement payment processing for User C.",
       toolCalls: [
         {
           id: "3",
@@ -431,7 +431,7 @@ const concurrencyResponses: MockLLMResponse[] = [
         {
           id: "4",
           message: null,
-          function: "handoff",
+          function: "delegate",
           args: JSON.stringify({
             toAgent: "orchestrator",
             context: "Payment implementation completed for User C",

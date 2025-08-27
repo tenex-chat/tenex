@@ -7,7 +7,6 @@ import type { TracingLogger } from "@/tracing";
 import { formatAnyError, formatToolError } from "@/utils/error-formatter";
 import type { StreamStateManager } from "./StreamStateManager";
 import { ExecutionConfig } from "./constants";
-import { isComplete } from "./control-flow-types";
 import type { ExecutionContext } from "./types";
 
 /**
@@ -44,13 +43,12 @@ export class ToolStreamHandler {
 
   /**
    * Handle a tool_complete event
-   * @returns true if this was the complete() tool
    */
   async handleToolCompleteEvent(
     event: { tool: string; result: unknown },
     tracingLogger: TracingLogger,
     context: ExecutionContext
-  ): Promise<boolean> {
+  ): Promise<void> {
     // Parse the tool result first to get metadata
     const toolResult = this.parseToolResult(event);
 
@@ -61,15 +59,6 @@ export class ToolStreamHandler {
 
     // Publish error if tool failed
     await this.publishToolError(toolResult, event.tool, tracingLogger, context);
-
-    // Process the tool result (update state with continue/termination)
-    this.processToolResult(toolResult, tracingLogger, context);
-
-    // Note: StreamHandle handles buffering internally
-    // Typing indicator is managed by ReasonActLoop, not needed here
-
-    // Check if this is the complete() tool
-    return this.isCompleteToolResult(toolResult);
   }
 
   /**
@@ -173,41 +162,4 @@ export class ToolStreamHandler {
     }
   }
 
-  /**
-   * Process tool result and update state
-   */
-  private processToolResult(
-    toolResult: ToolExecutionResult,
-    tracingLogger: TracingLogger,
-    _context: ExecutionContext
-  ): void {
-    if (!toolResult.success || !toolResult.output) {
-      tracingLogger.info("⚠️ Tool result unsuccessful or missing output", {
-        success: toolResult.success,
-        hasOutput: !!toolResult.output,
-      });
-      return;
-    }
-
-    const output = toolResult.output;
-
-    // Check if it's the complete() tool
-    if (isComplete(output)) {
-      // Mark that complete() was called
-      this.stateManager.setExplicitCompletion(output);
-    }
-  }
-
-  /**
-   * Check if tool result is from the complete() tool
-   */
-  private isCompleteToolResult(result: ToolExecutionResult): boolean {
-    if (!result.success || !result.output) {
-      return false;
-    }
-
-    const output = result.output as Record<string, unknown>;
-    // Check for completion intent type
-    return output.type === "completion" || output.type === "delegation";
-  }
 }

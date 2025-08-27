@@ -219,7 +219,7 @@ export class AgentExecutor {
         }
       }
 
-      // Get all available agents for handoffs
+      // Get all available agents for delegations
       const availableAgents = Array.from(projectCtx.agents.values());
 
       // Build system prompt using the shared function
@@ -270,16 +270,15 @@ export class AgentExecutor {
 STOP! A delegated task has JUST BEEN COMPLETED. The response is in the conversation above.
 
 YOU MUST:
-1. Use ONLY the complete() tool to pass the result back to the user
-2. Do NOT use ANY other tools
+1. Pass the result back to the user in your response
+2. Do NOT use ANY tools
 3. Do NOT delegate again - the task is ALREADY DONE
 
 THE TASK IS COMPLETE. DO NOT REPEAT IT.
 
-Use EXACTLY ONE tool call: complete() with the result from the conversation above.
+Simply respond with the result from the conversation above.
 
 DO NOT use delegate(), delegate_phase(), or any other tool.
-ONLY use complete().
 
 === END CRITICAL NOTIFICATION ===`;
 

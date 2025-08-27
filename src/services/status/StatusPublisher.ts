@@ -1,7 +1,6 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import type { ConversationCoordinator } from "@/conversations";
 import { EVENT_KINDS } from "@/llm/types";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
@@ -36,9 +35,8 @@ export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
   private executionQueueManager?: unknown; // Using unknown to avoid circular dependency
 
-  constructor(executionQueueManager: unknown, _conversationCoordinator: ConversationCoordinator) {
+  constructor(executionQueueManager: unknown) {
     this.executionQueueManager = executionQueueManager;
-    // conversationCoordinator no longer needed since we're self-contained
   }
 
   async startPublishing(projectPath: string): Promise<void> {

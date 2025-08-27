@@ -33,8 +33,7 @@ export class EventHandler {
 
   constructor(
     private projectPath: string,
-    private llmService: LLMService,
-    _ndk: NDK
+    private llmService: LLMService
   ) {}
 
   async initialize(): Promise<void> {
@@ -42,11 +41,8 @@ export class EventHandler {
     try {
       const projectCtx = getProjectContext();
       if (projectCtx?.pubkey) {
-        const projectIdentifier = projectCtx.project.tagValue("d") || projectCtx.project.id;
         this.executionQueueManager = new ExecutionQueueManager(
-          this.projectPath,
-          projectCtx.pubkey,
-          projectIdentifier
+          this.projectPath
         );
         await this.executionQueueManager.initialize();
       }

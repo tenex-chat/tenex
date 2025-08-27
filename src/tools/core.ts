@@ -45,27 +45,11 @@ export interface Tool<Input = unknown, Output = unknown> {
 }
 
 // ============================================================================
-// Control Flow and Termination Types
+// Conversation Result Type
 // ============================================================================
-
-/**
- * Termination type that ends execution
- */
-export type Termination = Complete;
-
-export interface Complete {
-  readonly type: "complete";
-  readonly completion: CompletionSummary;
-}
-
-export interface CompletionSummary {
-  readonly response: string;
-  readonly summary: string;
-}
 
 export interface ConversationResult {
   readonly response: string;
-  readonly summary: string;
   readonly success: boolean;
   readonly artifacts?: ReadonlyArray<string>;
 }

@@ -53,7 +53,7 @@ const delegatePhaseSchema = z.object({
  *
  * If recipient cannot be resolved, the tool fails with an error.
  *
- * The agent should NOT call complete() after using delegate_phase.
+ * The agent should NOT complete after using delegate_phase.
  */
 export const delegatePhaseTool = createToolDefinition<
   z.input<typeof delegatePhaseSchema>,
@@ -75,7 +75,7 @@ IMPORTANT: When you use delegate_phase(), you are:
 1. Switching the conversation to a new phase
 2. Delegating work to a specialist agent
 3. Setting up callbacks to be notified when the task completes
-- DO NOT call complete() after delegating - wait for the response
+- DO NOT complete after delegating - wait for the response
 - The delegated agent will handle the work and respond back`,
   schema: delegatePhaseSchema as z.ZodType<z.input<typeof delegatePhaseSchema>>,
   execute: async (input, context) => {

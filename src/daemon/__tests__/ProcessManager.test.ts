@@ -7,9 +7,6 @@ import { ProcessManager } from "../ProcessManager";
 const activePids = new Set<number>();
 let nextPid = 1000;
 
-// Store reference to the original process.kill
-const _originalProcessKill = process.kill;
-
 // Override process.kill globally
 (global as any).process = {
   ...process,

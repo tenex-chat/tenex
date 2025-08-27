@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { EVENT_KINDS } from "@/llm/types";
 import { StatusPublisher } from "../StatusPublisher";
 
-// Status publishing interval
-const _STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 // Mock dependencies
 const mockPublish = mock(async () => {});
@@ -61,8 +59,7 @@ describe("StatusPublisher", () => {
   let publisher: StatusPublisher;
 
   beforeEach(() => {
-    const mockConversationCoordinator = {} as any; // Mock ConversationCoordinator for tests
-    publisher = new StatusPublisher(undefined, mockConversationCoordinator);
+    publisher = new StatusPublisher(undefined);
     // Clear all mock calls
     mockPublish.mockClear();
     mockSign.mockClear();

@@ -30,8 +30,6 @@ export class ExecutionQueueManager extends EventEmitter {
 
   constructor(
     projectPath: string,
-    _projectPubkey?: string,
-    _projectIdentifier?: string,
     config: Partial<ExecutionQueueConfig> = {}
   ) {
     super();

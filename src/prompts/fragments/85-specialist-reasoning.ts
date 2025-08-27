@@ -39,7 +39,7 @@ Example:
   2. Deep dive into implementation details (too early in planning)
   3. Focus on architectural patterns and security best practices (appropriate)
 - Decision: Review the high-level architecture and identify potential security concerns
-- Tools needed: read_file to examine auth modules, complete() to return findings
+- Tools needed: read_file to examine auth modules, then return findings
 - Confidence: 0.85
 </thinking>
 

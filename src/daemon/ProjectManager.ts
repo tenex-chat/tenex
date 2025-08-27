@@ -205,9 +205,7 @@ export class ProjectManager implements IProjectManager {
       await conversationCoordinator.initialize();
 
       // Create and attach ExecutionQueueManager
-      const projectPubkey = projectCtx.pubkey;
-      const projectIdentifier = project.tagValue("d") || project.id;
-      const queueManager = new ExecutionQueueManager(projectPath, projectPubkey, projectIdentifier);
+      const queueManager = new ExecutionQueueManager(projectPath);
       await queueManager.initialize();
 
       conversationCoordinator.setExecutionQueueManager(queueManager);

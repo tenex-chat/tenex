@@ -121,6 +121,26 @@ export class LLMRouter implements LLMService {
 
     let response: CompletionResponse | undefined;
     let error: Error | undefined;
+    let requestId: string | undefined;
+
+    // Log the request immediately
+    const llmLogger = getLLMLogger();
+    if (llmLogger) {
+      const toolContext = request.toolContext;
+      requestId = await llmLogger.logLLMRequest({
+        agent: request.options?.agentName || "unknown",
+        rootEvent: undefined,
+        triggeringEvent: toolContext?.triggeringEvent,
+        conversationId: toolContext?.conversationId,
+        phase: toolContext?.phase,
+        configKey,
+        provider: config.provider,
+        model: config.model,
+        messages: request.messages,
+        tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+        startTime
+      });
+    }
 
     try {
       // Use the multi-llm-ts v4 API
@@ -201,24 +221,13 @@ export class LLMRouter implements LLMService {
         );
       }
 
-      // Log to LLM logger for clear debugging
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        const toolContext = request.toolContext;
-        await llmLogger.logLLMInteraction({
-          agent: request.options?.agentName || "unknown",
-          rootEvent: undefined, // Could be derived from conversation history
-          triggeringEvent: toolContext?.triggeringEvent,
-          conversationId: toolContext?.conversationId,
-          phase: toolContext?.phase,
-          configKey,
-          provider: config.provider,
-          model: config.model,
-          messages: request.messages,
-          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+      // Log the response
+      if (llmLogger && requestId) {
+        await llmLogger.logLLMResponse({
+          requestId,
           response,
-          startTime,
-          endTime
+          endTime,
+          startTime
         });
       }
 
@@ -241,24 +250,13 @@ export class LLMRouter implements LLMService {
         await unifiedLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
       }
 
-      // Log to LLM logger for clear debugging
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        const toolContext = request.toolContext;
-        await llmLogger.logLLMInteraction({
-          agent: request.options?.agentName || "unknown",
-          rootEvent: undefined, // Could be derived from conversation history
-          triggeringEvent: toolContext?.triggeringEvent,
-          conversationId: toolContext?.conversationId,
-          phase: toolContext?.phase,
-          configKey,
-          provider: config.provider,
-          model: config.model,
-          messages: request.messages,
-          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+      // Log the error
+      if (llmLogger && requestId) {
+        await llmLogger.logLLMResponse({
+          requestId,
           error,
-          startTime,
-          endTime
+          endTime,
+          startTime
         });
       }
 

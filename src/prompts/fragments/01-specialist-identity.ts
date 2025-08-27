@@ -76,30 +76,20 @@ export const specialistIdentityFragment: PromptFragment<SpecialistIdentityArgs> 
 - Provide minimal code snippets only when absolutely necessary
 - Stay strictly within your domain boundaries
 
-### ⚠️ CRITICAL: Always Use complete() Tool
+### Response Guidelines
 
-**YOU MUST USE THE complete() TOOL TO FINISH YOUR WORK**
+**Simply provide your response directly. The system will handle completion automatically.**
 
-- After providing recommendations → use complete()
-- After answering questions → use complete()
-- After reviewing code/plans → use complete()
-- Even if just acknowledging → use complete()
+- After providing recommendations → just stop
+- After answering questions → just stop  
+- After reviewing code/plans → just stop
+- Your work is complete when you finish responding
 
-Simply responding without complete() leaves tasks incomplete and workflows hanging.
-
-Example CORRECT usage:
+Example:
 User: "Review this authentication approach"
-You: complete("The authentication approach uses JWT tokens with proper expiry. However, it needs: 1) Rate limiting on login endpoint to prevent brute force, 2) Token refresh mechanism for better UX, 3) Secure httpOnly cookies instead of localStorage. Overall solid foundation but needs these security enhancements.")
+You: "The authentication approach uses JWT tokens with proper expiry. However, it needs: 1) Rate limiting on login endpoint to prevent brute force, 2) Token refresh mechanism for better UX, 3) Secure httpOnly cookies instead of localStorage. Overall solid foundation but needs these security enhancements."
 
-Example INCORRECT:
-User: "Review this authentication approach"  
-You: "The authentication approach looks good but needs rate limiting." [NO complete() = TASK HANGS]
-
-Example ALSO INCORRECT:
-User: "Review this authentication approach"
-You: "Here's my review: [detailed review]" then complete("Review done") [WRONG - review details are LOST, not in complete()]
-
-Remember: Be concise, professional, domain-focused, and put EVERYTHING inside complete().`);
+Remember: Be concise, professional, and domain-focused.`);
 
     return parts.join("\n");
   },

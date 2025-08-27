@@ -33,7 +33,7 @@ const delegateSchema = z.object({
  * If any recipient cannot be resolved, the tool fails with an error.
  *
  * When delegating to multiple recipients, the agent will wait for all responses
- * before continuing. The agent should NOT call complete() after delegating.
+ * before continuing. The agent should NOT complete after delegating.
  *
  * Each delegation creates a kind:1111 conversation event (following NIP-22) that:
  * - Is addressed to a specific agent via p-tag

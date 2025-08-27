@@ -34,9 +34,9 @@ export class DelegationCompletionHandler {
     const registry = DelegationRegistry.getInstance();
     let delegationContext: DelegationRecord | undefined;
     
-    // Method 1: Check for explicit completion (tool:complete with e-tag)
-    if (event.tagValue("tool") === "complete") {
-      // For explicit completions, check all e-tags to find the matching delegation
+    // Method 1: Check for completion (status:completed with e-tag)
+    if (event.tagValue("status") === "completed") {
+      // For completions, check all e-tags to find the matching delegation
       const eTags = event.getMatchingTags("e");
       for (const eTagArray of eTags) {
         const eTag = eTagArray[1]; // e-tag value is at index 1

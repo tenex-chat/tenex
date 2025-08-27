@@ -1,6 +1,5 @@
 import { delegateExternalTool } from "@/tools/implementations/delegate_external";
 import { claudeCode } from "@/tools/implementations/claude_code";
-import { completeTool } from "../tools/implementations/complete";
 import { delegateTool } from "../tools/implementations/delegate";
 import { lessonLearnTool } from "../tools/implementations/learn";
 import { readPathTool } from "../tools/implementations/readPath";
@@ -14,7 +13,6 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * These are fundamental capabilities that every agent needs.
  */
 export const CORE_AGENT_TOOLS = [
-  "complete",      // All agents must be able to complete tasks
   "lesson_get",    // All agents should access lessons
   "lesson_learn",  // All agents should be able to learn
   "delegate",      // All agents should be able to delegate
@@ -35,7 +33,6 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       readPathTool.name,
       lessonLearnTool.name,
       claudeCode.name,
-      completeTool.name,
       delegateExternalTool.name,
       "write_context_file",
       "shell",
@@ -53,7 +50,6 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       readPathTool.name,
       lessonLearnTool.name,
       claudeCode.name,
-      completeTool.name,
       delegateExternalTool.name,
       delegateTool.name,
       "agents_list",
@@ -70,7 +66,6 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
     lessonLearnTool.name,
     // analyze.name,
     claudeCode.name,
-    completeTool.name, // All agents can complete tasks
     delegateExternalTool.name, // All agents can delegate to external agents
     delegateTool.name, // Non-PM agents use regular delegate
   ];

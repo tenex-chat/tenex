@@ -30,7 +30,7 @@ export class PhaseManager {
    * Check if a phase transition is valid
    */
   canTransition(from: Phase, to: Phase): boolean {
-    // Allow same-phase transitions (handoffs between agents)
+    // Allow same-phase transitions (delegations between agents)
     if (from === to) {
       return true;
     }
@@ -52,7 +52,7 @@ export class PhaseManager {
 
     // Validate transition
     if (from === to) {
-      // Same phase handoff is always allowed
+      // Same phase delegation is always allowed
       const transition: PhaseTransition = {
         from,
         to,

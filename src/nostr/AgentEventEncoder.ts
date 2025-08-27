@@ -162,8 +162,8 @@ export class AgentEventEncoder {
     // p-tag the agent that triggered us
     event.tag(["p", context.triggeringEvent.pubkey]);
     
-    // Mark as completion
-    event.tag(["tool", "complete"]);
+    // Mark as natural completion
+    event.tag(["status", "completed"]);
     
     // Add summary if provided
     if (intent.summary) {

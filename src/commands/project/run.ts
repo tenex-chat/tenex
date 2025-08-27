@@ -57,7 +57,7 @@ async function runProjectListener(projectPath: string, ndk: NDK): Promise<void> 
     await mcpService.initialize(projectPath);
 
     // Initialize event handler
-    const eventHandler = new EventHandler(projectPath, llmService, ndk);
+    const eventHandler = new EventHandler(projectPath, llmService);
     await eventHandler.initialize();
 
     // Initialize subscription manager

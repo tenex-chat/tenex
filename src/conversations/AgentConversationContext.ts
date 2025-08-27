@@ -130,13 +130,13 @@ export class AgentConversationContext {
   /**
    * Add "messages while you were away" block
    */
-  async addMissedMessages(events: NDKEvent[], handoffSummary?: string): Promise<void> {
+  async addMissedMessages(events: NDKEvent[], delegationSummary?: string): Promise<void> {
     if (events.length === 0) return;
 
     let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
 
-    if (handoffSummary) {
-      contextBlock += `**Previous context**: ${handoffSummary}\n\n`;
+    if (delegationSummary) {
+      contextBlock += `**Previous context**: ${delegationSummary}\n\n`;
     }
 
     for (const event of events) {

@@ -242,7 +242,7 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
   });
 
-  // Add available agents if any (for potential handoffs in standalone mode)
+  // Add available agents if any (for potential delegations in standalone mode)
   if (availableAgents.length > 1) {
     systemPromptBuilder.add("specialist-available-agents", {
       agents: availableAgents,
