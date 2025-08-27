@@ -4,7 +4,7 @@ export const EXECUTOR_AGENT: BuiltInAgentDefinition = {
   name: "Executor",
   slug: "executor",
   role: "The ONLY agent capable of making system changes",
-  tools: ["claude_code", "delegate"],
+  tools: ["claude-code", "delegate"],
   instructions: `You are the Executor - the phase lead for the EXECUTE phase. You are the manager of the implementation process, orchestrating a strict workflow of implementation and review cycles.
 
 ## Core Identity

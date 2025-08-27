@@ -141,8 +141,14 @@ export class ReasonActLoop {
         } else {
           // No tool calls, no terminal tool, AND no content was generated
           // This indicates the agent truly has nothing further to do
-          tracingLogger.info("[ReasonActLoop] No tool calls, no content, ending loop", {
+          tracingLogger.warning("[ReasonActLoop] No tool calls, no content, ending loop", {
             iteration: iterations,
+            possibleCause: "Model returned empty response - check model availability and context",
+            lastResponseMetadata: stateManager.getFinalResponse() ? {
+              model: stateManager.getFinalResponse()?.model,
+              promptTokens: stateManager.getFinalResponse()?.usage?.prompt_tokens,
+              completionTokens: stateManager.getFinalResponse()?.usage?.completion_tokens,
+            } : null,
           });
           shouldContinueLoop = false;
         }
@@ -176,10 +182,10 @@ export class ReasonActLoop {
       
       if (fullContent.trim().length > 0) {
         // Build event context with all metadata
-        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-        const eventContext: EventContext = {
+        const completionConversation = context.conversationCoordinator.getConversation(context.conversationId);
+        const completionEventContext: EventContext = {
           triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+          rootEvent: completionConversation?.history[0] ?? context.triggeringEvent,
           conversationId: context.conversationId,
         };
 
@@ -188,9 +194,9 @@ export class ReasonActLoop {
         if (finalResponse) {
           const llmMetadata = await buildLLMMetadata(finalResponse, conversationMessages);
           if (llmMetadata) {
-            eventContext.model = llmMetadata.model;
-            eventContext.cost = llmMetadata.cost;
-            eventContext.usage = {
+            completionEventContext.model = llmMetadata.model;
+            completionEventContext.cost = llmMetadata.cost;
+            completionEventContext.usage = {
               prompt_tokens: llmMetadata.promptTokens,
               completion_tokens: llmMetadata.completionTokens,
               total_tokens: llmMetadata.totalTokens,
@@ -199,15 +205,15 @@ export class ReasonActLoop {
         }
 
         // Tools publish their own events now, no need to track them here
-        eventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
-        eventContext.phase = context.phase;
+        completionEventContext.executionTime = this.startTime ? Date.now() - this.startTime : undefined;
+        completionEventContext.phase = context.phase;
 
         const naturalCompletionIntent: CompletionIntent = {
           type: 'completion',
           content: fullContent,
         };
 
-        await this.agentPublisher.complete(naturalCompletionIntent, eventContext);
+        await this.agentPublisher.complete(naturalCompletionIntent, completionEventContext);
         
         tracingLogger.info("[ReasonActLoop] Published natural completion", {
           agent: context.agent.name,
@@ -427,7 +433,7 @@ export class ReasonActLoop {
       messages,
       options: {
         configName: context.agent.llmConfig,
-        agentName: context.agent.name,
+        agentName: context.agent.slug,
       },
       tools,
       toolContext: {

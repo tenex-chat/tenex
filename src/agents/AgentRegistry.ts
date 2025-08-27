@@ -535,20 +535,20 @@ export class AgentRegistry {
     const validToolNames = newToolNames.filter((name): name is ToolName => {
       // Check if the tool name is valid
       const validTools: ToolName[] = [
-        "read_path",
-        "write_context_file",
+        "read-path",
+        "write-context-file",
         "analyze",
-        "generate_inventory",
-        "lesson_learn",
-        "lesson_get",
+        "generate-inventory",
+        "lesson-learn",
+        "lesson-get",
         "shell",
-        "agents_discover",
-        "agents_hire",
-        "discover_capabilities",
+        "agents-discover",
+        "agents-hire",
+        "discover-capabilities",
         "delegate",
-        "delegate_phase",
-        "nostr_projects",
-        "claude_code",
+        "delegate-phase",
+        "nostr-projects",
+        "claude-code",
       ];
       return validTools.includes(name as ToolName);
     });

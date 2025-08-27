@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import type { ConversationCoordinator } from "@/conversations";
 import type { LLMService } from "@/llm/types";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
