@@ -5,7 +5,7 @@ import { generateInventory, inventoryExists } from "@/utils/inventory";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const execAsync = promisify(exec);
 
@@ -20,7 +20,7 @@ interface GenerateInventoryOutput {
 }
 
 export const generateInventoryTool: Tool<GenerateInventoryInput, GenerateInventoryOutput> = {
-  name: "generate_inventory",
+  name: "generate-inventory",
   description: "Generate a comprehensive project inventory using repomix + LLM analysis",
 
   parameters: createZodSchema(generateInventorySchema),
@@ -81,25 +81,19 @@ export const generateInventoryTool: Tool<GenerateInventoryInput, GenerateInvento
 
 The inventory provides comprehensive information about the codebase structure, significant files, and architectural patterns to help with development tasks.`;
 
-      return {
-        ok: true,
-        value: {
-          message,
-          inventoryExists: true,
-          regenerated: exists,
-        },
-      };
+      return success({
+        message,
+        inventoryExists: true,
+        regenerated: exists,
+      });
     } catch (error) {
       logger.error("Generate inventory tool failed", { error });
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "generate_inventory",
-          message: formatAnyError(error),
-          cause: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "generate-inventory",
+        message: formatAnyError(error),
+        cause: error,
+      });
     }
   },
 };

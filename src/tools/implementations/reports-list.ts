@@ -3,7 +3,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const reportsListSchema = z.object({
   allAgents: z
@@ -38,7 +38,7 @@ interface ReportsListOutput {
 }
 
 export const reportsListTool: Tool<ReportsListInput, ReportsListOutput> = {
-  name: "reports_list",
+  name: "reports-list",
   description: "List NDKArticle reports from agents in the project",
 
   promptFragment: `List reports (NDKArticles) from agents in the project.
@@ -93,18 +93,15 @@ Use this to discover available reports for reading or analysis.`,
         agent: context.agent.name,
       });
 
-      return {
-        ok: true,
-        value: {
-          success: true,
-          reports,
-          summary: {
-            total: reports.length,
-            byAgent,
-          },
-          message: `Found ${reports.length} report${reports.length !== 1 ? 's' : ''}`,
+      return success({
+        success: true,
+        reports,
+        summary: {
+          total: reports.length,
+          byAgent,
         },
-      };
+        message: `Found ${reports.length} report${reports.length !== 1 ? 's' : ''}`,
+      });
     } catch (error) {
       logger.error("❌ Reports list tool failed", {
         error: formatAnyError(error),
@@ -113,14 +110,11 @@ Use this to discover available reports for reading or analysis.`,
         phase: context.phase,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "reports_list",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "reports-list",
+        message: formatAnyError(error),
+      });
     }
   },
 };

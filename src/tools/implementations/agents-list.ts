@@ -53,7 +53,7 @@ interface AgentsListOutput {
  * List all available agents in the project with their configurations and system prompts
  */
 export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
-  name: "agents_list",
+  name: "agents-list",
   description:
     "List all available agents in the project, including their system prompts and configurations",
   parameters: createZodSchema(agentsListSchema),
@@ -222,7 +222,7 @@ export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
       logger.error("Failed to list agents", { error });
       return failure({
         kind: "execution",
-        tool: "agents_list",
+        tool: "agents-list",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

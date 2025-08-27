@@ -40,7 +40,7 @@ interface LessonLearnOutput {
 }
 
 export const lessonLearnTool: Tool<LessonLearnInput, LessonLearnOutput> = {
-  name: "lesson_learn",
+  name: "lesson-learn",
   description:
     "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
 

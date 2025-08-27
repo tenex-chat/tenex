@@ -37,7 +37,7 @@ interface AgentsReadOutput {
  * Read a local agent definition from JSON file
  */
 export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
-  name: "agents_read",
+  name: "agents-read",
   description: "Read a local agent definition from its JSON file",
   parameters: createZodSchema(agentsReadSchema),
   execute: async (
@@ -88,7 +88,7 @@ export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
       } catch (error) {
         return failure({
           kind: "execution",
-          tool: "agents_read",
+          tool: "agents-read",
           message: `Failed to read or parse agent definition file: ${error}`,
           cause: error,
         });
@@ -137,7 +137,7 @@ export const agentsRead: Tool<AgentsReadInput, AgentsReadOutput> = {
       logger.error("Failed to read agent definition", { error });
       return failure({
         kind: "execution",
-        tool: "agents_read",
+        tool: "agents-read",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

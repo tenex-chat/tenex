@@ -3,7 +3,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const reportDeleteSchema = z.object({
   slug: z.string().describe("The slug identifier (d-tag) of the report to delete"),
@@ -21,7 +21,7 @@ interface ReportDeleteOutput {
 }
 
 export const reportDeleteTool: Tool<ReportDeleteInput, ReportDeleteOutput> = {
-  name: "report_delete",
+  name: "report-delete",
   description: "Mark an NDKArticle report as deleted",
 
   promptFragment: `Mark a report as deleted by clearing its content and adding a deleted tag.
@@ -56,15 +56,12 @@ Note: This is a soft delete - the article still exists but is marked as deleted.
         agent: context.agent.name,
       });
 
-      return {
-        ok: true,
-        value: {
-          success: true,
-          articleId: `nostr:${articleId}`,
-          slug,
-          message: `Report "${slug}" marked as deleted`,
-        },
-      };
+      return success({
+        success: true,
+        articleId: `nostr:${articleId}`,
+        slug,
+        message: `Report "${slug}" marked as deleted`,
+      });
     } catch (error) {
       logger.error("❌ Report delete tool failed", {
         error: formatAnyError(error),
@@ -73,14 +70,11 @@ Note: This is a soft delete - the article still exists but is marked as deleted.
         phase: context.phase,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "report_delete",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "report-delete",
+        message: formatAnyError(error),
+      });
     }
   },
 };

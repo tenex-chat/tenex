@@ -59,7 +59,7 @@ export const delegatePhaseTool = createToolDefinition<
   z.input<typeof delegatePhaseSchema>,
   DelegationResponses
 >({
-  name: "delegate_phase",
+  name: "delegate-phase",
   description:
     "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
   promptFragment: `DELEGATE_PHASE TOOL (Project Manager ONLY):

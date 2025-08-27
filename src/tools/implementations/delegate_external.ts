@@ -1,8 +1,9 @@
 import { getNDK } from "@/nostr/ndkClient";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
+import { NDKEvent, type NDKFilter, type NDKSubscription } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema, failure, success } from "../types";
@@ -17,7 +18,7 @@ const delegateExternalSchema = z.object({
   projectId: z
     .string()
     .optional()
-    .describe("Optional project event ID (naddr1...) to reference in the message"),
+    .describe("Optional project event ID (naddr1...) to reference in the message. This should be the project the agent you are delegating TO works on (if you know it)"),
 });
 
 interface DelegateExternalInput {
@@ -28,13 +29,13 @@ interface DelegateExternalInput {
 }
 
 export const delegateExternalTool: Tool<DelegateExternalInput, DelegationResponses> = {
-  name: "delegate_external",
+  name: "delegate-external",
   description: "Delegate a task to an external agent or user and wait synchronously for their response, optionally as a reply or referencing a project",
 
   promptFragment: `Delegate tasks to external agents or users on Nostr and wait synchronously for their response.
 
 This tool allows you to:
-- Send a delegation request (kind:11) by p-tagging a recipient
+- Start a thread (kind:11) by p-tagging a recipient
 - Ask follow-up questions to an existing event (creates a proper kind:1111 reply)
 - Reference a project in your delegation
 - Wait synchronously for the recipient's response (blocking indefinitely until response)`,
@@ -44,11 +45,14 @@ This tool allows you to:
   execute: async (input, context) => {
     const { content, parentEventId, recipient, projectId } = input.value;
 
+    // Clean the recipient - strip nostr: prefix if present
+    const cleanRecipient = recipient.replace(/^nostr:/, "");
+
     logger.info("🚀 Delegating to external agent", {
       agent: context.agent.name,
       hasParent: !!parentEventId,
       hasProject: !!projectId,
-      recipientPrefix: recipient.substring(0, 8),
+      recipientPrefix: cleanRecipient.substring(0, 8),
       contentLength: content.length,
     });
 
@@ -59,6 +63,12 @@ This tool allows you to:
       // Strip optional nostr: prefix from IDs
       const cleanParentId = parentEventId?.replace(/^nostr:/, "");
       const cleanProjectId = projectId?.replace(/^nostr:/, "");
+
+      // Convert npub to hex pubkey if needed
+      let pubkey = cleanRecipient;
+      if (cleanRecipient.startsWith('npub')) {
+        pubkey = ndk.getUser({ npub: cleanRecipient }).pubkey;
+      }
 
       if (cleanParentId) {
         // Fetch the parent event and create a reply
@@ -73,31 +83,24 @@ This tool allows you to:
 
         // Use the parent event's reply() method to create the reply event
         chatEvent = await parentEvent.reply();
-        chatEvent.content = content;
         chatEvent.tags = chatEvent.tags.filter(t => t[0] !== 'p');
       } else {
-        // Create a new kind:11 event for direct messaging
-        chatEvent = new NDKEvent(ndk, {
-          kind: 11,
-          content,
-          tags: [],
-        });
-      }
-
-      let pubkey = recipient;
-
-      if (recipient.startsWith('npub')) {
-        pubkey = ndk.getUser({ npub: recipient }).pubkey;
+        // Create a new kind:11 event for starting a thread
+        chatEvent = new NDKEvent(ndk);
+        chatEvent.kind = 11;
+        
+        // Add phase and tool tags
       }
       
-      // P-tag the recipient
+      if (context.phase) chatEvent.tags.push(["phase", context.phase]);
+      chatEvent.tags.push(["tool", "delegate_external"]);
+      chatEvent.content = content;
       chatEvent.tags.push(["p", pubkey]);
 
       // Add project reference if provided
       if (cleanProjectId) {
         const projectEvent = await ndk.fetchEvent(cleanProjectId);
         if (projectEvent) {
-          // Use the event's tagReference() method to properly tag it
           const tagRef = projectEvent.tagReference();
           if (tagRef) {
             chatEvent.tags.push(tagRef);
@@ -120,15 +123,31 @@ This tool allows you to:
         mode: "synchronous",
       });
 
+      // Register the external delegation in DelegationRegistry
+      const registry = DelegationRegistry.getInstance();
+      const batchId = await registry.registerExternalDelegation({
+        delegationEventId: chatEvent.id,
+        delegatingAgent: context.agent,
+        assignedToPubkey: pubkey,
+        conversationId: context.conversationId,
+        fullRequest: content,
+        phase: context.phase,
+      });
+
+      logger.debug("External delegation registered in DelegationRegistry", {
+        batchId,
+        eventId: chatEvent.id.substring(0, 8),
+        conversationId: context.conversationId.substring(0, 8),
+      });
+
       // Publish conversation status event
       try {
         // Use shared AgentPublisher instance from context (guaranteed to be present)
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
         if (conversation?.history?.[0]) {
-          const nostrReference = `nostr:${chatEvent.encode()}`;
           await context.agentPublisher.conversation(
-            { type: "conversation", content: `🚀 External delegation sent: ${nostrReference}` },
+            { type: "conversation", content: `🚀 External delegation sent: nostr:${chatEvent.encode()}` },
             {
               triggeringEvent: context.triggeringEvent,
               rootEvent: conversation.history[0],
@@ -141,30 +160,41 @@ This tool allows you to:
         console.warn("Failed to publish delegation status:", statusError);
       }
 
-      // Wait synchronously for response from the external agent (blocking execution)
+      // Wait synchronously for response using the batch completion mechanism
       logger.info("⏳ Blocking execution to wait for external agent response", {
         eventId: chatEvent.id,
         recipientPubkey: pubkey.substring(0, 16),
+        batchId,
         mode: "synchronous",
       });
 
       try {
-        const response = await waitForExternalResponse({
-          delegationEventId: chatEvent.id!,
-          expectedSenderPubkey: pubkey,
-        });
+        // Wait for batch completion (will be triggered when response is received and processed)
+        const completions = await registry.waitForBatchCompletion(batchId);
 
         logger.info("✅ Synchronous wait complete - received response from external agent", {
           eventId: chatEvent.id,
-          responseLength: response.responses[0]?.response.length || 0,
+          batchId,
+          completionCount: completions.length,
           mode: "synchronous",
         });
+
+        // Convert to DelegationResponses format
+        const response: DelegationResponses = {
+          type: "delegation_responses",
+          responses: completions.map(c => ({
+            response: c.response,
+            summary: c.summary,
+            from: c.assignedTo,
+          })),
+        };
 
         return success(response);
       } catch (error) {
         // Synchronous wait failed - this should only happen if there's a network issue
         logger.error("❌ Synchronous wait failed for external response", {
           eventId: chatEvent.id,
+          batchId,
           mode: "synchronous",
           error,
         });
@@ -192,88 +222,3 @@ This tool allows you to:
   },
 };
 
-/**
- * Synchronously wait for a response from an external agent.
- * This function blocks execution indefinitely until:
- * - A response is received (kind:1111 reply event from the expected sender)
- * 
- * This ensures the delegate_external tool behaves synchronously like other delegation tools.
- */
-async function waitForExternalResponse(params: {
-  delegationEventId: string;
-  expectedSenderPubkey: string;
-}): Promise<DelegationResponses> {
-  const { delegationEventId, expectedSenderPubkey } = params;
-  const ndk = getNDK();
-
-  return new Promise<DelegationResponses>((resolve) => {
-    let subscription: NDKSubscription | undefined;
-
-    // Cleanup function
-    const cleanup = () => {
-      if (subscription) {
-        subscription.stop();
-      }
-    };
-
-    // Set up subscription filter
-    const filter: NDKFilter = {
-      kinds: [1111], // Reply events
-      authors: [expectedSenderPubkey],
-      "#e": [delegationEventId], // Must be replying to our delegation
-    };
-
-    logger.debug("Setting up synchronous wait subscription for external response", {
-      filter,
-      delegationEventId: delegationEventId.substring(0, 8),
-      expectedSender: expectedSenderPubkey.substring(0, 16),
-      mode: "synchronous",
-    });
-
-    // Create subscription - will block indefinitely until response
-    subscription = ndk.subscribe(filter, {
-      closeOnEose: false, // Keep listening indefinitely until response
-    });
-
-    subscription.on("event", (event: NDKEvent) => {
-      logger.info("📨 Synchronous wait successful - received response from external agent", {
-        eventId: event.id,
-        from: event.pubkey.substring(0, 16),
-        contentLength: event.content.length,
-        mode: "synchronous",
-      });
-
-      // Check if this is indeed a reply to our delegation
-      const replyToTag = event.tags.find(
-        (tag) => tag[0] === "e" && tag[1] === delegationEventId
-      );
-
-      if (replyToTag) {
-        cleanup();
-
-        // Extract summary if present
-        const summaryTag = event.tags.find((tag) => tag[0] === "summary");
-        const summary = summaryTag?.[1];
-
-        // Build response
-        const response: DelegationResponses = {
-          type: "delegation_responses",
-          responses: [{
-            response: event.content,
-            summary,
-            from: event.pubkey,
-          }],
-        };
-
-        resolve(response);
-      }
-    });
-
-    subscription.on("eose", () => {
-      logger.debug("End of stored events - continuing synchronous wait for new events", {
-        mode: "synchronous",
-      });
-      // Continue synchronous blocking wait indefinitely for new events until response
-    });
-  });
-}

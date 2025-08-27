@@ -63,7 +63,7 @@ function formatAgentsAsMarkdown(
 }
 
 export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDiscoverOutput> = {
-  name: "agents_discover",
+  name: "agents-discover",
   description:
     "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
   promptFragment:
@@ -120,7 +120,7 @@ export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDi
       logger.error("Failed to discover agents", { error });
       return failure({
         kind: "execution",
-        tool: "agents_discover",
+        tool: "agents-discover",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

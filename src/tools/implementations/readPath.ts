@@ -2,7 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 import { resolveAndValidatePath } from "../utils";
 
 const readPathSchema = z.object({
@@ -19,7 +19,7 @@ type ReadPathOutput = string;
  * Performs I/O side effects
  */
 export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
-  name: "read_path",
+  name: "read-path",
   description:
     "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories.",
 
@@ -59,10 +59,7 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
         const files = await readdir(fullPath);
         const fileList = files.map((file) => `  - ${file}`).join("\n");
 
-        return {
-          ok: true,
-          value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
-        };
+        return success(`Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`);
       }
 
       const content = await readFile(fullPath, "utf-8");
@@ -81,10 +78,7 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
         }
       }
 
-      return {
-        ok: true,
-        value: content,
-      };
+      return success(content);
     } catch (error: unknown) {
       // If it's an EISDIR error that we somehow missed, provide helpful guidance
       if (error instanceof Error && "code" in error && error.code === "EISDIR") {
@@ -93,33 +87,24 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
           const files = await readdir(fullPath);
           const fileList = files.map((file) => `  - ${file}`).join("\n");
 
-          return {
-            ok: true,
-            value: `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`,
-          };
+          return success(`Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`);
         } catch {
           // If we can't read the directory, fall back to the original error
-          return {
-            ok: false,
-            error: {
-              kind: "execution" as const,
-              tool: "read_path",
-              message: `Failed to read ${path}: ${error.message}`,
-              cause: error,
-            },
-          };
+          return failure({
+            kind: "execution" as const,
+            tool: "read-path",
+            message: `Failed to read ${path}: ${error.message}`,
+            cause: error,
+          });
         }
       }
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "read_path",
-          message: `Failed to read ${path}: ${formatAnyError(error)}`,
-          cause: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "read-path",
+        message: `Failed to read ${path}: ${formatAnyError(error)}`,
+        cause: error,
+      });
     }
   },
 };

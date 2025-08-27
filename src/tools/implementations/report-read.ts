@@ -3,7 +3,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const reportReadSchema = z.object({
   identifier: z
@@ -32,7 +32,7 @@ interface ReportReadOutput {
 }
 
 export const reportReadTool: Tool<ReportReadInput, ReportReadOutput> = {
-  name: "report_read",
+  name: "report-read",
   description: "Read an NDKArticle report by slug or naddr identifier",
 
   promptFragment: `Read a report (NDKArticle) by its slug or naddr identifier.
@@ -72,13 +72,10 @@ Use this to retrieve and analyze previously written reports.`,
           agent: context.agent.name,
         });
 
-        return {
-          ok: true,
-          value: {
-            success: false,
-            message: `No report found with identifier: ${identifier}`,
-          },
-        };
+        return success({
+          success: false,
+          message: `No report found with identifier: ${identifier}`,
+        });
       }
 
       // Check if the report is deleted
@@ -88,13 +85,10 @@ Use this to retrieve and analyze previously written reports.`,
           agent: context.agent.name,
         });
 
-        return {
-          ok: true,
-          value: {
-            success: false,
-            message: `Report "${identifier}" has been deleted`,
-          },
-        };
+        return success({
+          success: false,
+          message: `Report "${identifier}" has been deleted`,
+        });
       }
 
       logger.info("✅ Report read successfully", {
@@ -103,23 +97,20 @@ Use this to retrieve and analyze previously written reports.`,
         agent: context.agent.name,
       });
 
-      return {
-        ok: true,
-        value: {
-          success: true,
-          article: {
-            id: report.id,
-            slug: report.slug,
-            title: report.title,
-            summary: report.summary,
-            content: report.content,
-            author: report.author,
-            publishedAt: report.publishedAt,
-            hashtags: report.hashtags,
-            projectReference: report.projectReference,
-          },
+      return success({
+        success: true,
+        article: {
+          id: report.id,
+          slug: report.slug,
+          title: report.title,
+          summary: report.summary,
+          content: report.content,
+          author: report.author,
+          publishedAt: report.publishedAt,
+          hashtags: report.hashtags,
+          projectReference: report.projectReference,
         },
-      };
+      });
     } catch (error) {
       logger.error("❌ Report read tool failed", {
         error: formatAnyError(error),
@@ -128,14 +119,11 @@ Use this to retrieve and analyze previously written reports.`,
         phase: context.phase,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "report_read",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "report-read",
+        message: formatAnyError(error),
+      });
     }
   },
 };

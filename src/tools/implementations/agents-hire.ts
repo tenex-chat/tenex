@@ -37,7 +37,7 @@ interface AgentsHireOutput {
  * Hire (add) an NDKAgentDefinition from the Nostr network to the project
  */
 export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
-  name: "agents_hire",
+  name: "agents-hire",
   description:
     "Hire (add) a new agent from the Nostr network to the current project using its event ID",
   parameters: createZodSchema(agentsHireSchema),
@@ -159,7 +159,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
       logger.error("Failed to hire agent", { error });
       return failure({
         kind: "execution",
-        tool: "agents_hire",
+        tool: "agents-hire",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

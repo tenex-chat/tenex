@@ -3,7 +3,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const reportWriteSchema = z.object({
   slug: z.string().describe("The slug identifier for the article, used as the d-tag"),
@@ -32,7 +32,7 @@ interface ReportWriteOutput {
 }
 
 export const reportWriteTool: Tool<ReportWriteInput, ReportWriteOutput> = {
-  name: "report_write",
+  name: "report-write",
   description: "Generate or update an NDKArticle report for the current project",
 
   promptFragment: `Generate or update a report as an NDKArticle.
@@ -104,15 +104,12 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
         console.warn("Failed to publish report_write status:", statusError);
       }
 
-      return {
-        ok: true,
-        value: {
-          success: true,
-          articleId: `nostr:${articleId}`,
-          slug,
-          message: `Report "${title}" published successfully`,
-        },
-      };
+      return success({
+        success: true,
+        articleId: `nostr:${articleId}`,
+        slug,
+        message: `Report "${title}" published successfully`,
+      });
     } catch (error) {
       logger.error("❌ Report write tool failed", {
         error: formatAnyError(error),
@@ -121,14 +118,11 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
         phase: context.phase,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "report_write",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "report-write",
+        message: formatAnyError(error),
+      });
     }
   },
 };

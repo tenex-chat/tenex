@@ -4,7 +4,7 @@ import { logger } from "@/utils/logger";
 import { generateRepomixOutput } from "@/utils/repomix";
 import { Message } from "multi-llm-ts";
 import { z } from "zod";
-import { createToolDefinition } from "../types";
+import { createToolDefinition, success, failure } from "../types";
 
 const analyzeSchema = z.object({
   prompt: z.string().min(1).describe("The analysis prompt or question about the codebase"),
@@ -37,15 +37,12 @@ export const analyze = createToolDefinition<z.infer<typeof analyzeSchema>, Analy
     try {
       repomixResult = await generateRepomixOutput(context.projectPath, targetDirectory);
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "analyze",
-          message: `Failed to generate repomix output: ${formatAnyError(error)}`,
-          cause: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "analyze",
+        message: `Failed to generate repomix output: ${formatAnyError(error)}`,
+        cause: error,
+      });
     }
 
     try {
@@ -78,27 +75,21 @@ Provide a clear, structured response focused on the specific question asked.`;
 
       // Typing indicators are handled by the agent execution layer
 
-      return {
-        ok: true,
-        value: {
-          analysis: response.content || "",
-          repoSize: repomixResult.size,
-        },
-      };
+      return success({
+        analysis: response.content || "",
+        repoSize: repomixResult.size,
+      });
     } catch (error) {
       logger.error("Analyze tool failed", { error });
 
       // Typing indicators are handled by the agent execution layer
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "analyze",
-          message: formatAnyError(error),
-          cause: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "analyze",
+        message: formatAnyError(error),
+        cause: error,
+      });
     } finally {
       repomixResult.cleanup();
     }

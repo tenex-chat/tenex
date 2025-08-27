@@ -7,7 +7,7 @@ import { logger } from "@/utils/logger";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const WriteContextFileArgsSchema = z.object({
   filename: z.string().min(1, "filename must be a non-empty string"),
@@ -28,7 +28,7 @@ interface WriteContextFileOutput {
 }
 
 export const writeContextFileTool: Tool<WriteContextFileInput, WriteContextFileOutput> = {
-  name: "write_context_file",
+  name: "write-context-file",
   description:
     "Write or update a specification file in the context/ directory. You must have read this file recently before writing to it.",
 
@@ -62,14 +62,11 @@ Example workflow:
 
     // Only allow markdown files
     if (!filename.endsWith(".md")) {
-      return {
-        ok: false,
-        error: {
-          kind: "validation" as const,
-          field: "filename",
-          message: "Only markdown files (.md) can be written to the context directory",
-        },
-      };
+      return failure({
+        kind: "validation" as const,
+        field: "filename",
+        message: "Only markdown files (.md) can be written to the context directory",
+      });
     }
 
     try {
@@ -95,14 +92,11 @@ Example workflow:
 
       // If file exists and wasn't recently read, deny access
       if (fileExists && !wasRecentlyRead) {
-        return {
-          ok: false,
-          error: {
-            kind: "validation" as const,
-            field: "filename",
-            message: `You must read the file 'context/${filename}' before writing to it. Use the read_path tool first.`,
-          },
-        };
+        return failure({
+          kind: "validation" as const,
+          field: "filename",
+          message: `You must read the file 'context/${filename}' before writing to it. Use the read_path tool first.`,
+        });
       }
 
       // Ensure context directory exists
@@ -181,21 +175,15 @@ Example workflow:
         });
       }
 
-      return {
-        ok: true,
-        value: {
-          message: `Successfully wrote to context/${filename}`,
-        },
-      };
+      return success({
+        message: `Successfully wrote to context/${filename}`,
+      });
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "write_context_file",
-          message: `Failed to write file: ${formatAnyError(error)}`,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "write-context-file",
+        message: `Failed to write file: ${formatAnyError(error)}`,
+      });
     }
   },
 };

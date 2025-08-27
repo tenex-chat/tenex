@@ -35,7 +35,7 @@ interface CreateProjectOutput {
  * Not available to any agent by default - must be explicitly assigned
  */
 export const createProjectTool: Tool<CreateProjectInput, CreateProjectOutput> = {
-  name: "create_project",
+  name: "create-project",
   description: "Create and publish a new NDKProject event to Nostr",
 
   promptFragment: `Create a new NDKProject event and publish it to Nostr.

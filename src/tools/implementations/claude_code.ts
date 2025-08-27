@@ -33,7 +33,7 @@ interface ClaudeCodeOutput {
 }
 
 export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>, ClaudeCodeOutput>({
-  name: "claude_code",
+  name: "claude-code",
   description:
     "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development.",
   schema: claudeCodeSchema,

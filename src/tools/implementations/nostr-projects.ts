@@ -6,7 +6,7 @@ import { logger } from "@/utils/logger";
 import { NDKArticle, NDKUser } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 // Define schema that gracefully handles no arguments, empty strings, or optional pubkey
 // This handles cases where LLMs send "", {}, or {pubkey: "..."}
@@ -51,7 +51,7 @@ interface NostrProjectsOutput {
 }
 
 export const nostrProjectsTool: Tool<NostrProjectsInput, NostrProjectsOutput> = {
-  name: "nostr_projects",
+  name: "nostr-projects",
   description: "Fetch Nostr projects for a pubkey, including online status and spec documents",
 
   promptFragment: `Fetch projects from Nostr for analysis and information gathering.
@@ -77,14 +77,11 @@ Use this to understand what projects exist for a given user or the current proje
         phase: context.phase,
         conversationId: context.conversationId,
       });
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "nostr_projects",
-          message: error,
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "nostr-projects",
+        message: error,
+      });
     }
 
     // Determine which pubkey to use
@@ -106,14 +103,11 @@ Use this to understand what projects exist for a given user or the current proje
           agent: context.agent.name,
           phase: context.phase,
         });
-        return {
-          ok: false,
-          error: {
-            kind: "execution" as const,
-            tool: "nostr_projects",
-            message: error,
-          },
-        };
+        return failure({
+          kind: "execution" as const,
+          tool: "nostr-projects",
+          message: error,
+        });
       }
     }
 
@@ -289,10 +283,7 @@ Use this to understand what projects exist for a given user or the current proje
         agent: context.agent.name,
       });
 
-      return {
-        ok: true,
-        value: result,
-      };
+      return success(result);
     } catch (error) {
       logger.error("❌ Nostr projects tool failed", {
         error: formatAnyError(error),
@@ -301,14 +292,11 @@ Use this to understand what projects exist for a given user or the current proje
         phase: context.phase,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "nostr_projects",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "nostr-projects",
+        message: formatAnyError(error),
+      });
     }
   },
 };
