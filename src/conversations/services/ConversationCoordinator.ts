@@ -13,14 +13,15 @@ import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
+import { FileSystemAdapter } from "../persistence";
+import type { ConversationPersistenceAdapter } from "../persistence/types";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
 import type { AgentState, Conversation, ConversationMetadata } from "../types";
-import type { IAgentResolver } from "./AgentResolver";
-import type { ConversationEventProcessor } from "./ConversationEventProcessor";
-import type { IConversationPersistenceService } from "./ConversationPersistenceService";
-import type { ConversationStore } from "./ConversationStore";
-import type { PhaseManager, PhaseTransitionContext } from "./PhaseManager";
+import { ConversationEventProcessor } from "./ConversationEventProcessor";
+import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
+import { ConversationStore } from "./ConversationStore";
+import { PhaseManager, type PhaseTransitionContext } from "./PhaseManager";
 
 /**
  * Coordinates between all conversation services.
@@ -38,17 +39,17 @@ export class ConversationCoordinator {
   private agentContexts: Map<string, AgentConversationContext> = new Map();
 
   constructor(
-    store: ConversationStore,
-    persistence: IConversationPersistenceService,
-    phaseManager: PhaseManager,
-    eventProcessor: ConversationEventProcessor,
-    _agentResolver: IAgentResolver,
+    projectPath: string,
+    persistence?: ConversationPersistenceAdapter,
     executionQueueManager?: ExecutionQueueManager
   ) {
-    this.store = store;
-    this.persistence = persistence;
-    this.phaseManager = phaseManager;
-    this.eventProcessor = eventProcessor;
+    // Create services
+    this.store = new ConversationStore();
+    this.persistence = new ConversationPersistenceService(
+      persistence || new FileSystemAdapter(projectPath)
+    );
+    this.phaseManager = new PhaseManager(executionQueueManager);
+    this.eventProcessor = new ConversationEventProcessor();
     this.messageBuilder = new MessageBuilder();
 
     // Setup queue listeners if available

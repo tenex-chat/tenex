@@ -68,7 +68,7 @@ export class ConversationResolver {
       const taskId = AgentEventDecoder.getTaskId(event);
       if (taskId) {
         // Use DelegationRegistry to find the parent conversation
-        const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
+        const delegationContext = this.delegationRegistry.getDelegationContextByTaskId(taskId);
         if (delegationContext) {
           const parentConversation = this.conversationCoordinator.getConversation(
             delegationContext.delegatingAgent.conversationId
@@ -97,7 +97,7 @@ export class ConversationResolver {
 
       if (taskId) {
         // Use DelegationRegistry to find the parent conversation
-        const delegationContext = this.delegationRegistry.getDelegationContext(taskId);
+        const delegationContext = this.delegationRegistry.getDelegationContextByTaskId(taskId);
 
         if (delegationContext) {
           conversation = this.conversationCoordinator.getConversation(

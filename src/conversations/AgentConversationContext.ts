@@ -42,7 +42,7 @@ export class AgentConversationContext {
     }
 
     const processed = await this.messageBuilder.processNostrEntities(event.content);
-    const message = this.messageBuilder.formatEventAsMessage(event, processed, this.agentSlug);
+    const message = await this.messageBuilder.formatEventAsMessage(event, processed, this.agentSlug, this.conversationId);
 
     this.messages.push(message);
 
@@ -97,7 +97,7 @@ export class AgentConversationContext {
 
     // Process the content
     const processed = await this.messageBuilder.processNostrEntities(event.content);
-    const message = this.messageBuilder.formatEventAsMessage(event, processed, this.agentSlug);
+    const message = await this.messageBuilder.formatEventAsMessage(event, processed, this.agentSlug, this.conversationId);
 
     // Update session ID if present
     const sessionId = event.tagValue?.("claude-session");
