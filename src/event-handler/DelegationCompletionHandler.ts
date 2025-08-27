@@ -69,8 +69,15 @@ export class DelegationCompletionHandler {
         const eTag = eTagArray[1]; // e-tag value is at index 1
         if (!eTag) continue;
         
-        // Check if this e-tag points to a delegation request we're tracking
-        const potentialContext = registry.getDelegationContextByTaskId(eTag);
+        // For multi-recipient delegations, we need to construct the synthetic task ID
+        // Format: ${eventId}:${responderPubkey}
+        const syntheticTaskId = `${eTag}:${event.pubkey}`;
+        
+        // Try both the direct e-tag and the synthetic task ID
+        let potentialContext = registry.getDelegationContextByTaskId(eTag);
+        if (!potentialContext) {
+          potentialContext = registry.getDelegationContextByTaskId(syntheticTaskId);
+        }
         
         if (potentialContext && 
             potentialContext.status === "pending" && 
@@ -80,7 +87,8 @@ export class DelegationCompletionHandler {
             conversationId: conversation.id.substring(0, 8),
             from: event.pubkey.substring(0, 16),
             to: delegationContext.delegatingAgent.pubkey.substring(0, 16),
-            taskId: eTag.substring(0, 8),
+            taskId: delegationContext.taskId.substring(0, 16),
+            isMultiRecipient: delegationContext.taskId.includes(':'),
           });
           break; // Found a match, stop checking
         }

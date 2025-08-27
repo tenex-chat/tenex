@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../../conversations";
+import { DelegationRegistry } from "../../services/DelegationRegistry";
 import { handleChatMessage } from "../reply";
 
 // Mock dependencies
@@ -19,9 +20,12 @@ describe("Agent Event Routing", () => {
   let mockAgentExecutor: AgentExecutor;
   let mockProjectContext: any;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset mocks
     mock.restore();
+    
+    // Initialize DelegationRegistry before each test
+    await DelegationRegistry.initialize();
 
     // Create mock conversation manager
     mockConversationCoordinator = {
@@ -147,6 +151,111 @@ describe("Agent Event Routing", () => {
     const executionCall = (mockAgentExecutor.execute as any).mock.calls[0];
     const executionContext = executionCall[0];
     expect(executionContext.agent.slug).toBe("project-manager");
+  });
+
+  it("should route events with multiple p-tags to all tagged agents", async () => {
+    // Create an event with multiple p-tags
+    const multiPtagEvent: NDKEvent = {
+      id: "event-multi",
+      pubkey: "user-pubkey", // User event
+      content: "Message to multiple agents",
+      kind: 1111,
+      tags: [
+        ["E", "conv-root"],
+        ["K", "11"],
+        ["p", "pm-agent-pubkey"],
+        ["p", "code-agent-pubkey"],
+      ],
+      tagValue: (tag: string) => {
+        if (tag === "E") return "conv-root";
+        if (tag === "K") return "11";
+        return undefined;
+      },
+      getMatchingTags: (tag: string) => {
+        if (tag === "p") {
+          return [
+            ["p", "pm-agent-pubkey"],
+            ["p", "code-agent-pubkey"],
+          ];
+        }
+        if (tag === "E") return [["E", "conv-root"]];
+        return [];
+      },
+    } as any;
+
+    // Mock conversation lookup to return a conversation
+    mockConversationCoordinator.getConversationByEvent = mock(() => ({
+      id: "conv-1",
+      history: [],
+      phase: "chat",
+    }));
+
+    // Handle the event
+    await handleChatMessage(multiPtagEvent, {
+      conversationCoordinator: mockConversationCoordinator,
+      agentExecutor: mockAgentExecutor,
+    });
+
+    // Agent executor should be called twice - once for each p-tagged agent
+    expect(mockAgentExecutor.execute).toHaveBeenCalledTimes(2);
+    
+    // Verify both agents were executed
+    const calls = (mockAgentExecutor.execute as any).mock.calls;
+    const executedAgents = calls.map((call: any[]) => call[0].agent.slug);
+    expect(executedAgents).toContain("project-manager");
+    expect(executedAgents).toContain("code-agent");
+  });
+
+  it("should filter out self-replies when multiple agents are p-tagged", async () => {
+    // Create an event from PM that p-tags PM and code-agent
+    const selfReplyEvent: NDKEvent = {
+      id: "event-self",
+      pubkey: "pm-agent-pubkey", // PM sending the event
+      content: "Message from PM to PM and code-agent",
+      kind: 1111,
+      tags: [
+        ["E", "conv-root"],
+        ["K", "11"],
+        ["p", "pm-agent-pubkey"], // PM tagging itself
+        ["p", "code-agent-pubkey"],
+      ],
+      tagValue: (tag: string) => {
+        if (tag === "E") return "conv-root";
+        if (tag === "K") return "11";
+        return undefined;
+      },
+      getMatchingTags: (tag: string) => {
+        if (tag === "p") {
+          return [
+            ["p", "pm-agent-pubkey"],
+            ["p", "code-agent-pubkey"],
+          ];
+        }
+        if (tag === "E") return [["E", "conv-root"]];
+        return [];
+      },
+    } as any;
+
+    // Mock conversation lookup to return a conversation
+    mockConversationCoordinator.getConversationByEvent = mock(() => ({
+      id: "conv-1",
+      history: [],
+      phase: "chat",
+    }));
+
+    // Handle the event
+    await handleChatMessage(selfReplyEvent, {
+      conversationCoordinator: mockConversationCoordinator,
+      agentExecutor: mockAgentExecutor,
+    });
+
+    // Agent executor should be called only once - for code-agent (PM filtered out due to self-reply)
+    expect(mockAgentExecutor.execute).toHaveBeenCalledTimes(1);
+    
+    // Verify only code-agent was executed
+    const calls = (mockAgentExecutor.execute as any).mock.calls;
+    const executedAgents = calls.map((call: any[]) => call[0].agent.slug);
+    expect(executedAgents).toEqual(["code-agent"]);
   });
 
   it("should route agent events with p-tags to the tagged agent", async () => {

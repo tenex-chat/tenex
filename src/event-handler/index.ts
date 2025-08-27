@@ -3,7 +3,7 @@ import type NDK from "@nostr-dev-kit/ndk";
 import { type NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
-import { ConversationCoordinator } from "../conversations/ConversationCoordinator";
+import { ConversationCoordinator } from "../conversations";
 import { ExecutionQueueManager } from "../conversations/executionQueue";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import type { LLMService } from "../llm/types";

@@ -157,26 +157,41 @@ async function handleReplyLogic(
     await conversationCoordinator.addEvent(conversation.id, event);
   }
 
-  // 3. Determine target agent
-  let targetAgent = AgentRouter.resolveTargetAgent(event, projectCtx, projectManager);
-  if (!targetAgent) {
-    logger.debug(`No target agent resolved for event: ${event.id?.substring(0, 8)}`);
+  // 3. Determine target agents
+  let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx, projectManager);
+  if (targetAgents.length === 0) {
+    logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
     return;
   }
 
-  // 4. Check for self-reply
-  if (AgentRouter.wouldBeSelfReply(event, targetAgent)) {
-    const routingReason = AgentRouter.getRoutingReason(event, targetAgent, projectCtx);
+  // 4. Filter out self-replies
+  const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
+  if (nonSelfReplyAgents.length === 0) {
+    const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents, projectCtx);
     logInfo(
       chalk.gray(
-        `Skipping self-reply: ${targetAgent.name} would process its own message (${routingReason})`
+        `Skipping self-reply: all target agents would process their own message (${routingReasons})`
       )
     );
     return;
   }
+  
+  // Log if some agents were filtered out due to self-reply
+  if (nonSelfReplyAgents.length < targetAgents.length) {
+    const filteredAgents = targetAgents.filter(a => !nonSelfReplyAgents.includes(a));
+    logInfo(
+      chalk.gray(
+        `Filtered out self-reply for: ${filteredAgents.map(a => a.name).join(", ")}`
+      )
+    );
+  }
+  
+  targetAgents = nonSelfReplyAgents;
 
-  // 5. Handle delegation completion if applicable
+  // 5. Handle delegation completion if applicable (only for single agent case)
   let isDelegationCompletionReactivation = false;
+  let delegationOverrideAgent: AgentInstance | null = null;
+  let delegationOverrideEvent: NDKEvent | null = null;
 
   // Check for delegation completions only if:
   // 1. It's explicitly marked as complete (tool:complete), OR
@@ -198,7 +213,8 @@ async function handleReplyLogic(
         // This was a delegation completion and we should reactivate
         isDelegationCompletionReactivation = true;
         if (delegationCompletionResult.targetAgent) {
-          targetAgent = delegationCompletionResult.targetAgent;
+          // Override target agents with the delegating agent
+          delegationOverrideAgent = delegationCompletionResult.targetAgent;
         }
         if (delegationCompletionResult.replyTarget) {
           logInfo(
@@ -207,7 +223,7 @@ async function handleReplyLogic(
             )
           );
           // Override the triggering event to be the original user request
-          event = delegationCompletionResult.replyTarget;
+          delegationOverrideEvent = delegationCompletionResult.replyTarget;
         }
       } else if (hasCompletionMarker) {
         // It was an explicit completion but shouldn't reactivate yet (waiting for more delegations)
@@ -217,8 +233,16 @@ async function handleReplyLogic(
     }
   }
 
+  // If delegation completion overrode the target, use that single agent
+  if (delegationOverrideAgent) {
+    targetAgents = [delegationOverrideAgent];
+  }
+  
+  // If delegation completion overrode the event, use that
+  const effectiveEvent = delegationOverrideEvent || event;
+
   // 6. Extract claude-session
-  const claudeSessionId = mappedClaudeSessionId || AgentEventDecoder.getClaudeSessionId(event);
+  const claudeSessionId = mappedClaudeSessionId || AgentEventDecoder.getClaudeSessionId(effectiveEvent);
   if (claudeSessionId) {
     logInfo(
       chalk.gray("Passing claude-session to execution context: ") +
@@ -227,25 +251,31 @@ async function handleReplyLogic(
     );
   }
 
-  // 7. Build execution context
-  const executionContext: ExecutionContext = {
-    agent: targetAgent,
-    conversationId: conversation.id,
-    phase: conversation.phase,
-    projectPath: process.cwd(),
-    triggeringEvent: event,
-    conversationCoordinator,
-    claudeSessionId,
-    isDelegationCompletion: isDelegationCompletionReactivation,
-  };
+  // 7. Execute each target agent in parallel
+  const executionPromises = targetAgents.map(async (targetAgent) => {
+    // Build execution context for this agent
+    const executionContext: ExecutionContext = {
+      agent: targetAgent,
+      conversationId: conversation.id,
+      phase: conversation.phase,
+      projectPath: process.cwd(),
+      triggeringEvent: effectiveEvent,
+      conversationCoordinator,
+      claudeSessionId,
+      isDelegationCompletion: isDelegationCompletionReactivation,
+    };
 
-  // 8. Execute agent
-  await executeAgent(
-    executionContext,
-    agentExecutor,
-    conversation,
-    conversationCoordinator,
-    projectManager,
-    event
-  );
+    // Execute agent
+    await executeAgent(
+      executionContext,
+      agentExecutor,
+      conversation,
+      conversationCoordinator,
+      projectManager,
+      effectiveEvent
+    );
+  });
+  
+  // Wait for all agents to complete
+  await Promise.all(executionPromises);
 }
