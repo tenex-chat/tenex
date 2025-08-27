@@ -202,22 +202,26 @@ export class AgentPublisher {
       await event.sign(this.agent.signer);
     }
     
-    // For single event with multiple recipients, create synthetic task IDs
+    // Register delegation using the new clean interface
     const registry = DelegationRegistry.getInstance();
     const mainEvent = events[0]; // Should only be one event now
     
-    // Create task entries for each recipient using synthetic IDs
-    const tasks = intent.recipients.map((recipientPubkey) => ({
-      taskId: `${mainEvent.id}:${recipientPubkey}`, // Synthetic ID combining event ID and recipient
-      assignedToPubkey: recipientPubkey,
-      fullRequest: intent.request,
-      phase: intent.phase,
-    }));
+    logger.info("📦 Registering delegation", {
+      eventId: mainEvent.id?.substring(0, 8),
+      recipientCount: intent.recipients.length,
+      isMultiRecipient: intent.recipients.length > 1,
+      recipients: intent.recipients.map(p => p.substring(0, 16)),
+    });
     
-    const batchId = await registry.registerDelegationBatch({
-      tasks,
+    const batchId = await registry.registerDelegation({
+      delegationEventId: mainEvent.id,
+      recipients: intent.recipients.map(recipientPubkey => ({
+        pubkey: recipientPubkey,
+        request: intent.request,
+        phase: intent.phase,
+      })),
       delegatingAgent: this.agent,
-      conversationId: context.rootEvent?.id || "",
+      rootConversationId: context.rootEvent?.id || "",
       originalRequest: intent.request,
     });
 

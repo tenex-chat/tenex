@@ -161,7 +161,7 @@ describe("Multi-Recipient Delegation", () => {
   });
 
   describe("Registry Tracking", () => {
-    it("should create synthetic task IDs for each recipient", async () => {
+    it("should track each recipient with the same delegation event ID", async () => {
       const intent = {
         type: "delegation" as const,
         recipients: ["recipient1-pubkey", "recipient2-pubkey"],
@@ -221,18 +221,20 @@ describe("Multi-Recipient Delegation", () => {
       // Should have a batch ID
       expect(result.batchId).toBeDefined();
       
-      // Registry should be tracking synthetic task IDs
+      // Registry should be tracking delegations with same event ID
       const registry = DelegationRegistry.getInstance();
       
-      // Both synthetic task IDs should exist
+      // Both recipients should have delegation records with the same event ID
       const mainEventId = result.events[0].id;
-      const task1 = registry.getDelegationContextByTaskId(`${mainEventId}:recipient1-pubkey`);
-      const task2 = registry.getDelegationContextByTaskId(`${mainEventId}:recipient2-pubkey`);
+      const task1 = registry.findDelegationByEventAndResponder(mainEventId, "recipient1-pubkey");
+      const task2 = registry.findDelegationByEventAndResponder(mainEventId, "recipient2-pubkey");
       
       expect(task1).toBeDefined();
       expect(task2).toBeDefined();
       expect(task1?.assignedTo.pubkey).toBe("recipient1-pubkey");
       expect(task2?.assignedTo.pubkey).toBe("recipient2-pubkey");
+      expect(task1?.delegationEventId).toBe(mainEventId);
+      expect(task2?.delegationEventId).toBe(mainEventId);
     });
   });
 
@@ -240,26 +242,26 @@ describe("Multi-Recipient Delegation", () => {
     it("should correctly identify which recipient completed", async () => {
       const registry = DelegationRegistry.getInstance();
       
-      // Create a mock delegation with synthetic task IDs
+      // Create a mock delegation with same event ID for multiple recipients
       const eventId = "delegation-event-123";
       const recipients = ["agent1-pubkey", "agent2-pubkey"];
       
-      // Register the batch with synthetic task IDs
-      const batchId = await registry.registerDelegationBatch({
-        tasks: recipients.map(pubkey => ({
-          taskId: `${eventId}:${pubkey}`,
-          assignedToPubkey: pubkey,
-          fullRequest: "Test delegation",
+      // Register the batch with same event ID for all recipients
+      const batchId = await registry.registerDelegation({
+        delegationEventId: eventId,
+        recipients: recipients.map(pubkey => ({
+          pubkey: pubkey,
+          request: "Test delegation",
           phase: "execute",
         })),
         delegatingAgent: mockAgent,
-        conversationId: "conv-123",
+        rootConversationId: "conv-123",
         originalRequest: "Test delegation",
       });
       
-      // Now test that we can find the right delegation by synthetic ID
-      const delegation1 = registry.getDelegationContextByTaskId(`${eventId}:agent1-pubkey`);
-      const delegation2 = registry.getDelegationContextByTaskId(`${eventId}:agent2-pubkey`);
+      // Now test that we can find the right delegation by event ID and responder
+      const delegation1 = registry.findDelegationByEventAndResponder(eventId, "agent1-pubkey");
+      const delegation2 = registry.findDelegationByEventAndResponder(eventId, "agent2-pubkey");
       
       expect(delegation1).toBeDefined();
       expect(delegation2).toBeDefined();

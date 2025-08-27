@@ -7,7 +7,6 @@ import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { initializeUnifiedLogger } from "@/logging/UnifiedLogger";
 import { initializeLLMLogger } from "@/logging/LLMLogger";
 import { fetchAgentDefinition } from "@/utils/agentFetcher";
 import { ensureTenexInGitignore, initializeGitRepository } from "@/utils/git";
@@ -214,8 +213,7 @@ export class ProjectManager implements IProjectManager {
       // Republish kind:0 events for all agents on project load
       await agentRegistry.republishAllAgentProfiles(project);
 
-      // Initialize unified logger for all events
-      initializeUnifiedLogger(projectPath);
+      // UnifiedLogger initialization removed
       // Initialize LLM logger for clear request/response logging
       initializeLLMLogger(projectPath);
     } catch (error: unknown) {

@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import type { ExecutionQueueManager } from "../executionQueue";
 import type { Phase } from "../phases";
-import { PHASES, getValidTransitions } from "../phases";
+import { PHASES } from "../phases";
 import type { Conversation, PhaseTransition } from "../types";
 
 export interface PhaseTransitionContext {
@@ -20,28 +20,15 @@ export interface PhaseTransitionResult {
 }
 
 /**
- * Manages conversation phase transitions and validation.
- * Single Responsibility: Handle all phase-related logic and rules.
+ * Manages conversation phase transitions and execution queue.
+ * Handles phase transitions (all allowed) and EXECUTE phase queueing.
  */
 export class PhaseManager {
   constructor(private executionQueueManager?: ExecutionQueueManager) {}
 
   /**
-   * Check if a phase transition is valid
-   */
-  canTransition(from: Phase, to: Phase): boolean {
-    // Allow same-phase transitions (delegations between agents)
-    if (from === to) {
-      return true;
-    }
-
-    // Check if the transition is in the allowed list
-    const validTransitions = getValidTransitions(from);
-    return validTransitions.includes(to);
-  }
-
-  /**
    * Attempt a phase transition
+   * Note: All transitions are allowed - PM decides what makes sense
    */
   async transition(
     conversation: Conversation,
@@ -50,9 +37,8 @@ export class PhaseManager {
   ): Promise<PhaseTransitionResult> {
     const from = conversation.phase;
 
-    // Validate transition
+    // Same phase transitions are valid (delegations between agents)
     if (from === to) {
-      // Same phase delegation is always allowed
       const transition: PhaseTransition = {
         from,
         to,
@@ -65,19 +51,6 @@ export class PhaseManager {
       return {
         success: true,
         transition,
-      };
-    }
-
-    if (!this.canTransition(from, to)) {
-      const validTransitions = getValidTransitions(from);
-      logger.warn(`[PhaseManager] Invalid transition requested from ${from} to ${to}`, {
-        validTransitions: validTransitions.join(", "),
-        conversationId: conversation.id,
-        agent: context.agentName,
-      });
-      logger.debug(`[PhaseManager] Valid transitions from ${from}: ${validTransitions.join(", ")}`);
-      return {
-        success: false,
       };
     }
 
@@ -137,31 +110,6 @@ export class PhaseManager {
     };
   }
 
-  /**
-   * Get the rules for a specific phase
-   */
-  getPhaseRules(phase: Phase): {
-    canTransitionTo: Phase[];
-    description: string;
-  } {
-    // All phases can transition to all other phases
-    const allPhases: Phase[] = Object.values(PHASES) as Phase[];
-
-    const descriptions: Record<Phase, string> = {
-      [PHASES.CHAT]: "Open discussion and requirement gathering",
-      [PHASES.BRAINSTORM]: "Creative ideation and exploration",
-      [PHASES.PLAN]: "Planning and design phase",
-      [PHASES.EXECUTE]: "Implementation and execution phase",
-      [PHASES.VERIFICATION]: "Testing and verification phase",
-      [PHASES.CHORES]: "Maintenance and routine tasks",
-      [PHASES.REFLECTION]: "Review and reflection phase",
-    };
-
-    return {
-      canTransitionTo: allPhases.filter((p) => p !== phase),
-      description: descriptions[phase] || "Phase description not available",
-    };
-  }
 
   /**
    * Setup queue event listeners

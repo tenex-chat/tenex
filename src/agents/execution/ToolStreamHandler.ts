@@ -1,12 +1,10 @@
 import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
-import type { ContextualLogger } from "@/logging/UnifiedLogger";
 import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { ToolExecutionResult } from "@/tools/executor";
-import type { TracingLogger } from "@/tracing";
-import { formatAnyError, formatToolError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/utils/error-formatter";
+import { logError, logDebug } from "@/utils/logger";
 import type { StreamStateManager } from "./StreamStateManager";
-import { ExecutionConfig } from "./constants";
 import type { ExecutionContext } from "./types";
 
 /**
@@ -17,8 +15,7 @@ import type { ExecutionContext } from "./types";
 export class ToolStreamHandler {
   constructor(
     private stateManager: StreamStateManager,
-    private agentPublisher: AgentPublisher,
-    private executionLogger?: ContextualLogger
+    private agentPublisher: AgentPublisher
   ) {}
 
   /**
@@ -27,15 +24,18 @@ export class ToolStreamHandler {
   async handleToolStartEvent(
     toolName: string,
     toolArgs: Record<string, unknown>,
-    _tracingLogger: TracingLogger,
-    context?: ExecutionContext
+    _context?: ExecutionContext
   ): Promise<void> {
-    // Tools now handle their own state tracking
-
     // Log tool execution start
-    if (this.executionLogger && context) {
-      await this.executionLogger.toolStart(toolName, toolArgs);
-    }
+    logDebug(
+      `Tool starting: ${toolName}`,
+      "tools",
+      "debug",
+      {
+        tool: toolName,
+        args: toolArgs,
+      }
+    );
 
     // Note: StreamHandle doesn't have a flush method - it handles buffering internally
     // No action needed here for streaming
@@ -46,19 +46,16 @@ export class ToolStreamHandler {
    */
   async handleToolCompleteEvent(
     event: { tool: string; result: unknown },
-    tracingLogger: TracingLogger,
     context: ExecutionContext
   ): Promise<void> {
     // Parse the tool result first to get metadata
     const toolResult = this.parseToolResult(event);
 
-    // Tools handle their own publishing now, no need to track
-
     // Log tool execution complete
-    await this.logToolComplete(toolResult, event.tool);
+    this.logToolComplete(toolResult, event.tool);
 
     // Publish error if tool failed
-    await this.publishToolError(toolResult, event.tool, tracingLogger, context);
+    await this.publishToolError(toolResult, event.tool, context);
   }
 
   /**
@@ -86,26 +83,25 @@ export class ToolStreamHandler {
   }
 
   /**
-   * Log tool completion with ContextualLogger
+   * Log tool completion
    */
-  private async logToolComplete(
+  private logToolComplete(
     toolResult: ToolExecutionResult,
     toolName: string
-  ): Promise<void> {
-    if (!this.executionLogger) return;
-
-    // We don't have the exact start time, so use a reasonable estimate
-    const duration = ExecutionConfig.DEFAULT_TOOL_DURATION_MS;
-
-    await this.executionLogger.toolComplete(
-      toolName,
-      toolResult.success ? "success" : "error",
-      duration,
-      {
-        result: toolResult.success && toolResult.output ? String(toolResult.output) : undefined,
-        error: toolResult.error ? formatToolError(toolResult.error) : undefined,
-      }
-    );
+  ): void {
+    if (toolResult.success) {
+      logDebug(
+        `Tool completed successfully: ${toolName}`,
+        "tools",
+        "debug"
+      );
+    } else {
+      logError(
+        `Tool failed: ${toolName}`,
+        toolResult.error,
+        "tools"
+      );
+    }
   }
 
   /**
@@ -114,7 +110,6 @@ export class ToolStreamHandler {
   private async publishToolError(
     toolResult: ToolExecutionResult,
     toolName: string,
-    tracingLogger: TracingLogger,
     context: ExecutionContext
   ): Promise<void> {
     if (!toolResult.success && toolResult.error) {
@@ -148,14 +143,28 @@ export class ToolStreamHandler {
 
         await this.agentPublisher.error(errorIntent, eventContext);
 
-        tracingLogger.info("Tool error published", {
-          tool: toolName,
-          error: errorMessage,
-        });
+        logDebug(
+          "Tool error published",
+          "tools",
+          "debug",
+          {
+            tool: toolName,
+            error: errorMessage,
+          }
+        );
       } catch (error) {
-        tracingLogger.error("Failed to publish tool error", {
-          tool: toolName,
-          originalError: toolResult.error,
+        logError(
+          "Failed to publish tool error",
+          error,
+          "tools"
+        );
+        logDebug(
+          "Tool error details",
+          "tools",
+          "debug",
+          {
+            tool: toolName,
+            originalError: toolResult.error,
           publishError: formatAnyError(error),
         });
       }

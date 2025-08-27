@@ -2,7 +2,6 @@ import { configService } from "@/services";
 import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
-import { getUnifiedLogger, initializeUnifiedLogger } from "@/logging/UnifiedLogger";
 import { getLLMLogger, initializeLLMLogger } from "@/logging/LLMLogger";
 import { createMockLLMProvider } from "./providers/MockProvider";
 import { createSimpleMockProvider } from "./providers/SimpleMockProvider";
@@ -209,17 +208,7 @@ export class LLMRouter implements LLMService {
         });
       }
 
-      // Log to unified logger
-      const unifiedLogger = getUnifiedLogger();
-      if (unifiedLogger) {
-        await unifiedLogger.logLLMCall(
-          configKey,
-          config,
-          request,
-          { response },
-          { startTime, endTime }
-        );
-      }
+      // Unified logger removed - using simple logging
 
       // Log the response
       if (llmLogger && requestId) {
@@ -245,11 +234,7 @@ export class LLMRouter implements LLMService {
         stack: error.stack,
       });
 
-      // Log to unified logger
-      const unifiedLogger = getUnifiedLogger();
-      if (unifiedLogger) {
-        await unifiedLogger.logLLMCall(configKey, config, request, { error }, { startTime, endTime });
-      }
+      // Unified logger removed - error logged above
 
       // Log the error
       if (llmLogger && requestId) {
@@ -407,27 +392,7 @@ export class LLMRouter implements LLMService {
       });
 
       if (lastResponse) {
-        // Log to unified logger
-        const unifiedLogger = getUnifiedLogger();
-        if (unifiedLogger) {
-          logger.debug("[LLM Stream] Logging to JSONL", {
-            agentName: request.options?.agentName,
-            loggerExists: true,
-          });
-
-          await unifiedLogger.logLLMCall(
-            configKey,
-            config,
-            request,
-            { response: lastResponse },
-            { startTime, endTime }
-          );
-        } else {
-          logger.error("[LLM Stream] Unified Logger is not initialized (with usage)!", {
-            agentName: request.options?.agentName,
-            configKey,
-          });
-        }
+        // Unified logger removed - response logged via LLMLogger
 
         // Log the response
         if (llmLogger && requestId) {
@@ -457,26 +422,7 @@ export class LLMRouter implements LLMService {
           model: config.model,
         } as CompletionResponse & { model: string };
 
-        // Log even without usage data
-        const unifiedLogger = getUnifiedLogger();
-        if (unifiedLogger) {
-          logger.debug("[LLM Stream] Logging to JSONL (no usage data)", {
-            agentName: request.options?.agentName,
-          });
-
-          await unifiedLogger.logLLMCall(
-            configKey,
-            config,
-            request,
-            { response: fallbackResponse },
-            { startTime, endTime }
-          );
-        } else {
-          logger.error("[LLM Stream] Unified Logger is not initialized!", {
-            agentName: request.options?.agentName,
-            configKey,
-          });
-        }
+        // Unified logger removed - fallback response logged via LLMLogger
 
         // Log the response
         if (llmLogger && requestId) {
@@ -503,17 +449,7 @@ export class LLMRouter implements LLMService {
         stack: errorObj.stack,
       });
 
-      // Log to unified logger
-      const unifiedLogger = getUnifiedLogger();
-      if (unifiedLogger) {
-        await unifiedLogger.logLLMCall(
-          configKey,
-          config,
-          request,
-          { error: errorObj },
-          { startTime, endTime }
-        );
-      }
+      // Unified logger removed - error logged above
 
       // Log the error
       if (llmLogger && requestId) {
@@ -569,8 +505,7 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter | LL
       }
     }
 
-    // Initialize unified logger
-    initializeUnifiedLogger(projectPath);
+    // Unified logger initialization removed
     // Initialize LLM logger for clear request/response logging
     initializeLLMLogger(projectPath);
 

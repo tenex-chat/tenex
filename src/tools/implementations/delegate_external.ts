@@ -123,21 +123,32 @@ This tool allows you to:
         mode: "synchronous",
       });
 
-      // Register the external delegation in DelegationRegistry
+      // Register the delegation using the new unified interface
       const registry = DelegationRegistry.getInstance();
-      const batchId = await registry.registerExternalDelegation({
+      logger.info("📦 Registering single-recipient delegation", {
+        eventId: chatEvent.id.substring(0, 8),
+        recipient: pubkey.substring(0, 16),
+        kind: chatEvent.kind,
+      });
+      
+      const batchId = await registry.registerDelegation({
         delegationEventId: chatEvent.id,
+        recipients: [{
+          pubkey: pubkey,
+          request: content,
+          phase: context.phase,
+        }],
         delegatingAgent: context.agent,
-        assignedToPubkey: pubkey,
-        conversationId: context.conversationId,
-        fullRequest: content,
-        phase: context.phase,
+        rootConversationId: context.conversationId,
+        originalRequest: content,
       });
 
-      logger.debug("External delegation registered in DelegationRegistry", {
+      logger.info("✅ Single-recipient delegation registered via unified approach", {
         batchId,
         eventId: chatEvent.id.substring(0, 8),
         conversationId: context.conversationId.substring(0, 8),
+        recipient: pubkey.substring(0, 16),
+        usingUnifiedApproach: true,
       });
 
       // Publish conversation status event

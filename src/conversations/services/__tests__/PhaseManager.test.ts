@@ -46,38 +46,6 @@ describe("PhaseManager", () => {
     };
   });
 
-  describe("canTransition", () => {
-    it("should allow valid transitions from CHAT", () => {
-      expect(phaseManager.canTransition(PHASES.CHAT, PHASES.PLAN)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.CHAT, PHASES.REFLECTION)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.CHAT, PHASES.EXECUTE)).toBe(true);
-    });
-
-    it("should allow valid transitions from PLAN", () => {
-      expect(phaseManager.canTransition(PHASES.PLAN, PHASES.CHAT)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.PLAN, PHASES.EXECUTE)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.PLAN, PHASES.REFLECTION)).toBe(true);
-    });
-
-    it("should allow valid transitions from REFLECTION", () => {
-      expect(phaseManager.canTransition(PHASES.REFLECTION, PHASES.CHAT)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.REFLECTION, PHASES.PLAN)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.REFLECTION, PHASES.EXECUTE)).toBe(true);
-    });
-
-    it("should allow valid transitions from EXECUTE", () => {
-      expect(phaseManager.canTransition(PHASES.EXECUTE, PHASES.CHAT)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.EXECUTE, PHASES.REFLECTION)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.EXECUTE, PHASES.PLAN)).toBe(true);
-    });
-
-    it("should allow all valid phase transitions", () => {
-      // Now all phases can transition to all others
-      expect(phaseManager.canTransition(PHASES.CHAT, PHASES.EXECUTE)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.EXECUTE, PHASES.VERIFICATION)).toBe(true);
-      expect(phaseManager.canTransition(PHASES.VERIFICATION, PHASES.CHAT)).toBe(true);
-    });
-  });
 
   describe("transition", () => {
     const context = {
@@ -147,44 +115,11 @@ describe("PhaseManager", () => {
 
         await phaseManager.transition(mockConversation, PHASES.CHAT, context);
 
-        expect(mockQueueManager.releaseExecution).toHaveBeenCalledWith("conv1", "User request");
+        expect(mockQueueManager.releaseExecution).toHaveBeenCalledWith("conv1", "phase_transition");
       });
     });
   });
 
-  describe("getPhaseRules", () => {
-    it("should return rules for CHAT phase", () => {
-      const rules = phaseManager.getPhaseRules(PHASES.CHAT);
-      expect(rules.canTransitionTo).toContain(PHASES.PLAN);
-      expect(rules.canTransitionTo).toContain(PHASES.REFLECTION);
-      expect(rules.canTransitionTo).toContain(PHASES.EXECUTE);
-      expect(rules.description).toContain("Open discussion");
-    });
-
-    it("should return rules for PLAN phase", () => {
-      const rules = phaseManager.getPhaseRules(PHASES.PLAN);
-      expect(rules.canTransitionTo).toContain(PHASES.CHAT);
-      expect(rules.canTransitionTo).toContain(PHASES.EXECUTE);
-      expect(rules.canTransitionTo).toContain(PHASES.REFLECTION);
-      expect(rules.description).toContain("Planning");
-    });
-
-    it("should return rules for REFLECTION phase", () => {
-      const rules = phaseManager.getPhaseRules(PHASES.REFLECTION);
-      expect(rules.canTransitionTo).toContain(PHASES.CHAT);
-      expect(rules.canTransitionTo).toContain(PHASES.PLAN);
-      expect(rules.canTransitionTo).toContain(PHASES.EXECUTE);
-      expect(rules.description).toContain("Review");
-    });
-
-    it("should return rules for EXECUTE phase", () => {
-      const rules = phaseManager.getPhaseRules(PHASES.EXECUTE);
-      expect(rules.canTransitionTo).toContain(PHASES.CHAT);
-      expect(rules.canTransitionTo).toContain(PHASES.REFLECTION);
-      expect(rules.canTransitionTo).toContain(PHASES.PLAN);
-      expect(rules.description).toContain("Implementation");
-    });
-  });
 
   describe("setupQueueListeners", () => {
     it("should setup event listeners on queue manager", () => {

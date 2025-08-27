@@ -168,16 +168,3 @@ export const PHASE_DEFINITIONS: Record<Phase, PhaseDefinition> = {
 export function isValidPhase(phase: string): phase is Phase {
   return ALL_PHASES.includes(phase as Phase);
 }
-
-// All phases can transition to all other phases - PM decides what makes sense
-export function getValidTransitions(_currentPhase: Phase): readonly Phase[] {
-  // Return all phases as valid transitions (PM decides appropriateness)
-  return ALL_PHASES;
-}
-
-// Always returns true - PM controls phase transitions through delegate_phase tool
-export function canTransitionTo(_currentPhase: Phase, _targetPhase: Phase): boolean {
-  // Any phase can transition to any other phase
-  // The PM uses context and task complexity to decide appropriate transitions
-  return true;
-}

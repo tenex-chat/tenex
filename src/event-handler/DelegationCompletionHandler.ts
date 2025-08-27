@@ -25,6 +25,7 @@ export interface DelegationCompletionResult {
 export class DelegationCompletionHandler {
   /**
    * Process a delegation completion event using the DelegationRegistry
+   * Updated to use conversation key lookups instead of synthetic IDs
    */
   static async handleDelegationCompletion(
     event: NDKEvent,
@@ -34,63 +35,75 @@ export class DelegationCompletionHandler {
     const registry = DelegationRegistry.getInstance();
     let delegationContext: DelegationRecord | undefined;
     
-    // Method 1: Check for completion (status:completed with e-tag)
-    if (event.tagValue("status") === "completed") {
-      // For completions, check all e-tags to find the matching delegation
-      const eTags = event.getMatchingTags("e");
-      for (const eTagArray of eTags) {
-        const eTag = eTagArray[1]; // e-tag value is at index 1
-        if (!eTag) continue;
-        
-        const potentialContext = registry.getDelegationContextByTaskId(eTag);
-        if (potentialContext) {
-          delegationContext = potentialContext;
-          logger.debug("[DelegationCompletionHandler] Explicit completion detected", {
-            delegationId: eTag.substring(0, 8),
-            found: true
-          });
-          break;
-        }
-      }
+    logger.info("🔍 [DelegationCompletionHandler] Processing potential delegation completion", {
+      eventId: event.id?.substring(0, 8),
+      from: event.pubkey.substring(0, 16),
+      conversationId: conversation.id.substring(0, 8),
+      hasStatusTag: !!event.tagValue("status"),
+      status: event.tagValue("status"),
+    });
+    
+    // We need to find the delegation by conversation key.
+    // We know:
+    // - The root conversation ID (from the conversation object)
+    // - The responder pubkey (from event.pubkey)
+    // - We need to find who delegated TO this responder
+    
+    // First, let's check if this is a response to a delegation by looking at e-tags
+    const eTags = event.getMatchingTags("e");
+    
+    logger.debug("🔍 Checking e-tags for delegation references", {
+      eTagCount: eTags.length,
+      eTags: eTags.map(tag => tag[1]?.substring(0, 8)),
+    });
+    
+    // For each e-tag, check if it's a delegation event we're tracking
+    for (const eTagArray of eTags) {
+      const eTag = eTagArray[1]; // e-tag value is at index 1
+      if (!eTag) continue;
       
-      if (!delegationContext && eTags.length > 0) {
-        logger.debug("[DelegationCompletionHandler] Explicit completion but no matching delegation found", {
-          checkedTags: eTags.map(tag => tag[1]?.substring(0, 8))
+      // Use the registry's method to find delegation by event ID and responder
+      const potentialContext = registry.findDelegationByEventAndResponder(eTag, event.pubkey);
+      
+      if (potentialContext && potentialContext.status === "pending") {
+        delegationContext = potentialContext;
+        
+        logger.info("✅ [DelegationCompletionHandler] Found matching delegation via e-tag", {
+          delegationEventId: eTag.substring(0, 8),
+          from: event.pubkey.substring(0, 16),
+          to: potentialContext.delegatingAgent.pubkey.substring(0, 16),
+          status: potentialContext.status,
+          isExplicitCompletion: event.tagValue("status") === "completed",
         });
+        break;
       }
     }
     
-    // Method 2: Natural response detection - check if this event e-tags a delegation request
+    // Alternative: Try using conversation key if we can determine the delegator
     if (!delegationContext) {
-      const eTags = event.getMatchingTags("e");
-      
-      // Check all e-tags to find a matching delegation request
-      for (const eTagArray of eTags) {
-        const eTag = eTagArray[1]; // e-tag value is at index 1
-        if (!eTag) continue;
+      // Look for p-tags that might indicate who we're responding to
+      const pTags = event.getMatchingTags("p");
+      for (const pTagArray of pTags) {
+        const delegatorPubkey = pTagArray[1];
+        if (!delegatorPubkey) continue;
         
-        // For multi-recipient delegations, we need to construct the synthetic task ID
-        // Format: ${eventId}:${responderPubkey}
-        const syntheticTaskId = `${eTag}:${event.pubkey}`;
+        // Try to find delegation using conversation key
+        const potentialContext = registry.getDelegationByConversationKey(
+          conversation.id, // root conversation ID
+          delegatorPubkey,  // potential delegator
+          event.pubkey      // responder (current event author)
+        );
         
-        // Try both the direct e-tag and the synthetic task ID
-        let potentialContext = registry.getDelegationContextByTaskId(eTag);
-        if (!potentialContext) {
-          potentialContext = registry.getDelegationContextByTaskId(syntheticTaskId);
-        }
-        
-        if (potentialContext && 
-            potentialContext.status === "pending" && 
-            potentialContext.assignedTo.pubkey === event.pubkey) {
+        if (potentialContext && potentialContext.status === "pending") {
           delegationContext = potentialContext;
-          logger.info("[DelegationCompletionHandler] Natural delegation response detected", {
-            conversationId: conversation.id.substring(0, 8),
-            from: event.pubkey.substring(0, 16),
-            to: delegationContext.delegatingAgent.pubkey.substring(0, 16),
-            taskId: delegationContext.taskId.substring(0, 16),
-            isMultiRecipient: delegationContext.taskId.includes(':'),
+          
+          logger.info("✅ [DelegationCompletionHandler] Found matching delegation via conversation key", {
+            rootConversationId: conversation.id.substring(0, 8),
+            delegator: delegatorPubkey.substring(0, 16),
+            responder: event.pubkey.substring(0, 16),
+            status: potentialContext.status,
           });
-          break; // Found a match, stop checking
+          break;
         }
       }
     }
@@ -109,7 +122,7 @@ export class DelegationCompletionHandler {
     // Record the completion in the registry
     try {
       const result = await registry.recordTaskCompletion({
-        conversationId: delegationContext.delegatingAgent.conversationId,
+        conversationId: delegationContext.delegatingAgent.rootConversationId,
         fromPubkey: delegationContext.delegatingAgent.pubkey,
         toPubkey: event.pubkey,
         completionEventId: event.id,
@@ -132,7 +145,7 @@ export class DelegationCompletionHandler {
         ? "[DelegationCompletionHandler] 🔄 ASYNC FALLBACK: Processing completion (no sync listener)"
         : "[DelegationCompletionHandler] 🔁 Processing completion (sync listener active)", {
         batchComplete: result.batchComplete,
-        remainingTasks: result.remainingTasks,
+        remainingTasks: result.remainingDelegations,
         batchId: result.batchId,
         mode: isAsyncFallback ? "async-fallback" : "synchronous",
       });
@@ -190,7 +203,7 @@ export class DelegationCompletionHandler {
       }
       logInfo(
         chalk.gray(
-          `Delegation completed. Waiting for ${result.remainingTasks} more delegations.`
+          `Delegation completed. Waiting for ${result.remainingDelegations} more delegations.`
         )
       );
       return { shouldReactivate: false };

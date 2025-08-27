@@ -13,11 +13,10 @@ import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
 import type { Phase } from "../phases";
 import { PHASES } from "../phases";
-import type { AgentState, Conversation, ConversationMetadata } from "../types";
+import type { AgentState, Conversation, ConversationMetadata, PhaseTransition } from "../types";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
 import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
-import { PhaseManager, type PhaseTransitionContext } from "./PhaseManager";
 
 /**
  * Coordinates between all conversation services.
@@ -26,8 +25,8 @@ import { PhaseManager, type PhaseTransitionContext } from "./PhaseManager";
 export class ConversationCoordinator {
   private store: ConversationStore;
   private persistence: IConversationPersistenceService;
-  private phaseManager: PhaseManager;
   private eventProcessor: ConversationEventProcessor;
+  private executionQueueManager?: ExecutionQueueManager;
 
   constructor(
     projectPath: string,
@@ -39,8 +38,8 @@ export class ConversationCoordinator {
     this.persistence = new ConversationPersistenceService(
       persistence || new FileSystemAdapter(projectPath)
     );
-    this.phaseManager = new PhaseManager(executionQueueManager);
     this.eventProcessor = new ConversationEventProcessor();
+    this.executionQueueManager = executionQueueManager;
 
     // Setup queue listeners if available
     if (executionQueueManager) {
@@ -181,62 +180,89 @@ export class ConversationCoordinator {
       throw new Error(`Conversation ${id} not found`);
     }
 
-    const context: PhaseTransitionContext = {
-      agentPubkey,
-      agentName,
-      message,
-    };
+    const from = conversation.phase;
 
-    const result = await this.phaseManager.transition(conversation, phase, context);
-
-    if (result.success && result.transition) {
-      const previousPhase = conversation.phase;
-
-      // Update conversation
-      if (previousPhase !== phase) {
-        conversation.phase = phase;
-        conversation.phaseStartedAt = Date.now();
-
-        // Clear readFiles when transitioning from REFLECTION back to CHAT
-        if (previousPhase === PHASES.REFLECTION && phase === PHASES.CHAT) {
-          conversation.metadata.readFiles = undefined;
-        }
-      }
-
-      conversation.phaseTransitions.push(result.transition);
-
-      // Log phase transition
-      logInfo(
-        `Phase transition: ${previousPhase} → ${phase}`,
-        "conversation",
-        "verbose",
-        {
-          conversationId: id,
-          from: previousPhase,
-          to: phase,
-        }
+    // Handle EXECUTE phase entry with queue management
+    if (phase === PHASES.EXECUTE && from !== PHASES.EXECUTE && this.executionQueueManager) {
+      const permission = await this.executionQueueManager.requestExecution(
+        conversation.id,
+        agentPubkey
       );
 
-      await this.persistence.save(conversation);
-      return true;
-    }
-    if (result.queued) {
-      // Handle queue status
-      if (!result.queuePosition || !result.estimatedWait || !result.queueMessage) {
-        throw new Error("Invalid queue result - missing required properties");
+      if (!permission.granted) {
+        if (!permission.queuePosition || !permission.waitTime) {
+          throw new Error("Invalid permission - missing queue position or wait time");
+        }
+        
+        const queueMessage = this.formatQueueMessage(permission.queuePosition, permission.waitTime);
+
+        logger.info(`[ConversationCoordinator] Conversation ${conversation.id} queued for execution`, {
+          position: permission.queuePosition,
+          estimatedWait: permission.waitTime,
+        });
+
+        // Update queue status
+        conversation.metadata.queueStatus = {
+          isQueued: true,
+          position: permission.queuePosition,
+          estimatedWait: permission.waitTime,
+          message: queueMessage,
+        };
+
+        await this.persistence.save(conversation);
+        return false;
       }
-      conversation.metadata.queueStatus = {
-        isQueued: true,
-        position: result.queuePosition,
-        estimatedWait: result.estimatedWait,
-        message: result.queueMessage,
-      };
-
-      await this.persistence.save(conversation);
-      return false;
     }
 
-    return false;
+    // Handle EXECUTE phase exit
+    if (from === PHASES.EXECUTE && phase !== PHASES.EXECUTE && this.executionQueueManager) {
+      await this.executionQueueManager.releaseExecution(conversation.id, "phase_transition");
+    }
+
+    // Create transition record
+    const transition: PhaseTransition = {
+      from,
+      to: phase,
+      message,
+      timestamp: Date.now(),
+      agentPubkey,
+      agentName,
+    };
+
+    // Update conversation
+    if (from !== phase) {
+      conversation.phase = phase;
+      conversation.phaseStartedAt = Date.now();
+
+      // Clear readFiles when transitioning from REFLECTION back to CHAT
+      if (from === PHASES.REFLECTION && phase === PHASES.CHAT) {
+        conversation.metadata.readFiles = undefined;
+      }
+    }
+
+    conversation.phaseTransitions.push(transition);
+
+    // Log phase transition
+    logger.info("[ConversationCoordinator] Phase transition", {
+      conversationId: conversation.id,
+      from,
+      to: phase,
+      agent: agentName,
+    });
+
+    logInfo(
+      `Phase transition: ${from} → ${phase}`,
+      "conversation",
+      "verbose",
+      {
+        conversationId: id,
+        from,
+        to: phase,
+      }
+    );
+
+    await this.persistence.save(conversation);
+    return true;
   }
 
   /**
@@ -458,28 +484,44 @@ export class ConversationCoordinator {
             { conversationId }
           );
         }
-      },
-      async (conversationId: string) => {
-        const conversation = this.store.get(conversationId);
-        if (conversation && conversation.phase === PHASES.EXECUTE) {
-          await this.updatePhase(
-            conversationId,
-            PHASES.CHAT,
-            "Execution timeout reached. The execution lock has been automatically released.",
-            "system",
-            "system"
-          );
-        }
-      },
-      async (conversationId: string, remainingMs: number) => {
-        const minutes = Math.floor(remainingMs / 60000);
-        logWarning(
-          `Execution timeout warning: ${minutes} minutes remaining`,
-          "conversation",
-          "normal",
-          { conversationId, remainingMinutes: minutes }
+    });
+
+    this.executionQueueManager.on("timeout", async (conversationId: string) => {
+      const conversation = this.store.get(conversationId);
+      if (conversation && conversation.phase === PHASES.EXECUTE) {
+        await this.updatePhase(
+          conversationId,
+          PHASES.CHAT,
+          "Execution timeout reached. The execution lock has been automatically released.",
+          "system",
+          "system"
         );
       }
-    );
+    });
+
+    this.executionQueueManager.on("timeout-warning", async (conversationId: string, remainingMs: number) => {
+      const minutes = Math.floor(remainingMs / 60000);
+      logWarning(
+        `Execution timeout warning: ${minutes} minutes remaining`,
+        "conversation",
+        "normal",
+        { conversationId, remainingMinutes: minutes }
+      );
+    });
+  }
+
+  private formatQueueMessage(position: number, waitTimeSeconds: number): string {
+    const waitTime = this.formatWaitTime(waitTimeSeconds);
+    return `🚦 Execution Queue Status\n\nYour conversation has been added to the execution queue.\n\nQueue Position: ${position}\nEstimated Wait Time: ${waitTime}\n\nYou will be automatically notified when execution begins.`;
+  }
+
+  private formatWaitTime(seconds: number): string {
+    if (seconds < 60) {
+      return `~${Math.floor(seconds)} seconds`;
+    }
+    if (seconds < 3600) {
+      return `~${Math.floor(seconds / 60)} minutes`;
+    }
+    return `~${Math.floor(seconds / 3600)} hours`;
   }
 }

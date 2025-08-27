@@ -1,5 +1,9 @@
 import { getNDK } from "@/nostr";
 import { getAgentSlugFromEvent, getTargetedAgentSlugsFromEvent, isEventFromUser } from "@/nostr/utils";
+import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import "@/prompts/fragments/20-phase-constraints";
+import "@/prompts/fragments/20-phase-context";
+import "@/prompts/fragments/35-specialist-completion-guidance";
 import { getProjectContext } from "@/services";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
@@ -7,6 +11,7 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import type { Phase } from "./phases";
+import type { Conversation } from "./types";
 
 /**
  * Handles message formatting and processing.
@@ -14,6 +19,51 @@ import type { Phase } from "./phases";
  */
 export class MessageBuilder {
   private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
+
+  /**
+   * Builds phase-specific instructions to be injected as a system message
+   * when an agent transitions to a new phase.
+   *
+   * This includes:
+   * - Current phase context and any transition information
+   * - Phase-specific constraints
+   * - Phase-specific completion guidance
+   */
+  static buildPhaseInstructions(phase: Phase, conversation?: Conversation): string {
+    const builder = new PromptBuilder()
+      .add("phase-context", {
+        phase,
+        phaseMetadata: conversation?.metadata,
+        conversation,
+      })
+      .add("phase-constraints", {
+        phase,
+      })
+      .add("specialist-completion-guidance", {
+        phase,
+      });
+
+    return builder.build();
+  }
+
+  /**
+   * Formats a phase transition message for an agent that is
+   * re-entering the conversation in a different phase.
+   */
+  static formatPhaseTransitionMessage(
+    lastSeenPhase: Phase,
+    currentPhase: Phase,
+    phaseInstructions: string
+  ): string {
+    return `=== PHASE TRANSITION ===
+
+You were last active in the ${lastSeenPhase.toUpperCase()} phase.
+The conversation has now moved to the ${currentPhase.toUpperCase()} phase.
+
+${phaseInstructions}
+
+Please adjust your behavior according to the new phase requirements.`;
+  }
 
   /**
    * Process nostr entities in content, replacing them with inline content

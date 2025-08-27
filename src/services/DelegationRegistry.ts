@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export interface DelegationRecord {
   // Core identifiers
-  delegationEventId: string; // Delegation event ID (kind:1111) or synthetic ID for multi-recipient
+  delegationEventId: string; // Delegation event ID (kind:1111) - actual Nostr event ID
   delegationBatchId: string; // Groups tasks delegated together
 
   // Context from delegating agent
@@ -192,18 +192,23 @@ export class DelegationRegistry extends EventEmitter {
   }
 
   /**
-   * Register a new delegation batch
-   * Called when delegate() or delegate_phase() creates delegations
+   * Register a delegation - Unified interface for single and multi-recipient
+   * 
+   * @param delegationEventId - The actual Nostr event ID (kind:11 or kind:1111)
+   * @param recipients - Array of recipients (can be single or multiple)
+   * @param delegatingAgent - The agent creating the delegation  
+   * @param rootConversationId - The root conversation where delegation originated
+   * @param originalRequest - The original request text
    */
-  async registerDelegationBatch(params: {
-    tasks: Array<{
-      taskId: string; // Actually the delegation event ID (kind:1111) or synthetic ID
-      assignedToPubkey: string;
-      fullRequest: string;
+  async registerDelegation(params: {
+    delegationEventId: string;
+    recipients: Array<{
+      pubkey: string;
+      request: string;
       phase?: string;
     }>;
     delegatingAgent: AgentInstance;
-    conversationId: string; // The root conversation ID where delegation originated
+    rootConversationId: string;
     originalRequest: string;
   }): Promise<string> {
     const batchId = this.generateBatchId();
@@ -212,140 +217,70 @@ export class DelegationRegistry extends EventEmitter {
     const batch: DelegationBatch = {
       batchId,
       delegatingAgent: params.delegatingAgent.pubkey,
-      delegationKeys: [], // Will store conversation keys
+      delegationKeys: [],
       allCompleted: false,
       createdAt: Date.now(),
       originalRequest: params.originalRequest,
-      rootConversationId: params.conversationId,
+      rootConversationId: params.rootConversationId,
     };
 
+    logger.info("🔨 Registering delegation", {
+      batchId,
+      delegationEventId: params.delegationEventId.substring(0, 8),
+      recipientCount: params.recipients.length,
+      isMultiRecipient: params.recipients.length > 1,
+      rootConversationId: params.rootConversationId.substring(0, 8),
+    });
+
     // Create individual delegation records
-    for (const task of params.tasks) {
-      const convKey = `${params.conversationId}:${params.delegatingAgent.pubkey}:${task.assignedToPubkey}`;
+    for (const recipient of params.recipients) {
+      const convKey = `${params.rootConversationId}:${params.delegatingAgent.pubkey}:${recipient.pubkey}`;
       
       const record: DelegationRecord = {
-        delegationEventId: task.taskId, // This is the delegation event ID (kind:1111) or synthetic ID
+        delegationEventId: params.delegationEventId,
         delegationBatchId: batchId,
         delegatingAgent: {
           slug: params.delegatingAgent.slug,
           pubkey: params.delegatingAgent.pubkey,
-          rootConversationId: params.conversationId,
+          rootConversationId: params.rootConversationId,
         },
         assignedTo: {
-          pubkey: task.assignedToPubkey,
+          pubkey: recipient.pubkey,
         },
         content: {
-          fullRequest: task.fullRequest,
-          phase: task.phase,
+          fullRequest: recipient.request,
+          phase: recipient.phase,
         },
         status: "pending",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        siblingDelegationIds: params.tasks.filter((t) => t.taskId !== task.taskId).map((t) => t.taskId),
+        siblingDelegationIds: [],
       };
 
       this.delegations.set(convKey, record);
-      batch.delegationKeys.push(convKey); // Store conversation key
+      batch.delegationKeys.push(convKey);
       this.indexDelegation(record);
     }
 
-    this.batches.set(batchId, batch);
-    this.schedulePersistence();
-
-    logger.info("Registered delegation batch", {
-      batchId,
-      delegationCount: params.tasks.length,
-      delegatingAgent: params.delegatingAgent.slug,
-      delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
-      conversationId: params.conversationId.substring(0, 8),
-      delegationEventIds: params.tasks.map((t) => ({
-        id: t.taskId.substring(0, 8),
-        assignedTo: t.assignedToPubkey.substring(0, 16),
-      })),
-    });
-
-    // Debug: Log each individual task registration
-    for (const task of params.tasks) {
-      logger.debug("Registered individual delegation", {
-        taskId: task.taskId.substring(0, 8),
-        fullTaskId: task.taskId,
-        delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
-        assignedToPubkey: task.assignedToPubkey.substring(0, 16),
-        phase: task.phase,
-      });
+    // Update sibling IDs
+    for (const convKey of batch.delegationKeys) {
+      const record = this.delegations.get(convKey)!;
+      record.siblingDelegationIds = batch.delegationKeys.filter(k => k !== convKey);
     }
 
-    return batchId;
-  }
-
-  /**
-   * Register an external delegation
-   * Called when delegate_external creates a delegation to an external agent
-   */
-  async registerExternalDelegation(params: {
-    delegationEventId: string; // The kind:11 or kind:1111 event ID we published
-    delegatingAgent: AgentInstance;
-    assignedToPubkey: string;
-    conversationId: string; // The root conversation ID where delegation originated
-    fullRequest: string;
-    phase?: string;
-  }): Promise<string> {
-    const batchId = this.generateBatchId();
-    
-    // Create a single-item batch for external delegation
-    const batch: DelegationBatch = {
-      batchId,
-      delegatingAgent: params.delegatingAgent.pubkey,
-      delegationKeys: [],
-      allCompleted: false,
-      createdAt: Date.now(),
-      originalRequest: params.fullRequest,
-      rootConversationId: params.conversationId,
-    };
-
-    // Create delegation record using conversation key format
-    const convKey = `${params.conversationId}:${params.delegatingAgent.pubkey}:${params.assignedToPubkey}`;
-    
-    const record: DelegationRecord = {
-      delegationEventId: params.delegationEventId,
-      delegationBatchId: batchId,
-      delegatingAgent: {
-        slug: params.delegatingAgent.slug,
-        pubkey: params.delegatingAgent.pubkey,
-        rootConversationId: params.conversationId,
-      },
-      assignedTo: {
-        pubkey: params.assignedToPubkey,
-      },
-      content: {
-        fullRequest: params.fullRequest,
-        phase: params.phase,
-      },
-      status: "pending",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      siblingDelegationIds: [], // External delegations are always single
-    };
-
-    this.delegations.set(convKey, record);
-    batch.delegationKeys.push(convKey);
-    this.indexDelegation(record);
-
     this.batches.set(batchId, batch);
     this.schedulePersistence();
 
-    logger.info("Registered external delegation", {
+    logger.info("✅ Delegation registered", {
       batchId,
       delegationEventId: params.delegationEventId.substring(0, 8),
+      recipientCount: params.recipients.length,
       delegatingAgent: params.delegatingAgent.slug,
-      delegatingAgentPubkey: params.delegatingAgent.pubkey.substring(0, 16),
-      assignedToPubkey: params.assignedToPubkey.substring(0, 16),
-      conversationId: params.conversationId.substring(0, 8),
-      phase: params.phase,
     });
 
     return batchId;
   }
+
 
   /**
    * Record delegation completion
@@ -370,6 +305,11 @@ export class DelegationRegistry extends EventEmitter {
     const record = this.delegations.get(convKey);
     if (!record) {
       throw new Error(`No delegation record for ${convKey}`);
+    }
+    
+    // Prevent duplicate completions
+    if (record.status === "completed") {
+      throw new Error(`Delegation already completed for ${convKey}. Original completion: ${record.completion?.eventId}`);
     }
 
     // Update record
@@ -449,67 +389,76 @@ export class DelegationRegistry extends EventEmitter {
   }
 
   /**
-   * Get delegation context from conversation and agent pubkeys
+   * Get delegation context by conversation key lookup
+   * This is the primary way to find a delegation record
+   * 
+   * @param rootConversationId - The root conversation where delegation originated
+   * @param fromPubkey - The delegating agent's pubkey
+   * @param toPubkey - The recipient agent's pubkey
+   * @returns The delegation record if found
    */
-  getDelegationContext(conversationId: string, fromPubkey: string, toPubkey: string): DelegationRecord | undefined {
-    const convKey = `${conversationId}:${fromPubkey}:${toPubkey}`;
+  getDelegationByConversationKey(
+    rootConversationId: string,
+    fromPubkey: string,
+    toPubkey: string
+  ): DelegationRecord | undefined {
+    const convKey = `${rootConversationId}:${fromPubkey}:${toPubkey}`;
     
-    logger.debug("Looking up delegation context", {
-      conversationId: conversationId.substring(0, 8),
+    logger.debug("🔍 Looking up delegation by conversation key", {
+      convKey,
+      rootConversationId: rootConversationId.substring(0, 8),
       fromPubkey: fromPubkey.substring(0, 16),
       toPubkey: toPubkey.substring(0, 16),
-      convKey,
-      totalDelegations: this.delegations.size,
-      hasRecord: this.delegations.has(convKey),
+      exists: this.delegations.has(convKey),
     });
 
     const record = this.delegations.get(convKey);
-
+    
     if (record) {
-      logger.debug("Found delegation context", {
-        conversationId: conversationId.substring(0, 8),
-        delegatingAgentSlug: record.delegatingAgent.slug,
-        delegatingAgentPubkey: record.delegatingAgent.pubkey.substring(0, 16),
+      logger.debug("✅ Found delegation by conversation key", {
+        delegationEventId: record.delegationEventId.substring(0, 8),
         status: record.status,
         batchId: record.delegationBatchId,
       });
     } else {
-      logger.warn("No delegation context found", {
-        conversationId: conversationId.substring(0, 8),
-        fromPubkey: fromPubkey.substring(0, 16),
-        toPubkey: toPubkey.substring(0, 16),
-        availableKeys: Array.from(this.delegations.keys()),
+      logger.debug("❌ No delegation found for conversation key", {
+        convKey,
+        availableKeys: Array.from(this.delegations.keys()).slice(0, 5), // Log first 5 for debugging
       });
     }
 
     return record;
   }
+
+  /**
+   * Get delegation context from conversation and agent pubkeys
+   * Legacy method that wraps the new getDelegationByConversationKey
+   */
+  getDelegationContext(conversationId: string, fromPubkey: string, toPubkey: string): DelegationRecord | undefined {
+    return this.getDelegationByConversationKey(conversationId, fromPubkey, toPubkey);
+  }
   
   /**
-   * Legacy method for backward compatibility - looks up by delegation event ID
-   * Used when we have an explicit delegation completion with e-tags
-   * Now also handles synthetic delegation IDs for multi-recipient delegations
+   * DEPRECATED: This method is no longer reliable with multi-recipient delegations
+   * Multiple delegation records can share the same event ID
+   * Use getDelegationByConversationKey instead when you know the participants
+   * 
+   * @deprecated
    */
   getDelegationContextByTaskId(taskId: string): DelegationRecord | undefined {
-    // First try direct match (for both old style and synthetic IDs)
+    logger.warn("⚠️ getDelegationContextByTaskId is deprecated and may return incorrect results", {
+      taskId: taskId.substring(0, 16),
+      reason: "Multiple records may share the same event ID after refactoring",
+    });
+    
+    // Return first match (this is NOT reliable for multi-recipient delegations)
     for (const record of this.delegations.values()) {
       if (record.delegationEventId === taskId) {
+        logger.warn("⚠️ Found delegation by event ID, but this may not be the correct one for multi-recipient", {
+          delegationEventId: record.delegationEventId.substring(0, 8),
+          assignedTo: record.assignedTo.pubkey.substring(0, 16),
+        });
         return record;
-      }
-    }
-    
-    // If the provided delegationEventId looks like a synthetic ID but wasn't found,
-    // it might be because we're looking up with responder pubkey but need to match assignee
-    if (taskId.includes(':')) {
-      const [baseEventId, pubkey] = taskId.split(':');
-      
-      // Look for records where the delegation event ID starts with the base event ID
-      // and the assignedTo matches the pubkey portion
-      for (const record of this.delegations.values()) {
-        if (record.delegationEventId.startsWith(`${baseEventId}:`) && 
-            record.assignedTo.pubkey === pubkey) {
-          return record;
-        }
       }
     }
     
@@ -758,7 +707,31 @@ export class DelegationRegistry extends EventEmitter {
     try {
       const validatedData = PersistedDataSchema.parse(data);
 
-      this.delegations = new Map(validatedData.delegations);
+      // Migrate old synthetic IDs if found
+      const migratedDelegations = new Map();
+      let migrationCount = 0;
+      
+      for (const [key, record] of validatedData.delegations) {
+        // Check if delegationEventId contains synthetic ID (format: eventId:pubkey)
+        if (record.delegationEventId && record.delegationEventId.includes(':')) {
+          // Extract the actual event ID from synthetic ID
+          const [actualEventId] = record.delegationEventId.split(':');
+          record.delegationEventId = actualEventId;
+          migrationCount++;
+          logger.info("🔄 Migrated synthetic ID to actual event ID", {
+            old: record.delegationEventId.substring(0, 16) + "...",
+            new: actualEventId.substring(0, 8),
+          });
+        }
+        migratedDelegations.set(key, record);
+      }
+      
+      if (migrationCount > 0) {
+        logger.info("✅ Migrated delegations from synthetic IDs", { count: migrationCount });
+        this.isDirty = true; // Mark as dirty to persist migrated data
+      }
+      
+      this.delegations = migratedDelegations;
       this.batches = new Map(validatedData.batches);
       this.agentDelegations = new Map(validatedData.agentTasks.map(([k, v]) => [k, new Set(v)]));
       this.conversationDelegations = new Map(
@@ -887,6 +860,42 @@ export class DelegationRegistry extends EventEmitter {
       await shutdown("unhandledRejection");
       process.exit(1);
     });
+  }
+
+  /**
+   * Find delegation records by event ID and responder pubkey
+   * Used when processing completion events
+   * 
+   * @param eventId - The delegation event ID from the e-tag
+   * @param responderPubkey - The pubkey of the responding agent
+   * @returns The matching delegation record if found
+   */
+  findDelegationByEventAndResponder(
+    eventId: string,
+    responderPubkey: string
+  ): DelegationRecord | undefined {
+    logger.debug("🔍 Finding delegation by event ID and responder", {
+      eventId: eventId.substring(0, 8),
+      responderPubkey: responderPubkey.substring(0, 16),
+    });
+    
+    // Search through all delegations
+    for (const [convKey, record] of this.delegations.entries()) {
+      if (record.delegationEventId === eventId && 
+          record.assignedTo.pubkey === responderPubkey) {
+        
+        logger.debug("✅ Found delegation match", {
+          conversationKey: convKey,
+          status: record.status,
+          delegatingAgent: record.delegatingAgent.slug,
+        });
+        
+        return record;
+      }
+    }
+    
+    logger.debug("❌ No delegation found for event+responder combination");
+    return undefined;
   }
 
   /**

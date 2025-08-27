@@ -9,9 +9,8 @@ import {
 } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import { type TracingContext, createAgentExecutionContext, createTracingContext } from "@/tracing";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logger } from "@/utils/logger";
+import { logger, logInfo } from "@/utils/logger";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import { ReasonActLoop } from "./ReasonActLoop";
@@ -22,7 +21,6 @@ import "@/prompts/fragments/85-specialist-reasoning";
 import "@/prompts/fragments/15-specialist-available-agents";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { createExecutionLogger } from "@/logging/UnifiedLogger";
 
 /**
  * Minimal context for standalone agent execution
@@ -46,16 +44,7 @@ export class AgentExecutor {
   /**
    * Execute an agent's assignment for a conversation with streaming
    */
-  async execute(context: ExecutionContext, parentTracingContext?: TracingContext): Promise<void> {
-    // Create agent execution tracing context
-    const tracingContext = parentTracingContext
-      ? createAgentExecutionContext(parentTracingContext, context.agent.name)
-      : createAgentExecutionContext(
-          createTracingContext(context.conversationId),
-          context.agent.name
-        );
-
-    const executionLogger = createExecutionLogger(tracingContext, "agent");
+  async execute(context: ExecutionContext): Promise<void> {
 
     // Build messages first to get the Claude session ID
     const messages = await this.buildMessages(context, context.triggeringEvent);
@@ -100,10 +89,14 @@ export class AgentExecutor {
       startExecutionTime(conversation);
 
       // Log execution flow start
-      await executionLogger.logEvent(
-        "execution_start",
+      logInfo(
+        `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
+        "agent",
+        "verbose",
         {
-          narrative: `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
+          conversationId: context.conversationId,
+          agent: context.agent.name,
+          phase: context.phase,
         }
       );
 
