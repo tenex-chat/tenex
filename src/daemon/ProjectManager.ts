@@ -196,7 +196,7 @@ export class ProjectManager implements IProjectManager {
 
       // Initialize ConversationCoordinator with ExecutionQueueManager for CLI commands
       const projectCtx = (await import("@/services")).getProjectContext();
-      const ConversationCoordinator = (await import("@/conversations/ConversationCoordinator"))
+      const ConversationCoordinator = (await import("@/conversations"))
         .ConversationCoordinator;
       const ExecutionQueueManager = (await import("@/conversations/executionQueue"))
         .ExecutionQueueManager;

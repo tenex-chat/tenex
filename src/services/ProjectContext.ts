@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKProjectStatus } from "@/events/NDKProjectStatus";
 import { getNDK } from "@/nostr";

@@ -1,4 +1,4 @@
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import type { ConversationCoordinator } from "@/conversations";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { PHASES } from "@/conversations/phases";
 import type { Phase } from "@/conversations/phases";

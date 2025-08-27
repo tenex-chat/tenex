@@ -136,6 +136,7 @@ export class LLMLogger {
    */
   async logLLMResponse(params: {
     requestId: string;
+    agent: string;
     response?: CompletionResponse;
     error?: Error;
     endTime: number;
@@ -147,6 +148,7 @@ export class LLMLogger {
     const responseEntry: Partial<LLMLogEntry> = {
       timestamp: new Date().toISOString(),
       timestampMs: Date.now(),
+      agent: params.agent,
       durationMs: params.endTime - params.startTime
     };
 
@@ -221,6 +223,7 @@ export class LLMLogger {
     if (params.response || params.error) {
       await this.logLLMResponse({
         requestId,
+        agent: params.agent,
         response: params.response,
         error: params.error,
         endTime: params.endTime,

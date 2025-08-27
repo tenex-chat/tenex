@@ -1,4 +1,4 @@
-import type { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import type { ConversationCoordinator } from "@/conversations";
 import { formatDuration } from "@/utils/formatting";
 import chalk from "chalk";
 import inquirer from "inquirer";

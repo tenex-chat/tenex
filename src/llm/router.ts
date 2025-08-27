@@ -225,6 +225,7 @@ export class LLMRouter implements LLMService {
       if (llmLogger && requestId) {
         await llmLogger.logLLMResponse({
           requestId,
+          agent: request.options?.agentName || "unknown",
           response,
           endTime,
           startTime
@@ -254,6 +255,7 @@ export class LLMRouter implements LLMService {
       if (llmLogger && requestId) {
         await llmLogger.logLLMResponse({
           requestId,
+          agent: request.options?.agentName || "unknown",
           error,
           endTime,
           startTime
@@ -272,6 +274,26 @@ export class LLMRouter implements LLMService {
     }
 
     const startTime = Date.now();
+    let requestId: string | undefined;
+
+    // Log the request immediately
+    const llmLogger = getLLMLogger();
+    if (llmLogger) {
+      const toolContext = request.toolContext;
+      requestId = await llmLogger.logLLMRequest({
+        agent: request.options?.agentName || "unknown",
+        rootEvent: undefined,
+        triggeringEvent: toolContext?.triggeringEvent,
+        conversationId: toolContext?.conversationId,
+        phase: toolContext?.phase,
+        configKey,
+        provider: config.provider,
+        model: config.model,
+        messages: request.messages,
+        tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
+        startTime
+      });
+    }
 
     try {
       const llmConfig = {
@@ -407,24 +429,14 @@ export class LLMRouter implements LLMService {
           });
         }
 
-        // Log to LLM logger for clear debugging
-        const llmLogger = getLLMLogger();
-        if (llmLogger) {
-          const toolContext = request.toolContext;
-          await llmLogger.logLLMInteraction({
+        // Log the response
+        if (llmLogger && requestId) {
+          await llmLogger.logLLMResponse({
+            requestId,
             agent: request.options?.agentName || "unknown",
-            rootEvent: undefined, // Could be derived from conversation history
-            triggeringEvent: toolContext?.triggeringEvent,
-            conversationId: toolContext?.conversationId,
-            phase: toolContext?.phase,
-            configKey,
-            provider: config.provider,
-            model: config.model,
-            messages: request.messages,
-            tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
             response: lastResponse,
-            startTime,
-            endTime
+            endTime,
+            startTime
           });
         }
 
@@ -466,24 +478,14 @@ export class LLMRouter implements LLMService {
           });
         }
 
-        // Log to LLM logger for clear debugging
-        const llmLogger = getLLMLogger();
-        if (llmLogger) {
-          const toolContext = request.toolContext;
-          await llmLogger.logLLMInteraction({
+        // Log the response
+        if (llmLogger && requestId) {
+          await llmLogger.logLLMResponse({
+            requestId,
             agent: request.options?.agentName || "unknown",
-            rootEvent: undefined, // Could be derived from conversation history
-            triggeringEvent: toolContext?.triggeringEvent,
-            conversationId: toolContext?.conversationId,
-            phase: toolContext?.phase,
-            configKey,
-            provider: config.provider,
-            model: config.model,
-            messages: request.messages,
-            tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
             response: fallbackResponse,
-            startTime,
-            endTime
+            endTime,
+            startTime
           });
         }
 
@@ -513,24 +515,14 @@ export class LLMRouter implements LLMService {
         );
       }
 
-      // Log to LLM logger for clear debugging
-      const llmLogger = getLLMLogger();
-      if (llmLogger) {
-        const toolContext = request.toolContext;
-        await llmLogger.logLLMInteraction({
+      // Log the error
+      if (llmLogger && requestId) {
+        await llmLogger.logLLMResponse({
+          requestId,
           agent: request.options?.agentName || "unknown",
-          rootEvent: undefined, // Could be derived from conversation history
-          triggeringEvent: toolContext?.triggeringEvent,
-          conversationId: toolContext?.conversationId,
-          phase: toolContext?.phase,
-          configKey,
-          provider: config.provider,
-          model: config.model,
-          messages: request.messages,
-          tools: request.tools?.map(t => ({ name: t.name, description: t.description })),
           error: errorObj,
-          startTime,
-          endTime
+          endTime,
+          startTime
         });
       }
 
