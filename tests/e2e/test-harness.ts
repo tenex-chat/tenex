@@ -8,7 +8,7 @@ import {
     type MockLLMService
 } from "@/test-utils";
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
-import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import { ConversationCoordinator } from "@/conversations";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { ToolCall } from "@/llm/types";
 import { Message } from "multi-llm-ts";

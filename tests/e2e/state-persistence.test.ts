@@ -10,7 +10,7 @@ import {
     assertToolCalls,
     type E2ETestContext
 } from "./test-harness";
-import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import { ConversationCoordinator } from "@/conversations";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { MockLLMResponse } from "@/test-utils/mock-llm/types";
 import path from "path";

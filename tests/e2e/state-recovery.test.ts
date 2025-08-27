@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { ConversationCoordinator } from "@/conversations/ConversationCoordinator";
+import { ConversationCoordinator } from "@/conversations";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
 import { createMockLLMService } from "@/test-utils/mock-llm";
