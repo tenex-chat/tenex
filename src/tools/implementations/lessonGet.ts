@@ -1,11 +1,9 @@
-import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { getNDK } from "@/nostr";
+import { getProjectContext } from "@/services/ProjectContext";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKFilter } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
-import { createZodSchema } from "../types";
+import { createZodSchema, success, failure } from "../types";
 
 const lessonGetSchema = z.object({
   title: z.string().describe("Title of the lesson to retrieve"),
@@ -49,56 +47,33 @@ The tool will return both the summary and detailed version (if available) of the
       conversationId: context.conversationId,
     });
 
-    const ndk = getNDK();
-    if (!ndk) {
-      const error = "NDK instance not available";
-      logger.error("❌ lesson_get tool failed", {
-        error,
-        agent: context.agent.name,
-        agentPubkey: context.agent.pubkey,
-        title,
-        phase: context.phase,
-        conversationId: context.conversationId,
+    try {
+      // Get the project context to access in-memory lessons
+      const projectContext = getProjectContext();
+      
+      // Get lessons for this agent from memory
+      const agentLessons = projectContext.getLessonsForAgent(context.agent.pubkey);
+      
+      // Search for a lesson matching the title (case-insensitive)
+      const normalizedSearchTitle = title.toLowerCase().trim();
+      const matchingLesson = agentLessons.find(lesson => {
+        const lessonTitle = (lesson.title || "").toLowerCase().trim();
+        return lessonTitle === normalizedSearchTitle;
       });
-      return {
-        ok: false,
-        error: {
+
+      // Determine which lesson to use (exact match or partial)
+      const lesson = matchingLesson || agentLessons.find(lesson => {
+        const lessonTitle = (lesson.title || "").toLowerCase().trim();
+        return lessonTitle.includes(normalizedSearchTitle) || normalizedSearchTitle.includes(lessonTitle);
+      });
+
+      if (!lesson) {
+        return failure({
           kind: "execution" as const,
           tool: "lesson_get",
-          message: error,
-        },
-      };
-    }
-
-    try {
-      // Build filter to find lessons by title for this agent
-      const filter: NDKFilter = {
-        kinds: [NDKAgentLesson.kind],
-        "#title": [title],
-      };
-
-      // Add agent filter if we have the agent's event ID
-      if (context.agent.eventId) {
-        filter["#e"] = [context.agent.eventId];
+          message: `No lesson found with title: "${title}"`,
+        });
       }
-
-      // Fetch matching lessons
-      const events = await ndk.fetchEvents(filter);
-
-      if (events.size === 0) {
-        return {
-          ok: false,
-          error: {
-            kind: "execution" as const,
-            tool: "lesson_get",
-            message: `No lesson found with title: "${title}"`,
-          },
-        };
-      }
-
-      // Get the most recent lesson if multiple matches
-      const lessonEvents = Array.from(events).map((e) => NDKAgentLesson.from(e));
-      const lesson = lessonEvents.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
 
       // Publish status update about reading the lesson
       try {
@@ -121,17 +96,23 @@ The tool will return both the summary and detailed version (if available) of the
         logger.warn("Failed to publish lesson_get status:", error);
       }
 
-      return {
-        ok: true,
-        value: {
-          title: lesson.title || title,
-          lesson: lesson.lesson || lesson.content,
-          detailed: lesson.detailed,
-          category: lesson.category,
-          hashtags: lesson.hashtags,
-          hasDetailed: !!lesson.detailed,
-        },
-      };
+      logger.info("✅ Successfully retrieved lesson from memory", {
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        title: lesson.title || title,
+        hasDetailed: !!lesson.detailed,
+        phase: context.phase,
+        conversationId: context.conversationId,
+      });
+
+      return success({
+        title: lesson.title || title,
+        lesson: lesson.lesson || lesson.content,
+        detailed: lesson.detailed,
+        category: lesson.category,
+        hashtags: lesson.hashtags,
+        hasDetailed: !!lesson.detailed,
+      });
     } catch (error) {
       logger.error("❌ lesson_get tool failed", {
         error: formatAnyError(error),
@@ -142,14 +123,11 @@ The tool will return both the summary and detailed version (if available) of the
         conversationId: context.conversationId,
       });
 
-      return {
-        ok: false,
-        error: {
-          kind: "execution" as const,
-          tool: "lesson_get",
-          message: formatAnyError(error),
-        },
-      };
+      return failure({
+        kind: "execution" as const,
+        tool: "lesson_get",
+        message: formatAnyError(error),
+      });
     }
   },
 };
