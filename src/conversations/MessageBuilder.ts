@@ -18,7 +18,7 @@ export class MessageBuilder {
   /**
    * Process nostr entities in content, replacing them with inline content
    */
-  async processNostrEntities(content: string): Promise<string> {
+  static async processNostrEntities(content: string): Promise<string> {
     const entities = content.match(MessageBuilder.NOSTR_ENTITY_REGEX);
     if (!entities || entities.length === 0) {
       return content;
@@ -57,7 +57,7 @@ export class MessageBuilder {
   /**
    * Format an NDKEvent as a Message for a specific agent
    */
-  async formatEventAsMessage(
+  static async formatEventAsMessage(
     event: NDKEvent,
     processedContent: string,
     targetAgentSlug: string,
@@ -197,7 +197,7 @@ export class MessageBuilder {
   /**
    * Build phase transition message
    */
-  buildPhaseTransitionMessage(fromPhase: Phase | undefined, toPhase: Phase): string {
+  static buildPhaseTransitionMessage(fromPhase: Phase | undefined, toPhase: Phase): string {
     if (fromPhase) {
       return `=== PHASE TRANSITION: ${fromPhase.toUpperCase()} → ${toPhase.toUpperCase()} ===`;
     }
@@ -207,7 +207,7 @@ export class MessageBuilder {
   /**
    * Format a system message with proper attribution
    */
-  formatSystemMessage(content: string, attribution?: string): Message {
+  static formatSystemMessage(content: string, attribution?: string): Message {
     if (attribution) {
       return new Message("system", `[${attribution}]: ${content}`);
     }
@@ -217,29 +217,106 @@ export class MessageBuilder {
   /**
    * Create a user message
    */
-  formatUserMessage(content: string): Message {
+  static formatUserMessage(content: string): Message {
     return new Message("user", content);
   }
 
   /**
    * Create an assistant message
    */
-  formatAssistantMessage(content: string): Message {
+  static formatAssistantMessage(content: string): Message {
     return new Message("assistant", content);
   }
 
   /**
    * Check if content contains nostr entities
    */
-  hasNostrEntities(content: string): boolean {
+  static hasNostrEntities(content: string): boolean {
     return MessageBuilder.NOSTR_ENTITY_REGEX.test(content);
   }
 
   /**
    * Extract nostr entities from content
    */
-  extractNostrEntities(content: string): string[] {
+  static extractNostrEntities(content: string): string[] {
     const matches = content.match(MessageBuilder.NOSTR_ENTITY_REGEX);
     return matches || [];
+  }
+
+  /**
+   * Build "Messages While You Were Away" block for catching up on conversation history
+   */
+  static async buildMissedMessagesBlock(
+    events: NDKEvent[], 
+    agentSlug: string,
+    delegationSummary?: string
+  ): Promise<Message> {
+    let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
+
+    if (delegationSummary) {
+      contextBlock += `**Previous context**: ${delegationSummary}\n\n`;
+    }
+
+    for (const event of events) {
+      const sender = MessageBuilder.getEventSender(event, agentSlug);
+      if (sender && event.content) {
+        const processed = await MessageBuilder.processNostrEntities(event.content);
+        contextBlock += `${sender}:\n${processed}\n\n`;
+      }
+    }
+
+    contextBlock += "=== END OF HISTORY ===\n";
+    contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
+
+    return new Message("system", contextBlock);
+  }
+
+  /**
+   * Build delegation responses block
+   */
+  static buildDelegationResponsesBlock(
+    responses: Map<string, NDKEvent>, 
+    originalRequest: string
+  ): Message {
+    let message = "=== DELEGATE RESPONSES RECEIVED ===\n\n";
+    message += `You previously delegated the following request to ${responses.size} agent(s):\n`;
+    message += `"${originalRequest}"\n\n`;
+    message += "Here are all the responses:\n\n";
+
+    const projectCtx = getProjectContext();
+    for (const [pubkey, event] of responses) {
+      const agent = projectCtx.getAgentByPubkey(pubkey);
+      const agentName = agent?.name || pubkey.substring(0, 8);
+      message += `### Response from ${agentName}:\n`;
+      message += `${event.content}\n\n`;
+    }
+
+    message += "=== END OF DELEGATE RESPONSES ===\n\n";
+    message += "Now process these responses and complete your task.";
+
+    return new Message("system", message);
+  }
+
+  /**
+   * Helper to determine event sender for display purposes
+   */
+  private static getEventSender(event: NDKEvent, currentAgentSlug: string): string | null {
+    const eventAgentSlug = getAgentSlugFromEvent(event);
+
+    if (isEventFromUser(event)) {
+      return "🟢 USER";
+    }
+    if (eventAgentSlug) {
+      const projectCtx = getProjectContext();
+      const sendingAgent = projectCtx.agents.get(eventAgentSlug);
+      const agentName = sendingAgent ? sendingAgent.name : "Another agent";
+
+      // Mark the agent's own previous messages clearly
+      if (eventAgentSlug === currentAgentSlug) {
+        return `💬 You (${agentName})`;
+      }
+      return `💬 ${agentName}`;
+    }
+    return "💬 Unknown";
   }
 }

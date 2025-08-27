@@ -1,16 +1,12 @@
 import type { AgentInstance } from "@/agents/types";
-import { createExecutionLogger } from "@/logging/UnifiedLogger";
 import {
   buildPhaseInstructions,
   formatPhaseTransitionMessage,
 } from "@/prompts/utils/phaseInstructionsBuilder";
-import type { TracingContext } from "@/tracing";
-import { createPhaseExecutionContext, createTracingContext } from "@/tracing";
-import { logger } from "@/utils/logger";
+import { logger, logInfo, logWarning } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";
-import { MessageBuilder } from "../MessageBuilder";
 import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
@@ -32,10 +28,8 @@ export class ConversationCoordinator {
   private persistence: IConversationPersistenceService;
   private phaseManager: PhaseManager;
   private eventProcessor: ConversationEventProcessor;
-  private messageBuilder: MessageBuilder;
 
-  // Context management
-  private conversationContexts: Map<string, TracingContext> = new Map();
+  // Agent message contexts (for building conversation history per agent)
   private agentContexts: Map<string, AgentConversationContext> = new Map();
 
   constructor(
@@ -50,7 +44,6 @@ export class ConversationCoordinator {
     );
     this.phaseManager = new PhaseManager(executionQueueManager);
     this.eventProcessor = new ConversationEventProcessor();
-    this.messageBuilder = new MessageBuilder();
 
     // Setup queue listeners if available
     if (executionQueueManager) {
@@ -73,15 +66,14 @@ export class ConversationCoordinator {
   async createConversation(event: NDKEvent): Promise<Conversation> {
     const conversation = await this.eventProcessor.createConversationFromEvent(event);
 
-    // Create tracing context
-    const tracingContext = createTracingContext(conversation.id);
-    this.conversationContexts.set(conversation.id, tracingContext);
-
-    const executionLogger = createExecutionLogger(tracingContext, "conversation");
-    await executionLogger.logEvent(
-      "conversation_start",
+    // Log conversation start
+    logInfo(
+      `Starting conversation ${conversation.id.substring(0, 8)}`,
+      "conversation",
+      "normal",
       {
-        userMessage: event.content || "",
+        conversationId: conversation.id,
+        userMessage: event.content?.substring(0, 100),
         eventId: event.id,
       }
     );
@@ -217,13 +209,12 @@ export class ConversationCoordinator {
       conversation.phaseTransitions.push(result.transition);
 
       // Log phase transition
-      const tracingContext = this.getOrCreateTracingContext(id);
-      const phaseContext = createPhaseExecutionContext(tracingContext, phase);
-      const executionLogger = createExecutionLogger(phaseContext, "conversation");
-
-      await executionLogger.logEvent(
-        "phase_transition",
+      logInfo(
+        `Phase transition: ${previousPhase} → ${phase}`,
+        "conversation",
+        "verbose",
         {
+          conversationId: id,
           from: previousPhase,
           to: phase,
         }
@@ -264,12 +255,8 @@ export class ConversationCoordinator {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Get or create the agent context
+    // Get or create the agent context (now stateless)
     const context = this.getOrCreateAgentContext(conversationId, targetAgent.slug);
-
-    // Clear processed event IDs to ensure we rebuild the full conversation history
-    // This is critical for the agent to see its own previous responses
-    context.clearProcessedEvents();
 
     // Get or initialize the agent's state
     let agentState = conversation.agentStates.get(targetAgent.slug);
@@ -281,73 +268,51 @@ export class ConversationCoordinator {
       conversation.agentStates.set(targetAgent.slug, agentState);
     }
 
-    // Check if we need to show phase instructions
-    const agentHasSeenPhase = agentState.lastSeenPhase !== undefined;
-
-    if (agentHasSeenPhase && agentState.lastSeenPhase) {
-      context.setCurrentPhase(agentState.lastSeenPhase);
-    }
-
-    const needsPhaseInstructions =
-      !agentHasSeenPhase || context.getCurrentPhase() !== conversation.phase;
-
-    // Build complete history
-    const historyToProcess: NDKEvent[] = [];
-    for (const event of conversation.history) {
-      if (triggeringEvent?.id && event.id === triggeringEvent.id) {
-        break;
-      }
-      historyToProcess.push(event);
-    }
-
-    if (historyToProcess.length > 0) {
-      await context.addEvents(historyToProcess);
-    }
-
-    // Handle phase transitions
+    // Check if we need phase instructions
+    const needsPhaseInstructions = !agentState.lastSeenPhase || agentState.lastSeenPhase !== conversation.phase;
+    let phaseInstructions: string | undefined;
+    
     if (needsPhaseInstructions) {
-      const phaseInstructions = buildPhaseInstructions(conversation.phase, conversation);
-
-      let phaseMessage: string;
+      const instructions = buildPhaseInstructions(conversation.phase, conversation);
       if (agentState.lastSeenPhase) {
-        phaseMessage = formatPhaseTransitionMessage(
+        phaseInstructions = formatPhaseTransitionMessage(
           agentState.lastSeenPhase,
           conversation.phase,
-          phaseInstructions
+          instructions
         );
       } else {
-        phaseMessage = `=== CURRENT PHASE: ${conversation.phase.toUpperCase()} ===\n\n${phaseInstructions}`;
+        phaseInstructions = `=== CURRENT PHASE: ${conversation.phase.toUpperCase()} ===\n\n${instructions}`;
       }
-
-      context.handlePhaseTransition(conversation.phase, phaseMessage);
       agentState.lastSeenPhase = conversation.phase;
     }
 
-    // Delegation responses are now handled by DelegationRegistry in reply.ts
+    // Build messages using the stateless context
+    const messages = await context.buildMessages(
+      conversation,
+      agentState,
+      triggeringEvent,
+      phaseInstructions
+    );
 
-    // Add the triggering event
-    if (triggeringEvent) {
-      await context.addTriggeringEvent(triggeringEvent);
-    }
-
-    // Update state
-    context.setLastProcessedIndex(conversation.history.length);
+    // Update agent state
     agentState.lastProcessedMessageIndex = conversation.history.length;
 
-    const sessionId = context.getClaudeSessionId();
-    if (sessionId && conversation.phase) {
-      if (!agentState.claudeSessionsByPhase) {
-        agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
+    // Extract and update session ID if present in triggering event
+    if (triggeringEvent) {
+      const sessionId = context.extractSessionId(triggeringEvent);
+      if (sessionId && conversation.phase) {
+        if (!agentState.claudeSessionsByPhase) {
+          agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
+        }
+        agentState.claudeSessionsByPhase[conversation.phase] = sessionId;
       }
-      agentState.claudeSessionsByPhase[conversation.phase] = sessionId;
     }
 
     await this.persistence.save(conversation);
 
     return {
-      messages: context.getMessages(),
-      claudeSessionId:
-        sessionId || (conversation.phase && agentState.claudeSessionsByPhase?.[conversation.phase]),
+      messages,
+      claudeSessionId: conversation.phase && agentState.claudeSessionsByPhase?.[conversation.phase],
     };
   }
 
@@ -383,7 +348,17 @@ export class ConversationCoordinator {
   async archiveConversation(conversationId: string): Promise<void> {
     await this.persistence.archive(conversationId);
     this.store.delete(conversationId);
-    this.conversationContexts.delete(conversationId);
+    
+    // Clean up agent contexts for this conversation
+    const keysToDelete = [];
+    for (const [key] of this.agentContexts) {
+      if (key.startsWith(`${conversationId}:`)) {
+        keysToDelete.push(key);
+      }
+    }
+    for (const key of keysToDelete) {
+      this.agentContexts.delete(key);
+    }
   }
 
   /**
@@ -415,17 +390,21 @@ export class ConversationCoordinator {
 
     this.eventProcessor.cleanupMetadata(conversation);
     this.store.delete(conversationId);
-    this.conversationContexts.delete(conversationId);
+    
+    // Clean up agent contexts for this conversation
+    const keysToDelete = [];
+    for (const [key] of this.agentContexts) {
+      if (key.startsWith(`${conversationId}:`)) {
+        keysToDelete.push(key);
+      }
+    }
+    for (const key of keysToDelete) {
+      this.agentContexts.delete(key);
+    }
 
     await this.persistence.save(conversation);
   }
 
-  /**
-   * Get the tracing context for a conversation
-   */
-  getTracingContext(conversationId: string): TracingContext | undefined {
-    return this.conversationContexts.get(conversationId);
-  }
 
   /**
    * Get phase history for a conversation
@@ -484,14 +463,6 @@ export class ConversationCoordinator {
     }
   }
 
-  private getOrCreateTracingContext(conversationId: string): TracingContext {
-    let context = this.conversationContexts.get(conversationId);
-    if (!context) {
-      context = createTracingContext(conversationId);
-      this.conversationContexts.set(conversationId, context);
-    }
-    return context;
-  }
 
   private getOrCreateAgentContext(
     conversationId: string,
@@ -501,7 +472,7 @@ export class ConversationCoordinator {
     let context = this.agentContexts.get(key);
 
     if (!context) {
-      context = new AgentConversationContext(conversationId, agentSlug, this.messageBuilder);
+      context = new AgentConversationContext(conversationId, agentSlug);
       this.agentContexts.set(key, context);
     }
 
@@ -519,16 +490,12 @@ export class ConversationCoordinator {
           conversation.metadata.queueStatus = undefined;
           await this.persistence.save(conversation);
 
-          const tracingContext = this.conversationContexts.get(conversationId);
-          if (tracingContext) {
-            const executionLogger = createExecutionLogger(tracingContext, "conversation");
-            await executionLogger.logEvent(
-              "execution_start",
-              {
-                narrative: "Execution lock acquired - starting EXECUTE phase",
-              }
-            );
-          }
+          logInfo(
+            "Execution lock acquired - starting EXECUTE phase",
+            "conversation",
+            "verbose",
+            { conversationId }
+          );
         }
       },
       async (conversationId: string) => {
@@ -544,20 +511,13 @@ export class ConversationCoordinator {
         }
       },
       async (conversationId: string, remainingMs: number) => {
-        const tracingContext = this.conversationContexts.get(conversationId);
-        if (tracingContext) {
-          const minutes = Math.floor(remainingMs / 60000);
-          const warningMessage = `⚠️ Execution Timeout Warning\n\nYour conversation has been executing for an extended period.\nTime remaining: ${minutes} minutes\n\nThe execution will be automatically terminated if not completed soon.`;
-
-          // Log timeout warning using execution logger
-          const executionLogger = createExecutionLogger(tracingContext, "conversation");
-          await executionLogger.logEvent(
-            "execution_start",
-            {
-              narrative: warningMessage,
-            }
-          );
-        }
+        const minutes = Math.floor(remainingMs / 60000);
+        logWarning(
+          `Execution timeout warning: ${minutes} minutes remaining`,
+          "conversation",
+          "normal",
+          { conversationId, remainingMinutes: minutes }
+        );
       }
     );
   }
