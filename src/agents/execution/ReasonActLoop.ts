@@ -77,15 +77,16 @@ export class ReasonActLoop {
       // Main Reason-Act-Observe loop
       while (shouldContinueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
-        tracingLogger.info("[ReasonActLoop] Starting iteration", {
-          iteration: iterations,
-          shouldContinueLoop,
-          messageCount: conversationMessages.length,
-          lastMessage: conversationMessages[conversationMessages.length - 1].content.substring(
-            0,
-            100
-          ),
-        });
+        logDebug(
+          `[ReasonActLoop] Starting iteration ${iterations}`,
+          "agent",
+          "debug",
+          {
+            iteration: iterations,
+            shouldContinueLoop,
+            messageCount: conversationMessages.length,
+          }
+        );
 
         // Create stream with streamHandle in context
         const stream = this.createLLMStream(context, conversationMessages, tools);
@@ -96,7 +97,6 @@ export class ReasonActLoop {
           stateManager,
           toolHandler,
           eventContext,
-          tracingLogger,
           context,
           conversationMessages
         );
@@ -113,30 +113,35 @@ export class ReasonActLoop {
             conversationMessages,
             iterationResult.toolResults,
             iterationResult.assistantMessage,
-            tracingLogger
+            context
           );
         } else if (this.agentPublisher.hasBufferedContent()) {
           // Agent generated content but no tool calls or terminal tool
           // This means the agent has provided a textual response - we should complete
           const bufferedContent = this.agentPublisher.getBufferedContent();
           conversationMessages.push(new Message("assistant", bufferedContent));
-          tracingLogger.info("[ReasonActLoop] Agent generated content, completing", {
-            iteration: iterations,
-            contentLength: bufferedContent.length,
-          });
+          logInfo(
+            "[ReasonActLoop] Agent generated content, completing",
+            "agent",
+            "verbose",
+            {
+              iteration: iterations,
+              contentLength: bufferedContent.length,
+            }
+          );
           shouldContinueLoop = false; // Complete after generating a response
         } else {
           // No tool calls, no terminal tool, AND no content was generated
           // This indicates the agent truly has nothing further to do
-          tracingLogger.warning("[ReasonActLoop] No tool calls, no content, ending loop", {
-            iteration: iterations,
-            possibleCause: "Model returned empty response - check model availability and context",
-            lastResponseMetadata: stateManager.getFinalResponse() ? {
-              model: stateManager.getFinalResponse()?.model,
-              promptTokens: stateManager.getFinalResponse()?.usage?.prompt_tokens,
-              completionTokens: stateManager.getFinalResponse()?.usage?.completion_tokens,
-            } : null,
-          });
+          logWarning(
+            "[ReasonActLoop] No tool calls, no content, ending loop",
+            "agent",
+            "normal",
+            {
+              iteration: iterations,
+              possibleCause: "Model returned empty response - check model availability and context",
+            }
+          );
           shouldContinueLoop = false;
         }
 
@@ -145,21 +150,26 @@ export class ReasonActLoop {
         // Final kind:1111 events come from StreamStateManager.fullContent via implicit/explicit completion
       }
 
-      tracingLogger.info("[ReasonActLoop] Exited main loop", {
-        iterations,
-        shouldContinueLoop,
-        reason: !shouldContinueLoop ? "completed" : "max iterations",
-      });
+      logDebug(
+        "[ReasonActLoop] Exited main loop",
+        "agent",
+        "debug",
+        {
+          iterations,
+          shouldContinueLoop,
+          reason: !shouldContinueLoop ? "completed" : "max iterations",
+        }
+      );
 
       if (iterations >= MAX_ITERATIONS && shouldContinueLoop) {
         const error = new Error(
           `Agent ${context.agent.name} reached maximum iterations (${MAX_ITERATIONS}) without completing task`
         );
-        tracingLogger.error("[ReasonActLoop] Maximum iterations reached without completion", {
-          maxIterations: MAX_ITERATIONS,
-          agent: context.agent.name,
-          phase: context.phase,
-        });
+        logError(
+          "[ReasonActLoop] Maximum iterations reached without completion",
+          error,
+          "agent"
+        );
         throw error;
       }
 
@@ -202,16 +212,21 @@ export class ReasonActLoop {
 
         await this.agentPublisher.complete(naturalCompletionIntent, completionEventContext);
         
-        tracingLogger.info("[ReasonActLoop] Published natural completion", {
-          agent: context.agent.name,
-          phase: context.phase,
-          contentLength: fullContent.length,
-        });
+        logInfo(
+          "[ReasonActLoop] Published natural completion",
+          "agent",
+          "verbose",
+          {
+            agent: context.agent.name,
+            phase: context.phase,
+            contentLength: fullContent.length,
+          }
+        );
       }
 
       yield this.createFinalEvent(stateManager);
     } catch (error) {
-      yield* this.handleError(error, tracingLogger, context);
+      yield* this.handleError(error, context);
       throw error;
     }
   }
@@ -224,7 +239,6 @@ export class ReasonActLoop {
     stateManager: StreamStateManager,
     toolHandler: ToolStreamHandler,
     eventContext: EventContext,
-    tracingLogger: TracingLogger,
     context: ExecutionContext,
     messages: Message[]
   ): Promise<{
@@ -239,11 +253,15 @@ export class ReasonActLoop {
     let assistantMessage = "";
 
     for await (const event of stream) {
-      tracingLogger.info("[processIterationStream]", {
-        agent: context.agent.name,
-        type: event.type,
-        content: event.content
-      });
+      logDebug(
+        "[processIterationStream]",
+        "agent",
+        "debug",
+        {
+          agent: context.agent.name,
+          type: event.type,
+        }
+      );
       events.push(event);
 
       switch (event.type) {
@@ -270,8 +288,7 @@ export class ReasonActLoop {
           await toolHandler.handleToolStartEvent(
             event.tool,
             event.args,
-            tracingLogger,
-            context
+              context
           );
           break;
         }
@@ -279,8 +296,7 @@ export class ReasonActLoop {
         case "tool_complete": {
           await toolHandler.handleToolCompleteEvent(
             event,
-            tracingLogger,
-            context
+              context
           );
           break;
         }
@@ -290,13 +306,16 @@ export class ReasonActLoop {
             stateManager.setFinalResponse(event.response);
             
             // Log LLM metadata for debugging
-            tracingLogger.info("[ReasonActLoop] Received 'done' event", {
-              hasResponse: !!event.response,
-              model: event.response.model,
-              hasUsage: !!event.response.usage,
-              promptTokens: event.response.usage?.prompt_tokens,
-              completionTokens: event.response.usage?.completion_tokens,
-            });
+            logDebug(
+              "[ReasonActLoop] Received 'done' event",
+              "agent",
+              "debug",
+              {
+                hasResponse: !!event.response,
+                model: event.response.model,
+                hasUsage: !!event.response.usage,
+              }
+            );
           }
           break;
 
@@ -321,7 +340,7 @@ export class ReasonActLoop {
     messages: Message[],
     toolResults: ToolExecutionResult[],
     assistantMessage: string,
-    tracingLogger: TracingLogger
+    context: ExecutionContext
   ): void {
     // Add the assistant's message (with reasoning and tool calls)
     if (assistantMessage) {
@@ -336,10 +355,15 @@ export class ReasonActLoop {
       const message = this.messageBuilder.formatUserMessage(toolResultMessage);
       messages.push(message);
 
-      tracingLogger.info("[ReasonActLoop] Added tool result to conversation", {
-        success: result.success,
-        resultLength: toolResultMessage.length,
-      });
+      logDebug(
+        "[ReasonActLoop] Added tool result to conversation",
+        "agent",
+        "debug",
+        {
+          success: result.success,
+          resultLength: toolResultMessage.length,
+        }
+      );
     }
   }
 
@@ -450,21 +474,23 @@ export class ReasonActLoop {
 
   private async *handleError(
     error: unknown,
-    tracingLogger: TracingLogger,
     context: ExecutionContext
   ): AsyncGenerator<StreamEvent> {
-    tracingLogger.error("Streaming error", {
-      error: formatAnyError(error),
-      agent: context.agent.name,
-    });
+    logError(
+      "Streaming error",
+      error,
+      "agent"
+    );
 
     // Try to flush any pending stream content
     try {
       await this.agentPublisher.publishStreamContent();
     } catch (finalizeError) {
-      tracingLogger.error("Failed to publish stream on error", {
-        error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
-      });
+      logError(
+        "Failed to publish stream on error",
+        finalizeError,
+        "agent"
+      );
     }
 
     // Stop typing indicator using AgentPublisher
@@ -477,9 +503,11 @@ export class ReasonActLoop {
       };
       await this.agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
     } catch (typingError) {
-      tracingLogger.warning("Failed to stop typing indicator", {
-        error: formatAnyError(typingError),
-      });
+      logWarning(
+        "Failed to stop typing indicator",
+        "agent",
+        "verbose"
+      );
     }
 
     yield {
