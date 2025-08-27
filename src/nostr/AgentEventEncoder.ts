@@ -184,43 +184,40 @@ export class AgentEventEncoder {
   }
 
   /**
-   * Encode a delegation intent into kind:1111 conversation events.
-   * Creates properly tagged delegation request events for each recipient.
+   * Encode a delegation intent into a single kind:1111 conversation event.
+   * Creates a single event with multiple p-tags for all recipients.
    */
   encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
-    const events: NDKEvent[] = [];
+    const event = new NDKEvent(getNDK());
+    event.kind = 1111; // NIP-22 comment/conversation kind
+    event.content = intent.request;
+
+    this.addConversationTags(event, context);
     
+    // Add ALL recipients as p-tags in a single event
     for (const recipientPubkey of intent.recipients) {
-      const event = new NDKEvent(getNDK());
-      event.kind = 1111; // NIP-22 comment/conversation kind
-      event.content = intent.request;
-
-      this.addConversationTags(event, context);
-      
-      // Recipient tag - this makes it a delegation
       event.tag(["p", recipientPubkey]);
-      
-      // Phase metadata if provided
-      if (intent.phase) {
-        event.tag(["phase", intent.phase]);
-      }
-
-      event.tag(["tool", "delegate"])
-
-      // Add standard metadata
-      this.addStandardTags(event, context);
-
-      events.push(event);
+    }
+    
+    // Phase metadata if provided
+    if (intent.phase) {
+      event.tag(["phase", intent.phase]);
     }
 
-    logger.debug("Encoded delegation requests", {
-      eventCount: events.length,
+    event.tag(["tool", "delegate"]);
+
+    // Add standard metadata
+    this.addStandardTags(event, context);
+
+    logger.debug("Encoded delegation request", {
+      recipientCount: intent.recipients.length,
       phase: intent.phase,
       recipients: intent.recipients.map((r) => r.substring(0, 8)),
       kind: 1111,
     });
 
-    return events;
+    // Return as array for backward compatibility with current signature
+    return [event];
   }
 
   /**

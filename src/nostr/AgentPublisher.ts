@@ -184,7 +184,7 @@ export class AgentPublisher {
 
   /**
    * Publish delegation request events.
-   * Creates and publishes kind:1111 conversation events for each recipient.
+   * Creates and publishes a single kind:1111 conversation event with multiple p-tags.
    */
   async delegate(
     intent: DelegationIntent,
@@ -197,26 +197,31 @@ export class AgentPublisher {
     await this.flushStreamIfNeeded();
     const events = this.encoder.encodeDelegation(intent, context);
 
-    // Sign all events first
+    // Sign the event (should be single event now)
     for (const event of events) {
       await event.sign(this.agent.signer);
     }
     
-    // Register with DelegationRegistry (now using event IDs instead of task IDs)
+    // For single event with multiple recipients, create synthetic task IDs
     const registry = DelegationRegistry.getInstance();
+    const mainEvent = events[0]; // Should only be one event now
+    
+    // Create task entries for each recipient using synthetic IDs
+    const tasks = intent.recipients.map((recipientPubkey) => ({
+      taskId: `${mainEvent.id}:${recipientPubkey}`, // Synthetic ID combining event ID and recipient
+      assignedToPubkey: recipientPubkey,
+      fullRequest: intent.request,
+      phase: intent.phase,
+    }));
+    
     const batchId = await registry.registerDelegationBatch({
-      tasks: events.map((event, index) => ({
-        taskId: event.id, // Using event ID as the identifier
-        assignedToPubkey: intent.recipients[index],
-        fullRequest: intent.request,
-        phase: intent.phase,
-      })),
+      tasks,
       delegatingAgent: this.agent,
       conversationId: context.rootEvent?.id || "",
       originalRequest: intent.request,
     });
 
-    // Publish all events
+    // Publish the single event
     for (const [index, event] of events.entries()) {
       await event.publish();
       logger.debug("Published delegation request", {
