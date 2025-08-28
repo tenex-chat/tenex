@@ -63,7 +63,11 @@ export class TENEXTestFixture extends TestFixture {
     if (!this.relayMocks.has(url)) {
       return this.createMockRelay(url);
     }
-    return this.relayMocks.get(url)!;
+    const relay = this.relayMocks.get(url);
+    if (!relay) {
+      throw new Error(`Relay not found for URL: ${url}`);
+    }
+    return relay;
   }
 
   /**
@@ -75,14 +79,6 @@ export class TENEXTestFixture extends TestFixture {
     kind = 8000, // Agent-specific kind
     tags: string[][] = []
   ): Promise<NDKEvent> {
-    let agentUser: NDKUser;
-    
-    if (typeof agent === "string") {
-      agentUser = await this.getUser(agent);
-    } else {
-      agentUser = agent;
-    }
-
     const event = await this.eventFactory.createSignedTextNote(
       content,
       agent,
@@ -121,7 +117,7 @@ export class TENEXTestFixture extends TestFixture {
     for (const reply of replies) {
       const replyEvent = reply.isAgent
         ? await this.createAgentEvent(reply.author, reply.content, 8001, [
-            ["e", parentEvent.id || "", "", "reply"],
+            ["e", parentEvent.id ?? "", "", "reply"],
             ["p", parentEvent.pubkey]
           ])
         : await this.eventFactory.createReply(
@@ -188,7 +184,7 @@ export async function withTestEnvironment<T>(
 export async function getTestUserWithSigner(
   name: TestUserName,
   ndk?: NDK
-): Promise<{ user: NDKUser; signer: any }> {
+): Promise<{ user: NDKUser; signer: unknown }> {
   const user = await UserGenerator.getUser(name, ndk);
   const signer = SignerGenerator.getSigner(name);
   return { user, signer };
@@ -197,7 +193,25 @@ export async function getTestUserWithSigner(
 /**
  * Create a mock agent configuration for testing
  */
-export function createMockAgentConfig(overrides: any = {}) {
+interface MockAgentConfig {
+  name?: string;
+  slug?: string;
+  role?: string;
+  backend?: string;
+  tools?: string[];
+  capabilities?: {
+    canRead?: boolean;
+    canWrite?: boolean;
+    canExecute?: boolean;
+  };
+  rateLimits?: {
+    messagesPerMinute?: number;
+    tokensPerDay?: number;
+  };
+  [key: string]: unknown;
+}
+
+export function createMockAgentConfig(overrides: MockAgentConfig = {}): MockAgentConfig {
   return {
     name: overrides.name || "TestAgent",
     slug: overrides.slug || "test-agent",

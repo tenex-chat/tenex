@@ -53,7 +53,7 @@ interface AgentsListOutput {
  * List all available agents in the project with their configurations and system prompts
  */
 export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
-  name: "agents-list",
+  name: "agents_list",
   description:
     "List all available agents in the project, including their system prompts and configurations",
   parameters: createZodSchema(agentsListSchema),
@@ -81,7 +81,7 @@ export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
           const registryContent = await readFile(projectRegistryPath);
           const registry = JSON.parse(registryContent);
           
-          for (const [slug, entry] of Object.entries(registry as Record<string, any>)) {
+          for (const [slug, entry] of Object.entries(registry as Record<string, { file: string; eventId?: string }>)) {
             const agentFilePath = path.join(projectAgentsDir, entry.file);
             
             if (await fileExists(agentFilePath)) {
@@ -124,7 +124,7 @@ export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
             const registryContent = await readFile(globalRegistryPath);
             const registry = JSON.parse(registryContent);
             
-            for (const [slug, entry] of Object.entries(registry as Record<string, any>)) {
+            for (const [slug, entry] of Object.entries(registry as Record<string, { file: string; eventId?: string }>)) {
               // Skip if already loaded from project
               if (agents.some(a => a.slug === slug)) {
                 continue;
@@ -222,7 +222,7 @@ export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
       logger.error("Failed to list agents", { error });
       return failure({
         kind: "execution",
-        tool: "agents-list",
+        tool: "agents_list",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

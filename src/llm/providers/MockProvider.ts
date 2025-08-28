@@ -61,7 +61,7 @@ export class MockLLMProvider implements LLMService {
   private requestHistory: Array<{
     request: CompletionRequest;
     scenario: MockScenario | null;
-    response: any;
+    response: MockScenario['response'] | undefined;
     timestamp: Date;
   }> = [];
 
@@ -363,19 +363,24 @@ export class MockLLMProvider implements LLMService {
   }
 
   // Utility methods for testing
-  getRequestHistory() {
+  getRequestHistory(): Array<{
+    request: CompletionRequest;
+    scenario: MockScenario | null;
+    response: MockScenario['response'] | undefined;
+    timestamp: Date;
+  }> {
     return this.requestHistory;
   }
 
-  clearHistory() {
+  clearHistory(): void {
     this.requestHistory = [];
   }
 
-  addScenario(scenario: MockScenario) {
+  addScenario(scenario: MockScenario): void {
     this.scenarios.push(scenario);
   }
 
-  removeScenario(name: string) {
+  removeScenario(name: string): void {
     this.scenarios = this.scenarios.filter((s) => s.name !== name);
   }
 }

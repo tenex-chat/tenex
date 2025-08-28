@@ -114,7 +114,7 @@ export const timeline: CommandModule<Record<string, never>, { conversationId?: s
                   provider: entry.data.provider,
                   messageCount: entry.data.messageCount,
                   status: entry.error ? "error" : "success",
-                  tokensUsed: (entry.data.usage as any)?.totalTokens,
+                  tokensUsed: (entry.data.usage as { totalTokens?: number })?.totalTokens,
                   reasoning: entry.data.content ? extractReasoning(entry.data.content as string) : undefined,
                 },
                 duration: entry.durationMs,

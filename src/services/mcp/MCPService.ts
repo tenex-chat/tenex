@@ -229,7 +229,7 @@ export class MCPService {
     return tools;
   }
 
-  private convertMCPToolToTenexTool(serverName: string, mcpTool: any): Tool {
+  private convertMCPToolToTenexTool(serverName: string, mcpTool: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }): Tool {
     // Use the adapter to create a type-safe tool with Zod schemas
     // Cast mcpTool to MCPTool interface for the adapter
     const typedTool: MCPToolInterface = {

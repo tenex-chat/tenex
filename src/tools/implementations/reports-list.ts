@@ -38,7 +38,7 @@ interface ReportsListOutput {
 }
 
 export const reportsListTool: Tool<ReportsListInput, ReportsListOutput> = {
-  name: "reports-list",
+  name: "reports_list",
   description: "List NDKArticle reports from agents in the project",
 
   promptFragment: `List reports (NDKArticles) from agents in the project.
@@ -112,7 +112,7 @@ Use this to discover available reports for reading or analysis.`,
 
       return failure({
         kind: "execution" as const,
-        tool: "reports-list",
+        tool: "reports_list",
         message: formatAnyError(error),
       });
     }

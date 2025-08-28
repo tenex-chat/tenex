@@ -4,7 +4,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import type { ToolExecutionResult } from "@/tools/executor";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logger, logInfo, logError, logWarning, logDebug } from "@/utils/logger";
+import { logger, logInfo, logError } from "@/utils/logger";
 import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
@@ -77,16 +77,11 @@ export class ReasonActLoop {
       // Main Reason-Act-Observe loop
       while (shouldContinueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
-        logDebug(
-          `[ReasonActLoop] Starting iteration ${iterations}`,
-          "agent",
-          "debug",
-          {
-            iteration: iterations,
-            shouldContinueLoop,
-            messageCount: conversationMessages.length,
-          }
-        );
+        logger.debug(`[ReasonActLoop] Starting iteration ${iterations}`, {
+          iteration: iterations,
+          shouldContinueLoop,
+          messageCount: conversationMessages.length,
+        });
 
         // Create stream with streamHandle in context
         const stream = this.createLLMStream(context, conversationMessages, tools);
@@ -112,8 +107,7 @@ export class ReasonActLoop {
           this.addToolResultsToConversation(
             conversationMessages,
             iterationResult.toolResults,
-            iterationResult.assistantMessage,
-            context
+            iterationResult.assistantMessage
           );
         } else if (this.agentPublisher.hasBufferedContent()) {
           // Agent generated content but no tool calls or terminal tool
@@ -133,15 +127,15 @@ export class ReasonActLoop {
         } else {
           // No tool calls, no terminal tool, AND no content was generated
           // This indicates the agent truly has nothing further to do
-          logWarning(
-            "[ReasonActLoop] No tool calls, no content, ending loop",
-            "agent",
-            "normal",
-            {
-              iteration: iterations,
-              possibleCause: "Model returned empty response - check model availability and context",
-            }
-          );
+          logger.warning("[ReasonActLoop] No tool calls, no content, ending loop", {
+            iteration: iterations,
+            possibleCause: "Model returned empty response - check model availability and context",
+            lastResponseMetadata: stateManager.getFinalResponse() ? {
+              model: stateManager.getFinalResponse()?.model,
+              promptTokens: stateManager.getFinalResponse()?.usage?.prompt_tokens,
+              completionTokens: stateManager.getFinalResponse()?.usage?.completion_tokens,
+            } : null,
+          });
           shouldContinueLoop = false;
         }
 
@@ -150,16 +144,11 @@ export class ReasonActLoop {
         // Final kind:1111 events come from StreamStateManager.fullContent via implicit/explicit completion
       }
 
-      logDebug(
-        "[ReasonActLoop] Exited main loop",
-        "agent",
-        "debug",
-        {
-          iterations,
-          shouldContinueLoop,
-          reason: !shouldContinueLoop ? "completed" : "max iterations",
-        }
-      );
+      logger.debug("[ReasonActLoop] Exited main loop", {
+        iterations,
+        shouldContinueLoop,
+        reason: !shouldContinueLoop ? "completed" : "max iterations",
+      });
 
       if (iterations >= MAX_ITERATIONS && shouldContinueLoop) {
         const error = new Error(
@@ -253,15 +242,10 @@ export class ReasonActLoop {
     let assistantMessage = "";
 
     for await (const event of stream) {
-      logDebug(
-        "[processIterationStream]",
-        "agent",
-        "debug",
-        {
-          agent: context.agent.name,
-          type: event.type,
-        }
-      );
+      logger.debug("[processIterationStream]", {
+        agent: context.agent.name,
+        type: event.type,
+      });
       events.push(event);
 
       switch (event.type) {
@@ -278,10 +262,7 @@ export class ReasonActLoop {
           // Check for repetitive tool calls
           const warningMessage = this.repetitionDetector.checkRepetition(event.tool, event.args);
           if (warningMessage) {
-            const systemMessage = this.messageBuilder.formatSystemMessage(
-              warningMessage,
-              "Tool Repetition Detector"
-            );
+            const systemMessage = new Message("system", warningMessage);
             messages.push(systemMessage);
           }
 
@@ -306,16 +287,11 @@ export class ReasonActLoop {
             stateManager.setFinalResponse(event.response);
             
             // Log LLM metadata for debugging
-            logDebug(
-              "[ReasonActLoop] Received 'done' event",
-              "agent",
-              "debug",
-              {
-                hasResponse: !!event.response,
-                model: event.response.model,
-                hasUsage: !!event.response.usage,
-              }
-            );
+            logger.debug("[ReasonActLoop] Received 'done' event", {
+              hasResponse: !!event.response,
+              model: event.response.model,
+              hasUsage: !!event.response.usage,
+            });
           }
           break;
 
@@ -339,31 +315,24 @@ export class ReasonActLoop {
   private addToolResultsToConversation(
     messages: Message[],
     toolResults: ToolExecutionResult[],
-    assistantMessage: string,
-    context: ExecutionContext
+    assistantMessage: string
   ): void {
     // Add the assistant's message (with reasoning and tool calls)
     if (assistantMessage) {
-      const message = this.messageBuilder.formatAssistantMessage(assistantMessage);
+      const message = new Message("assistant", assistantMessage);
       messages.push(message);
     }
 
     // Add tool results as user messages for the next iteration
     for (const result of toolResults) {
       const toolResultMessage = this.formatToolResultAsString(result);
-      // Use MessageBuilder to create properly formatted user message
-      const message = this.messageBuilder.formatUserMessage(toolResultMessage);
+      const message = new Message("user", toolResultMessage);
       messages.push(message);
 
-      logDebug(
-        "[ReasonActLoop] Added tool result to conversation",
-        "agent",
-        "debug",
-        {
-          success: result.success,
-          resultLength: toolResultMessage.length,
-        }
-      );
+      logger.debug("[ReasonActLoop] Added tool result to conversation", {
+        success: result.success,
+        resultLength: toolResultMessage.length,
+      });
     }
   }
 
@@ -503,11 +472,9 @@ export class ReasonActLoop {
       };
       await this.agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
     } catch (typingError) {
-      logWarning(
-        "Failed to stop typing indicator",
-        "agent",
-        "verbose"
-      );
+      logger.warning("Failed to stop typing indicator", {
+        error: typingError
+      });
     }
 
     yield {

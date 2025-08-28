@@ -41,7 +41,7 @@ interface AgentsWriteOutput {
  * Write or update a local agent definition and activate it in the project
  */
 export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
-  name: "agents-write",
+  name: "agents_write",
   description:
     "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (complete, delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
   parameters: createZodSchema(agentsWriteSchema),
@@ -111,7 +111,7 @@ export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
 
       // Update the agents registry
       const registryPath = path.join(projectPath, ".tenex", "agents.json");
-      let registry: Record<string, any> = {};
+      let registry: Record<string, { file: string; nsec?: string; eventId?: string }> = {};
       
       if (await fileExists(registryPath)) {
         try {
@@ -180,7 +180,7 @@ export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
       logger.error("Failed to write agent definition", { error });
       return failure({
         kind: "execution",
-        tool: "agents-write",
+        tool: "agents_write",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

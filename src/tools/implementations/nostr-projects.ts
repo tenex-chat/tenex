@@ -51,7 +51,7 @@ interface NostrProjectsOutput {
 }
 
 export const nostrProjectsTool: Tool<NostrProjectsInput, NostrProjectsOutput> = {
-  name: "nostr-projects",
+  name: "nostr_projects",
   description: "Fetch Nostr projects for a pubkey, including online status and spec documents",
 
   promptFragment: `Fetch projects from Nostr for analysis and information gathering.
@@ -79,7 +79,7 @@ Use this to understand what projects exist for a given user or the current proje
       });
       return failure({
         kind: "execution" as const,
-        tool: "nostr-projects",
+        tool: "nostr_projects",
         message: error,
       });
     }
@@ -105,7 +105,7 @@ Use this to understand what projects exist for a given user or the current proje
         });
         return failure({
           kind: "execution" as const,
-          tool: "nostr-projects",
+          tool: "nostr_projects",
           message: error,
         });
       }
@@ -294,7 +294,7 @@ Use this to understand what projects exist for a given user or the current proje
 
       return failure({
         kind: "execution" as const,
-        tool: "nostr-projects",
+        tool: "nostr_projects",
         message: formatAnyError(error),
       });
     }

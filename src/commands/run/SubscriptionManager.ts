@@ -237,6 +237,16 @@ export class SubscriptionManager {
   }
 
   private async handleIncomingEvent(event: NDKEvent, source: string): Promise<void> {
+    // Debug: Check event type at receipt
+    if (typeof event.getMatchingTags !== 'function') {
+      logger.error(`[SubscriptionManager] Received non-NDKEvent from ${source}!`, {
+        eventId: event.id,
+        eventConstructor: event.constructor?.name,
+        isNDKEvent: event instanceof NDKEvent,
+        hasGetMatchingTags: typeof event.getMatchingTags,
+      });
+    }
+
     // Check for duplicate events
     if (hasProcessedEvent(event.id)) {
       return;

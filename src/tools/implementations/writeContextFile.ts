@@ -28,7 +28,7 @@ interface WriteContextFileOutput {
 }
 
 export const writeContextFileTool: Tool<WriteContextFileInput, WriteContextFileOutput> = {
-  name: "write-context-file",
+  name: "write_context_file",
   description:
     "Write or update a specification file in the context/ directory. You must have read this file recently before writing to it.",
 
@@ -181,7 +181,7 @@ Example workflow:
     } catch (error) {
       return failure({
         kind: "execution" as const,
-        tool: "write-context-file",
+        tool: "write_context_file",
         message: `Failed to write file: ${formatAnyError(error)}`,
       });
     }

@@ -36,29 +36,29 @@ import type { Tool } from "./types.js";
  * This ensures type safety when referencing tools throughout the codebase.
  */
 export type ToolName =
-  | "read-path"
-  | "write-context-file"
+  | "read_path"
+  | "write_context_file"
   | "analyze"
-  | "generate-inventory"
-  | "lesson-learn"
-  | "lesson-get"
+  | "generate_inventory"
+  | "lesson_learn"
+  | "lesson_get"
   | "shell"
-  | "agents-discover"
-  | "agents-hire"
-  | "agents-list"
-  | "agents-read"
-  | "agents-write"
-  | "discover-capabilities"
+  | "agents_discover"
+  | "agents_hire"
+  | "agents_list"
+  | "agents_read"
+  | "agents_write"
+  | "discover_capabilities"
   | "delegate"
-  | "delegate-phase"
-  | "nostr-projects"
-  | "claude-code"
-  | "create-project"
-  | "delegate-external"
-  | "report-write"
-  | "report-read"
-  | "reports-list"
-  | "report-delete";
+  | "delegate_phase"
+  | "nostr_projects"
+  | "claude_code"
+  | "create_project"
+  | "delegate_external"
+  | "report_write"
+  | "report_read"
+  | "reports_list"
+  | "report_delete";
 
 /**
  * Registry of all available tools mapped by their canonical names.
@@ -66,29 +66,29 @@ export type ToolName =
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const toolsMap = new Map<ToolName, Tool<any, any>>([
-  ["read-path", readPathTool],
-  ["write-context-file", writeContextFileTool],
+  ["read_path", readPathTool],
+  ["write_context_file", writeContextFileTool],
   ["analyze", analyze],
-  ["generate-inventory", generateInventoryTool],
-  ["lesson-learn", lessonLearnTool],
-  ["lesson-get", lessonGetTool],
+  ["generate_inventory", generateInventoryTool],
+  ["lesson_learn", lessonLearnTool],
+  ["lesson_get", lessonGetTool],
   ["shell", shellTool],
-  ["agents-discover", agentsDiscover],
-  ["agents-hire", agentsHire],
-  ["agents-list", agentsList],
-  ["agents-read", agentsRead],
-  ["agents-write", agentsWrite],
-  ["discover-capabilities", mcpDiscover],
+  ["agents_discover", agentsDiscover],
+  ["agents_hire", agentsHire],
+  ["agents_list", agentsList],
+  ["agents_read", agentsRead],
+  ["agents_write", agentsWrite],
+  ["discover_capabilities", mcpDiscover],
   ["delegate", delegateTool],
-  ["delegate-phase", delegatePhaseTool],
-  ["nostr-projects", nostrProjectsTool],
-  ["claude-code", claudeCode],
-  ["create-project", createProjectTool],
-  ["delegate-external", delegateExternalTool],
-  ["report-write", reportWriteTool],
-  ["report-read", reportReadTool],
-  ["reports-list", reportsListTool],
-  ["report-delete", reportDeleteTool],
+  ["delegate_phase", delegatePhaseTool],
+  ["nostr_projects", nostrProjectsTool],
+  ["claude_code", claudeCode],
+  ["create_project", createProjectTool],
+  ["delegate_external", delegateExternalTool],
+  ["report_write", reportWriteTool],
+  ["report_read", reportReadTool],
+  ["reports_list", reportsListTool],
+  ["report_delete", reportDeleteTool],
 ]);
 
 /**

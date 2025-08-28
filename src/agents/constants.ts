@@ -13,12 +13,12 @@ export const PROJECT_MANAGER_AGENT = "project-manager" as const;
  * These are fundamental capabilities that every agent needs.
  */
 export const CORE_AGENT_TOOLS = [
-  "lesson-get",    // All agents should access lessons
-  "lesson-learn",  // All agents should be able to learn
+  "lesson_get",    // All agents should access lessons
+  "lesson_learn",  // All agents should be able to learn
   "delegate",      // All agents should be able to delegate
-  "read-path",     // All agents need file system access
-  "reports-list",  // All agents should see available reports
-  "report-read",   // All agents should read reports
+  "read_path",     // All agents need file system access
+  "reports_list",  // All agents should see available reports
+  "report_read",   // All agents should read reports
 ] as const;
 
 /**
@@ -34,13 +34,13 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       lessonLearnTool.name,
       claudeCode.name,
       delegateExternalTool.name,
-      "write-context-file",
+      "write_context_file",
       "shell",
-      "discover-capabilities",
-      "agents-hire",
-      "agents-discover",
-      "nostr-projects",
-      "delegate-phase", // PM uses delegate-phase instead of delegate
+      "discover_capabilities",
+      "agents_hire",
+      "agents_discover",
+      "nostr_projects",
+      "delegate_phase", // PM uses delegate_phase instead of delegate
     ];
   }
 
@@ -52,11 +52,11 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
       claudeCode.name,
       delegateExternalTool.name,
       delegateTool.name,
-      "agents-list",
-      "agents-discover",
-      "agents-hire",
-      "agents-read",
-      "agents-write",
+      "agents_list",
+      "agents_discover",
+      "agents_hire",
+      "agents_read",
+      "agents_write",
     ];
   }
 
@@ -74,7 +74,7 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
   // This allows agents to self-modify and introspect
   const agentSelfManagementSlugs = ["human-resources", "self-improving-agent", "meta-agent"];
   if (agentSelfManagementSlugs.includes(agent.slug)) {
-    tools.push("agents-read", "agents-write");
+    tools.push("agents_read", "agents_write");
   }
 
   return tools;

@@ -1,8 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { NDKProjectStatus } from "@/events/NDKProjectStatus";
-import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 

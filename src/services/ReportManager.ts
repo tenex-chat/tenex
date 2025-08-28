@@ -154,7 +154,13 @@ export class ReportManager {
     const projectTagId = projectCtx.project.tagId();
     
     // Build the filter for fetching articles
-    const filter: any = {
+    interface ArticleFilter {
+      kinds: number[];
+      "#a": string[];
+      authors?: string[];
+    }
+    
+    const filter: ArticleFilter = {
       kinds: [30023],
       "#a": [projectTagId], // Articles that tag this project
     };

@@ -1,6 +1,6 @@
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
-import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
+import type { Result, Tool, ToolError, Validated } from "@/tools/types";
 import { createZodSchema, failure, success } from "@/tools/types";
 import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { logger } from "@/utils/logger";
@@ -37,16 +37,16 @@ interface AgentsHireOutput {
  * Hire (add) an NDKAgentDefinition from the Nostr network to the project
  */
 export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
-  name: "agents-hire",
+  name: "agents_hire",
   description:
     "Hire (add) a new agent from the Nostr network to the current project using its event ID",
   parameters: createZodSchema(agentsHireSchema),
   execute: async (
-    input: Validated<AgentsHireInput>,
-    _context: ExecutionContext
+    input: Validated<AgentsHireInput>
   ): Promise<Result<ToolError, AgentsHireOutput>> => {
     try {
-      let { eventId, slug } = input.value;
+      let { eventId } = input.value;
+      const { slug } = input.value;
 
       if (!eventId) {
         return failure({
@@ -69,7 +69,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
         // Validate bech32 format
         try {
           filterAndRelaySetFromBech32(eventId, ndk);
-        } catch (error) {
+        } catch {
           return success({
             success: false,
             error: `Invalid event ID format: "${eventId}". Please provide a valid Nostr event ID in bech32 format (e.g., nevent1...) or hex format.`,
@@ -107,16 +107,23 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
         return success({
           success: true,
           message: result.message,
-          agent: result.agent ? {
-            slug: result.slug!,
+          agent: result.agent && result.slug ? {
+            slug: result.slug,
             name: result.agent.name,
             pubkey: result.agent.pubkey,
           } : undefined,
         });
       }
 
-      const agent = result.agent!;
-      const agentSlug = result.slug!;
+      const agent = result.agent;
+      const agentSlug = result.slug;
+
+      if (!agent || !agentSlug) {
+        return success({
+          success: false,
+          error: "Agent installation succeeded but agent or slug is missing",
+        });
+      }
 
       // Update the project event to add the new agent reference
       const project = projectContext.project;
@@ -126,7 +133,9 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
       
       if (!hasAgent) {
         // Add the agent tag to the project
-        project.tags.push(["agent", agent.eventId!]);
+        if (agent.eventId) {
+          project.tags.push(["agent", agent.eventId]);
+        }
         
         // Sign and publish the updated project event
         await project.sign(projectContext.signer);
@@ -159,7 +168,7 @@ export const agentsHire: Tool<AgentsHireInput, AgentsHireOutput> = {
       logger.error("Failed to hire agent", { error });
       return failure({
         kind: "execution",
-        tool: "agents-hire",
+        tool: "agents_hire",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

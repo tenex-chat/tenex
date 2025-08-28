@@ -32,7 +32,7 @@ interface ReportWriteOutput {
 }
 
 export const reportWriteTool: Tool<ReportWriteInput, ReportWriteOutput> = {
-  name: "report-write",
+  name: "report_write",
   description: "Generate or update an NDKArticle report for the current project",
 
   promptFragment: `Generate or update a report as an NDKArticle.
@@ -120,7 +120,7 @@ The slug should be descriptive and consistent (e.g., "security-audit-2024", "per
 
       return failure({
         kind: "execution" as const,
-        tool: "report-write",
+        tool: "report_write",
         message: formatAnyError(error),
       });
     }

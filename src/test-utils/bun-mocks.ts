@@ -1,5 +1,7 @@
 import { mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Conversation, AgentState, PhaseTransition } from "@/conversations/types";
+import type { AgentInstance } from "@/agents/types";
 
 /**
  * Create a mock NDKEvent for testing
@@ -14,19 +16,19 @@ export function createMockNDKEvent(overrides: Partial<NDKEvent> = {}): NDKEvent 
     tags: [],
     sig: "test-sig",
     relay: undefined,
-    tag: mock((tag: string[]) => {
-      (event as any).tags.push(tag);
+    tag: mock((tag: string[]): void => {
+      (event as NDKEvent).tags.push(tag);
     }),
-    tagValue: mock((tagName: string) => {
-      const tag = (event as any).tags.find((t: string[]) => t[0] === tagName);
+    tagValue: mock((tagName: string): string | undefined => {
+      const tag = (event as NDKEvent).tags.find((t: string[]) => t[0] === tagName);
       return tag ? tag[1] : undefined;
     }),
-    getMatchingTags: mock((tagName: string) => {
-      return (event as any).tags.filter((t: string[]) => t[0] === tagName);
+    getMatchingTags: mock((tagName: string): string[][] => {
+      return (event as NDKEvent).tags.filter((t: string[]) => t[0] === tagName);
     }),
-    tagReference: mock(() => ["e", "test-event-id"]),
-    publish: mock(() => Promise.resolve()),
-    reply: mock(() => {
+    tagReference: mock((): string[] => ["e", "test-event-id"]),
+    publish: mock((): Promise<void> => Promise.resolve()),
+    reply: mock((): NDKEvent => {
       const replyEvent = createMockNDKEvent();
       replyEvent.tags = [["e", "test-event-id", "", "reply"]];
       return replyEvent;
@@ -42,18 +44,30 @@ export function createMockNDKEvent(overrides: Partial<NDKEvent> = {}): NDKEvent 
   return event as unknown as NDKEvent;
 }
 
+interface MockNDK {
+  fetchEvent: ReturnType<typeof mock>;
+  fetchEvents: ReturnType<typeof mock>;
+  publish: ReturnType<typeof mock>;
+  connect: ReturnType<typeof mock>;
+  signer: {
+    sign: ReturnType<typeof mock>;
+    pubkey: ReturnType<typeof mock>;
+  };
+  [key: string]: unknown;
+}
+
 /**
  * Create a mock NDK instance
  */
-export function createMockNDK(overrides: any = {}) {
+export function createMockNDK(overrides: Partial<MockNDK> = {}): MockNDK {
   return {
-    fetchEvent: mock(() => Promise.resolve(null)),
-    fetchEvents: mock(() => Promise.resolve(new Set())),
-    publish: mock(() => Promise.resolve()),
-    connect: mock(() => Promise.resolve()),
+    fetchEvent: mock((): Promise<NDKEvent | null> => Promise.resolve(null)),
+    fetchEvents: mock((): Promise<Set<NDKEvent>> => Promise.resolve(new Set())),
+    publish: mock((): Promise<void> => Promise.resolve()),
+    connect: mock((): Promise<void> => Promise.resolve()),
     signer: {
-      sign: mock(() => Promise.resolve("signature")),
-      pubkey: mock(() => "test-pubkey"),
+      sign: mock((): Promise<string> => Promise.resolve("signature")),
+      pubkey: mock((): string => "test-pubkey"),
     },
     ...overrides,
   };
@@ -62,15 +76,15 @@ export function createMockNDK(overrides: any = {}) {
 /**
  * Create a mock Conversation
  */
-export function createMockConversation(overrides: any = {}) {
+export function createMockConversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
     id: "test-conversation-id",
     title: "Test Conversation",
     phase: "CHAT",
     history: [],
-    agentStates: new Map(),
+    agentStates: new Map<string, AgentState>(),
     metadata: {},
-    phaseTransitions: [],
+    phaseTransitions: [] as PhaseTransition[],
     executionTime: {
       totalSeconds: 0,
       isActive: false,
@@ -83,7 +97,7 @@ export function createMockConversation(overrides: any = {}) {
 /**
  * Create a mock Agent
  */
-export function createMockAgent(overrides: any = {}) {
+export function createMockAgent(overrides: Partial<AgentInstance> = {}): Partial<AgentInstance> {
   return {
     name: "test-agent",
     slug: "test-agent",
@@ -95,21 +109,50 @@ export function createMockAgent(overrides: any = {}) {
   };
 }
 
+interface MockFSOptions {
+  recursive?: boolean;
+  [key: string]: unknown;
+}
+
+interface MockFSStats {
+  isFile(): boolean;
+  isDirectory(): boolean;
+  size: number;
+}
+
+interface MockFS {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(path: string, options?: MockFSOptions): Promise<void>;
+  readdir(path: string): Promise<string[]>;
+  stat(path: string): Promise<MockFSStats>;
+  unlink(path: string): Promise<void>;
+  _setFile(path: string, content: string): void;
+  _setDirectory(path: string): void;
+  _clear(): void;
+  _getFiles(): Map<string, string>;
+  _getDirectories(): Set<string>;
+}
+
 /**
  * Create mock file system operations
  */
-export function createMockFS() {
+export function createMockFS(): MockFS {
   const files = new Map<string, string>();
   const directories = new Set<string>(["/", "/tmp"]);
 
   return {
-    readFile: mock((path: string) => {
+    readFile: mock((path: string): Promise<string> => {
       if (!files.has(path)) {
         throw new Error(`ENOENT: no such file or directory, open '${path}'`);
       }
-      return Promise.resolve(files.get(path)!);
+      const content = files.get(path);
+      if (content === undefined) {
+        throw new Error(`File content is undefined for path: ${path}`);
+      }
+      return Promise.resolve(content);
     }),
-    writeFile: mock((path: string, content: string) => {
+    writeFile: mock((path: string, content: string): Promise<void> => {
       // Ensure parent directory exists
       const dir = path.substring(0, path.lastIndexOf("/"));
       if (dir && !directories.has(dir)) {
@@ -118,7 +161,7 @@ export function createMockFS() {
       files.set(path, content);
       return Promise.resolve();
     }),
-    mkdir: mock((path: string, options?: any) => {
+    mkdir: mock((path: string, options?: MockFSOptions): Promise<void> => {
       directories.add(path);
       // Add parent directories if recursive
       if (options?.recursive) {
@@ -130,7 +173,7 @@ export function createMockFS() {
       }
       return Promise.resolve();
     }),
-    readdir: mock((path: string) => {
+    readdir: mock((path: string): Promise<string[]> => {
       if (!directories.has(path)) {
         throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
       }
@@ -160,12 +203,12 @@ export function createMockFS() {
       
       return Promise.resolve(entries);
     }),
-    stat: mock((path: string) => {
+    stat: mock((path: string): Promise<MockFSStats> => {
       if (files.has(path)) {
         return Promise.resolve({
           isFile: () => true,
           isDirectory: () => false,
-          size: files.get(path)!.length,
+          size: files.get(path)?.length ?? 0,
         });
       }
       if (directories.has(path)) {
@@ -177,7 +220,7 @@ export function createMockFS() {
       }
       throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
     }),
-    unlink: mock((path: string) => {
+    unlink: mock((path: string): Promise<void> => {
       if (!files.has(path)) {
         throw new Error(`ENOENT: no such file or directory, unlink '${path}'`);
       }
@@ -185,19 +228,19 @@ export function createMockFS() {
       return Promise.resolve();
     }),
     // Helper methods for testing
-    _setFile: (path: string, content: string) => {
+    _setFile: (path: string, content: string): void => {
       files.set(path, content);
     },
-    _setDirectory: (path: string) => {
+    _setDirectory: (path: string): void => {
       directories.add(path);
     },
-    _clear: () => {
+    _clear: (): void => {
       files.clear();
       directories.clear();
       directories.add("/");
       directories.add("/tmp");
     },
-    _getFiles: () => files,
-    _getDirectories: () => directories,
+    _getFiles: (): Map<string, string> => files,
+    _getDirectories: (): Set<string> => directories,
   };
 }

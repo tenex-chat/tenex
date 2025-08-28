@@ -3,7 +3,7 @@ import { logger } from "@/utils/logger";
 import { igniteEngine, loadModels } from "multi-llm-ts";
 import { ToolPlugin } from "./ToolPlugin";
 import { getLLMLogger, initializeLLMLogger } from "@/logging/LLMLogger";
-import { createMockLLMProvider } from "./providers/MockProvider";
+import { createMockLLMProvider, type MockScenario } from "./providers/MockProvider";
 import { createSimpleMockProvider } from "./providers/SimpleMockProvider";
 import type {
   CompletionRequest,
@@ -480,7 +480,7 @@ export async function loadLLMRouter(projectPath: string): Promise<LLMRouter | LL
       if (process.env.MOCK_SCENARIOS) {
         // Complex mock with scenarios and event publishing
         const scenariosType = process.env.MOCK_SCENARIOS;
-        let scenarios: any[] = [];
+        let scenarios: MockScenario[] = [];
         
         if (scenariosType.startsWith("ios-")) {
           // iOS compatibility testing scenarios

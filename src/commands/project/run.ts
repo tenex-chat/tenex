@@ -3,7 +3,7 @@ import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
 import { loadLLMRouter } from "@/llm";
-import { getNDK, shutdownNDK } from "@/nostr/ndkClient";
+import { shutdownNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import { StatusPublisher } from "@/services/status";
@@ -12,7 +12,6 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
-import type NDK from "@nostr-dev-kit/ndk";
 import { Command } from "commander";
 
 export const projectRunCommand = new Command("run")
@@ -24,14 +23,13 @@ export const projectRunCommand = new Command("run")
 
       // Initialize project context (includes NDK setup)
       await ensureProjectInitialized(projectPath);
-      const ndk = getNDK();
 
       // Display project information
       const projectDisplay = new ProjectDisplay();
       await projectDisplay.displayProjectInfo(projectPath);
 
       // Start the project listener
-      await runProjectListener(projectPath, ndk);
+      await runProjectListener(projectPath);
     } catch (err) {
       // Don't double-log project configuration errors
       // as they're already handled in ensureProjectInitialized
@@ -42,7 +40,7 @@ export const projectRunCommand = new Command("run")
     }
   });
 
-async function runProjectListener(projectPath: string, ndk: NDK): Promise<void> {
+async function runProjectListener(projectPath: string): Promise<void> {
   try {
     const projectCtx = getProjectContext();
     const project = projectCtx.project;

@@ -7,7 +7,7 @@ import type {
 import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";
-import inquirer from "inquirer";
+import inquirer, { type DistinctQuestion } from "inquirer";
 import { LLM_DEFAULTS } from "../constants";
 
 export type { LLMConfigWithName };
@@ -243,7 +243,7 @@ export class LLMConfigUI {
       });
     }
 
-    const responses = await inquirer.prompt(basePrompts as any);
+    const responses = await inquirer.prompt(basePrompts as DistinctQuestion[]);
 
     return {
       configName: responses.configName,

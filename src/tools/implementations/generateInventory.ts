@@ -20,7 +20,7 @@ interface GenerateInventoryOutput {
 }
 
 export const generateInventoryTool: Tool<GenerateInventoryInput, GenerateInventoryOutput> = {
-  name: "generate-inventory",
+  name: "generate_inventory",
   description: "Generate a comprehensive project inventory using repomix + LLM analysis",
 
   parameters: createZodSchema(generateInventorySchema),
@@ -90,7 +90,7 @@ The inventory provides comprehensive information about the codebase structure, s
       logger.error("Generate inventory tool failed", { error });
       return failure({
         kind: "execution" as const,
-        tool: "generate-inventory",
+        tool: "generate_inventory",
         message: formatAnyError(error),
         cause: error,
       });

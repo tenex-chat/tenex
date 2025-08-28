@@ -1,6 +1,6 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import type NDK from "@nostr-dev-kit/ndk";
-import { type NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr";
+import { NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations";
@@ -77,6 +77,21 @@ export class EventHandler {
   async handleEvent(event: NDKEvent): Promise<void> {
     // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
     if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
+
+    // Debug: Check if event has proper NDKEvent methods
+    if (typeof event.getMatchingTags !== 'function') {
+      logger.error("Event is missing getMatchingTags method!", {
+        eventId: event.id,
+        eventKind: event.kind,
+        hasGetMatchingTags: typeof event.getMatchingTags,
+        hasEncode: typeof event.encode,
+        eventConstructor: event.constructor?.name,
+        eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
+        eventKeys: Object.keys(event),
+        isNDKEvent: event instanceof NDKEvent,
+      });
+      // Don't mask the issue - let it fail so we can trace it
+    }
 
     // Try to get agent slug if the event is from an agent
     let fromIdentifier = event.pubkey;

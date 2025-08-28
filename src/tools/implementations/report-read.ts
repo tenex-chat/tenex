@@ -32,7 +32,7 @@ interface ReportReadOutput {
 }
 
 export const reportReadTool: Tool<ReportReadInput, ReportReadOutput> = {
-  name: "report-read",
+  name: "report_read",
   description: "Read an NDKArticle report by slug or naddr identifier",
 
   promptFragment: `Read a report (NDKArticle) by its slug or naddr identifier.
@@ -121,7 +121,7 @@ Use this to retrieve and analyze previously written reports.`,
 
       return failure({
         kind: "execution" as const,
-        tool: "report-read",
+        tool: "report_read",
         message: formatAnyError(error),
       });
     }

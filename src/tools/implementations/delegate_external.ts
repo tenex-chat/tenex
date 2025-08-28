@@ -3,7 +3,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { NDKEvent, type NDKFilter, type NDKSubscription } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { Tool } from "../types";
 import { createZodSchema, failure, success } from "../types";
@@ -29,7 +29,7 @@ interface DelegateExternalInput {
 }
 
 export const delegateExternalTool: Tool<DelegateExternalInput, DelegationResponses> = {
-  name: "delegate-external",
+  name: "delegate_external",
   description: "Delegate a task to an external agent or user and wait synchronously for their response, optionally as a reply or referencing a project",
 
   promptFragment: `Delegate tasks to external agents or users on Nostr and wait synchronously for their response.
@@ -64,10 +64,21 @@ This tool allows you to:
       const cleanParentId = parentEventId?.replace(/^nostr:/, "");
       const cleanProjectId = projectId?.replace(/^nostr:/, "");
 
+      logger.debug("Processing recipient", { cleanRecipient });
+
       // Convert npub to hex pubkey if needed
       let pubkey = cleanRecipient;
       if (cleanRecipient.startsWith('npub')) {
         pubkey = ndk.getUser({ npub: cleanRecipient }).pubkey;
+      } else {
+        // Validate it's a proper hex pubkey (64 hex characters)
+        if (!/^[0-9a-f]{64}$/i.test(pubkey)) {
+          return failure({
+            kind: "execution" as const,
+            tool: "delegate_external",
+            message: `Invalid pubkey format: ${pubkey.substring(0, 16)}... (must be 64 hex characters or npub)`,
+          });
+        }
       }
 
       if (cleanParentId) {
@@ -112,9 +123,11 @@ This tool allows you to:
         }
       }
 
+      logger.debug("Chat event details", { eventId: chatEvent.id, kind: chatEvent.kind });
+      
       // Sign and publish the event
       await chatEvent.sign(context.agent.signer);
-      await chatEvent.publish();
+      chatEvent.publish();
 
       logger.info("✅ External delegation published, waiting synchronously for response", {
         eventId: chatEvent.id,
@@ -123,14 +136,7 @@ This tool allows you to:
         mode: "synchronous",
       });
 
-      // Register the delegation using the new unified interface
       const registry = DelegationRegistry.getInstance();
-      logger.info("📦 Registering single-recipient delegation", {
-        eventId: chatEvent.id.substring(0, 8),
-        recipient: pubkey.substring(0, 16),
-        kind: chatEvent.kind,
-      });
-      
       const batchId = await registry.registerDelegation({
         delegationEventId: chatEvent.id,
         recipients: [{
@@ -141,14 +147,6 @@ This tool allows you to:
         delegatingAgent: context.agent,
         rootConversationId: context.conversationId,
         originalRequest: content,
-      });
-
-      logger.info("✅ Single-recipient delegation registered via unified approach", {
-        batchId,
-        eventId: chatEvent.id.substring(0, 8),
-        conversationId: context.conversationId.substring(0, 8),
-        recipient: pubkey.substring(0, 16),
-        usingUnifiedApproach: true,
       });
 
       // Publish conversation status event
@@ -170,14 +168,6 @@ This tool allows you to:
         // Don't fail the tool if we can't publish the status
         console.warn("Failed to publish delegation status:", statusError);
       }
-
-      // Wait synchronously for response using the batch completion mechanism
-      logger.info("⏳ Blocking execution to wait for external agent response", {
-        eventId: chatEvent.id,
-        recipientPubkey: pubkey.substring(0, 16),
-        batchId,
-        mode: "synchronous",
-      });
 
       try {
         // Wait for batch completion (will be triggered when response is received and processed)

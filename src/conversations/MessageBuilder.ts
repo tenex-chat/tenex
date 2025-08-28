@@ -17,7 +17,9 @@ import type { Conversation } from "./types";
  * Handles message formatting and processing.
  * Single Responsibility: Transform events and content into properly formatted messages.
  */
-export class MessageBuilder {
+
+// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
+export  class MessageBuilder {
   private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
 
   /**

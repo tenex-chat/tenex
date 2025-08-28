@@ -19,7 +19,7 @@ type ReadPathOutput = string;
  * Performs I/O side effects
  */
 export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
-  name: "read-path",
+  name: "read_path",
   description:
     "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories.",
 
@@ -92,7 +92,7 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
           // If we can't read the directory, fall back to the original error
           return failure({
             kind: "execution" as const,
-            tool: "read-path",
+            tool: "read_path",
             message: `Failed to read ${path}: ${error.message}`,
             cause: error,
           });
@@ -101,7 +101,7 @@ export const readPathTool: Tool<ReadPathInput, ReadPathOutput> = {
 
       return failure({
         kind: "execution" as const,
-        tool: "read-path",
+        tool: "read_path",
         message: `Failed to read ${path}: ${formatAnyError(error)}`,
         cause: error,
       });

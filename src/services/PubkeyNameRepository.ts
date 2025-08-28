@@ -1,7 +1,7 @@
 import { getNDK } from "@/nostr";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKEvent, NostrEvent } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 
 interface UserProfile {
   name?: string;
@@ -220,4 +220,4 @@ export class PubkeyNameRepository {
 }
 
 // Export singleton instance getter for convenience
-export const getPubkeyNameRepository = () => PubkeyNameRepository.getInstance();
+export const getPubkeyNameRepository = (): PubkeyNameRepository => PubkeyNameRepository.getInstance();

@@ -65,7 +65,7 @@ function formatToolsAsMarkdown(
 }
 
 export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOutput> = {
-  name: "discover-capabilities",
+  name: "discover_capabilities",
   description:
     "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
   promptFragment:
@@ -163,7 +163,7 @@ export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOut
       logger.error("Failed to discover MCP tools", { error });
       return failure({
         kind: "execution",
-        tool: "mcp-discover",
+        tool: "discover_capabilities",
         message: error instanceof Error ? error.message : String(error),
         cause: error,
       });

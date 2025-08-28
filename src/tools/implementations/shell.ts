@@ -2,7 +2,6 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { PROJECT_MANAGER_AGENT } from "@/agents/constants";
 import { ExecutionConfig } from "@/agents/execution/constants";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { Tool } from "../types";

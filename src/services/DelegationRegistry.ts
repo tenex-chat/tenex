@@ -264,7 +264,10 @@ export class DelegationRegistry extends EventEmitter {
 
     // Update sibling IDs
     for (const convKey of batch.delegationKeys) {
-      const record = this.delegations.get(convKey)!;
+      const record = this.delegations.get(convKey);
+      if (!record) {
+        throw new Error(`No delegation record found for ${convKey}`);
+      }
       record.siblingDelegationIds = batch.delegationKeys.filter(k => k !== convKey);
     }
 
@@ -527,7 +530,7 @@ export class DelegationRegistry extends EventEmitter {
 
     // Wait for completion event - no timeout as delegations are long-running
     return new Promise((resolve) => {
-      const handler = (data: { completions: Array<any> }) => {
+      const handler = (data: { completions: Array<{ response: string; summary?: string; fromPubkey: string; toPubkey: string; completionEventId: string; timestamp: number; error?: string }> }): void => {
         logger.debug("Batch completion event received", { 
           batchId, 
           completionCount: data.completions.length 

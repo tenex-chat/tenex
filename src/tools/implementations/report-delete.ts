@@ -21,7 +21,7 @@ interface ReportDeleteOutput {
 }
 
 export const reportDeleteTool: Tool<ReportDeleteInput, ReportDeleteOutput> = {
-  name: "report-delete",
+  name: "report_delete",
   description: "Mark an NDKArticle report as deleted",
 
   promptFragment: `Mark a report as deleted by clearing its content and adding a deleted tag.
@@ -72,7 +72,7 @@ Note: This is a soft delete - the article still exists but is marked as deleted.
 
       return failure({
         kind: "execution" as const,
-        tool: "report-delete",
+        tool: "report_delete",
         message: formatAnyError(error),
       });
     }

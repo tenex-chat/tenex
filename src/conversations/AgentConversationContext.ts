@@ -2,7 +2,6 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Message } from "multi-llm-ts";
 import { MessageBuilder } from "./MessageBuilder";
-import type { Phase } from "./phases";
 import type { AgentState, Conversation } from "./types";
 
 /**

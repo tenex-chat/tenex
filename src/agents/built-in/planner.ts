@@ -4,7 +4,7 @@ export const PLANNER_AGENT: BuiltInAgentDefinition = {
   name: "Planner",
   slug: "planner",
   role: "Creates implementation plans and strategies (cannot modify code)",
-  tools: ["claude-code", "delegate", "report-write", "reports-list", "report-read"],
+  tools: ["claude_code", "delegate", "report_write", "reports_list", "report_read"],
   instructions: `# YOU ARE A PLANNER - YOU ONLY CREATE PLANS
 
 ## **🚨 CRITICAL RESTRICTION 🚨**

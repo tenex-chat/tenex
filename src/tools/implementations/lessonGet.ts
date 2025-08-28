@@ -23,11 +23,11 @@ interface LessonGetOutput {
 }
 
 export const lessonGetTool: Tool<LessonGetInput, LessonGetOutput> = {
-  name: "lesson-get",
+  name: "lesson_get",
   description:
     "Retrieve the full version of a lesson by its title, including detailed explanation if available",
 
-  promptFragment: `Use the lesson-get tool when you need to retrieve the full details of a lesson you've learned before. This is especially useful when:
+  promptFragment: `Use the lesson_get tool when you need to retrieve the full details of a lesson you've learned before. This is especially useful when:
 - You need more context about a previously learned lesson
 - The lesson summary mentions a detailed version is available
 - You're working on something related to a past lesson and need the full context
@@ -70,7 +70,7 @@ The tool will return both the summary and detailed version (if available) of the
       if (!lesson) {
         return failure({
           kind: "execution" as const,
-          tool: "lesson-get",
+          tool: "lesson_get",
           message: `No lesson found with title: "${title}"`,
         });
       }

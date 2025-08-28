@@ -141,7 +141,6 @@ export class ToolPlugin extends Plugin {
 
       // Execute the tool using the type-safe executor
       const result = await this.executor.execute(this.tool, normalizedParameters);
-      const endTime = Date.now();
 
       // Serialize the typed result for transport through LLM layer
       const serializedResult = serializeToolResult(result);
@@ -199,8 +198,7 @@ export class ToolPlugin extends Plugin {
 
       return processedResult;
     } catch (error) {
-      const endTime = Date.now();
-      const duration = endTime - startTime;
+      const duration = Date.now() - startTime;
 
       // Create an error result for logging
       const errorResult: ToolExecutionResult = {
