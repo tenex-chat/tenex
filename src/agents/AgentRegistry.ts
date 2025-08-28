@@ -449,6 +449,57 @@ export class AgentRegistry {
   }
 
   /**
+   * Find registry entry and path for an agent by its public key
+   * Checks both local and global registries
+   */
+  private findRegistryEntryByPubkey(agentPubkey: string): {
+    entry: TenexAgents[string];
+    registry: TenexAgents;
+    agentsDir: string;
+    slug: string;
+  } | null {
+    // Check local registry first
+    for (const [slug, entry] of Object.entries(this.registry)) {
+      // Get the pubkey from the nsec
+      try {
+        const signer = new NDKPrivateKeySigner(entry.nsec);
+        if (signer.pubkey === agentPubkey) {
+          return {
+            entry,
+            registry: this.registry,
+            agentsDir: this.agentsDir,
+            slug,
+          };
+        }
+      } catch (error) {
+        logger.debug("Failed to decode nsec for registry entry", { slug, error });
+      }
+    }
+
+    // Check global registry if not found locally
+    if (!this.isGlobal) {
+      for (const [slug, entry] of Object.entries(this.globalRegistry)) {
+        try {
+          const signer = new NDKPrivateKeySigner(entry.nsec);
+          if (signer.pubkey === agentPubkey) {
+            const globalPath = configService.getGlobalPath();
+            return {
+              entry,
+              registry: this.globalRegistry,
+              agentsDir: path.join(globalPath, "agents"),
+              slug,
+            };
+          }
+        } catch (error) {
+          logger.debug("Failed to decode nsec for global registry entry", { slug, error });
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Update an agent's LLM configuration persistently
    */
   async updateAgentLLMConfig(agentPubkey: string, newLLMConfig: string): Promise<boolean> {
@@ -462,16 +513,16 @@ export class AgentRegistry {
     // Update the agent in memory
     agent.llmConfig = newLLMConfig;
 
-    // Find the registry entry by slug
-    const registryEntry = this.registry[agent.slug];
-    if (!registryEntry) {
-      logger.warn(`Registry entry not found for agent ${agent.slug}`);
+    // Find the registry entry by pubkey
+    const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
+    if (!registryInfo) {
+      logger.warn(`Registry entry not found for agent with pubkey ${agentPubkey}`);
       return false;
     }
 
     // Update the agent definition file
     try {
-      const definitionPath = path.join(this.agentsDir, registryEntry.file);
+      const definitionPath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
 
       // Read existing definition
       let agentDefinition: StoredAgentData;
@@ -480,7 +531,7 @@ export class AgentRegistry {
         agentDefinition = JSON.parse(content);
       } catch (error) {
         logger.warn("Failed to read agent definition, creating from current state", {
-          file: registryEntry.file,
+          file: registryInfo.entry.file,
           error,
         });
         // Create definition from current agent state
@@ -502,7 +553,7 @@ export class AgentRegistry {
 
       logger.info(`Updated LLM config for agent ${agent.name} (${agent.slug})`, {
         newLLMConfig,
-        file: registryEntry.file,
+        file: registryInfo.entry.file,
       });
 
       return true;
@@ -554,16 +605,16 @@ export class AgentRegistry {
     });
     agent.tools = getTools(validToolNames);
 
-    // Find the registry entry by slug
-    const registryEntry = this.registry[agent.slug];
-    if (!registryEntry) {
-      logger.warn(`Registry entry not found for agent ${agent.slug}`);
+    // Find the registry entry by pubkey
+    const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
+    if (!registryInfo) {
+      logger.warn(`Registry entry not found for agent with pubkey ${agentPubkey}`);
       return false;
     }
 
     // Update the agent definition file
     try {
-      const definitionPath = path.join(this.agentsDir, registryEntry.file);
+      const definitionPath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
 
       // Read existing definition
       let agentDefinition: StoredAgentData;
@@ -572,7 +623,7 @@ export class AgentRegistry {
         agentDefinition = JSON.parse(content);
       } catch (error) {
         logger.warn("Failed to read agent definition, creating from current state", {
-          file: registryEntry.file,
+          file: registryInfo.entry.file,
           error,
         });
         // Create definition from current agent state
@@ -595,7 +646,7 @@ export class AgentRegistry {
 
       logger.info(`Updated tools for agent ${agent.name} (${agent.slug})`, {
         newTools: newToolNames,
-        file: registryEntry.file,
+        file: registryInfo.entry.file,
       });
 
       return true;
