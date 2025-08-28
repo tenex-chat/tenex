@@ -1,8 +1,6 @@
-import type { CompletionRequest, CompletionResponse, ResolvedLLMConfig } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { type SDKMessage, query } from "@anthropic-ai/claude-code";
 import type { ContentBlock, TextBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import { Message } from "multi-llm-ts";
 
 export interface ClaudeCodeExecutorOptions {
   prompt: string;
@@ -60,24 +58,6 @@ export class ClaudeCodeExecutor {
       totalCost: 0,
       messageCount: 0,
       assistantMessages: [],
-    };
-
-    // Prepare data for logging
-    const startTime = Date.now();
-
-    // Build request object for logging
-    const messages: Message[] = [];
-    if (this.options.systemPrompt) {
-      messages.push(new Message("system", this.options.systemPrompt));
-    }
-    messages.push(new Message("user", this.options.prompt));
-
-    const request: CompletionRequest = {
-      messages,
-      options: {
-        agentName: this.options.agentName,
-        configName: "claude-code",
-      },
     };
 
     // Log the request details
@@ -163,44 +143,14 @@ export class ClaudeCodeExecutor {
       if (timeoutId) clearTimeout(timeoutId);
 
       const duration = Date.now() - this.startTime;
-      const endTime = Date.now();
 
-      // Log successful completion to JSONL
-      if (unifiedLogger) {
-        const response: CompletionResponse = {
-          type: "text",
-          content: metrics.assistantMessages.join("\n\n"),
-          model: "claude-code",
-          usage: {
-            prompt_tokens: 0, // Claude Code doesn't provide token counts
-            completion_tokens: 0,
-            total_cost_usd: metrics.totalCost,
-          },
-        } as CompletionResponse;
-
-        // Create a resolved config for logging
-        const config: ResolvedLLMConfig = {
-          provider: "anthropic" as const,
-          model: "claude-code",
-          apiKey: "claude-code-sdk", // Placeholder since it uses SDK
-          enableCaching: false,
-        };
-
-        await unifiedLogger.logLLMCall(
-          "claude-code",
-          config,
-          request,
-          { response },
-          { startTime, endTime }
-        );
-
-        logger.debug("[Claude Backend] Logged to JSONL", {
-          agentName: this.options.agentName,
-          sessionId: metrics.sessionId,
-          duration: `${duration}ms`,
-          messageCount: metrics.messageCount,
-        });
-      }
+      logger.debug("[Claude Backend] Execution completed", {
+        agentName: this.options.agentName,
+        sessionId: metrics.sessionId,
+        duration: `${duration}ms`,
+        messageCount: metrics.messageCount,
+        totalCost: metrics.totalCost,
+      });
 
       return {
         success: true,
@@ -212,34 +162,13 @@ export class ClaudeCodeExecutor {
       };
     } catch (err) {
       const duration = Date.now() - this.startTime;
-      const endTime = Date.now();
       const error = err instanceof Error ? err.message : "Unknown error";
 
-      logger.error("[ClaudeCodeExecutor] Execution failed", { error, duration });
-
-      // Log error to JSONL
-      if (unifiedLogger) {
-        const config = {
-          provider: "anthropic" as const,
-          model: "claude-code",
-          apiKey: "claude-code-sdk",
-          enableCaching: false,
-        };
-
-        await unifiedLogger.logLLMCall(
-          "claude-code",
-          config,
-          request,
-          { error: err instanceof Error ? err : new Error(error) },
-          { startTime, endTime }
-        );
-
-        logger.debug("[Claude Backend] Logged error to JSONL", {
-          agentName: this.options.agentName,
-          error,
-          duration: `${duration}ms`,
-        });
-      }
+      logger.error("[ClaudeCodeExecutor] Execution failed", {
+        agentName: this.options.agentName,
+        error,
+        duration: `${duration}ms`,
+      });
 
       return {
         success: false,

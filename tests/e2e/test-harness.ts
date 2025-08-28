@@ -209,27 +209,6 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         })
     }));
     
-    // Mock tracing
-    mock.module("@/tracing", () => ({
-        TracingContext: class {
-            constructor() {}
-            getRequest() { return { id: "mock-request-id" }; }
-            getConversation() { return { id: "mock-conv-id" }; }
-            getAgent() { return null; }
-            addConversation() {}
-            addAgent() {}
-            removeAgent() {}
-        },
-        createTracingLogger: () => ({
-            info: () => {},
-            warn: () => {},
-            warning: () => {},
-            error: () => {},
-            debug: () => {},
-            trace: () => {}
-        })
-    }));
-    
     // Create test agent
     const testAgent = {
         name: "test-agent",
