@@ -482,28 +482,7 @@ export class ConversationCoordinator {
       }
     });
 
-    queueManager.on("timeout", async (conversationId: string) => {
-      const conversation = this.store.get(conversationId);
-      if (conversation && conversation.phase === PHASES.EXECUTE) {
-        await this.updatePhase(
-          conversationId,
-          PHASES.CHAT,
-          "Execution timeout reached. The execution lock has been automatically released.",
-          "system",
-          "system"
-        );
-      }
-    });
-
-    queueManager.on("timeout-warning", async (conversationId: string, remainingMs: number) => {
-      const minutes = Math.floor(remainingMs / 60000);
-      logWarning(
-        `Execution timeout warning: ${minutes} minutes remaining`,
-        "conversation",
-        "normal",
-        { conversationId, remainingMinutes: minutes }
-      );
-    });
+    // Timeout functionality disabled - no timeout handling needed
   }
 
   private formatQueueMessage(position: number, waitTimeSeconds: number): string {

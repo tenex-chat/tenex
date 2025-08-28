@@ -350,6 +350,10 @@ export class AgentRegistry {
     }
   }
 
+  private async saveGlobalRegistry(): Promise<void> {
+    await configService.saveGlobalAgents(this.globalRegistry);
+  }
+
   /**
    * Remove an agent by its event ID
    * This removes the agent from memory and deletes its definition file
@@ -378,16 +382,22 @@ export class AgentRegistry {
       return false;
     }
 
+    // Don't allow removing global agents from a project context
+    if (agentToRemove.isGlobal && !this.isGlobal) {
+      logger.warn(`Cannot remove global agent ${agentSlugToRemove} from project context. Remove it globally instead.`);
+      return false;
+    }
+
     // Remove from memory
     this.agents.delete(agentSlugToRemove);
     this.agentsByPubkey.delete(agentToRemove.pubkey);
 
-    // Remove from registry
-    const registryEntry = this.registry[agentSlugToRemove];
-    if (registryEntry) {
+    // Find registry info using pubkey to ensure we get the right registry
+    const registryInfo = this.findRegistryEntryByPubkey(agentToRemove.pubkey);
+    if (registryInfo) {
       // Delete the agent definition file
       try {
-        const filePath = path.join(this.agentsDir, registryEntry.file);
+        const filePath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
         await fs.unlink(filePath);
         logger.info(`Deleted agent definition file: ${filePath}`);
       } catch (error) {
@@ -397,9 +407,15 @@ export class AgentRegistry {
         });
       }
 
-      // Remove from registry and save
-      delete this.registry[agentSlugToRemove];
-      await this.saveRegistry();
+      // Remove from the appropriate registry and save
+      delete registryInfo.registry[agentSlugToRemove];
+      
+      // Save the appropriate registry
+      if (registryInfo.registry === this.globalRegistry) {
+        await this.saveGlobalRegistry();
+      } else {
+        await this.saveRegistry();
+      }
     }
 
     logger.info(`Removed agent ${agentSlugToRemove} (eventId: ${eventId})`);
@@ -423,25 +439,37 @@ export class AgentRegistry {
       return false;
     }
 
+    // Don't allow removing global agents from a project context
+    if (agent.isGlobal && !this.isGlobal) {
+      logger.warn(`Cannot remove global agent ${slug} from project context. Remove it globally instead.`);
+      return false;
+    }
+
     // Remove from memory
     this.agents.delete(slug);
     this.agentsByPubkey.delete(agent.pubkey);
 
-    // Remove from registry
-    const registryEntry = this.registry[slug];
-    if (registryEntry) {
+    // Find registry info using pubkey to ensure we get the right registry
+    const registryInfo = this.findRegistryEntryByPubkey(agent.pubkey);
+    if (registryInfo) {
       // Delete the agent definition file
       try {
-        const filePath = path.join(this.agentsDir, registryEntry.file);
+        const filePath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
         await fs.unlink(filePath);
         logger.info(`Deleted agent definition file: ${filePath}`);
       } catch (error) {
         logger.warn("Failed to delete agent definition file", { error, slug });
       }
 
-      // Remove from registry and save
-      delete this.registry[slug];
-      await this.saveRegistry();
+      // Remove from the appropriate registry and save
+      delete registryInfo.registry[slug];
+      
+      // Save the appropriate registry
+      if (registryInfo.registry === this.globalRegistry) {
+        await this.saveGlobalRegistry();
+      } else {
+        await this.saveRegistry();
+      }
     }
 
     logger.info(`Removed agent ${slug}`);

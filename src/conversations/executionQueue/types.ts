@@ -65,7 +65,7 @@ export interface ExecutionQueueConfig {
   maxQueueSize?: number; // Default: 100
   maxHistorySize?: number; // Default: 1000
   persistenceDir?: string; // Default: .tenex/state
-  enableAutoTimeout?: boolean; // Default: true
+  enableAutoTimeout?: boolean; // Default: false
   enablePersistence?: boolean; // Default: true
 }
 
@@ -73,6 +73,6 @@ export const DEFAULT_EXECUTION_QUEUE_CONFIG: ExecutionQueueConfig = {
   maxExecutionDuration: 30 * 60 * 1000, // 30 minutes
   maxQueueSize: 100,
   maxHistorySize: 1000,
-  enableAutoTimeout: true,
+  enableAutoTimeout: false,
   enablePersistence: true,
 };
