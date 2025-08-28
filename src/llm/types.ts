@@ -21,18 +21,16 @@ export interface ApiKeyResult {
 
 import type {
   LlmCompletionOpts,
-  Message as LlmMessage,
+  Message,
   LlmResponse,
-  LlmTool,
-  LlmToolCall,
 } from "multi-llm-ts";
 
-// Re-export multi-llm-ts types directly
-export type Message = LlmMessage;
 // Extend LlmResponse to include model information
 export type CompletionResponse = LlmResponse & { model?: string };
-export type ToolDefinition = LlmTool;
-export type ToolCall = LlmToolCall;
+
+// Re-export for convenience
+export type { Message } from "multi-llm-ts";
+export type { LlmToolCall as ToolCall } from "multi-llm-ts";
 
 // Extended completion options with routing context
 export interface CompletionOptions extends LlmCompletionOpts {

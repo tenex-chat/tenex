@@ -216,7 +216,6 @@ export class AgentEventEncoder {
       kind: 1111,
     });
 
-    // Return as array for backward compatibility with current signature
     return [event];
   }
 

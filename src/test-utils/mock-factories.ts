@@ -168,8 +168,3 @@ export class MockBuilder<T> {
   }
 }
 
-// Usage example:
-// const agent = new MockBuilder<AgentInstance>()
-//     .with('name', 'TestAgent')
-//     .with('allowedTools', ['test-tool'])
-//     .build(createMockAgent());
