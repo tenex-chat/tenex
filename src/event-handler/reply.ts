@@ -8,11 +8,9 @@ import { ConversationResolver } from "../conversations/services/ConversationReso
 // New refactored modules
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "../services";
-import { DelegationRegistry } from "../services/DelegationRegistry";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
-import { DelegationCompletionHandler } from "./DelegationCompletionHandler";
 
 const logInfo = logger.info.bind(logger);
 
@@ -44,8 +42,7 @@ export const handleChatMessage = async (
     logger.debug(`Agent event not directed to system - adding to history only: ${event.id?.substring(0, 8)}`);
     
     // Try to find and update the conversation this event belongs to
-    const registry = DelegationRegistry.getInstance();
-    const resolver = new ConversationResolver(context.conversationCoordinator, registry);
+    const resolver = new ConversationResolver(context.conversationCoordinator);
     const result = await resolver.resolveConversationForEvent(event);
     
     if (result.conversation) {
@@ -133,10 +130,7 @@ async function handleReplyLogic(
   }
 
   // 1. Resolve conversation context
-  const conversationResolver = new ConversationResolver(
-    conversationCoordinator,
-    DelegationRegistry.getInstance()
-  );
+  const conversationResolver = new ConversationResolver(conversationCoordinator);
   const {
     conversation,
     claudeSessionId: mappedClaudeSessionId,
@@ -188,60 +182,8 @@ async function handleReplyLogic(
   
   targetAgents = nonSelfReplyAgents;
 
-  // 5. Handle delegation completion if applicable (only for single agent case)
-  let isDelegationCompletionReactivation = false;
-  let delegationOverrideAgent: AgentInstance | null = null;
-  let delegationOverrideEvent: NDKEvent | null = null;
-
-  // Check for delegation completions only if:
-  // 1. It's explicitly marked as complete (tool:complete), OR
-  // 2. It e-tags a known delegation request
-  if (event.kind === 1111 && AgentEventDecoder.isEventFromAgent(event, projectCtx.agents)) {
-    // Only check for delegation completion if it has markers suggesting it might be one
-    const hasCompletionMarker = AgentEventDecoder.isDelegationCompletion(event);
-    const eTags = event.getMatchingTags("e");
-    
-    // Only proceed if there's evidence this might be a delegation completion
-    if (hasCompletionMarker || eTags.length > 0) {
-      const delegationCompletionResult = await DelegationCompletionHandler.handleDelegationCompletion(
-        event,
-        conversation,
-        conversationCoordinator
-      );
-
-      if (delegationCompletionResult.shouldReactivate) {
-        // This was a delegation completion and we should reactivate
-        isDelegationCompletionReactivation = true;
-        if (delegationCompletionResult.targetAgent) {
-          // Override target agents with the delegating agent
-          delegationOverrideAgent = delegationCompletionResult.targetAgent;
-        }
-        if (delegationCompletionResult.replyTarget) {
-          logInfo(
-            chalk.cyan(
-              `Delegation completion will reply to original user event: ${delegationCompletionResult.replyTarget.id?.substring(0, 8)}`
-            )
-          );
-          // Override the triggering event to be the original user request
-          delegationOverrideEvent = delegationCompletionResult.replyTarget;
-        }
-      } else if (hasCompletionMarker) {
-        // It was an explicit completion but shouldn't reactivate yet (waiting for more delegations)
-        return;
-      }
-      // If it wasn't a delegation completion at all, continue normal processing
-    }
-  }
-
-  // If delegation completion overrode the target, use that single agent
-  if (delegationOverrideAgent) {
-    targetAgents = [delegationOverrideAgent];
-  }
-  
-  // If delegation completion overrode the event, use that
-  const effectiveEvent = delegationOverrideEvent || event;
-
-  // 6. Extract claude-session
+  // 5. Extract claude-session
+  const effectiveEvent = event;
   const claudeSessionId = mappedClaudeSessionId || AgentEventDecoder.getClaudeSessionId(effectiveEvent);
   if (claudeSessionId) {
     logInfo(
@@ -251,7 +193,7 @@ async function handleReplyLogic(
     );
   }
 
-  // 7. Execute each target agent in parallel
+  // 6. Execute each target agent in parallel
   const executionPromises = targetAgents.map(async (targetAgent) => {
     // Build execution context for this agent
     const executionContext: ExecutionContext = {
@@ -262,7 +204,6 @@ async function handleReplyLogic(
       triggeringEvent: effectiveEvent,
       conversationCoordinator,
       claudeSessionId,
-      isDelegationCompletion: isDelegationCompletionReactivation,
     };
 
     // Execute agent

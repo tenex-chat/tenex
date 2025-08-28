@@ -1,5 +1,4 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import { getNDK } from "@/nostr";
 import { NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
@@ -105,7 +104,21 @@ export class EventHandler {
       }
       
       // Process p-tags to show agent slugs where possible
-      const pTags = event.getMatchingTags("p");
+      let pTags: any[];
+      try {
+        pTags = event.getMatchingTags("p");
+      } catch (err) {
+        logger.error("Failed to get p-tags - event is not a proper NDKEvent!", {
+          error: err,
+          eventType: typeof event,
+          eventConstructor: event?.constructor?.name,
+          eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
+          hasGetMatchingTags: typeof event?.getMatchingTags,
+          eventKeys: Object.keys(event || {}),
+          event: JSON.stringify(event, null, 2)
+        });
+        throw err;
+      }
       if (pTags.length > 0) {
         const recipients = pTags.map((t) => {
           const pubkey = t[1];
@@ -116,7 +129,21 @@ export class EventHandler {
       }
     } catch {
       // Project context might not be available, continue with pubkey
-      const pTags = event.getMatchingTags("p");
+      let pTags: any[];
+      try {
+        pTags = event.getMatchingTags("p");
+      } catch (err) {
+        logger.error("Failed to get p-tags (fallback) - event is not a proper NDKEvent!", {
+          error: err,
+          eventType: typeof event,
+          eventConstructor: event?.constructor?.name,
+          eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
+          hasGetMatchingTags: typeof event?.getMatchingTags,
+          eventKeys: Object.keys(event || {}),
+          event: JSON.stringify(event, null, 2)
+        });
+        throw err;
+      }
       if (pTags.length > 0) {
         forIdentifiers = pTags.map((t) => t[1].substring(0, 8)).join(", ");
       }
@@ -125,6 +152,13 @@ export class EventHandler {
     logger.info(
       `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.encode()})`
     );
+
+    // Check if this is a delegation response BEFORE routing
+    const delegationRegistry = DelegationRegistry.getInstance();
+    if (delegationRegistry.isDelegationResponse(event)) {
+      await delegationRegistry.handleDelegationResponse(event);
+      return; // Done - this was a delegation response
+    }
 
     switch (event.kind) {
       case NDKKind.GenericReply: // kind 1111

@@ -132,7 +132,7 @@ Please adjust your behavior according to the new phase requirements.`;
         
         if (targetAgent) {
           // Check if there's a delegation record for this conversation
-          const delegationContext = registry.getDelegationContext(
+          const delegationContext = registry.getDelegationByConversationKey(
             conversationId,
             targetAgent.pubkey,
             event.pubkey

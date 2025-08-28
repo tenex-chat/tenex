@@ -121,7 +121,7 @@ export class DelegationCompletionHandler {
 
     // Record the completion in the registry
     try {
-      const result = await registry.recordTaskCompletion({
+      const result = await registry.recordDelegationCompletion({
         conversationId: delegationContext.delegatingAgent.rootConversationId,
         fromPubkey: delegationContext.delegatingAgent.pubkey,
         toPubkey: event.pubkey,

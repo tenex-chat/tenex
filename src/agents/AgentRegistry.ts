@@ -847,7 +847,7 @@ export class AgentRegistry {
         const unavailableMcpTools = requestedMcpTools.filter(name => !availableMcpToolNames.has(name));
         
         if (unavailableMcpTools.length > 0) {
-          logger.info(`Agent "${slug}" requested MCP tools not yet available:`, unavailableMcpTools);
+          logger.debug(`Agent "${slug}" requested MCP tools not yet available:`, unavailableMcpTools);
         }
       } catch (error) {
         logger.debug(`Could not load MCP tools for agent "${slug}":`, error);

@@ -11,15 +11,18 @@ export function getRootConversationId(context: ExecutionContext): string {
   // Check if this is a delegated task (kind 1934)
   if (context.triggeringEvent.kind === 1934) {
     const registry = DelegationRegistry.getInstance();
-    const delegationContext = registry.getDelegationContext(context.triggeringEvent.id);
+    const delegationContext = registry.findDelegationByEventAndResponder(
+      context.triggeringEvent.id, 
+      context.agent.pubkey
+    );
 
     if (delegationContext) {
       logger.debug("[getRootConversationId] Found delegation context, using parent conversation", {
         currentConversationId: context.conversationId.substring(0, 8),
-        rootConversationId: delegationContext.delegatingAgent.conversationId.substring(0, 8),
+        rootConversationId: delegationContext.delegatingAgent.rootConversationId.substring(0, 8),
         delegatingAgent: delegationContext.delegatingAgent.slug,
       });
-      return delegationContext.delegatingAgent.conversationId;
+      return delegationContext.delegatingAgent.rootConversationId;
     }
   }
 

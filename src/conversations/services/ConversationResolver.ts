@@ -1,7 +1,6 @@
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services";
-import type { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -21,8 +20,7 @@ export interface ConversationResolutionResult {
  */
 export class ConversationResolver {
   constructor(
-    private conversationCoordinator: ConversationCoordinator,
-    private delegationRegistry: DelegationRegistry
+    private conversationCoordinator: ConversationCoordinator
   ) {}
 
   /**
@@ -31,7 +29,7 @@ export class ConversationResolver {
    * or use delegation context to find parent conversations.
    */
   async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
-    // Try standard conversation resolution first
+    // Try standard conversation resolution
     const result = await this.findConversationForReply(event);
 
     // If no conversation found and this could be an orphaned reply, try to create one
@@ -55,84 +53,11 @@ export class ConversationResolver {
   private async findConversationForReply(event: NDKEvent): Promise<ConversationResolutionResult> {
     const convRoot = AgentEventDecoder.getConversationRoot(event);
 
-    let conversation = convRoot
+    const conversation = convRoot
       ? this.conversationCoordinator.getConversationByEvent(convRoot)
       : undefined;
     let mappedClaudeSessionId: string | undefined;
 
-    // Check if this is a task completion - use registry to find parent conversation
-    if (
-      AgentEventDecoder.getReferencedKind(event) === "1934" &&
-      AgentEventDecoder.isTaskCompletionEvent(event)
-    ) {
-      const taskId = AgentEventDecoder.getTaskId(event);
-      if (taskId) {
-        // Use DelegationRegistry to find the parent conversation
-        const delegationContext = this.delegationRegistry.getDelegationContextByTaskId(taskId);
-        if (delegationContext) {
-          const parentConversation = this.conversationCoordinator.getConversation(
-            delegationContext.delegatingAgent.conversationId
-          );
-          if (parentConversation) {
-            conversation = parentConversation;
-            logInfo(
-              chalk.cyan("Task completion routed to parent conversation: ") +
-                chalk.yellow(delegationContext.delegatingAgent.conversationId.substring(0, 8))
-            );
-          }
-        }
-      }
-    }
-
-    // If no conversation found and this is a reply to an NDKTask (K tag = 1934)
-    if (!conversation && AgentEventDecoder.getReferencedKind(event) === "1934") {
-      const taskId = AgentEventDecoder.getTaskId(event);
-      logger.debug("Checking for conversation for K=1934 event", {
-        hasConversation: !!conversation,
-        taskId: taskId?.substring(0, 8),
-        eventKind: event.kind,
-        hasTool: event.tagValue("tool"),
-        hasStatus: event.tagValue("status"),
-      });
-
-      if (taskId) {
-        // Use DelegationRegistry to find the parent conversation
-        const delegationContext = this.delegationRegistry.getDelegationContextByTaskId(taskId);
-
-        if (delegationContext) {
-          conversation = this.conversationCoordinator.getConversation(
-            delegationContext.delegatingAgent.conversationId
-          );
-
-          if (conversation) {
-            logInfo(
-              chalk.gray("Found conversation via delegation registry: ") +
-                chalk.cyan(delegationContext.delegatingAgent.conversationId)
-            );
-          } else {
-            logger.error("Delegation context points to non-existent conversation", {
-              taskId: taskId.substring(0, 8),
-              conversationId: delegationContext.delegatingAgent.conversationId,
-            });
-          }
-        } else {
-          logger.debug("No delegation context found, falling back to task as conversation root");
-          // Fallback: The task itself might be the conversation root
-          conversation = this.conversationCoordinator.getConversation(taskId);
-
-          if (conversation) {
-            const claudeSession = AgentEventDecoder.getClaudeSessionId(event);
-            if (claudeSession) {
-              logInfo(
-                chalk.gray("Found claude-session tag in kind:1111 event: ") +
-                  chalk.cyan(claudeSession)
-              );
-              mappedClaudeSessionId = claudeSession;
-            }
-          }
-        }
-      }
-    }
 
     return { conversation, claudeSessionId: mappedClaudeSessionId };
   }

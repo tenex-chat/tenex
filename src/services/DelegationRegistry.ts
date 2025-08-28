@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 
 export interface DelegationRecord {
@@ -286,10 +287,57 @@ export class DelegationRegistry extends EventEmitter {
 
 
   /**
+   * Check if an event is a delegation response we're waiting for
+   */
+  isDelegationResponse(event: NDKEvent): boolean {
+    if (event.kind !== 1111) return false;
+    
+    const eTags = event.getMatchingTags("e");
+    for (const eTagArray of eTags) {
+      const delegationEventId = eTagArray[1];
+      if (!delegationEventId) continue;
+      
+      if (this.findDelegationByEventAndResponder(delegationEventId, event.pubkey)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Handle a delegation response - find the delegation and record completion
+   */
+  async handleDelegationResponse(event: NDKEvent): Promise<void> {
+    if (!this.isDelegationResponse(event)) {
+      throw new Error(`Event ${event.id} is not a delegation response`);
+    }
+
+    // Find the delegation this is responding to
+    const eTags = event.getMatchingTags("e");
+    for (const eTagArray of eTags) {
+      const delegationEventId = eTagArray[1];
+      if (!delegationEventId) continue;
+      
+      const delegation = this.findDelegationByEventAndResponder(delegationEventId, event.pubkey);
+      if (delegation) {
+        await this.recordDelegationCompletion({
+          conversationId: delegation.delegatingAgent.rootConversationId,
+          fromPubkey: delegation.delegatingAgent.pubkey,
+          toPubkey: event.pubkey,
+          completionEventId: event.id,
+          response: event.content,
+          summary: event.tagValue?.("summary"),
+        });
+        break;
+      }
+    }
+  }
+
+  /**
    * Record delegation completion
    * Called when a delegation completion event (kind:1111 reply) is received
    */
-  async recordTaskCompletion(params: {
+  async recordDelegationCompletion(params: {
     conversationId: string; // The root conversation ID
     fromPubkey: string;
     toPubkey: string;
@@ -367,7 +415,12 @@ export class DelegationRegistry extends EventEmitter {
       const completions = this.getBatchCompletions(batch.batchId);
       this.emit(`${batch.batchId}:completion`, {
         batchId: batch.batchId,
-        completions,
+        completions: completions.map(c => ({
+          taskId: c.delegationId,
+          response: c.response,
+          summary: c.summary,
+          assignedTo: c.assignedTo
+        })),
         rootConversationId: record.delegatingAgent.rootConversationId,
         delegatingAgent: record.delegatingAgent.pubkey,
       });
@@ -433,40 +486,7 @@ export class DelegationRegistry extends EventEmitter {
     return record;
   }
 
-  /**
-   * Get delegation context from conversation and agent pubkeys
-   * Legacy method that wraps the new getDelegationByConversationKey
-   */
-  getDelegationContext(conversationId: string, fromPubkey: string, toPubkey: string): DelegationRecord | undefined {
-    return this.getDelegationByConversationKey(conversationId, fromPubkey, toPubkey);
-  }
   
-  /**
-   * DEPRECATED: This method is no longer reliable with multi-recipient delegations
-   * Multiple delegation records can share the same event ID
-   * Use getDelegationByConversationKey instead when you know the participants
-   * 
-   * @deprecated
-   */
-  getDelegationContextByTaskId(taskId: string): DelegationRecord | undefined {
-    logger.warn("⚠️ getDelegationContextByTaskId is deprecated and may return incorrect results", {
-      taskId: taskId.substring(0, 16),
-      reason: "Multiple records may share the same event ID after refactoring",
-    });
-    
-    // Return first match (this is NOT reliable for multi-recipient delegations)
-    for (const record of this.delegations.values()) {
-      if (record.delegationEventId === taskId) {
-        logger.warn("⚠️ Found delegation by event ID, but this may not be the correct one for multi-recipient", {
-          delegationEventId: record.delegationEventId.substring(0, 8),
-          assignedTo: record.assignedTo.pubkey.substring(0, 16),
-        });
-        return record;
-      }
-    }
-    
-    return undefined;
-  }
 
   /**
    * Check if a batch was handled synchronously
@@ -480,7 +500,7 @@ export class DelegationRegistry extends EventEmitter {
    * Used when synthesizing responses after all delegations complete
    */
   getBatchCompletions(batchId: string): Array<{
-    taskId: string;
+    delegationId: string;
     response: string;
     summary?: string;
     assignedTo: string;
@@ -498,7 +518,7 @@ export class DelegationRegistry extends EventEmitter {
         } => record !== undefined && record.completion !== undefined
       )
       .map((record) => ({
-        taskId: record.delegationEventId,
+        delegationId: record.delegationEventId,
         response: record.completion.response,
         summary: record.completion.summary,
         assignedTo: record.assignedTo.pubkey,
@@ -516,7 +536,7 @@ export class DelegationRegistry extends EventEmitter {
   async waitForBatchCompletion(
     batchId: string
   ): Promise<Array<{
-    taskId: string;
+    delegationId: string;
     response: string;
     summary?: string;
     assignedTo: string;
@@ -530,12 +550,17 @@ export class DelegationRegistry extends EventEmitter {
 
     // Wait for completion event - no timeout as delegations are long-running
     return new Promise((resolve) => {
-      const handler = (data: { completions: Array<{ response: string; summary?: string; fromPubkey: string; toPubkey: string; completionEventId: string; timestamp: number; error?: string }> }): void => {
+      const handler = (data: { completions: Array<{ taskId: string; response: string; summary?: string; assignedTo: string; }> }): void => {
         logger.debug("Batch completion event received", { 
           batchId, 
           completionCount: data.completions.length 
         });
-        resolve(data.completions);
+        resolve(data.completions.map(c => ({
+          delegationId: c.taskId,
+          response: c.response,
+          summary: c.summary,
+          assignedTo: c.assignedTo
+        })));
       };
 
       this.once(`${batchId}:completion`, handler);
@@ -547,29 +572,7 @@ export class DelegationRegistry extends EventEmitter {
     });
   }
 
-  /**
-   * Get active delegations for an agent
-   */
-  getAgentActiveDelegations(agentPubkey: string): DelegationRecord[] {
-    const delegationIds = this.agentDelegations.get(agentPubkey);
-    if (!delegationIds) return [];
 
-    return Array.from(delegationIds)
-      .map((id) => this.delegations.get(id))
-      .filter((r): r is DelegationRecord => r !== undefined && r.status === "pending");
-  }
-
-  /**
-   * Get all delegations for a conversation
-   */
-  getConversationTasks(conversationId: string): DelegationRecord[] {
-    const delegationIds = this.conversationDelegations.get(conversationId);
-    if (!delegationIds) return [];
-
-    return Array.from(delegationIds)
-      .map((id) => this.delegations.get(id))
-      .filter((r): r is DelegationRecord => r !== undefined);
-  }
 
   // Private helper methods
 

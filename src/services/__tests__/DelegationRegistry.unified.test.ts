@@ -312,18 +312,6 @@ describe("DelegationRegistry - Unified Approach (No Synthetic IDs)", () => {
       expect(delegationY).toBeDefined();
       expect(delegationY?.assignedTo.pubkey).toBe("pubkey_y");
 
-      // Verify the deprecated getDelegationContextByTaskId warns about ambiguity
-      warnSpy.mockClear();
-      const ambiguousResult = registry.getDelegationContextByTaskId(delegationEventId);
-      
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("getDelegationContextByTaskId is deprecated"),
-        expect.anything()
-      );
-      
-      // It will return one of them (first match), but we can't rely on which
-      expect(ambiguousResult).toBeDefined();
-      expect(recipients).toContain(ambiguousResult?.assignedTo.pubkey);
     });
   });
 
