@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import { logger } from "@/utils/logger";
 import { LockManager } from "./LockManager";
 import { QueueManager } from "./QueueManager";
-import { TimeoutManager } from "./TimeoutManager";
 import {
   DEFAULT_EXECUTION_QUEUE_CONFIG,
   type ExecutionHistory,
@@ -17,14 +16,11 @@ export interface ExecutionQueueManagerEvents {
   "lock-released": (conversationId: string, reason: string) => void;
   "queue-joined": (conversationId: string, position: number) => void;
   "queue-left": (conversationId: string) => void;
-  "timeout-warning": (conversationId: string, remainingMs: number) => void;
-  timeout: (conversationId: string) => void;
 }
 
 export class ExecutionQueueManager extends EventEmitter {
   private lockManager: LockManager;
   private queueManager: QueueManager;
-  private timeoutManager: TimeoutManager;
   private config: ExecutionQueueConfig;
   private initialized = false;
 
@@ -38,21 +34,8 @@ export class ExecutionQueueManager extends EventEmitter {
     // Initialize components
     this.lockManager = new LockManager(projectPath, config);
     this.queueManager = new QueueManager(projectPath, config);
-    this.timeoutManager = new TimeoutManager(config);
-
-    // Set up timeout event handlers
-    this.setupTimeoutHandlers();
   }
 
-  private setupTimeoutHandlers(): void {
-    this.timeoutManager.on("timeout", async (conversationId) => {
-      await this.handleTimeout(conversationId);
-    });
-
-    this.timeoutManager.on("warning", async (conversationId, remainingMs) => {
-      this.emit("timeout-warning", conversationId, remainingMs);
-    });
-  }
 
   async initialize(): Promise<void> {
     if (this.initialized) {
@@ -125,9 +108,6 @@ export class ExecutionQueueManager extends EventEmitter {
       throw new Error("Failed to acquire lock when it should be available");
     }
 
-    // Start timeout timer
-    this.timeoutManager.startTimeout(conversationId, this.config.maxExecutionDuration);
-
     // Emit lock acquired event
     this.emit("lock-acquired", conversationId, agentPubkey);
 
@@ -150,9 +130,6 @@ export class ExecutionQueueManager extends EventEmitter {
       return;
     }
 
-    // Clear timeout
-    this.timeoutManager.clearTimeout(conversationId);
-
     // Record execution history
     const endTime = Date.now();
     const history: ExecutionHistory = {
@@ -160,7 +137,7 @@ export class ExecutionQueueManager extends EventEmitter {
       startTime: currentLock.timestamp,
       endTime,
       agentPubkey: currentLock.agentPubkey,
-      reason: reason as "completed" | "timeout" | "forced" | "error",
+      reason: reason as "completed" | "forced" | "error",
     };
     await this.queueManager.addToHistory(history);
 
@@ -229,15 +206,6 @@ export class ExecutionQueueManager extends EventEmitter {
     return currentLock.conversationId;
   }
 
-  private async handleTimeout(conversationId: string): Promise<void> {
-    logger.info(`Execution timeout for conversation ${conversationId}`);
-
-    // Force release due to timeout
-    await this.forceRelease(conversationId, "timeout");
-
-    // Emit timeout event
-    this.emit("timeout", conversationId);
-  }
 
   async removeFromQueue(conversationId: string): Promise<boolean> {
     if (!this.initialized) {
@@ -335,7 +303,7 @@ export class ExecutionQueueManager extends EventEmitter {
     return {
       lock: await this.lockManager.getCurrentLock(),
       queue: this.queueManager.getQueueStatus(),
-      activeTimeouts: this.timeoutManager.getActiveTimeouts(),
+      activeTimeouts: [],
       config: this.config,
     };
   }
@@ -344,9 +312,6 @@ export class ExecutionQueueManager extends EventEmitter {
     if (!this.initialized) {
       await this.initialize();
     }
-
-    // Clear all timeouts
-    this.timeoutManager.clearAll();
 
     // Force release any lock
     await this.lockManager.forceReleaseAny();

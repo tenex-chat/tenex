@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import { logger, logInfo, logWarning } from "@/utils/logger";
+import { logger, logInfo } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";

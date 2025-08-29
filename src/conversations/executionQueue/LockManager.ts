@@ -40,20 +40,14 @@ export class LockManager {
   }
 
   async getCurrentLock(): Promise<ExecutionLock | null> {
-    if (this.currentLock && !this.isLockExpired(this.currentLock)) {
+    if (this.currentLock) {
       return this.currentLock;
-    }
-
-    // If current lock is expired, clear it
-    if (this.currentLock && this.isLockExpired(this.currentLock)) {
-      await this.clearExpiredLock();
-      return null;
     }
 
     // Try to load from persistent storage
     if (this.config.enablePersistence) {
       const persistedLock = await this.loadLockFromDisk();
-      if (persistedLock && !this.isLockExpired(persistedLock)) {
+      if (persistedLock) {
         this.currentLock = persistedLock;
         return persistedLock;
       }
@@ -73,9 +67,6 @@ export class LockManager {
       conversationId,
       agentPubkey,
       timestamp: Date.now(),
-      maxDuration:
-        this.config.maxExecutionDuration ??
-        (DEFAULT_EXECUTION_QUEUE_CONFIG.maxExecutionDuration || 300000),
     };
 
     this.currentLock = lock;
@@ -136,36 +127,20 @@ export class LockManager {
     return releasedConversationId;
   }
 
-  isLockExpired(lock: ExecutionLock): boolean {
-    if (!this.config.enableAutoTimeout) {
-      return false;
-    }
-
-    const now = Date.now();
-    const lockAge = now - lock.timestamp;
-    return lockAge > lock.maxDuration;
+  isLockExpired(_lock: ExecutionLock): boolean {
+    // Timeouts removed - locks never expire
+    return false;
   }
 
   getLockAge(lock: ExecutionLock): number {
     return Date.now() - lock.timestamp;
   }
 
-  getRemainingTime(lock: ExecutionLock): number {
-    if (!this.config.enableAutoTimeout) {
-      return Number.POSITIVE_INFINITY;
-    }
-
-    const age = this.getLockAge(lock);
-    return Math.max(0, lock.maxDuration - age);
+  getRemainingTime(_lock: ExecutionLock): number {
+    // Timeouts removed - infinite time remaining
+    return Number.POSITIVE_INFINITY;
   }
 
-  private async clearExpiredLock(): Promise<void> {
-    this.currentLock = null;
-
-    if (this.config.enablePersistence) {
-      await this.deleteLockFromDisk();
-    }
-  }
 
   private async saveLockToDisk(lock: ExecutionLock): Promise<void> {
     const persistedLock: PersistedLock = {
@@ -192,12 +167,11 @@ export class LockManager {
         return null;
       }
 
-      // Check if lock has expired
+      // Convert persisted lock to ExecutionLock
       const lock: ExecutionLock = {
         conversationId: persistedLock.conversationId,
         agentPubkey: persistedLock.agentPubkey,
         timestamp: persistedLock.timestamp,
-        maxDuration: persistedLock.maxDuration,
       };
 
       if (this.isLockExpired(lock)) {

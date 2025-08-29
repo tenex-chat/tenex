@@ -8,8 +8,6 @@ describe("ExecutionQueueManager", () => {
   let manager: ExecutionQueueManager;
   let testProjectPath: string;
   const config: Partial<ExecutionQueueConfig> = {
-    maxExecutionDuration: 5000, // 5 seconds for testing
-    enableAutoTimeout: true,
     enablePersistence: true,
   };
 
@@ -181,10 +179,9 @@ describe("ExecutionQueueManager", () => {
   });
 
   describe("Timeout Management", () => {
-    it("should emit timeout event after duration", (done) => {
+    it.skip("should emit timeout event after duration - REMOVED TIMEOUTS", (done) => {
       const shortConfig: Partial<ExecutionQueueConfig> = {
-        maxExecutionDuration: 100, // 100ms for testing
-        enableAutoTimeout: true,
+        // Timeouts removed
       };
 
       const timeoutManager = new ExecutionQueueManager(
@@ -202,7 +199,7 @@ describe("ExecutionQueueManager", () => {
       });
     }, 1000);
 
-    it("should clear timeout on release", async () => {
+    it.skip("should clear timeout on release - REMOVED TIMEOUTS", async () => {
       let timeoutFired = false;
 
       manager.on("timeout", () => {
@@ -232,7 +229,7 @@ describe("ExecutionQueueManager", () => {
       expect(status.lock?.conversationId).toBe("conv-1");
       expect(status.queue.totalWaiting).toBe(2);
       expect(status.queue.queue.length).toBe(2);
-      expect(status.config.maxExecutionDuration).toBe(5000);
+      // Timeout config removed
     });
 
     it("should clear all state", async () => {
@@ -291,11 +288,9 @@ describe("ExecutionQueueManager", () => {
       await newManager.clearAll();
     });
 
-    it("should clear expired lock on startup", async () => {
+    it.skip("should clear expired lock on startup - REMOVED TIMEOUTS", async () => {
       // Create manager with very short timeout
       const expireConfig: Partial<ExecutionQueueConfig> = {
-        maxExecutionDuration: 1, // 1ms - will expire immediately
-        enableAutoTimeout: true,
         enablePersistence: true,
       };
 

@@ -6,7 +6,6 @@ export interface ExecutionLock {
   conversationId: string;
   agentPubkey: string;
   timestamp: number;
-  maxDuration: number; // Maximum execution time in milliseconds
 }
 
 export interface QueueEntry {
@@ -33,7 +32,6 @@ export interface PersistedLock {
   conversationId: string;
   agentPubkey: string;
   timestamp: number;
-  maxDuration: number;
   projectPath: string;
 }
 
@@ -42,7 +40,7 @@ export interface ExecutionHistory {
   startTime: number;
   endTime: number;
   agentPubkey: string;
-  reason: "completed" | "timeout" | "forced" | "error";
+  reason: "completed" | "forced" | "error";
 }
 
 export interface ForceReleaseRequest {
@@ -61,18 +59,14 @@ export interface ExecutionQueueEvent {
 }
 
 export interface ExecutionQueueConfig {
-  maxExecutionDuration?: number; // Default: 30 minutes in milliseconds
   maxQueueSize?: number; // Default: 100
   maxHistorySize?: number; // Default: 1000
   persistenceDir?: string; // Default: .tenex/state
-  enableAutoTimeout?: boolean; // Default: false
   enablePersistence?: boolean; // Default: true
 }
 
 export const DEFAULT_EXECUTION_QUEUE_CONFIG: ExecutionQueueConfig = {
-  maxExecutionDuration: 30 * 60 * 1000, // 30 minutes
   maxQueueSize: 100,
   maxHistorySize: 1000,
-  enableAutoTimeout: false,
   enablePersistence: true,
 };
