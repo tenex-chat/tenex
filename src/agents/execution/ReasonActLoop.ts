@@ -63,6 +63,14 @@ export class ReasonActLoop {
 
     // Track conversation messages for the iterative loop
     const conversationMessages = [...messages];
+    
+    // Add initial EOM instruction
+    const eomInstruction = new Message(
+      "system",
+      "When you have fully completed your task and have no further actions to take, you MUST put '=== EOM ===' on a new line by itself at the very end of your response. Do not include '=== EOM ===' if you plan to continue with more actions."
+    );
+    conversationMessages.push(eomInstruction);
+    
     let iterations = 0;
     let shouldContinueLoop = true;
 
@@ -105,30 +113,72 @@ export class ReasonActLoop {
 
         // Check if we should continue iterating
         if (iterationResult.hasToolCalls) {
-          // Add tool results to conversation for next iteration
+          // Tool calls take precedence - add results and continue
           this.addToolResultsToConversation(
             conversationMessages,
             iterationResult.toolResults,
             iterationResult.assistantMessage
           );
+          this.hasGeneratedContentPreviously = true;
         } else if (this.agentPublisher.hasBufferedContent()) {
-          // Agent generated content but no tool calls or terminal tool
-          // This means the agent has provided a textual response - we should complete
+          // Agent generated content but no tool calls
           const bufferedContent = this.agentPublisher.getBufferedContent();
-          conversationMessages.push(new Message("assistant", bufferedContent));
+          const { hasEOM, cleanContent } = this.detectAndStripEOM(bufferedContent);
+          
+          if (hasEOM) {
+            // Agent explicitly marked completion with EOM
+            // We need to update the buffer with clean content (without EOM)
+            // First clear, then re-add the clean content if there is any
+            this.agentPublisher.clearBuffer();
+            if (cleanContent.trim().length > 0) {
+              // Re-add clean content to buffer for final publishing
+              await this.agentPublisher.addStreamContent(cleanContent, eventContext);
+              // Also add to conversation for history
+              conversationMessages.push(new Message("assistant", cleanContent));
+            }
+            logInfo(
+              "[ReasonActLoop] Agent completed with EOM marker",
+              "agent",
+              "verbose",
+              {
+                iteration: iterations,
+                contentLength: cleanContent.length,
+              }
+            );
+            shouldContinueLoop = false;
+          } else {
+            // No EOM marker - add reminder and continue
+            conversationMessages.push(new Message("assistant", bufferedContent));
+            const reminderMessage = new Message(
+              "system",
+              "If you are done with your work, put '=== EOM ===' on its own line. Otherwise, continue with your planned actions."
+            );
+            conversationMessages.push(reminderMessage);
+            this.hasGeneratedContentPreviously = true;
+            logInfo(
+              "[ReasonActLoop] Agent generated content without EOM, continuing with reminder",
+              "agent",
+              "verbose",
+              {
+                iteration: iterations,
+                contentLength: bufferedContent.length,
+              }
+            );
+            shouldContinueLoop = true;
+          }
+        } else if (this.hasGeneratedContentPreviously) {
+          // Empty response after previous content - implicit completion
           logInfo(
-            "[ReasonActLoop] Agent generated content, completing",
+            "[ReasonActLoop] Empty response after content, assuming completion",
             "agent",
             "verbose",
             {
               iteration: iterations,
-              contentLength: bufferedContent.length,
             }
           );
-          shouldContinueLoop = false; // Complete after generating a response
+          shouldContinueLoop = false;
         } else {
-          // No tool calls, no terminal tool, AND no content was generated
-          // This indicates the agent truly has nothing further to do
+          // No tool calls, no content from the start
           logger.warning("[ReasonActLoop] No tool calls, no content, ending loop", {
             iteration: iterations,
             possibleCause: "Model returned empty response - check model availability and context",
@@ -499,6 +549,33 @@ export class ReasonActLoop {
         tools: tools?.map((t) => t.name).join(", "),
       }
     );
+  }
+
+  /**
+   * Detect and strip the EOM marker from content
+   * Returns the content without the marker and whether it was found
+   */
+  private detectAndStripEOM(content: string): { hasEOM: boolean; cleanContent: string } {
+    const lines = content.split('\n');
+    const lastLine = lines[lines.length - 1]?.trim();
+    
+    if (lastLine === '=== EOM ===' || lastLine === 'EOM') {
+      // Remove the EOM line
+      lines.pop();
+      return { hasEOM: true, cleanContent: lines.join('\n').trimEnd() };
+    }
+    
+    // Also check for EOM on second-to-last line (in case of trailing newline)
+    if (lines.length > 1) {
+      const secondToLastLine = lines[lines.length - 2]?.trim();
+      if (secondToLastLine === '=== EOM ===' || secondToLastLine === 'EOM') {
+        // Remove the EOM line and any trailing empty line
+        lines.splice(-2);
+        return { hasEOM: true, cleanContent: lines.join('\n').trimEnd() };
+      }
+    }
+    
+    return { hasEOM: false, cleanContent: content };
   }
 
   private extractAndLogReasoning(
