@@ -208,8 +208,6 @@ export class AgentPublisher {
     
     logger.info("📦 Registering delegation", {
       eventId: mainEvent.id?.substring(0, 8),
-      recipientCount: intent.recipients.length,
-      isMultiRecipient: intent.recipients.length > 1,
       recipients: intent.recipients.map(p => p.substring(0, 16)),
     });
     

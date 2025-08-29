@@ -310,7 +310,7 @@ describe("E2E: State Persistence and Recovery", () => {
         const lastExecution = continuationTrace.executions[continuationTrace.executions.length - 1];
         expect(lastExecution.message).toContain("Continuing the implementation after recovery");
         
-        // Verify complete tool sequence
+        // Verify tool sequence
         const allToolCalls = [...trace.toolCalls, ...continuationTrace.toolCalls];
         const toolNames = allToolCalls.map(tc => tc.tool);
         expect(toolNames).toContain("writeContextFile");

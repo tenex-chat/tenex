@@ -268,7 +268,7 @@ shouldRetryForTermination(context, attempt) {
 
 Context-aware reminders:
 - **Orchestrator**: "You haven't provided routing instructions yet..."
-- **Standard Agent**: "You haven't used the 'complete' tool yet..."
+- **Standard Agent**: "You haven't properly completed your task yet..."
 
 **Auto-Completion**:
 
@@ -430,7 +430,7 @@ tool_complete event
 Task completion sequence:
 
 ```typescript
-complete() tool called
+agent completion
     → handleAgentCompletion()
     → Determine next agent (orchestrator)
     → Create termination object

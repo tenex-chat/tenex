@@ -90,7 +90,6 @@ The executor handles the actual tool invocation with several responsibilities:
 
 Special handling exists for certain tools:
 - `generate_inventory`: Bypasses validation for dynamic schema generation
-- Terminal tool (`complete`): Triggers control flow changes
 
 ### 4. Tool Registry (`src/tools/registry.ts`)
 
@@ -100,7 +99,6 @@ A centralized registry manages all available tools:
 const toolsMap = new Map<string, Tool<any, any>>([
     ["read_path", readPathTool],
     ["write_context_file", writeContextFileTool],
-    ["complete", completeTool],
     ["shell", shellTool],
     // ... more tools
 ]);
@@ -216,7 +214,7 @@ Tools are assigned to agents based on capabilities:
 #### Assignment Rules
 1. **Orchestrator**: No tools (uses routing backend)
 2. **Project Manager**: All tools including shell, inventory generation
-3. **Other Built-in Agents**: Standard tools + complete
+3. **Other Built-in Agents**: Standard tools
 4. **Custom Agents**: Configurable tool sets
 
 The assignment system ensures:

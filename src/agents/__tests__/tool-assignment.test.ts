@@ -13,7 +13,6 @@ describe("Tool assignment", () => {
       const tools = getDefaultToolsForAgent(mockAgent);
 
       // Orchestrator now gets standard tools like other agents
-      expect(tools).toContain("complete");
       expect(tools).toContain("read_path");
       expect(tools).toContain("lesson_learn");
       expect(tools).toContain("claude_code");
@@ -34,14 +33,12 @@ describe("Tool assignment", () => {
       const plannerTools = getDefaultToolsForAgent(mockPlanner);
 
       // Both agents get default tools from constants.ts
-      expect(executorTools).toContain("complete");
       expect(executorTools).toContain("read_path");
       expect(executorTools).toContain("lesson_learn");
       expect(executorTools).toContain("claude_code");
       expect(executorTools).toContain("delegate"); // All non-PM agents have delegate
 
       // Planner gets the same default tools
-      expect(plannerTools).toContain("complete");
       expect(plannerTools).toContain("read_path");
       expect(plannerTools).toContain("lesson_learn");
       expect(plannerTools).toContain("claude_code");
@@ -55,7 +52,6 @@ describe("Tool assignment", () => {
       } as Pick<AgentInstance, "isBuiltIn" | "slug">;
       const tools = getDefaultToolsForAgent(mockCustomAgent);
 
-      expect(tools).toContain("complete");
       expect(tools).toContain("delegate"); // All non-PM agents have delegate
       expect(tools).toContain("read_path");
       expect(tools).toContain("lesson_learn");
@@ -69,7 +65,6 @@ describe("Tool assignment", () => {
       } as Pick<AgentInstance, "isBuiltIn" | "slug">;
       const tools = getDefaultToolsForAgent(mockProjectManager);
 
-      expect(tools).toContain("complete");
       expect(tools).toContain("delegate"); // PM uses delegate with phase support
       expect(tools).toContain("write_context_file");
       expect(tools).toContain("shell");

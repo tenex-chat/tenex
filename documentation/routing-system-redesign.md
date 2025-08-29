@@ -267,10 +267,10 @@ When asked to review:
 ALWAYS use complete() to return control to orchestrator.`
 ```
 
-### Phase 3: Complete Tool Enhancement
+### Phase 3: Completion System Enhancement
 
 #### 3.1 No structural changes needed
-The current complete() tool already works well for this architecture.
+The current completion system already works well for this architecture.
 
 ### Phase 4: Review Cycle Implementation
 

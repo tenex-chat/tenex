@@ -254,7 +254,7 @@ describe("E2E: Executor-Verification Flow", () => {
         
         // Verify tool calls
         assertToolCalls(trace, "executor", "continue", "continue");
-        assertToolCalls(trace, "project-manager", "continue", "complete");
+        assertToolCalls(trace, "project-manager", "continue");
         
         // Verify feedback was propagated
         const feedbackPropagated = assertFeedbackPropagated(

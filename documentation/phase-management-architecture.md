@@ -295,10 +295,10 @@ Agents receive phase information through multiple channels:
    - Phase-specific constraints applied
    - Clear expectations per phase
 
-3. **Tool Behavior** (src/tools/implementations/complete.ts:31-40)
+3. **Tool Behavior**
    - Tools adapt to current phase
-   - Different completion messages per phase
-   - Phase-aware tool descriptions
+   - Different behaviors per phase
+   - Phase-aware tool operations
 
 ### Phase-Specific Agent Selection
 
@@ -397,7 +397,7 @@ Event handlers determine initial phase routing (src/event-handler/reply.ts:124-1
 ### Tool System Integration
 
 Tools receive phase context for appropriate behavior:
-- Complete tool formats messages per phase
+- Completion messages formatted per phase
 - Learn tool activated in REFLECTION
 - Tools can check phase for conditional logic
 

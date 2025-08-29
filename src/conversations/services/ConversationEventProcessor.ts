@@ -166,7 +166,7 @@ export class ConversationEventProcessor {
   }
 
   /**
-   * Extract completion from an event (if it's a complete() tool call)
+   * Extract completion from an event
    */
   extractCompletionFromEvent(event: NDKEvent): {
     agent: string;

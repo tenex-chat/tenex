@@ -228,8 +228,6 @@ export class DelegationRegistry extends EventEmitter {
     logger.info("🔨 Registering delegation", {
       batchId,
       delegationEventId: params.delegationEventId.substring(0, 8),
-      recipientCount: params.recipients.length,
-      isMultiRecipient: params.recipients.length > 1,
       rootConversationId: params.rootConversationId.substring(0, 8),
     });
 

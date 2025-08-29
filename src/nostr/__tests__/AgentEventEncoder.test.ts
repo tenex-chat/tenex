@@ -149,24 +149,6 @@ describe("AgentEventEncoder", () => {
       expect(toolTags[0]).toHaveLength(2);
     });
 
-    it("should format complete tool tags correctly without arguments", () => {
-      const contextWithCompleteTool: EventContext = {
-        ...baseContext,
-        toolCalls: [{ name: "complete", arguments: { response: "Task completed successfully" } }],
-      };
-
-      const intent: CompletionIntent = {
-        type: "completion",
-        content: "Task completed successfully",
-      };
-
-      const event = encoder.encodeCompletion(intent, contextWithCompleteTool);
-
-      const toolTags = event.getMatchingTags("tool");
-      expect(toolTags).toHaveLength(1);
-      expect(toolTags[0]).toEqual(["tool", "complete"]); // Should only have 2 elements, no arguments
-      expect(toolTags[0]).toHaveLength(2); // Explicitly check length
-    });
 
     it("should include phase information when provided", () => {
       const contextWithPhase: EventContext = {
@@ -345,11 +327,10 @@ describe("AgentEventEncoder", () => {
 describe("AgentEventDecoder", () => {
   // These tests use simple mocks since they only test static utility functions
   describe("isTaskCompletionEvent", () => {
-    it("should identify task completion by status and tool tags", () => {
+    it("should identify task completion by status tag", () => {
       const event = createMockNDKEvent();
       event.tags = [
-        ["status", "complete"],
-        ["tool", "complete"]
+        ["status", "complete"]
       ];
 
       expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(true);

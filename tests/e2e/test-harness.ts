@@ -168,15 +168,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
                     for (const toolCall of response.toolCalls) {
                         const toolName = toolCall.function.name;
                         const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
-                        
-                        if (toolName === 'complete') {
-                            // For complete tool, simulate completion
-                            // The complete tool now publishes events directly,
-                            // so we don't need to call a separate handler
-                            // Just log that completion was requested
-                            console.log('Complete tool called with args:', toolArgs);
-                        }
-                        // Add other tools as needed
+                        // Add tool handlers as needed
                     }
                 }
                 
@@ -218,7 +210,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         role: "Test Agent",
         instructions: "You are a test agent for E2E testing",
         systemPrompt: "You are a test agent for E2E testing",
-        allowedTools: ["writeContextFile", "complete", "analyze"],
+        allowedTools: ["writeContextFile", "analyze"],
         tools: [],
         isBuiltIn: false,
         llmConfig: { model: "claude-3-sonnet-20240229", provider: "anthropic" }
@@ -580,21 +572,11 @@ export async function executeConversationFlow(
                                 iteration: iteration,
                             });
                         }
-                    } else if (toolName === 'complete') {
-                        // Set the last agent executed for routing context
-                        lastAgentExecuted = targetAgent;
-                        // Update mock LLM context for next iteration 
-                        if ((context.mockLLM as any).updateContext) {
-                            (context.mockLLM as any).updateContext({
-                                previousAgent: targetAgent,
-                                iteration: iteration
-                            });
-                        }
+                    }
                         
                         // End conversation in specific scenarios:
-                        // 1. If orchestrator called complete (explicit end)
-                        // 2. If project-manager completed verification phase (workflow complete)
-                        // 3. If project-manager completed plan phase (plan review complete)
+                        // 1. If certain phases are completed
+                        // 2. If workflow is complete
                         if (targetAgent === 'orchestrator' || 
                             (targetAgent === 'project-manager' && 
                              (routingDecision.phase === 'verification' || routingDecision.phase === 'plan'))) {

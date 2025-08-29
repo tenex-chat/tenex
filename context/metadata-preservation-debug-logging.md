@@ -1,7 +1,7 @@
 # LLM Metadata Preservation Debug Logging
 
 ## Overview
-Comprehensive debug logging has been added throughout the metadata preservation flow to track how LLM metadata is handled when tools (especially `complete()`) are used.
+Comprehensive debug logging has been added throughout the metadata preservation flow to track how LLM metadata is handled when tools are used.
 
 ## Debug Log Points
 
@@ -11,17 +11,17 @@ Comprehensive debug logging has been added throughout the metadata preservation 
   - `[handleAgentCompletion] Created unpublished event`
   - Shows: agent name, response length, event ID, tags
 
-### 2. **complete() tool** (`complete.ts`)
+### 2. **Completion handling**
 - **Location**: When serializing event for deferred publishing
 - **Logs**:
-  - `[complete() tool] Serializing event for deferred publishing`
+  - `[completion] Serializing event for deferred publishing`
   - Shows: agent name, event ID, serialized event keys, content length, tag count
 
 ### 3. **ToolStreamHandler** (`ToolStreamHandler.ts`)
 - **Location**: When storing serialized event
 - **Logs**:
   - `[ToolStreamHandler] Stored serialized event for deferred publishing`
-  - `[ToolStreamHandler] Complete tool has no serialized event` (if missing)
+  - `[ToolStreamHandler] Completion has no serialized event` (if missing)
   - Shows: presence of serialized event, event keys, content length
 
 ### 4. **StreamStateManager** (`StreamStateManager.ts`)
@@ -67,10 +67,10 @@ Comprehensive debug logging has been added throughout the metadata preservation 
 
 ## Log Flow Example
 
-When a complete() tool is used, you'll see this sequence in the logs:
+When a completion occurs, you'll see this sequence in the logs:
 
 1. `[handleAgentCompletion] Created unpublished event`
-2. `[complete() tool] Serializing event for deferred publishing`
+2. `[completion] Serializing event for deferred publishing`
 3. `[ToolStreamHandler] Stored serialized event for deferred publishing`
 4. `[StreamStateManager] Stored deferred event`
 5. `[ReasonActLoop] Terminal tool detected, continuing to wait for metadata`
@@ -80,7 +80,7 @@ When a complete() tool is used, you'll see this sequence in the logs:
 9. `[ReasonActLoop] Adding metadata to deferred event`
 10. `[NostrPublisher] Adding LLM metadata to event`
 11. `[NostrPublisher] ✅ Metadata tags added`
-12. `[ReasonActLoop] ✅ Published deferred complete() event with metadata`
+12. `[ReasonActLoop] ✅ Published deferred completion event with metadata`
 
 ## Key Indicators
 
@@ -90,7 +90,7 @@ When a complete() tool is used, you'll see this sequence in the logs:
 
 ### Warning Signs
 - `Have deferred event but no publisher` - indicates a configuration issue
-- `Complete tool has no serialized event` - indicates the tool didn't serialize properly
+- `Completion has no serialized event` - indicates the completion didn't serialize properly
 
 ### Debug Information
 - All logs include relevant context like agent names, event IDs, and data sizes

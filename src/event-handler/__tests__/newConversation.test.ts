@@ -26,7 +26,7 @@ describe("handleNewConversation", () => {
         name: slug,
         slug,
         systemPrompt: `You are the ${slug} agent`,
-        tools: ["analyze", "complete"],
+        tools: ["analyze"],
         backend: "claude",
       })),
       getDefaultAgent: mock(() => ({
@@ -94,7 +94,7 @@ describe("handleNewConversation", () => {
               slug: "planner",
               pubkey: "planner-pubkey",
               systemPrompt: "You are the planner agent",
-              tools: ["analyze", "complete"],
+              tools: ["analyze"],
               backend: "claude",
             },
           ],

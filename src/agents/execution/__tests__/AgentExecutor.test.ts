@@ -37,7 +37,7 @@ describe("AgentExecutor", () => {
               slug: "test-agent",
               pubkey: "test-agent-pubkey",
               systemPrompt: "You are the test-agent agent",
-              tools: ["analyze", "complete"],
+              tools: ["analyze"],
               backend: "claude",
             },
           ],
@@ -366,9 +366,8 @@ describe("AgentExecutor", () => {
       mock.module("@/agents/execution/ClaudeBackend", () => ({
         ClaudeBackend: class {
           async execute(_messages: Message[], tools: Tool[], context: ExecutionContext) {
-            expect(tools.length).toBe(2);
+            expect(tools.length).toBe(1);
             expect(tools[0].name).toBe("analyze");
-            expect(tools[1].name).toBe("complete");
             context.onComplete?.({
               content: "Tools loaded",
               toolCalls: [],

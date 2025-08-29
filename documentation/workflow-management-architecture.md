@@ -162,7 +162,7 @@ This sequence cannot be bypassed, ensuring consistent quality control.
    - Handle termination
    ↓
 6. Completion Handling
-   - Agent calls complete() tool
+   - Agent completes task
    - Routes back to orchestrator
    - Updates orchestrator turn
    ↓
@@ -273,7 +273,7 @@ This enables:
 Different phases have different termination requirements:
 
 - **CHAT/BRAINSTORM**: No termination required (conversational)
-- **Other Phases**: MUST call `complete()` tool or face auto-completion
+- **Other Phases**: MUST complete their work or face auto-completion
 
 ### Termination Enforcement Flow
 
@@ -299,8 +299,8 @@ Different phases have different termination requirements:
 
 **For Non-Orchestrator Agents:**
 ```
-"I see you've finished responding, but you haven't used the 'complete' tool yet. 
-As a non-orchestrator agent, you MUST use the 'complete' tool to signal that 
+"I see you've finished responding, but haven't properly completed your work. 
+As a non-orchestrator agent, you MUST signal that 
 your work is done and report back to the orchestrator."
 ```
 
@@ -312,7 +312,7 @@ As the orchestrator, you MUST route to appropriate agents for the next task."
 
 ### Completion Handler
 
-The `complete()` tool performs these actions:
+When an agent completes, the system:
 
 1. **Publishes completion event** with summary to orchestrator
 2. **Updates orchestrator turn** with completion record
@@ -498,7 +498,7 @@ async function handleAgentCompletion(options: CompletionOptions) {
     await publisher.publishResponse({
         content: response,
         destinationPubkeys: [orchestrator.pubkey],
-        additionalTags: [["tool", "complete"]],
+        additionalTags: [["status", "complete"]],
         completeMetadata: {...}
     });
     

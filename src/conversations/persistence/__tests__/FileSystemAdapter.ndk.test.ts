@@ -112,7 +112,6 @@ describe("FileSystemAdapter with NDK utilities", () => {
           [
             ["e", rootEvent.id || "", "", "reply"],
             ["status", "complete"],
-            ["tool", "complete"],
           ]
         );
 

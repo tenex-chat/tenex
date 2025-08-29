@@ -446,7 +446,7 @@ graph TB
         
         subgraph "Built-in Tools"
             FileTools[File Tools<br/>read/write]
-            ControlTools[Control Tools<br/>complete/continue]
+            ControlTools[Control Tools<br/>continue]
             AnalysisTools[Analysis Tools<br/>analyze/learn]
             ExecutionTools[Execution Tools<br/>shell/inventory]
             DelegationTools[Delegation Tools<br/>delegate/delegate_external]
@@ -1287,8 +1287,8 @@ graph TB
                         <li><strong>continue</strong>: Continues with same agent (session continuity)</li>
                     </ul>
                     
-                    <h3>Complete Tool</h3>
-                    <p>The most important tool - ensures proper task completion:</p>
+                    <h3>Task Completion</h3>
+                    <p>Ensures proper task completion:</p>
                     <ul>
                         <li>Captures completion summary</li>
                         <li>Determines next agent routing</li>
@@ -1498,13 +1498,13 @@ graph TB
             'ControlTools-Orchestrator': {
                 title: 'Control Return Flow',
                 content: `
-                    <h3>Complete Tool → Orchestrator</h3>
+                    <h3>Completion → Orchestrator</h3>
                     <p>Critical control flow that enables multi-agent collaboration.</p>
                     
                     <div class="connection-flow">
                         <h4>Completion Process</h4>
                         <ol>
-                            <li>Agent calls <code>complete()</code> tool</li>
+                            <li>Agent completes task</li>
                             <li>Tool signals task termination</li>
                             <li>Control returns to orchestrator</li>
                             <li>Orchestrator decides next agent</li>

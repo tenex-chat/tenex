@@ -513,7 +513,7 @@ describe("E2E: Agent Error Recovery", () => {
 
         // Verify workflow completed
         assertAgentSequence(trace, ["executor", "orchestrator"]);
-        assertToolCalls(trace, ["shell", "complete", "complete"]);
+        assertToolCalls(trace, ["shell"]);
         
         conversationalLogger.logTestEnd(true, "Timeout Handling");
     });

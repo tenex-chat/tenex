@@ -22,6 +22,7 @@ export class ReasonActLoop {
   private repetitionDetector: ToolRepetitionDetector;
   private startTime?: number;
   private agentPublisher!: AgentPublisher;
+  private hasGeneratedContentPreviously = false;
 
   constructor(private llmService: LLMService) {
     this.repetitionDetector = new ToolRepetitionDetector();
@@ -33,6 +34,7 @@ export class ReasonActLoop {
    */
   async execute(messages: Array<Message>, tools: Tool[], context: ExecutionContext): Promise<void> {
     this.startTime = Date.now();
+    this.hasGeneratedContentPreviously = false; // Reset for each execution
 
     // Use the shared AgentPublisher from context
     this.agentPublisher = context.agentPublisher;

@@ -17,7 +17,7 @@ const agentsWriteSchema = z.object({
   instructions: z.string().optional().describe("System instructions that guide agent behavior"),
   useCriteria: z.string().optional().describe("Criteria for when this agent should be selected"),
   llmConfig: z.string().optional().describe("LLM configuration identifier"),
-  tools: z.array(z.string()).optional().describe("List of tool names available to this agent. All agents automatically get core tools: complete, lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, delegate_external, delegate_phase, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
+  tools: z.array(z.string()).optional().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, delegate_external, delegate_phase, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
   mcp: z.boolean().optional().describe("Whether this agent has access to MCP tools (defaults to true)"),
 });
 
@@ -43,7 +43,7 @@ interface AgentsWriteOutput {
 export const agentsWrite: Tool<AgentsWriteInput, AgentsWriteOutput> = {
   name: "agents_write",
   description:
-    "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (complete, delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
+    "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
   parameters: createZodSchema(agentsWriteSchema),
   execute: async (
     input: Validated<AgentsWriteInput>,
