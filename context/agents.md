@@ -19,7 +19,6 @@ The `src/agents` module is the core of the TENEX application, responsible for de
     - **`ToolStreamHandler.ts`**: Handles the streaming of tool outputs.
     - **`StreamStateManager.ts`**: Manages the state of streaming operations during tool execution.
     - **`TerminationHandler.ts`**: Handles graceful termination of agent execution.
-    - **`ToolRepetitionDetector.ts`**: Detects and prevents infinite loops in tool usage.
 
 - **`builtInAgents.ts`**: Registry of all built-in agents provided by TENEX.
 

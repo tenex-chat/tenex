@@ -5,9 +5,10 @@ import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 import type { ToolExecutionResult } from "@/tools/executor";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger, logInfo, logError } from "@/utils/logger";
+import { detectAndStripEOM } from "@/utils/eom-utils";
+import { formatToolResultAsString } from "@/utils/tool-result-formatter";
 import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
-import { ToolRepetitionDetector } from "./ToolRepetitionDetector";
 import { ToolStreamHandler } from "./ToolStreamHandler";
 import type { ExecutionContext } from "./types";
 
@@ -19,13 +20,11 @@ const MAX_ITERATIONS = 20;
  * Iteratively calls the LLM, executes tools, and feeds results back for further reasoning.
  */
 export class ReasonActLoop {
-  private repetitionDetector: ToolRepetitionDetector;
   private startTime?: number;
   private agentPublisher!: AgentPublisher;
   private hasGeneratedContentPreviously = false;
 
   constructor(private llmService: LLMService) {
-    this.repetitionDetector = new ToolRepetitionDetector();
     // AgentPublisher and AgentStreamer will be initialized in execute() when we have the agent
   }
 
@@ -87,10 +86,19 @@ export class ReasonActLoop {
       // Main Reason-Act-Observe loop
       while (shouldContinueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
-        logger.debug(`[ReasonActLoop] Starting iteration ${iterations}`, {
+        const last4Messages = conversationMessages.slice(-4).map(msg => ({
+          role: msg.role,
+          content: msg.content.length > 500 ? msg.content.substring(0, 500) + '...' : msg.content
+        }));
+        
+        logger.info(`[ReasonActLoop] Starting iteration ${iterations}`, {
           iteration: iterations,
           shouldContinueLoop,
+          agent: context.agent.slug,
+          triggeringEventId: context.triggeringEvent.id,
+          triggeringEventContent: context.triggeringEvent.content.substring(0, 40),
           messageCount: conversationMessages.length,
+          last4Messages,
         });
 
         // Create stream with streamHandle in context
@@ -111,35 +119,64 @@ export class ReasonActLoop {
           yield event;
         }
 
+        // Check for EOM in assistant message first, before any other logic
+        let cleanedAssistantMessage = iterationResult.assistantMessage;
+        if (iterationResult.assistantMessage) {
+          const { hasEOM, cleanContent } = detectAndStripEOM(iterationResult.assistantMessage);
+          if (hasEOM) {
+            cleanedAssistantMessage = cleanContent;
+            shouldContinueLoop = false;
+            logInfo(
+              "[ReasonActLoop] Agent completed with EOM marker in message",
+              "agent",
+              "normal",
+              {
+                iteration: iterations,
+                hasToolCalls: iterationResult.hasToolCalls,
+                contentLength: cleanContent.length,
+              }
+            );
+          }
+        }
+
         // Check if we should continue iterating
         if (iterationResult.hasToolCalls) {
-          // Tool calls take precedence - add results and continue
+          logger.info("[ReasonActLoop] Processing tool results", {
+            iteration: iterations,
+            toolResultCount: iterationResult.toolResults.length,
+            hasAssistantMessage: !!cleanedAssistantMessage,
+            toolNames: iterationResult.toolResults.map(r => r.toolName).join(", "),
+          });
+          
+          // Tool calls - add results with cleaned message
           this.addToolResultsToConversation(
             conversationMessages,
             iterationResult.toolResults,
-            iterationResult.assistantMessage
+            cleanedAssistantMessage
           );
-          this.hasGeneratedContentPreviously = true;
+          // Only set this flag if we're continuing (no EOM)
+          if (shouldContinueLoop) {
+            this.hasGeneratedContentPreviously = true;
+          }
         } else if (this.agentPublisher.hasBufferedContent()) {
           // Agent generated content but no tool calls
           const bufferedContent = this.agentPublisher.getBufferedContent();
-          const { hasEOM, cleanContent } = this.detectAndStripEOM(bufferedContent);
+          const { hasEOM, cleanContent } = detectAndStripEOM(bufferedContent);
           
           if (hasEOM) {
             // Agent explicitly marked completion with EOM
-            // We need to update the buffer with clean content (without EOM)
-            // First clear, then re-add the clean content if there is any
+            // Add FULL content (WITH EOM) to conversation so LLM knows it marked completion
+            conversationMessages.push(new Message("assistant", bufferedContent));
+            // Clear the buffer and re-add only the clean content (without the EOM marker) for publishing
             this.agentPublisher.clearBuffer();
             if (cleanContent.trim().length > 0) {
-              // Re-add clean content to buffer for final publishing
+              // Re-add clean content (without EOM) for final publishing
               await this.agentPublisher.addStreamContent(cleanContent, eventContext);
-              // Also add to conversation for history
-              conversationMessages.push(new Message("assistant", cleanContent));
             }
             logInfo(
               "[ReasonActLoop] Agent completed with EOM marker",
               "agent",
-              "verbose",
+              "normal",
               {
                 iteration: iterations,
                 contentLength: cleanContent.length,
@@ -158,7 +195,7 @@ export class ReasonActLoop {
             logInfo(
               "[ReasonActLoop] Agent generated content without EOM, continuing with reminder",
               "agent",
-              "verbose",
+              "normal",
               {
                 iteration: iterations,
                 contentLength: bufferedContent.length,
@@ -171,7 +208,7 @@ export class ReasonActLoop {
           logInfo(
             "[ReasonActLoop] Empty response after content, assuming completion",
             "agent",
-            "verbose",
+            "normal",
             {
               iteration: iterations,
             }
@@ -196,7 +233,7 @@ export class ReasonActLoop {
         // Final kind:1111 events come from StreamStateManager.fullContent via implicit/explicit completion
       }
 
-      logger.debug("[ReasonActLoop] Exited main loop", {
+      logger.info("[ReasonActLoop] Exited main loop", {
         iterations,
         shouldContinueLoop,
         reason: !shouldContinueLoop ? "completed" : "max iterations",
@@ -256,7 +293,7 @@ export class ReasonActLoop {
         logInfo(
           "[ReasonActLoop] Published natural completion",
           "agent",
-          "verbose",
+          "normal",
           {
             agent: context.agent.name,
             phase: context.phase,
@@ -294,9 +331,10 @@ export class ReasonActLoop {
     let assistantMessage = "";
 
     for await (const event of stream) {
-      logger.debug("[processIterationStream]", {
+      logger.info("[processIterationStream]", {
         agent: context.agent.name,
         type: event.type,
+        content: event.content,
       });
       events.push(event);
 
@@ -310,27 +348,14 @@ export class ReasonActLoop {
 
         case "tool_start": {
           hasToolCalls = true;
-
-          // Check for repetitive tool calls
-          const warningMessage = this.repetitionDetector.checkRepetition(event.tool, event.args);
-          if (warningMessage) {
-            const systemMessage = new Message("system", warningMessage);
-            messages.push(systemMessage);
-          }
-
-          await toolHandler.handleToolStartEvent(
-            event.tool,
-            event.args,
-              context
-          );
           break;
         }
 
         case "tool_complete": {
-          await toolHandler.handleToolCompleteEvent(
-            event,
-              context
-          );
+          hasToolCalls = true;
+
+          const toolResult = await toolHandler.handleToolCompleteEvent(event, context);
+          toolResults.push(toolResult);
           break;
         }
 
@@ -339,7 +364,7 @@ export class ReasonActLoop {
             stateManager.setFinalResponse(event.response);
             
             // Log LLM metadata for debugging
-            logger.debug("[ReasonActLoop] Received 'done' event", {
+            logger.info("[ReasonActLoop] Received 'done' event", {
               hasResponse: !!event.response,
               model: event.response.model,
               hasUsage: !!event.response.usage,
@@ -373,38 +398,37 @@ export class ReasonActLoop {
     if (assistantMessage) {
       const message = new Message("assistant", assistantMessage);
       messages.push(message);
+      
+      logger.info("[ReasonActLoop] Added assistant message to conversation", {
+        messageLength: assistantMessage.length,
+        messagePreview: assistantMessage.substring(0, 200),
+      });
     }
 
     // Add tool results as user messages for the next iteration
     for (const result of toolResults) {
-      const toolResultMessage = this.formatToolResultAsString(result);
+      const toolResultMessage = formatToolResultAsString(result);
       const message = new Message("user", toolResultMessage);
       messages.push(message);
 
-      logger.debug("[ReasonActLoop] Added tool result to conversation", {
+      logger.info("[ReasonActLoop] Added tool result to conversation", {
+        toolName: result.toolName,
         success: result.success,
+        hasError: !!result.error,
         resultLength: toolResultMessage.length,
+        resultPreview: toolResultMessage.substring(0, 200),
       });
     }
+    
+    // Log the total state after adding results
+    logger.info("[ReasonActLoop] Conversation state after tool results", {
+      totalMessages: messages.length,
+      toolResultsAdded: toolResults.length,
+      lastMessageRole: messages[messages.length - 1]?.role,
+      readyForNextIteration: true,
+    });
   }
 
-  /**
-   * Format a tool result as a string for inclusion in the conversation
-   */
-  private formatToolResultAsString(result: ToolExecutionResult): string {
-    if (result.success) {
-      // Format the output as a string
-      const output = result.output;
-      if (typeof output === "string") {
-        return `Tool result: ${output}`;
-      }
-      if (output !== undefined && output !== null) {
-        return `Tool result: ${JSON.stringify(output)}`;
-      }
-      return "Tool result: Success";
-    }
-    return `Tool error: ${result.error?.message || "Unknown error"}`;
-  }
 
   /**
    * Handle the done event with metadata processing
@@ -416,8 +440,13 @@ export class ReasonActLoop {
     eventContext: EventContext,
     context?: ExecutionContext
   ): Promise<void> {
-    // Add content to streaming buffer in AgentPublisher (single source of truth)
-    await this.agentPublisher.addStreamContent(event.content, eventContext);
+    // Strip EOM marker before sending to AgentPublisher
+    const { cleanContent } = detectAndStripEOM(event.content);
+    
+    // Only add to publisher if there's content after stripping EOM
+    if (cleanContent) {
+      await this.agentPublisher.addStreamContent(cleanContent, eventContext);
+    }
 
     // Extract and log reasoning if present
     this.extractAndLogReasoning(this.agentPublisher.getBufferedContent(), context, stateManager);
@@ -440,24 +469,24 @@ export class ReasonActLoop {
     messages: Message[],
     tools?: Tool[]
   ): ReturnType<LLMService["stream"]> {
+    const messagesPreview = messages.map((msg, index) => {
+      const isToolResult = msg.role === "user" && msg.content.includes("Tool [");
+      const preview = isToolResult
+        ? msg.content // Show full tool results
+        : msg.content.length > 500
+          ? `${msg.content.substring(0, 500)}...`
+          : msg.content;
+      return preview;
+    });
+    
     // Log what we're sending to the LLM
-    logger.debug("[ReasonActLoop] Calling LLM stream", {
+    logger.info("[ReasonActLoop] Calling LLM stream", {
       agent: context.agent.name,
       phase: context.phase,
       messageCount: messages.length,
       toolCount: tools?.length || 0,
       toolNames: tools?.map((t) => t.name).join(", ") || "none",
-    });
-
-    // Log the actual messages being sent
-    messages.forEach((msg, index) => {
-      const preview =
-        msg.content.length > 200 ? `${msg.content.substring(0, 200)}...` : msg.content;
-      logger.debug(`[ReasonActLoop] Message ${index + 1}/${messages.length}`, {
-        role: msg.role,
-        contentLength: msg.content.length,
-        preview,
-      });
+      messagesPreview
     });
 
     return this.llmService.stream({
@@ -551,32 +580,6 @@ export class ReasonActLoop {
     );
   }
 
-  /**
-   * Detect and strip the EOM marker from content
-   * Returns the content without the marker and whether it was found
-   */
-  private detectAndStripEOM(content: string): { hasEOM: boolean; cleanContent: string } {
-    const lines = content.split('\n');
-    const lastLine = lines[lines.length - 1]?.trim();
-    
-    if (lastLine === '=== EOM ===' || lastLine === 'EOM') {
-      // Remove the EOM line
-      lines.pop();
-      return { hasEOM: true, cleanContent: lines.join('\n').trimEnd() };
-    }
-    
-    // Also check for EOM on second-to-last line (in case of trailing newline)
-    if (lines.length > 1) {
-      const secondToLastLine = lines[lines.length - 2]?.trim();
-      if (secondToLastLine === '=== EOM ===' || secondToLastLine === 'EOM') {
-        // Remove the EOM line and any trailing empty line
-        lines.splice(-2);
-        return { hasEOM: true, cleanContent: lines.join('\n').trimEnd() };
-      }
-    }
-    
-    return { hasEOM: false, cleanContent: content };
-  }
 
   private extractAndLogReasoning(
     content: string,
