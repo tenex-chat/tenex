@@ -88,6 +88,23 @@ IMPORTANT: When you use delegate_phase(), you are:
         throw new Error(`Could not resolve recipient: ${recipient}`);
       }
 
+      if (title) {
+        const { NDKEventMetadata } = await import("@/events/NDKEventMetadata");
+        const { getNDK } = await import("@/nostr/ndkClient");
+        const ndk = getNDK();
+
+        const metadataEvent = new NDKEventMetadata(ndk);
+        metadataEvent.kind = 513;
+        metadataEvent.setConversationId(context.conversationId);
+        metadataEvent.title = title;
+
+        await metadataEvent.sign(context.agent.signer);
+        await metadataEvent.publish();
+
+        context.conversationCoordinator.setTitle(context.conversationId, title);
+        logger.info(`Set conversation title: ${title}`);
+      }
+
       logger.info("[delegate_phase() tool] 🎯 Starting phase delegation", {
         fromAgent: context.agent.slug,
         phase: phase,
@@ -103,24 +120,6 @@ IMPORTANT: When you use delegate_phase(), you are:
         context.agent.pubkey,
         context.agent.name
       );
-
-      // Set title if provided
-      if (title) {
-        const { NDKEventMetadata } = await import("@/events/NDKEventMetadata");
-        const { getNDK } = await import("@/nostr/ndkClient");
-        const ndk = getNDK();
-        
-        const metadataEvent = new NDKEventMetadata(ndk);
-        metadataEvent.kind = 513;
-        metadataEvent.setConversationId(context.conversationId);
-        metadataEvent.title = title;
-        
-        await metadataEvent.sign(context.agent.signer);
-        await metadataEvent.publish();
-        
-        context.conversationCoordinator.setTitle(context.conversationId, title);
-        logger.info(`Set conversation title: ${title}`);
-      }
 
       logger.info("[delegate_phase() tool] 🔄 Phase updated, initiating synchronous delegation", {
         newPhase: phase,

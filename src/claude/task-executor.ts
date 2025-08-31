@@ -9,7 +9,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { ContentBlock, TextBlock, ToolUseBlock } from "@anthropic-ai/sdk/resources/messages/messages";
-import { NDKEvent, type NDKSubscription, type NDKTask } from "@nostr-dev-kit/ndk";
+import type { NDKEvent, NDKSubscription, NDKTask } from "@nostr-dev-kit/ndk";
 import { ClaudeCodeExecutor } from "./executor";
 
 export interface ClaudeTaskOptions {
@@ -189,7 +189,7 @@ export class ClaudeTaskExecutor {
             .filter((c: ContentBlock): c is ToolUseBlock => c.type === "tool_use");
 
           for (const toolBlock of toolUseBlocks) {
-            let toolMessage = "";
+            let toolMessage: string | undefined;
             
             // Special formatting for TodoWrite tool
             if (toolBlock.name === "TodoWrite" && toolBlock.input?.todos) {
@@ -212,9 +212,6 @@ export class ClaudeTaskExecutor {
               });
               
               toolMessage = todoLines.join("\n");
-            } else {
-              // Default formatting for other tools
-              toolMessage = `🔧 Using tool: ${toolBlock.name}\n\n${JSON.stringify(toolBlock.input, null, 2)}`;
             }
             
             // Only publish if we have content

@@ -193,21 +193,14 @@ export class ProjectManager implements IProjectManager {
       // Initialize ProjectContext
       await setProjectContext(project, loadedAgents);
 
-      // Initialize ConversationCoordinator with ExecutionQueueManager for CLI commands
+      // Initialize ConversationCoordinator for CLI commands
       const projectCtx = (await import("@/services")).getProjectContext();
       const ConversationCoordinator = (await import("@/conversations"))
         .ConversationCoordinator;
-      const ExecutionQueueManager = (await import("@/conversations/executionQueue"))
-        .ExecutionQueueManager;
 
       const conversationCoordinator = new ConversationCoordinator(projectPath);
       await conversationCoordinator.initialize();
-
-      // Create and attach ExecutionQueueManager
-      const queueManager = new ExecutionQueueManager(projectPath);
-      await queueManager.initialize();
-
-      conversationCoordinator.setExecutionQueueManager(queueManager);
+      
       projectCtx.conversationCoordinator = conversationCoordinator;
 
       // Republish kind:0 events for all agents on project load

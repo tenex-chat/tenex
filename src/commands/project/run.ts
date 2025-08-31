@@ -62,10 +62,9 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const subscriptionManager = new SubscriptionManager(eventHandler, projectPath);
     await subscriptionManager.start();
 
-    // Start status publisher with ExecutionQueueManager and ConversationCoordinator from event handler
-    const executionQueueManager = eventHandler.getExecutionQueueManager();
+    // Start status publisher with ConversationCoordinator from event handler
     const conversationCoordinator = eventHandler.getConversationCoordinator();
-    const statusPublisher = new StatusPublisher(executionQueueManager, conversationCoordinator);
+    const statusPublisher = new StatusPublisher(conversationCoordinator);
     await statusPublisher.startPublishing(projectPath);
 
     // Set up graceful shutdown

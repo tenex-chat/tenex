@@ -24,19 +24,13 @@ export const handleNewConversation = async (
     // Get project context
     const projectCtx = getProjectContext();
 
-    // Get Project Manager as default coordinator
-    const projectManager = projectCtx.getAgent("project-manager");
-    if (!projectManager) {
-      throw new Error("Project Manager agent not found - required for workflow coordination");
-    }
-
     // Check for p-tags to determine if user @mentioned a specific agent
     const pTags = event.tags.filter((tag) => tag[0] === "p");
     const mentionedPubkeys = pTags
       .map((tag) => tag[1])
       .filter((pubkey): pubkey is string => !!pubkey);
 
-    let targetAgent = projectManager; // Default to PM for coordination
+    let targetAgent = null;
 
     // If there are p-tags, check if any match system agents
     if (mentionedPubkeys.length > 0) {
@@ -47,6 +41,12 @@ export const handleNewConversation = async (
           break;
         }
       }
+    }
+
+    // If no p-tags or no matching agent, just log and return
+    if (!targetAgent) {
+      logInfo(chalk.gray(`New conversation without p-tags or matching agents - not routing to any agent`));
+      return;
     }
 
     // Execute with the appropriate agent

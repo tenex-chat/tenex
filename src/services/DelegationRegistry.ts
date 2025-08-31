@@ -225,11 +225,7 @@ export class DelegationRegistry extends EventEmitter {
       rootConversationId: params.rootConversationId,
     };
 
-    logger.info("🔨 Registering delegation", {
-      batchId,
-      delegationEventId: params.delegationEventId.substring(0, 8),
-      rootConversationId: params.rootConversationId.substring(0, 8),
-    });
+    // Registration details logged at the end of this method
 
     // Create individual delegation records
     for (const recipient of params.recipients) {
@@ -273,7 +269,7 @@ export class DelegationRegistry extends EventEmitter {
     this.batches.set(batchId, batch);
     this.schedulePersistence();
 
-    logger.info("✅ Delegation registered", {
+    logger.debug("✅ Delegation registered", {
       batchId,
       delegationEventId: params.delegationEventId.substring(0, 8),
       recipientCount: params.recipients.length,
@@ -285,7 +281,11 @@ export class DelegationRegistry extends EventEmitter {
 
 
   /**
-   * Check if an event is a delegation response we're waiting for
+   * Check if an event is a delegation response we're waiting for.
+   * A valid delegation response must:
+   * 1. Be kind 1111
+   * 2. Have an e-tag pointing to the delegation event
+   * 3. Have a p-tag pointing to the delegating agent
    */
   isDelegationResponse(event: NDKEvent): boolean {
     if (event.kind !== 1111) return false;
@@ -295,8 +295,30 @@ export class DelegationRegistry extends EventEmitter {
       const delegationEventId = eTagArray[1];
       if (!delegationEventId) continue;
       
-      if (this.findDelegationByEventAndResponder(delegationEventId, event.pubkey)) {
-        return true;
+      const delegation = this.findDelegationByEventAndResponder(delegationEventId, event.pubkey);
+      if (delegation) {
+        // Check if the event p-tags the delegating agent
+        const pTags = event.getMatchingTags("p");
+        for (const pTagArray of pTags) {
+          const taggedPubkey = pTagArray[1];
+          if (taggedPubkey === delegation.delegatingAgent.pubkey) {
+            logger.debug("Valid delegation response detected", {
+              respondingAgent: event.pubkey.substring(0, 8),
+              delegatingAgent: delegation.delegatingAgent.pubkey.substring(0, 8),
+              delegationEventId: delegationEventId.substring(0, 8),
+              eventId: event.id.substring(0, 8),
+            });
+            return true;
+          }
+        }
+        
+        logger.debug("Event references delegation but doesn't p-tag delegating agent", {
+          respondingAgent: event.pubkey.substring(0, 8),
+          delegatingAgent: delegation.delegatingAgent.pubkey.substring(0, 8),
+          delegationEventId: delegationEventId.substring(0, 8),
+          eventId: event.id.substring(0, 8),
+          pTags: pTags.map(p => p[1].substring(0, 8)),
+        });
       }
     }
     return false;
@@ -360,6 +382,15 @@ export class DelegationRegistry extends EventEmitter {
     if (record.status === "completed") {
       throw new Error(`Delegation already completed for ${convKey}. Original completion: ${record.completion?.eventId}`);
     }
+
+    // Log which event is being used to mark delegation as complete
+    logger.info("📝 Marking delegation as complete", {
+      convKey,
+      delegationEventId: record.delegationEventId,
+      completionEventId: params.completionEventId,
+      completingAgent: params.toPubkey,
+      batchId: record.delegationBatchId,
+    });
 
     // Update record
     record.status = "completed";

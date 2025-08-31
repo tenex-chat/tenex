@@ -3,7 +3,6 @@ import { NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations";
-import { ExecutionQueueManager } from "../conversations/executionQueue";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
@@ -27,7 +26,6 @@ const IGNORED_EVENT_KINDS = [
 export class EventHandler {
   private conversationCoordinator!: ConversationCoordinator;
   private agentExecutor!: AgentExecutor;
-  private executionQueueManager?: ExecutionQueueManager;
   private isUpdatingProject = false;
 
   constructor(
@@ -36,37 +34,18 @@ export class EventHandler {
   ) {}
 
   async initialize(): Promise<void> {
-    // Create ExecutionQueueManager if we have project context
-    try {
-      const projectCtx = getProjectContext();
-      if (projectCtx?.pubkey) {
-        this.executionQueueManager = new ExecutionQueueManager(
-          this.projectPath
-        );
-        await this.executionQueueManager.initialize();
-      }
-    } catch (err) {
-      // ExecutionQueueManager is optional, continue without it
-      logger.warn("Could not create ExecutionQueueManager:", err);
-    }
-
     // Initialize DelegationRegistry singleton first
     await DelegationRegistry.initialize();
 
     // Initialize components directly
     this.conversationCoordinator = new ConversationCoordinator(
       this.projectPath,
-      undefined, // default persistence
-      this.executionQueueManager
+      undefined // default persistence
     );
     this.agentExecutor = new AgentExecutor(this.llmService, this.conversationCoordinator);
 
     // Initialize components
     await this.conversationCoordinator.initialize();
-  }
-
-  getExecutionQueueManager(): ExecutionQueueManager | undefined {
-    return this.executionQueueManager;
   }
 
   getConversationCoordinator(): ConversationCoordinator {
@@ -337,7 +316,7 @@ export class EventHandler {
     if (event.content) {
       logInfo(
         chalk.white(
-          `[handleDefaultEvent ${event.id.substring(0, 6)}] Handling event kind ${event.kind}`
+          `[handleDefaultEvent ${event.id.substring(0, 6)}] Receivend unhandled event kind ${event.kind}`
         ) +
           chalk.white(`[handleDefaultEvent ${event.id.substring(0, 6)}] Content: `) +
           chalk.gray(event.content.substring(0, 100) + (event.content.length > 100 ? "..." : ""))

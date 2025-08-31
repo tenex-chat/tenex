@@ -33,10 +33,10 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
-  private executionQueueManager?: unknown; // Using unknown to avoid circular dependency
+  private conversationCoordinator?: unknown; // Using unknown to avoid circular dependency
 
-  constructor(executionQueueManager: unknown) {
-    this.executionQueueManager = executionQueueManager;
+  constructor(conversationCoordinator: unknown) {
+    this.conversationCoordinator = conversationCoordinator;
   }
 
   async startPublishing(projectPath: string): Promise<void> {
@@ -257,13 +257,13 @@ export class StatusPublisher {
 
   private async gatherQueueInfo(intent: StatusIntent): Promise<void> {
     try {
-      if (!this.executionQueueManager) {
+      if (!this.conversationCoordinator) {
         // No queue manager available, skip queue tags
         return;
       }
 
       // Get the execution queue state
-      const queueState = await (this.executionQueueManager as { getExecutionQueueState: () => Promise<{ active?: string; queued: string[] }> }).getExecutionQueueState();
+      const queueState = (this.conversationCoordinator as { getExecutionStatus: () => { active: string | null; queued: string[] } }).getExecutionStatus();
 
       // Add queue entries in order
       // First: the active conversation (if any)

@@ -148,12 +148,6 @@ export class ReasonActLoop {
             toolNames: iterationResult.toolResults.map(r => r.toolName).join(", "),
           });
           
-          // Tool calls - add results with cleaned message
-          this.addToolResultsToConversation(
-            conversationMessages,
-            iterationResult.toolResults,
-            cleanedAssistantMessage
-          );
           // Only set this flag if we're continuing (no EOM)
           if (shouldContinueLoop) {
             this.hasGeneratedContentPreviously = true;
@@ -375,6 +369,8 @@ export class ReasonActLoop {
         case "error":
           await this.handleErrorEvent(event, stateManager, eventContext);
           break;
+        default:
+          logger.warn("[ReasonActLoop] Unhandled type!", event);
       }
     }
 
@@ -385,50 +381,6 @@ export class ReasonActLoop {
       assistantMessage: assistantMessage.trim(),
     };
   }
-
-  /**
-   * Add tool results back to the conversation for the next iteration
-   */
-  private addToolResultsToConversation(
-    messages: Message[],
-    toolResults: ToolExecutionResult[],
-    assistantMessage: string
-  ): void {
-    // Add the assistant's message (with reasoning and tool calls)
-    if (assistantMessage) {
-      const message = new Message("assistant", assistantMessage);
-      messages.push(message);
-      
-      logger.info("[ReasonActLoop] Added assistant message to conversation", {
-        messageLength: assistantMessage.length,
-        messagePreview: assistantMessage.substring(0, 200),
-      });
-    }
-
-    // Add tool results as user messages for the next iteration
-    for (const result of toolResults) {
-      const toolResultMessage = formatToolResultAsString(result);
-      const message = new Message("user", toolResultMessage);
-      messages.push(message);
-
-      logger.info("[ReasonActLoop] Added tool result to conversation", {
-        toolName: result.toolName,
-        success: result.success,
-        hasError: !!result.error,
-        resultLength: toolResultMessage.length,
-        resultPreview: toolResultMessage.substring(0, 200),
-      });
-    }
-    
-    // Log the total state after adding results
-    logger.info("[ReasonActLoop] Conversation state after tool results", {
-      totalMessages: messages.length,
-      toolResultsAdded: toolResults.length,
-      lastMessageRole: messages[messages.length - 1]?.role,
-      readyForNextIteration: true,
-    });
-  }
-
 
   /**
    * Handle the done event with metadata processing

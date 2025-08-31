@@ -117,6 +117,27 @@ Use this to understand what projects exist for a given user or the current proje
       phase: context.phase,
     });
 
+    // Publish status message about what we're doing
+    try {
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      
+      if (conversation?.history?.[0]) {
+        // Format the pubkey as npub for the status message
+        const user = new NDKUser({ pubkey: targetPubkey });
+        await context.agentPublisher.conversation(
+          { type: "conversation", content: `🔍 Getting nostr:${user.npub}'s projects` },
+          {
+            triggeringEvent: context.triggeringEvent,
+            rootEvent: conversation.history[0],
+            conversationId: context.conversationId,
+          }
+        );
+      }
+    } catch (error) {
+      // Don't fail the tool if we can't publish the status
+      logger.warn("Failed to publish nostr_projects status:", error);
+    }
+
     try {
       // Calculate 1 minute ago timestamp for online status check
       const oneMinuteAgo = Math.floor(Date.now() / 1000) - 60;

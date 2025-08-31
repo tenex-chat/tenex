@@ -19,43 +19,19 @@ export class ToolStreamHandler {
   ) {}
 
   /**
-   * Handle a tool_start event
-   */
-  async handleToolStartEvent(
-    toolName: string,
-    toolArgs: Record<string, unknown>,
-    _context?: ExecutionContext
-  ): Promise<void> {
-    // Log tool execution start
-    logDebug(
-      `Tool starting: ${toolName}`,
-      "tools",
-      "debug",
-      {
-        tool: toolName,
-        args: toolArgs,
-      }
-    );
-
-    // Note: StreamHandle doesn't have a flush method - it handles buffering internally
-    // No action needed here for streaming
-  }
-
-  /**
    * Handle a tool_complete event
    */
   async handleToolCompleteEvent(
     event: { tool: string; result: unknown },
     context: ExecutionContext
-  ): Promise<void> {
+  ): Promise<ToolExecutionResult> {
     // Parse the tool result first to get metadata
     const toolResult = this.parseToolResult(event);
 
-    // Log tool execution complete
-    this.logToolComplete(toolResult, event.tool);
-
     // Publish error if tool failed
     await this.publishToolError(toolResult, event.tool, context);
+    
+    return toolResult;
   }
 
   /**
@@ -80,28 +56,6 @@ export class ToolStreamHandler {
     }
 
     return deserializeToolResult(result.__typedResult);
-  }
-
-  /**
-   * Log tool completion
-   */
-  private logToolComplete(
-    toolResult: ToolExecutionResult,
-    toolName: string
-  ): void {
-    if (toolResult.success) {
-      logDebug(
-        `Tool completed successfully: ${toolName}`,
-        "tools",
-        "debug"
-      );
-    } else {
-      logError(
-        `Tool failed: ${toolName}`,
-        toolResult.error,
-        "tools"
-      );
-    }
   }
 
   /**

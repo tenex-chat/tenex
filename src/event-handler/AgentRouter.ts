@@ -49,18 +49,13 @@ export  class AgentRouter {
       }
     }
 
-    // If no p-tags and the author is an agent, don't route it anywhere
-    if (mentionedPubkeys.length === 0 && isAuthorAnAgent) {
+    // If no p-tags, don't route to anyone - just log it
+    if (mentionedPubkeys.length === 0) {
+      const senderType = isAuthorAnAgent ? "agent" : "user";
       logInfo(
-        chalk.gray(`Agent event from ${event.pubkey.substring(0, 8)} without p-tags - not routing`)
+        chalk.gray(`Event from ${senderType} ${event.pubkey.substring(0, 8)} without p-tags - not routing to any agent`)
       );
       return [];
-    }
-
-    // Default to PM for coordination only if it's from a user (not an agent)
-    if (!isAuthorAnAgent) {
-      logInfo(chalk.gray("Routing user event to Project Manager for coordination"));
-      return [projectManager];
     }
 
     return [];
@@ -108,17 +103,12 @@ export  class AgentRouter {
     }
 
     const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-    const isAuthorAnAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
 
     const reasons: string[] = [];
     for (const agent of targetAgents) {
       // Check if target was p-tagged
       if (mentionedPubkeys.includes(agent.pubkey)) {
         reasons.push(`Agent "${agent.name}" was directly mentioned (p-tagged)`);
-      }
-      // Check if it's the PM handling a user event
-      else if (!isAuthorAnAgent && agent.slug === "project-manager") {
-        reasons.push("Project Manager handles coordination for user events");
       }
     }
 
@@ -138,16 +128,10 @@ export  class AgentRouter {
     }
 
     const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-    const isAuthorAnAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
 
     // Check if target was p-tagged
     if (mentionedPubkeys.includes(targetAgent.pubkey)) {
       return `Agent "${targetAgent.name}" was directly mentioned (p-tagged)`;
-    }
-
-    // Check if it's the PM handling a user event
-    if (!isAuthorAnAgent && targetAgent.slug === "project-manager") {
-      return "Project Manager handles coordination for user events";
     }
 
     return "Unknown routing reason";

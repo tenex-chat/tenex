@@ -206,10 +206,7 @@ export class AgentPublisher {
     const registry = DelegationRegistry.getInstance();
     const mainEvent = events[0]; // Should only be one event now
     
-    logger.info("📦 Registering delegation", {
-      eventId: mainEvent.id?.substring(0, 8),
-      recipients: intent.recipients.map(p => p.substring(0, 16)),
-    });
+    // Removed redundant logging - registration is logged in DelegationRegistry
     
     const batchId = await registry.registerDelegation({
       delegationEventId: mainEvent.id,

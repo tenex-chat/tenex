@@ -43,7 +43,6 @@ export interface ConversationMetadata {
   queueStatus?: {
     isQueued: boolean;
     position: number;
-    estimatedWait: number;
     message: string;
   }; // Execution queue status when waiting for EXECUTE phase
 }

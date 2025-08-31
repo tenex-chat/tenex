@@ -38,7 +38,21 @@ This tool allows you to:
 - Start a thread (kind:11) by p-tagging a recipient
 - Ask follow-up questions to an existing event (creates a proper kind:1111 reply)
 - Reference a project in your delegation
-- Wait synchronously for the recipient's response (blocking indefinitely until response)`,
+- Wait synchronously for the recipient's response (blocking indefinitely until response)
+
+IMPORTANT Communication Guidelines:
+- When delegating to agents from other projects, recontextualize the message from YOUR perspective
+- Replace ambiguous pronouns like "we" with specific context (e.g., "the [YourProject] project" or "I")
+- Identify yourself and your project when initiating cross-project communication
+- Don't assume the recipient shares your context - provide necessary background
+- Focus on what the recipient knows about; don't mention internal project details unless essential
+
+Example transformations:
+BAD: "We need to fix our authentication system, how did you solve this?"
+GOOD: "I'm working on the Authentication project and need to fix an authentication issue. How did the TENEX project solve this?"
+
+BAD: "The agent lesson kind we're using is incorrect"
+GOOD: "In my project (Agents Web), I have an incorrect agent lesson kind implementation"`,
 
   parameters: createZodSchema(delegateExternalSchema),
 

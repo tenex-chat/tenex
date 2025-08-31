@@ -4,7 +4,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Message } from "multi-llm-ts";
 import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
-import type { ExecutionQueueManager } from "../executionQueue";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
@@ -23,12 +22,14 @@ export class ConversationCoordinator {
   private store: ConversationStore;
   private persistence: IConversationPersistenceService;
   private eventProcessor: ConversationEventProcessor;
-  private executionQueueManager?: ExecutionQueueManager;
+  
+  // Simple execution lock - only one conversation can execute at a time
+  private currentlyExecuting: string | null = null;
+  private executionQueue: Array<{conversationId: string; agentPubkey: string}> = [];
 
   constructor(
     projectPath: string,
-    persistence?: ConversationPersistenceAdapter,
-    executionQueueManager?: ExecutionQueueManager
+    persistence?: ConversationPersistenceAdapter
   ) {
     // Create services
     this.store = new ConversationStore();
@@ -36,12 +37,6 @@ export class ConversationCoordinator {
       persistence || new FileSystemAdapter(projectPath)
     );
     this.eventProcessor = new ConversationEventProcessor();
-    this.executionQueueManager = executionQueueManager;
-
-    // Setup queue listeners if available
-    if (executionQueueManager) {
-      this.setupQueueListeners();
-    }
   }
 
   /**
@@ -50,7 +45,6 @@ export class ConversationCoordinator {
   async initialize(): Promise<void> {
     await this.persistence.initialize();
     await this.loadConversations();
-    logger.info("[ConversationCoordinator] Initialized");
   }
 
   /**
@@ -179,41 +173,19 @@ export class ConversationCoordinator {
 
     const from = conversation.phase;
 
-    // Handle EXECUTE phase entry with queue management
-    if (phase === PHASES.EXECUTE && from !== PHASES.EXECUTE && this.executionQueueManager) {
-      const permission = await this.executionQueueManager.requestExecution(
-        conversation.id,
-        agentPubkey
-      );
-
-      if (!permission.granted) {
-        if (!permission.queuePosition || !permission.waitTime) {
-          throw new Error("Invalid permission - missing queue position or wait time");
-        }
-        
-        const queueMessage = this.formatQueueMessage(permission.queuePosition, permission.waitTime);
-
-        logger.info(`[ConversationCoordinator] Conversation ${conversation.id} queued for execution`, {
-          position: permission.queuePosition,
-          estimatedWait: permission.waitTime,
-        });
-
-        // Update queue status
-        conversation.metadata.queueStatus = {
-          isQueued: true,
-          position: permission.queuePosition,
-          estimatedWait: permission.waitTime,
-          message: queueMessage,
-        };
-
-        await this.persistence.save(conversation);
+    // Handle EXECUTE phase entry with simple lock
+    if (phase === PHASES.EXECUTE && from !== PHASES.EXECUTE) {
+      const canExecute = await this.requestExecution(conversation.id, agentPubkey);
+      
+      if (!canExecute) {
+        // Already queued, return false to prevent phase transition
         return false;
       }
     }
 
     // Handle EXECUTE phase exit
-    if (from === PHASES.EXECUTE && phase !== PHASES.EXECUTE && this.executionQueueManager) {
-      await this.executionQueueManager.releaseExecution(conversation.id, "phase_transition");
+    if (from === PHASES.EXECUTE && phase !== PHASES.EXECUTE) {
+      await this.releaseExecution(conversation.id);
     }
 
     // Create transition record
@@ -238,14 +210,6 @@ export class ConversationCoordinator {
     }
 
     conversation.phaseTransitions.push(transition);
-
-    // Log phase transition
-    logger.info("[ConversationCoordinator] Phase transition", {
-      conversationId: conversation.id,
-      from,
-      to: phase,
-      agent: agentName,
-    });
 
     logInfo(
       `Phase transition: ${from} → ${phase}`,
@@ -413,18 +377,154 @@ export class ConversationCoordinator {
   }
 
   /**
-   * Get execution queue manager (if available)
+   * Request execution lock for a conversation
    */
-  getExecutionQueueManager(): ExecutionQueueManager | undefined {
-    return this.executionQueueManager;
+  private async requestExecution(conversationId: string, agentPubkey: string): Promise<boolean> {
+    // If already executing this conversation, allow it
+    if (this.currentlyExecuting === conversationId) {
+      return true;
+    }
+    
+    // If nothing is executing, take the lock
+    if (!this.currentlyExecuting) {
+      this.currentlyExecuting = conversationId;
+      logger.info(`[ConversationCoordinator] Execution lock acquired for ${conversationId}`);
+      return true;
+    }
+    
+    // Check if already in queue
+    const existingIndex = this.executionQueue.findIndex(e => e.conversationId === conversationId);
+    if (existingIndex >= 0) {
+      return false; // Already queued
+    }
+    
+    // Add to queue
+    this.executionQueue.push({ conversationId, agentPubkey });
+    const position = this.executionQueue.length;
+    
+    logger.info(`[ConversationCoordinator] Conversation ${conversationId} queued at position ${position}`);
+    
+    // Update conversation with queue status
+    const conversation = this.store.get(conversationId);
+    if (conversation) {
+      conversation.metadata.queueStatus = {
+        isQueued: true,
+        position,
+        message: this.formatQueueMessage(position),
+      };
+      await this.persistence.save(conversation);
+    }
+    
+    return false;
   }
-
+  
   /**
-   * Set execution queue manager
+   * Release execution lock
    */
-  setExecutionQueueManager(manager: ExecutionQueueManager): void {
-    this.executionQueueManager = manager;
-    this.setupQueueListeners();
+  private async releaseExecution(conversationId: string): Promise<void> {
+    if (this.currentlyExecuting !== conversationId) {
+      return; // Not holding the lock
+    }
+    
+    logger.info(`[ConversationCoordinator] Releasing execution lock for ${conversationId}`);
+    this.currentlyExecuting = null;
+    
+    // Process next in queue
+    await this.processNextInQueue();
+  }
+  
+  /**
+   * Process next conversation in queue
+   */
+  private async processNextInQueue(): Promise<void> {
+    if (this.executionQueue.length === 0) {
+      return; // Queue is empty
+    }
+    
+    const next = this.executionQueue.shift();
+    if (!next) return;
+    
+    // Grant execution to next conversation
+    this.currentlyExecuting = next.conversationId;
+    
+    // Clear queue status from conversation
+    const conversation = this.store.get(next.conversationId);
+    if (conversation) {
+      conversation.metadata.queueStatus = undefined;
+      await this.persistence.save(conversation);
+      
+      logger.info(`[ConversationCoordinator] Execution lock granted to ${next.conversationId} from queue`);
+      
+      // The conversation will naturally progress to EXECUTE phase
+      // when it's next processed
+    }
+  }
+  
+  /**
+   * Force release the current execution lock
+   */
+  async forceReleaseExecution(): Promise<string | null> {
+    if (!this.currentlyExecuting) {
+      return null;
+    }
+    
+    const released = this.currentlyExecuting;
+    logger.info(`[ConversationCoordinator] Force releasing execution lock for ${released}`);
+    
+    this.currentlyExecuting = null;
+    await this.processNextInQueue();
+    
+    return released;
+  }
+  
+  /**
+   * Get execution status
+   */
+  getExecutionStatus(): { active: string | null; queued: string[] } {
+    return {
+      active: this.currentlyExecuting,
+      queued: this.executionQueue.map(e => e.conversationId),
+    };
+  }
+  
+  /**
+   * Remove conversation from queue
+   */
+  async removeFromQueue(conversationId: string): Promise<boolean> {
+    const initialLength = this.executionQueue.length;
+    this.executionQueue = this.executionQueue.filter(e => e.conversationId !== conversationId);
+    
+    if (this.executionQueue.length !== initialLength) {
+      // Update positions for remaining queued conversations
+      for (let i = 0; i < this.executionQueue.length; i++) {
+        const conv = this.store.get(this.executionQueue[i].conversationId);
+        if (conv?.metadata.queueStatus) {
+          conv.metadata.queueStatus.position = i + 1;
+          conv.metadata.queueStatus.message = this.formatQueueMessage(i + 1);
+          await this.persistence.save(conv);
+        }
+      }
+      return true;
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Clear all queued conversations
+   */
+  async clearQueue(): Promise<void> {
+    // Clear queue status from all queued conversations
+    for (const entry of this.executionQueue) {
+      const conversation = this.store.get(entry.conversationId);
+      if (conversation) {
+        conversation.metadata.queueStatus = undefined;
+        await this.persistence.save(conversation);
+      }
+    }
+    
+    this.executionQueue = [];
+    logger.info("[ConversationCoordinator] Execution queue cleared");
   }
 
   /**
@@ -454,8 +554,6 @@ export class ConversationCoordinator {
 
         this.store.set(conversation.id, conversation);
       }
-
-      logger.info(`[ConversationCoordinator] Loaded ${conversations.length} conversations`);
     } catch (error) {
       logger.error("[ConversationCoordinator] Failed to load conversations", { error });
     }
@@ -463,40 +561,9 @@ export class ConversationCoordinator {
 
 
 
-  private setupQueueListeners(): void {
-    const queueManager = this.getExecutionQueueManager();
-    if (!queueManager) return;
 
-    queueManager.on("lock-acquired", async (conversationId: string, _agentPubkey: string) => {
-      const conversation = this.store.get(conversationId);
-      if (conversation?.metadata.queueStatus) {
-        conversation.metadata.queueStatus = undefined;
-        await this.persistence.save(conversation);
-
-        logInfo(
-          "Execution lock acquired - starting EXECUTE phase",
-          "conversation",
-          "verbose",
-          { conversationId }
-        );
-      }
-    });
-
-    // Timeout functionality disabled - no timeout handling needed
+  private formatQueueMessage(position: number): string {
+    return `🚦 Execution Queue Status\n\nYour conversation has been added to the execution queue.\n\nQueue Position: ${position}\n\nYou will be automatically notified when execution begins.`;
   }
 
-  private formatQueueMessage(position: number, waitTimeSeconds: number): string {
-    const waitTime = this.formatWaitTime(waitTimeSeconds);
-    return `🚦 Execution Queue Status\n\nYour conversation has been added to the execution queue.\n\nQueue Position: ${position}\nEstimated Wait Time: ${waitTime}\n\nYou will be automatically notified when execution begins.`;
-  }
-
-  private formatWaitTime(seconds: number): string {
-    if (seconds < 60) {
-      return `~${Math.floor(seconds)} seconds`;
-    }
-    if (seconds < 3600) {
-      return `~${Math.floor(seconds / 60)} minutes`;
-    }
-    return `~${Math.floor(seconds / 3600)} hours`;
-  }
 }

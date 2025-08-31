@@ -5,7 +5,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 interface LLMLogEntry {
   timestamp: string;
-  timestampMs: number;
   agent: string;
   rootEventId?: string;
   triggeringEventId?: string;
@@ -99,7 +98,6 @@ export class LLMLogger {
     const requestId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const logEntry: LLMLogEntry = {
       timestamp: new Date().toISOString(),
-      timestampMs: Date.now(),
       agent: params.agent,
       rootEventId: params.rootEvent?.id,
       triggeringEventId: params.triggeringEvent?.id,
@@ -147,7 +145,6 @@ export class LLMLogger {
 
     const responseEntry: Partial<LLMLogEntry> = {
       timestamp: new Date().toISOString(),
-      timestampMs: Date.now(),
       agent: params.agent,
       durationMs: params.endTime - params.startTime
     };
