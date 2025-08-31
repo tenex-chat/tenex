@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Learning System is TENEX's sophisticated knowledge persistence and evolution mechanism that enables agents to capture, store, retrieve, and apply lessons learned during task execution. This architecture implements a distributed learning paradigm where each agent maintains its own knowledge base of up to 50 lessons, persisted through Nostr events (NDKAgentLesson kind 4129), with built-in quality control through metacognition checks and domain boundary enforcement. The system seamlessly integrates lessons into agent prompts, creating a continuous improvement loop where agents become more effective over time by learning from their experiences and avoiding past mistakes.
+The Learning System is TENEX's sophisticated knowledge persistence and evolution mechanism that enables agents to capture, store, retrieve, and apply lessons learned during task execution. This architecture implements a distributed learning paradigm where each agent maintains its own knowledge base of up to 50 lessons, persisted through Nostr events (NDKAgentLesson kind 4129), with integrated quality control through metacognition checks and domain boundary enforcement. The system seamlessly integrates lessons into agent prompts, creating a continuous improvement loop where agents become more effective over time by learning from their experiences and avoiding past mistakes.
 
 ## Table of Contents
 

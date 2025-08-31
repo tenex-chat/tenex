@@ -41,8 +41,6 @@ export interface AgentInstance {
   eventId?: string;
   /** Agent slug/key from agents.json configuration */
   slug: string;
-  /** Whether this is a built-in agent (executor, planner, project-manager) */
-  isBuiltIn?: boolean;
   /** Whether this agent is from the global configuration */
   isGlobal?: boolean;
 }

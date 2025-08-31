@@ -74,9 +74,6 @@ export class ProjectDisplay {
     logInfo(chalk.gray("Tools:       ") + chalk.cyan(`[${toolCount}] ${toolNames || "none"}`));
 
     logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
-    if (agent.isBuiltIn) {
-      logInfo(chalk.gray("Built-in:    ") + chalk.green("✓"));
-    }
     if (agent.eventId) {
       logInfo(chalk.gray("Event ID:    ") + chalk.gray(agent.eventId));
     }

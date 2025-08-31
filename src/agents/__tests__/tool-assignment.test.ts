@@ -1,95 +1,89 @@
 import { describe, expect, it } from "bun:test";
-import { getBuiltInAgents } from "../builtInAgents";
 import { getDefaultToolsForAgent } from "../constants";
 import type { AgentInstance } from "../types";
 
 describe("Tool assignment", () => {
   describe("getDefaultToolsForAgent", () => {
-    it("orchestrator agent should have default tools (no longer special cased)", () => {
+    it("all agents should receive the same default tool set", () => {
       const mockAgent = {
-        isBuiltIn: true,
-        slug: "orchestrator",
-      } as Pick<AgentInstance, "isBuiltIn" | "slug">;
+        slug: "any-agent",
+      } as Pick<AgentInstance, "slug">;
       const tools = getDefaultToolsForAgent(mockAgent);
 
-      // Orchestrator now gets standard tools like other agents
+      // All agents now get the same comprehensive tool set
       expect(tools).toContain("read_path");
       expect(tools).toContain("lesson_learn");
       expect(tools).toContain("claude_code");
       expect(tools).toContain("delegate");
-    });
-
-    it("planner and executor agents get default tools", () => {
-      const mockExecutor = {
-        isBuiltIn: true,
-        slug: "executor",
-      } as Pick<AgentInstance, "isBuiltIn" | "slug">;
-      const mockPlanner = {
-        isBuiltIn: true,
-        slug: "planner",
-      } as Pick<AgentInstance, "isBuiltIn" | "slug">;
-
-      const executorTools = getDefaultToolsForAgent(mockExecutor);
-      const plannerTools = getDefaultToolsForAgent(mockPlanner);
-
-      // Both agents get default tools from constants.ts
-      expect(executorTools).toContain("read_path");
-      expect(executorTools).toContain("lesson_learn");
-      expect(executorTools).toContain("claude_code");
-      expect(executorTools).toContain("delegate"); // All non-PM agents have delegate
-
-      // Planner gets the same default tools
-      expect(plannerTools).toContain("read_path");
-      expect(plannerTools).toContain("lesson_learn");
-      expect(plannerTools).toContain("claude_code");
-      expect(plannerTools).toContain("delegate"); // All non-PM agents have delegate
-    });
-
-    it("custom agents should have default tools including delegate", () => {
-      const mockCustomAgent = {
-        isBuiltIn: false,
-        slug: "custom-agent",
-      } as Pick<AgentInstance, "isBuiltIn" | "slug">;
-      const tools = getDefaultToolsForAgent(mockCustomAgent);
-
-      expect(tools).toContain("delegate"); // All non-PM agents have delegate
-      expect(tools).toContain("read_path");
-      expect(tools).toContain("lesson_learn");
-      expect(tools).toContain("claude_code");
-    });
-
-    it("project-manager agent should have special tools including delegate", () => {
-      const mockProjectManager = {
-        isBuiltIn: true,
-        slug: "project-manager",
-      } as Pick<AgentInstance, "isBuiltIn" | "slug">;
-      const tools = getDefaultToolsForAgent(mockProjectManager);
-
-      expect(tools).toContain("delegate"); // PM uses delegate with phase support
+      expect(tools).toContain("delegate_phase");
       expect(tools).toContain("write_context_file");
       expect(tools).toContain("shell");
-      expect(tools).toContain("discover_capabilities");
+    });
+
+    it("different agents should get identical default tools", () => {
+      const agent1 = { slug: "agent-one" } as Pick<AgentInstance, "slug">;
+      const agent2 = { slug: "agent-two" } as Pick<AgentInstance, "slug">;
+      const agent3 = { slug: "agent-three" } as Pick<AgentInstance, "slug">;
+
+      const tools1 = getDefaultToolsForAgent(agent1);
+      const tools2 = getDefaultToolsForAgent(agent2);
+      const tools3 = getDefaultToolsForAgent(agent3);
+
+      // All agents get identical tool sets
+      expect(tools1).toEqual(tools2);
+      expect(tools2).toEqual(tools3);
+      
+      // Verify they all have core tools
+      [tools1, tools2, tools3].forEach(tools => {
+        expect(tools).toContain("read_path");
+        expect(tools).toContain("lesson_learn");
+        expect(tools).toContain("claude_code");
+        expect(tools).toContain("delegate");
+      });
+    });
+
+    it("tools should include both delegate and delegate_phase", () => {
+      const mockAgent = {
+        slug: "test-agent",
+      } as Pick<AgentInstance, "slug">;
+      const tools = getDefaultToolsForAgent(mockAgent);
+
+      // All agents now have access to both delegation mechanisms
+      expect(tools).toContain("delegate");
+      expect(tools).toContain("delegate_phase");
+      expect(tools).toContain("delegate_external");
+    });
+
+    it("all agents should have access to agent management tools", () => {
+      const mockAgent = {
+        slug: "any-agent",
+      } as Pick<AgentInstance, "slug">;
+      const tools = getDefaultToolsForAgent(mockAgent);
+
+      // Agent management tools available to all
       expect(tools).toContain("agents_hire");
       expect(tools).toContain("agents_discover");
+      expect(tools).toContain("discover_capabilities");
       expect(tools).toContain("nostr_projects");
     });
   });
 
-  describe("AgentRegistry tool assignment fix", () => {
-    it("should determine isBuiltIn before assigning tools", () => {
-      // This test verifies that when creating an agent,
-      // the isBuiltIn status is determined BEFORE calling getDefaultToolsForAgent
-
-      const builtInSlugs = getBuiltInAgents().map((a) => a.slug);
-
-      // Verify built-in agents (orchestrator is no longer in the list)
-      expect(builtInSlugs).toContain("executor");
-      expect(builtInSlugs).toContain("planner");
-      expect(builtInSlugs).toContain("project-manager");
-
-      // The fix in AgentRegistry.ts ensures isBuiltIn is determined before tool assignment
-      const isBuiltIn = builtInSlugs.includes("executor");
-      expect(isBuiltIn).toBe(true);
+  describe("Tool assignment behavior", () => {
+    it("should provide consistent tools regardless of agent slug", () => {
+      // Test that the tool assignment is now uniform
+      const specialNames = ["project-manager", "executor", "planner", "orchestrator"];
+      const normalNames = ["custom-agent", "my-agent", "test-agent"];
+      
+      const allAgents = [...specialNames, ...normalNames];
+      const toolSets = allAgents.map(slug => 
+        getDefaultToolsForAgent({ slug } as Pick<AgentInstance, "slug">)
+      );
+      
+      // All should be identical
+      const firstSet = toolSets[0];
+      toolSets.forEach(set => {
+        expect(set).toEqual(firstSet);
+      });
     });
   });
 });

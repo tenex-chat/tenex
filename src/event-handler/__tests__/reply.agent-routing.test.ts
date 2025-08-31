@@ -43,16 +43,20 @@ describe("Agent Event Routing", () => {
     } as any;
 
     // Create mock project context with agents
+    // First agent in the map becomes the PM dynamically
+    const pmAgent = {
+      name: "primary-agent",
+      pubkey: "pm-agent-pubkey",
+      slug: "primary-agent",
+      eventId: "pm-event-id",
+    };
+    
     mockProjectContext = {
       pubkey: "project-pubkey",
       agents: new Map([
         [
-          "project-manager",
-          {
-            name: "project-manager",
-            pubkey: "pm-agent-pubkey",
-            slug: "project-manager",
-          },
+          "primary-agent",  // This is now the PM (first agent)
+          pmAgent,
         ],
         [
           "code-agent",
@@ -60,10 +64,12 @@ describe("Agent Event Routing", () => {
             name: "code-agent",
             pubkey: "code-agent-pubkey",
             slug: "code-agent",
+            eventId: "code-event-id",
           },
         ],
       ]),
       getAgent: (slug: string) => mockProjectContext.agents.get(slug),
+      getProjectManager: () => pmAgent,  // Dynamic PM getter
     };
 
     // Mock getProjectContext
@@ -150,7 +156,7 @@ describe("Agent Event Routing", () => {
     // Check that the execution context has the PM as target agent
     const executionCall = (mockAgentExecutor.execute as any).mock.calls[0];
     const executionContext = executionCall[0];
-    expect(executionContext.agent.slug).toBe("project-manager");
+    expect(executionContext.agent.slug).toBe("primary-agent"); // Dynamic PM
   });
 
   it("should route events with multiple p-tags to all tagged agents", async () => {
@@ -202,7 +208,7 @@ describe("Agent Event Routing", () => {
     // Verify both agents were executed
     const calls = (mockAgentExecutor.execute as any).mock.calls;
     const executedAgents = calls.map((call: any[]) => call[0].agent.slug);
-    expect(executedAgents).toContain("project-manager");
+    expect(executedAgents).toContain("primary-agent"); // Dynamic PM
     expect(executedAgents).toContain("code-agent");
   });
 
@@ -306,6 +312,6 @@ describe("Agent Event Routing", () => {
     // Check that the execution context has the PM as target agent
     const executionCall = (mockAgentExecutor.execute as any).mock.calls[0];
     const executionContext = executionCall[0];
-    expect(executionContext.agent.slug).toBe("project-manager");
+    expect(executionContext.agent.slug).toBe("primary-agent"); // Dynamic PM
   });
 });

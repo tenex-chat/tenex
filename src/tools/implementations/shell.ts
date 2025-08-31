@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { PROJECT_MANAGER_AGENT } from "@/agents/constants";
+import { getProjectContext } from "@/services";
 import { ExecutionConfig } from "@/agents/execution/constants";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -25,7 +25,7 @@ const shellSchema = z.object({
 
 /**
  * Shell tool - allows agents to execute shell commands
- * Restricted to project-manager agent for safety
+ * Restricted to the project manager agent for safety
  */
 export const shellTool: Tool<
   {
@@ -37,19 +37,30 @@ export const shellTool: Tool<
 > = {
   name: "shell",
   description:
-    "Execute shell commands in the project directory (restricted to project-manager agent only)",
+    "Execute shell commands in the project directory (restricted to project manager agent only)",
 
   parameters: createZodSchema(shellSchema),
 
   execute: async (input, context) => {
     const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input.value;
 
-    // Safety check - only project-manager can use this tool
-    if (context.agent.slug !== PROJECT_MANAGER_AGENT) {
+    // Safety check - only the current PM can use this tool
+    try {
+      const projectContext = getProjectContext();
+      const pmAgent = projectContext.getProjectManager();
+      if (context.agent.pubkey !== pmAgent.pubkey) {
+        return failure({
+          kind: "validation",
+          field: "agent",
+          message: "Shell tool is restricted to the project manager agent only",
+        });
+      }
+    } catch (error) {
+      // If we can't get project context, deny access
       return failure({
         kind: "validation",
         field: "agent",
-        message: "Shell tool is restricted to project-manager agent only",
+        message: "Unable to verify project manager status",
       });
     }
 

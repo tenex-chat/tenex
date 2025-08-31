@@ -15,9 +15,8 @@ import type { ToolName } from "@/tools/registry";
 import type { Tool } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { type NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { getBuiltInAgents } from "./builtInAgents";
 import { CORE_AGENT_TOOLS, getDefaultToolsForAgent } from "./constants";
 
 /**
@@ -104,9 +103,6 @@ export class AgentRegistry {
         logger.debug(`Loading agent from registry: ${slug}`, { registryEntry });
         await this.loadAgentBySlug(slug, false);
       }
-
-      // Load built-in agents
-      await this.ensureBuiltInAgents(ndkProject);
     } catch (error) {
       logger.error("Failed to load agent registry", { error });
       this.registry = {};
@@ -175,7 +171,7 @@ export class AgentRegistry {
     if (!registryEntry) {
       // Generate new nsec for agent
       const signer = NDKPrivateKeySigner.generate();
-      const { nsec } = signer;
+      const nsec = signer.privateKey;
 
       // Create new registry entry
       const fileName = `${config.eventId || name.toLowerCase().replace(/[^a-z0-9]/g, "-")}.json`;
@@ -189,8 +185,6 @@ export class AgentRegistry {
         registryEntry.eventId = config.eventId;
       }
 
-      // Check if this is a built-in agent
-      const isBuiltIn = getBuiltInAgents().some((agent) => agent.slug === name);
 
       // Save agent definition to file
       agentDefinition = {
@@ -203,21 +197,12 @@ export class AgentRegistry {
       };
 
       // Include tools if explicitly provided
-      // For built-in agents, always save tools even if empty array
       if (config.tools !== undefined) {
         agentDefinition.tools = config.tools;
       }
 
       const definitionPath = path.join(this.agentsDir, fileName);
-      if (isBuiltIn) {
-        // For built-in agents, we don't save instructions to the JSON file
-        // This ensures built-in agents always use the up-to-date instructions
-        // from the code rather than potentially outdated instructions in the file
-        const { instructions: _, ...definitionWithoutInstructions } = agentDefinition;
-        await writeJsonFile(definitionPath, definitionWithoutInstructions);
-      } else {
-        await writeJsonFile(definitionPath, agentDefinition);
-      }
+      await writeJsonFile(definitionPath, agentDefinition);
 
       this.registry[name] = registryEntry;
       await this.saveRegistry();
@@ -235,28 +220,6 @@ export class AgentRegistry {
         try {
           agentDefinition = JSON.parse(content);
 
-          // For built-in agents, merge missing fields from TypeScript definition before validation
-          const builtInAgents = getBuiltInAgents();
-          const builtInAgent = builtInAgents.find((agent) => agent.slug === name);
-          if (builtInAgent) {
-            // Fill in missing required fields from built-in definition
-            if (!agentDefinition.role) {
-              agentDefinition.role = builtInAgent.role;
-            }
-            if (!agentDefinition.useCriteria) {
-              agentDefinition.useCriteria = builtInAgent.useCriteria;
-            }
-            if (!agentDefinition.instructions) {
-              agentDefinition.instructions = builtInAgent.instructions || "";
-            }
-            if (!agentDefinition.name) {
-              agentDefinition.name = builtInAgent.name;
-            }
-            // Apply MCP setting from built-in definition
-            if (builtInAgent.mcp !== undefined) {
-              agentDefinition.mcp = builtInAgent.mcp;
-            }
-          }
 
           this.validateAgentDefinition(agentDefinition);
         } catch (error) {
@@ -267,8 +230,6 @@ export class AgentRegistry {
           throw new Error(`Invalid agent definition in ${registryEntry.file}: ${error}`);
         }
       } else {
-        // Check if this is a built-in agent
-        const isBuiltIn = getBuiltInAgents().some((agent) => agent.slug === name);
 
         // Fallback: create definition from config if file doesn't exist
         agentDefinition = {
@@ -279,12 +240,7 @@ export class AgentRegistry {
           useCriteria: config.useCriteria,
           llmConfig: config.llmConfig,
         };
-        if (isBuiltIn) {
-          const { instructions: _, ...definitionWithoutInstructions } = agentDefinition;
-          await writeJsonFile(definitionPath, definitionWithoutInstructions);
-        } else {
-          await writeJsonFile(definitionPath, agentDefinition);
-        }
+        await writeJsonFile(definitionPath, agentDefinition);
       }
     }
 
@@ -376,11 +332,6 @@ export class AgentRegistry {
       return false;
     }
 
-    // Don't allow removing built-in agents
-    if (agentToRemove.isBuiltIn) {
-      logger.warn(`Cannot remove built-in agent ${agentSlugToRemove}`);
-      return false;
-    }
 
     // Don't allow removing global agents from a project context
     if (agentToRemove.isGlobal && !this.isGlobal) {
@@ -433,11 +384,6 @@ export class AgentRegistry {
       return false;
     }
 
-    // Don't allow removing built-in agents
-    if (agent.isBuiltIn) {
-      logger.warn(`Cannot remove built-in agent ${slug}`);
-      return false;
-    }
 
     // Don't allow removing global agents from a project context
     if (agent.isGlobal && !this.isGlobal) {
@@ -761,33 +707,6 @@ export class AgentRegistry {
     try {
       agentDefinition = JSON.parse(content);
 
-      // For built-in agents, merge missing fields from TypeScript definition before validation
-      const builtInAgents = getBuiltInAgents();
-      const builtInAgent = builtInAgents.find((agent) => agent.slug === slug);
-      if (builtInAgent) {
-        // Fill in missing required fields from built-in definition
-        if (!agentDefinition.role) {
-          agentDefinition.role = builtInAgent.role;
-        }
-        if (!agentDefinition.useCriteria) {
-          agentDefinition.useCriteria = builtInAgent.useCriteria;
-        }
-        if (!agentDefinition.instructions) {
-          agentDefinition.instructions = builtInAgent.instructions || "";
-        }
-        if (!agentDefinition.name) {
-          agentDefinition.name = builtInAgent.name;
-        }
-        // CRITICAL: Always use tools from built-in definition for built-in agents
-        // This ensures built-in agents always have their correct tools
-        if (builtInAgent.tools !== undefined) {
-          agentDefinition.tools = builtInAgent.tools;
-        }
-        // Also apply MCP setting from built-in definition
-        if (builtInAgent.mcp !== undefined) {
-          agentDefinition.mcp = builtInAgent.mcp;
-        }
-      }
 
       this.validateAgentDefinition(agentDefinition);
     } catch (error) {
@@ -832,30 +751,9 @@ export class AgentRegistry {
   ): Promise<AgentInstance> {
     const pubkey = signer.pubkey;
 
-    // Determine agent name - use project name for project-manager agent
-    let agentName = agentDefinition.name;
-    const isProjectManager = slug === "project-manager";
-
-    if (isProjectManager) {
-      try {
-        const { getProjectContext } = await import("@/services");
-        const projectCtx = getProjectContext();
-        const projectTitle = projectCtx.project.tagValue("title");
-        if (projectTitle) {
-          agentName = projectTitle;
-        }
-      } catch {
-        // If project context not available, use default name
-        agentName = agentDefinition.name;
-      }
-    }
-
-    // Determine if this is a built-in agent
-    const isBuiltIn = getBuiltInAgents().some((builtIn) => builtIn.slug === slug);
-
     // Create Agent instance with all properties set
     const agent: AgentInstance = {
-      name: agentName,
+      name: agentDefinition.name,
       pubkey,
       signer,
       role: agentDefinition.role,
@@ -867,7 +765,6 @@ export class AgentRegistry {
       mcp: agentDefinition.mcp ?? true, // Default to true for all agents
       eventId: registryEntry.eventId,
       slug: slug,
-      isBuiltIn: isBuiltIn,
       isGlobal: isGlobal,
     };
 
@@ -1028,7 +925,6 @@ export class AgentRegistry {
     }
 
     // Optional fields with type validation
-    // Note: instructions is optional for built-in agents
     if (def.instructions !== undefined && typeof def.instructions !== "string") {
       throw new Error("Agent instructions must be a string");
     }
@@ -1055,55 +951,6 @@ export class AgentRegistry {
 
     if (def.llmConfig !== undefined && typeof def.llmConfig !== "string") {
       throw new Error("Agent llmConfig must be a string");
-    }
-  }
-
-  /**
-   * Ensure built-in agents are loaded
-   */
-  private async ensureBuiltInAgents(ndkProject?: NDKProject): Promise<void> {
-    const builtInAgents = getBuiltInAgents();
-    logger.debug(`Loading ${builtInAgents.length} built-in agents`, {
-      agentSlugs: builtInAgents.map((a) => a.slug),
-    });
-
-    for (const def of builtInAgents) {
-      logger.debug(`Loading built-in agent: ${def.slug}`, {
-        name: def.name,
-        role: def.role,
-        tools: def.tools,
-      });
-
-      // Check if agent was already loaded from registry
-      const existingAgent = this.agents.get(def.slug);
-      if (existingAgent) {
-        // FIX: Force update the tools for built-in agents
-        if (def.tools !== undefined) {
-          const { getTools } = await import("@/tools/registry");
-          existingAgent.tools = getTools(def.tools as ToolName[]);
-        }
-        existingAgent.isBuiltIn = true;
-      } else {
-        // Use ensureAgent just like any other agent
-        const agent = await this.ensureAgent(
-          def.slug,
-          {
-            name: def.name,
-            role: def.role,
-            instructions: def.instructions || "",
-            llmConfig: def.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-            mcp: def.mcp ?? true, // Use agent-specific MCP setting, default to true if not specified
-            tools: def.tools,
-          },
-          ndkProject
-        );
-
-        if (!agent) {
-          logger.error(`Failed to load built-in agent: ${def.slug}`);
-        } else {
-          agent.isBuiltIn = true;
-        }
-      }
     }
   }
 

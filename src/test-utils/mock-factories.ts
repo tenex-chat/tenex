@@ -80,8 +80,6 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
     mcp: false,
     eventId: "mock-event-id",
     slug: "mock-agent",
-    
-    isBuiltIn: false,
     backend: "reason-act-loop",
     ...overrides,
   } as AgentInstance;
