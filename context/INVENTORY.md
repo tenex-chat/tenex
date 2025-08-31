@@ -48,7 +48,6 @@
     - **`tracing/`**: Implements tracing for monitoring and debugging.
     - **`utils/`**: Contains miscellaneous utility functions.
         - **`agentFetcher.ts`**: Fetches agent definitions.
-        - **`conversationFetcher.ts`**: Fetches conversation data.
         - **`error-handler.ts`**: Provides centralized error handling.
         - **`git/`**: Git-related utilities.
         - **`inventory.ts`**: Utilities for generating project inventories.

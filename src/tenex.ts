@@ -9,7 +9,6 @@ import { runDebugSystemPrompt } from "./commands/debug/index";
 import { inventoryCommand } from "./commands/inventory/index";
 import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
-import { queueCommand } from "./commands/queue/index";
 import { setupCommand } from "./commands/setup/index";
 import { PHASES } from "./conversations/phases";
 import { initNDK } from "./nostr/ndkClient";
@@ -25,7 +24,6 @@ program.addCommand(projectCommand);
 program.addCommand(setupCommand);
 program.addCommand(inventoryCommand);
 program.addCommand(mcpCommand);
-program.addCommand(queueCommand);
 
 // Add debug command
 const debug = program.command("debug").description("Debug commands");
@@ -39,22 +37,6 @@ debug
     PHASES.CHAT
   )
   .action((options) => runDebugSystemPrompt(options));
-debug
-  .command("conversation <nevent>")
-  .description("Fetch and display a Nostr conversation thread")
-  .action((nevent) => {
-    import("./commands/debug/conversation").then(({ runDebugConversation }) =>
-      runDebugConversation(nevent)
-    );
-  });
-debug
-  .command("timeline [conversationId]")
-  .description("Display a timeline of all events in a conversation")
-  .action((conversationId) => {
-    import("./commands/debug/timeline").then(({ timeline }) => {
-      timeline.handler({ conversationId, _: [], $0: "" });
-    });
-  });
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {
