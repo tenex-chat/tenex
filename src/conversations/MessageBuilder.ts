@@ -259,7 +259,7 @@ Please adjust your behavior according to the new phase requirements.`;
   /**
    * Format a system message with proper attribution
    */
-  static formatSystemMessage(content: string, attribution?: string): Message {
+  static formatSystemMessage(content: string, attribution?: string): CoreMessage {
     if (attribution) {
       return { role: "system", content: `[${attribution}]: ${content}` };
     }
@@ -269,14 +269,14 @@ Please adjust your behavior according to the new phase requirements.`;
   /**
    * Create a user message
    */
-  static formatUserMessage(content: string): Message {
+  static formatUserMessage(content: string): CoreMessage {
     return { role: "user", content };
   }
 
   /**
    * Create an assistant message
    */
-  static formatAssistantMessage(content: string): Message {
+  static formatAssistantMessage(content: string): CoreMessage {
     return { role: "assistant", content };
   }
 

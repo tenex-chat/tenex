@@ -34,7 +34,7 @@ export interface StandaloneAgentContext {
 
 export class AgentExecutor {
   constructor(
-    private llmService: LLMService,
+    private llmService: import("@/llm/service").LLMService,
     private conversationCoordinator: ConversationCoordinator,
     private standaloneContext?: StandaloneAgentContext
   ) {}
@@ -162,7 +162,7 @@ export class AgentExecutor {
   private async buildMessages(
     context: ExecutionContext,
     _triggeringEvent: NDKEvent
-  ): Promise<Message[]> {
+  ): Promise<CoreMessage[]> {
     const messages: CoreMessage[] = [];
 
     // Get fresh conversation data
