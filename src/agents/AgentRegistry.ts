@@ -12,7 +12,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 import type { ToolName } from "@/tools/registry";
-import type { Tool } from "@/tools/types";
+// Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -609,14 +609,12 @@ export class AgentRegistry {
     }
 
     // Update the agent tools in memory
-    const { getTools } = await import("@/tools/registry");
     // Filter to only valid tool names
     const validToolNames = newToolNames.filter((name): name is ToolName => {
       // Check if the tool name is valid
       const validTools: ToolName[] = [
         "read_path",
         "write_context_file",
-        "analyze",
         "generate_inventory",
         "lesson_learn",
         "lesson_get",
@@ -631,7 +629,7 @@ export class AgentRegistry {
       ];
       return validTools.includes(name as ToolName);
     });
-    agent.tools = getTools(validToolNames);
+    agent.tools = validToolNames;
 
     // Find the registry entry by pubkey
     const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
@@ -883,19 +881,41 @@ export class AgentRegistry {
       }
     }
 
-    // Convert tool names to Tool instances
-    const { getTool } = await import("@/tools/registry");
-    
-    // Process each tool name individually to track unknown tools
-    const availableTools: Tool[] = [];
+    // Validate tool names - we now store tool names as strings, not instances
+    const validToolNames: string[] = [];
     const unknownTools: string[] = [];
     const requestedMcpTools: string[] = [];
     const unknownNonMcpTools: string[] = [];
     
+    // Check which tools are valid
+    const validTools: ToolName[] = [
+      "read_path",
+      "write_context_file",
+      "generate_inventory",
+      "lesson_learn",
+      "lesson_get",
+      "shell",
+      "agents_discover",
+      "agents_hire",
+      "agents_list",
+      "agents_read",
+      "agents_write",
+      "discover_capabilities",
+      "delegate",
+      "delegate_phase",
+      "nostr_projects",
+      "claude_code",
+      "create_project",
+      "delegate_external",
+      "report_write",
+      "report_read",
+      "reports_list",
+      "report_delete",
+    ];
+    
     for (const toolName of toolNames) {
-      const tool = getTool(toolName as ToolName);
-      if (tool) {
-        availableTools.push(tool);
+      if (validTools.includes(toolName as ToolName)) {
+        validToolNames.push(toolName);
       } else {
         // Check if it's an MCP tool (starts with "mcp__")
         if (toolName.startsWith("mcp__")) {
@@ -918,8 +938,10 @@ export class AgentRegistry {
           requestedMcpTools.includes(tool.name)
         );
         
-        // Add available MCP tools
-        availableTools.push(...filteredMcpTools);
+        // Add available MCP tool names
+        for (const tool of filteredMcpTools) {
+          validToolNames.push(tool.name);
+        }
         
         // Track which MCP tools are not yet available
         const availableMcpToolNames = new Set(filteredMcpTools.map(t => t.name));
@@ -936,7 +958,9 @@ export class AgentRegistry {
       try {
         const { mcpService } = await import("@/services/mcp/MCPService");
         const allMcpTools = mcpService.getCachedTools();
-        availableTools.push(...allMcpTools);
+        for (const tool of allMcpTools) {
+          validToolNames.push(tool.name);
+        }
       } catch (error) {
         logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
       }
@@ -947,7 +971,7 @@ export class AgentRegistry {
       logger.warn(`Agent "${slug}" requested unknown tools:`, unknownNonMcpTools);
     }
     
-    agent.tools = availableTools;
+    agent.tools = validToolNames;
     
     // Store the full list of requested tools (including unknown ones) in the agent definition
     // This ensures MCP tools are preserved even if not currently installed
@@ -1079,8 +1103,7 @@ export class AgentRegistry {
       if (existingAgent) {
         // FIX: Force update the tools for built-in agents
         if (def.tools !== undefined) {
-          const { getTools } = await import("@/tools/registry");
-          existingAgent.tools = getTools(def.tools as ToolName[]);
+          existingAgent.tools = def.tools as ToolName[];
         }
         existingAgent.isBuiltIn = true;
       } else {

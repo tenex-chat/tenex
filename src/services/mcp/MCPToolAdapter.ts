@@ -1,5 +1,4 @@
-import type { Tool } from "@/tools/types";
-import { createZodSchema, mcpSchemaToZod } from "@/tools/zod-schema";
+// Tool type and zod schema functions removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -30,128 +29,95 @@ export interface MCPTool {
 }
 
 /**
- * Converts an MCP tool definition to our type-safe tool system using Zod
+ * Create a simple AI SDK compatible tool from MCP tool
  */
 export function adaptMCPTool(
   mcpTool: MCPTool,
   serverName: string,
   executeFn: (args: Record<string, unknown>) => Promise<unknown>
-): Tool<Record<string, unknown>, unknown> {
+): any {
   const namespacedName = `mcp__${serverName}__${mcpTool.name}`;
 
-  // Convert MCP input schema to Zod schema
-  const zodSchema = mcpTool.inputSchema ? mcpSchemaToZod(mcpTool.inputSchema) : z.object({});
-
-  // Add description to the schema
-  const schemaWithDescription = zodSchema.describe(`${mcpTool.name} parameters for ${serverName}`);
-
-  // Create the parameter schema using our Zod adapter
-  const parameters = createZodSchema<Record<string, unknown>>(
-    schemaWithDescription as z.ZodType<Record<string, unknown>>
-  );
-
-  // Create a Tool that wraps the MCP tool
-  const tool: Tool<Record<string, unknown>, unknown> = {
-    name: namespacedName,
+  // Create simple AI SDK tool
+  return {
     description: mcpTool.description || `Tool from ${serverName}`,
-    parameters,
-
-    execute: async (input) => {
+    parameters: mcpTool.inputSchema ? mcpSchemaToAiSdk(mcpTool.inputSchema) : z.object({}),
+    execute: async (args: Record<string, unknown>) => {
       try {
         logger.debug(`Executing MCP tool: ${namespacedName}`, {
           serverName,
           toolName: mcpTool.name,
-          args: input.value,
+          args,
         });
 
-        const result = await executeFn(input.value);
-
-        return {
-          ok: true,
-          value: result,
-        };
+        const result = await executeFn(args);
+        return result;
       } catch (error) {
         logger.error(`MCP tool execution failed: ${namespacedName}`, {
           serverName,
           toolName: mcpTool.name,
           error: formatAnyError(error),
         });
-
-        return {
-          ok: false,
-          error: {
-            kind: "execution" as const,
-            tool: namespacedName,
-            message: formatAnyError(error),
-            cause: error,
-          },
-        };
+        throw error;
       }
     },
   };
-
-  return tool;
 }
 
 /**
- * Type-safe MCP tool with proper inference
+ * Convert MCP schema to AI SDK compatible Zod schema
  */
-export interface TypedMCPTool<TInput extends z.ZodType<unknown>>
-  extends Tool<z.infer<TInput>, unknown> {
-  readonly inputSchema: TInput;
+function mcpSchemaToAiSdk(inputSchema: MCPTool['inputSchema']): z.ZodSchema {
+  if (!inputSchema?.properties) {
+    return z.object({});
+  }
+
+  const shape: Record<string, z.ZodSchema> = {};
+  
+  for (const [key, prop] of Object.entries(inputSchema.properties)) {
+    shape[key] = mcpPropertyToZod(prop);
+  }
+
+  const schema = z.object(shape);
+  
+  // Handle required fields
+  if (inputSchema.required && inputSchema.required.length > 0) {
+    return schema.partial().required(
+      inputSchema.required.reduce((acc, field) => {
+        acc[field] = true;
+        return acc;
+      }, {} as Record<string, true>)
+    );
+  }
+  
+  return schema.partial();
 }
 
-/**
- * Create a strongly-typed MCP tool
- */
-export function createTypedMCPTool<TInput extends z.ZodType<unknown>>(config: {
-  name: string;
-  serverName: string;
-  description?: string;
-  inputSchema: TInput;
-  execute: (args: z.infer<TInput>) => Promise<unknown>;
-}): TypedMCPTool<TInput> {
-  const namespacedName = `mcp__${config.serverName}__${config.name}`;
-
-  const tool: TypedMCPTool<TInput> = {
-    name: namespacedName,
-    description: config.description || `Tool from ${config.serverName}`,
-    parameters: createZodSchema(config.inputSchema),
-    inputSchema: config.inputSchema,
-
-    execute: async (input) => {
-      try {
-        logger.debug(`Executing typed MCP tool: ${namespacedName}`, {
-          serverName: config.serverName,
-          toolName: config.name,
-          args: input.value,
-        });
-
-        const result = await config.execute(input.value);
-
-        return {
-          ok: true,
-          value: result,
-        };
-      } catch (error) {
-        logger.error(`Typed MCP tool execution failed: ${namespacedName}`, {
-          serverName: config.serverName,
-          toolName: config.name,
-          error: formatAnyError(error),
-        });
-
-        return {
-          ok: false,
-          error: {
-            kind: "execution" as const,
-            tool: namespacedName,
-            message: formatAnyError(error),
-            cause: error,
-          },
-        };
+function mcpPropertyToZod(prop: MCPPropertyDefinition): z.ZodSchema {
+  switch (prop.type) {
+    case 'string':
+      return z.string().describe(prop.description || '');
+    case 'number':
+      return z.number().describe(prop.description || '');
+    case 'integer':
+      return z.number().int().describe(prop.description || '');
+    case 'boolean':
+      return z.boolean().describe(prop.description || '');
+    case 'array':
+      const itemSchema = prop.items ? mcpPropertyToZod(prop.items) : z.unknown();
+      return z.array(itemSchema).describe(prop.description || '');
+    case 'object':
+      if (prop.properties) {
+        const shape: Record<string, z.ZodSchema> = {};
+        for (const [key, subProp] of Object.entries(prop.properties)) {
+          shape[key] = mcpPropertyToZod(subProp);
+        }
+        return z.object(shape).describe(prop.description || '');
       }
-    },
-  };
-
-  return tool;
+      return z.record(z.unknown()).describe(prop.description || '');
+    default:
+      return z.unknown().describe(prop.description || '');
+  }
 }
+
+// TypedMCPTool removed - using simple AI SDK tools only

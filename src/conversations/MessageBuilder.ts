@@ -9,7 +9,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 import type { Phase } from "./phases";
 import type { Conversation } from "./types";
 
@@ -114,14 +114,14 @@ Please adjust your behavior according to the new phase requirements.`;
     processedContent: string,
     targetAgentSlug: string,
     conversationId?: string
-  ): Promise<Message> {
+  ): Promise<CoreMessage> {
     const eventAgentSlug = getAgentSlugFromEvent(event);
     const nameRepo = getPubkeyNameRepository();
     const projectCtx = getProjectContext();
 
     // Agent's own message
     if (eventAgentSlug === targetAgentSlug) {
-      return new Message("assistant", processedContent);
+      return { role: "assistant", content: processedContent };
     }
 
     // Check if this is an external delegation response
@@ -150,9 +150,9 @@ Please adjust your behavior according to the new phase requirements.`;
             });
             
             // Format as a delegation response with clear context
-            return new Message("user", 
+            return { role: "user", content: 
               `[DELEGATION RESPONSE from ${responderName}]:\n${processedContent}\n[END DELEGATION RESPONSE]`
-            );
+            };
           }
         }
       } catch (error) {
@@ -180,7 +180,7 @@ Please adjust your behavior according to the new phase requirements.`;
         });
         
         // Format as a system message showing it was directed to other agents (using user name and agent slugs)
-        return new Message("system", `[${userName} → ${targetedAgentSlugs.join(', ')}]: ${processedContent}`);
+        return { role: "system", content: `[${userName} → ${targetedAgentSlugs.join(', ')}]: ${processedContent}` };
       }
       
       // This agent IS a target or it's a broadcast message to all
@@ -194,7 +194,7 @@ Please adjust your behavior according to the new phase requirements.`;
         messageType: "user"
       });
       
-      return new Message("user", processedContent);
+      return { role: "user", content: processedContent };
     }
 
     // Another agent's message - check if it's targeted to specific agents
@@ -217,7 +217,7 @@ Please adjust your behavior according to the new phase requirements.`;
         });
         
         // Use 'user' role so the agent knows to respond, with clear sender → recipient format
-        return new Message("user", `[${sendingAgentSlug} → @${targetAgentSlug}]: ${processedContent}`);
+        return { role: "user", content: `[${sendingAgentSlug} → @${targetAgentSlug}]: ${processedContent}` };
       } else {
         // This agent is NOT targeted - they're just observing
         
@@ -230,7 +230,7 @@ Please adjust your behavior according to the new phase requirements.`;
         });
         
         // Use 'system' role since this agent is just observing
-        return new Message("system", `[${sendingAgentSlug} → ${targetedAgentSlugs.join(', ')}]: ${processedContent}`);
+        return { role: "system", content: `[${sendingAgentSlug} → ${targetedAgentSlugs.join(', ')}]: ${processedContent}` };
       }
     }
     
@@ -243,7 +243,7 @@ Please adjust your behavior according to the new phase requirements.`;
     });
     
     // Use 'system' role for broadcast messages from other agents (no "→ All" suffix)
-    return new Message("system", `[${sendingAgentSlug}]: ${processedContent}`);
+    return { role: "system", content: `[${sendingAgentSlug}]: ${processedContent}` };
   }
 
   /**
@@ -261,23 +261,23 @@ Please adjust your behavior according to the new phase requirements.`;
    */
   static formatSystemMessage(content: string, attribution?: string): Message {
     if (attribution) {
-      return new Message("system", `[${attribution}]: ${content}`);
+      return { role: "system", content: `[${attribution}]: ${content}` };
     }
-    return new Message("system", content);
+    return { role: "system", content };
   }
 
   /**
    * Create a user message
    */
   static formatUserMessage(content: string): Message {
-    return new Message("user", content);
+    return { role: "user", content };
   }
 
   /**
    * Create an assistant message
    */
   static formatAssistantMessage(content: string): Message {
-    return new Message("assistant", content);
+    return { role: "assistant", content };
   }
 
   /**
@@ -302,7 +302,7 @@ Please adjust your behavior according to the new phase requirements.`;
     events: NDKEvent[], 
     agentSlug: string,
     delegationSummary?: string
-  ): Promise<Message> {
+  ): Promise<CoreMessage> {
     let contextBlock = "=== MESSAGES WHILE YOU WERE AWAY ===\n\n";
 
     if (delegationSummary) {
@@ -320,7 +320,7 @@ Please adjust your behavior according to the new phase requirements.`;
     contextBlock += "=== END OF HISTORY ===\n";
     contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
 
-    return new Message("system", contextBlock);
+    return { role: "system", content: contextBlock };
   }
 
   /**
@@ -329,7 +329,7 @@ Please adjust your behavior according to the new phase requirements.`;
   static buildDelegationResponsesBlock(
     responses: Map<string, NDKEvent>, 
     originalRequest: string
-  ): Message {
+  ): CoreMessage {
     let message = "=== DELEGATE RESPONSES RECEIVED ===\n\n";
     message += `You previously delegated the following request to ${responses.size} agent(s):\n`;
     message += `"${originalRequest}"\n\n`;
@@ -346,7 +346,7 @@ Please adjust your behavior according to the new phase requirements.`;
     message += "=== END OF DELEGATE RESPONSES ===\n\n";
     message += "Now process these responses and complete your task.";
 
-    return new Message("system", message);
+    return { role: "system", content: message };
   }
 
   /**

@@ -1,14 +1,7 @@
+import { tool } from 'ai';
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
-import type {
-  ExecutionContext,
-  ParameterSchema,
-  Result,
-  Tool,
-  ToolError,
-  Validated,
-} from "@/tools/types";
-import { createZodSchema, failure, success } from "@/tools/types";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import type { NDKFilter } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
@@ -19,16 +12,108 @@ const mcpDiscoverSchema = z.object({
   limit: z.coerce.number().default(50).describe("Maximum number of tools to return"),
 });
 
-// Define the output type - returns markdown formatted string
-interface McpDiscoverOutput {
+type McpDiscoverInput = z.infer<typeof mcpDiscoverSchema>;
+type McpDiscoverOutput = {
   markdown: string;
   toolsFound: number;
+};
+
+// Core implementation - extracted from existing execute function
+async function executeMcpDiscover(input: McpDiscoverInput, _context: ExecutionContext): Promise<McpDiscoverOutput> {
+  const { searchText, limit = 50 } = input;
+  const ndk = getNDK();
+
+  // Build filter for kind:4200 (NDKMCPTool)
+  const filter: NDKFilter = {
+    kinds: NDKMCPTool.kinds,
+  };
+
+  logger.debug("Discovering NDKMCPTool events", { filter });
+
+  // Fetch events from network
+  const events = await ndk.fetchEvents(filter, {
+    closeOnEose: true,
+    groupable: false,
+  });
+
+  logger.info(`Found ${events.size} NDKMCPTool events`);
+
+  // Convert to NDKMCPTool instances and extract metadata
+  const discoveredTools: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    command?: string;
+    image?: string;
+    slug: string;
+    authorPubkey: string;
+    createdAt?: number;
+  }> = [];
+
+  for (const event of Array.from(events)) {
+    const mcpTool = NDKMCPTool.from(event);
+
+    // Get bech32 encoded ID
+    const bech32Id = mcpTool.encode();
+
+    const discovered = {
+      id: bech32Id,
+      name: mcpTool.name || "Unnamed Tool",
+      description: mcpTool.description,
+      command: mcpTool.command,
+      image: mcpTool.image,
+      slug: mcpTool.slug,
+      authorPubkey: mcpTool.pubkey,
+      createdAt: mcpTool.created_at,
+    };
+
+    discoveredTools.push(discovered);
+  }
+
+  // Apply local filtering if specified
+  let filtered = discoveredTools;
+
+  if (searchText) {
+    const searchLower = searchText.toLowerCase();
+    filtered = discoveredTools.filter((tool) => {
+      const searchableText = [tool.name, tool.description || "", tool.command || ""]
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(searchLower);
+    });
+  }
+
+  // Sort by creation time (newest first)
+  filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  // Limit results
+  if (limit && filtered.length > limit) {
+    filtered = filtered.slice(0, limit);
+  }
+
+  logger.info(`Returning ${filtered.length} MCP tools after filtering`);
+
+  // Format as markdown
+  const markdown = formatToolsAsMarkdown(filtered);
+
+  return {
+    markdown,
+    toolsFound: filtered.length,
+  };
 }
 
-/**
- * Tool: mcp_discover
- * Discover MCP tool definitions from the Nostr network
- */
+// AI SDK tool factory
+export function createMcpDiscoverTool(context: ExecutionContext) {
+  return tool({
+    description: "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
+    parameters: mcpDiscoverSchema,
+    execute: async (input: McpDiscoverInput) => {
+      return await executeMcpDiscover(input, context);
+    },
+  });
+}
+
 /**
  * Format discovered tools as markdown
  */
@@ -64,109 +149,3 @@ function formatToolsAsMarkdown(
   return lines.join("\n");
 }
 
-export const mcpDiscover: Tool<z.input<typeof mcpDiscoverSchema>, McpDiscoverOutput> = {
-  name: "discover_capabilities",
-  description:
-    "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
-  promptFragment:
-    "When showing the tools to the user, just use their nostr:id, the frontend will display them properly. You cannot install MCP tools directly, you can only suggest them to the user.",
-  parameters: createZodSchema(mcpDiscoverSchema) as ParameterSchema<
-    z.input<typeof mcpDiscoverSchema>
-  >,
-  execute: async (
-    input: Validated<z.input<typeof mcpDiscoverSchema>>,
-    _context: ExecutionContext
-  ): Promise<Result<ToolError, McpDiscoverOutput>> => {
-    try {
-      const { searchText, limit = 50 } = input.value;
-      const ndk = getNDK();
-
-      // Build filter for kind:4200 (NDKMCPTool)
-      const filter: NDKFilter = {
-        kinds: NDKMCPTool.kinds,
-      };
-
-      logger.debug("Discovering NDKMCPTool events", { filter });
-
-      // Fetch events from network
-      const events = await ndk.fetchEvents(filter, {
-        closeOnEose: true,
-        groupable: false,
-      });
-
-      logger.info(`Found ${events.size} NDKMCPTool events`);
-
-      // Convert to NDKMCPTool instances and extract metadata
-      const discoveredTools: Array<{
-        id: string;
-        name: string;
-        description?: string;
-        command?: string;
-        image?: string;
-        slug: string;
-        authorPubkey: string;
-        createdAt?: number;
-      }> = [];
-
-      for (const event of Array.from(events)) {
-        const mcpTool = NDKMCPTool.from(event);
-
-        // Get bech32 encoded ID
-        const bech32Id = mcpTool.encode();
-
-        const discovered = {
-          id: bech32Id,
-          name: mcpTool.name || "Unnamed Tool",
-          description: mcpTool.description,
-          command: mcpTool.command,
-          image: mcpTool.image,
-          slug: mcpTool.slug,
-          authorPubkey: mcpTool.pubkey,
-          createdAt: mcpTool.created_at,
-        };
-
-        discoveredTools.push(discovered);
-      }
-
-      // Apply local filtering if specified
-      let filtered = discoveredTools;
-
-      if (searchText) {
-        const searchLower = searchText.toLowerCase();
-        filtered = discoveredTools.filter((tool) => {
-          const searchableText = [tool.name, tool.description || "", tool.command || ""]
-            .join(" ")
-            .toLowerCase();
-
-          return searchableText.includes(searchLower);
-        });
-      }
-
-      // Sort by creation time (newest first)
-      filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-      // Limit results
-      if (limit && filtered.length > limit) {
-        filtered = filtered.slice(0, limit);
-      }
-
-      logger.info(`Returning ${filtered.length} MCP tools after filtering`);
-
-      // Format as markdown
-      const markdown = formatToolsAsMarkdown(filtered);
-
-      return success({
-        markdown,
-        toolsFound: filtered.length,
-      });
-    } catch (error) {
-      logger.error("Failed to discover MCP tools", { error });
-      return failure({
-        kind: "execution",
-        tool: "discover_capabilities",
-        message: error instanceof Error ? error.message : String(error),
-        cause: error,
-      });
-    }
-  },
-};

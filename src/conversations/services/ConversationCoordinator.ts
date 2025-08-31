@@ -1,7 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { logger, logInfo } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 import { AgentConversationContext } from "../AgentConversationContext";
 import { MessageBuilder } from "../MessageBuilder";
 import { ensureExecutionTimeInitialized } from "../executionTime";
@@ -233,7 +233,7 @@ export class ConversationCoordinator {
     conversationId: string,
     targetAgent: AgentInstance,
     triggeringEvent?: NDKEvent
-  ): Promise<{ messages: Message[]; claudeSessionId?: string }> {
+  ): Promise<{ messages: CoreMessage[]; claudeSessionId?: string }> {
     const conversation = this.store.get(conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);

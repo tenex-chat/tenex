@@ -1,16 +1,15 @@
-import type { LLMService, StreamEvent, Tool } from "@/llm/types";
 import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
-import type { ToolExecutionResult } from "@/tools/executor";
+// ToolExecutionResult removed - using AI SDK tools only
+import { getToolsObject } from "@/tools/registry";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger, logInfo, logError } from "@/utils/logger";
 import { detectAndStripEOM } from "@/utils/eom-utils";
-import { formatToolResultAsString } from "@/utils/tool-result-formatter";
-import { Message } from "multi-llm-ts";
 import { StreamStateManager } from "./StreamStateManager";
 import { ToolStreamHandler } from "./ToolStreamHandler";
 import type { ExecutionContext } from "./types";
+import type { CoreMessage } from "ai";
 
 // Maximum iterations to prevent infinite loops
 const MAX_ITERATIONS = 20;
@@ -24,14 +23,14 @@ export class ReasonActLoop {
   private agentPublisher!: AgentPublisher;
   private hasGeneratedContentPreviously = false;
 
-  constructor(private llmService: LLMService) {
-    // AgentPublisher and AgentStreamer will be initialized in execute() when we have the agent
+  constructor(private llmService: any) {
+    // AgentPublisher will be initialized in execute() when we have the agent
   }
 
   /**
    * Core execution implementation for all agents
    */
-  async execute(messages: Array<Message>, tools: Tool[], context: ExecutionContext): Promise<void> {
+  async execute(messages: Array<CoreMessage>, tools: any[], context: ExecutionContext): Promise<void> {
     this.startTime = Date.now();
     this.hasGeneratedContentPreviously = false; // Reset for each execution
 
@@ -40,19 +39,18 @@ export class ReasonActLoop {
 
     // Execute the streaming loop
     const generator = this.executeStreamingInternal(context, messages, tools);
-
+    
     // Drain the generator
-    let iterResult: IteratorResult<StreamEvent, void>;
-    do {
-      iterResult = await generator.next();
-    } while (!iterResult.done);
+    for await (const _ of generator) {
+      // Just drain it
+    }
   }
 
   async *executeStreamingInternal(
     context: ExecutionContext,
-    messages: Message[],
+    messages: CoreMessage[],
     tools?: Tool[]
-  ): AsyncGenerator<StreamEvent, void, unknown> {
+  ): AsyncGenerator<any, void, unknown> {
 
     // Initialize handlers
     const stateManager = new StreamStateManager();
@@ -64,10 +62,10 @@ export class ReasonActLoop {
     const conversationMessages = [...messages];
     
     // Add initial EOM instruction
-    const eomInstruction = new Message(
-      "system",
-      "When you have fully completed your task and have no further actions to take, you MUST put '=== EOM ===' on a new line by itself at the very end of your response. Do not include '=== EOM ===' if you plan to continue with more actions."
-    );
+    const eomInstruction: CoreMessage = {
+      role: "system",
+      content: "When you have fully completed your task and have no further actions to take, you MUST put '=== EOM ===' on a new line by itself at the very end of your response. Do not include '=== EOM ===' if you plan to continue with more actions."
+    };
     conversationMessages.push(eomInstruction);
     
     let iterations = 0;
@@ -160,7 +158,7 @@ export class ReasonActLoop {
           if (hasEOM) {
             // Agent explicitly marked completion with EOM
             // Add FULL content (WITH EOM) to conversation so LLM knows it marked completion
-            conversationMessages.push(new Message("assistant", bufferedContent));
+            conversationMessages.push({ role: "assistant", content: bufferedContent });
             // Clear the buffer and re-add only the clean content (without the EOM marker) for publishing
             this.agentPublisher.clearBuffer();
             if (cleanContent.trim().length > 0) {
@@ -179,11 +177,11 @@ export class ReasonActLoop {
             shouldContinueLoop = false;
           } else {
             // No EOM marker - add reminder and continue
-            conversationMessages.push(new Message("assistant", bufferedContent));
-            const reminderMessage = new Message(
-              "system",
-              "If you are done with your work, put '=== EOM ===' on its own line. Otherwise, continue with your planned actions."
-            );
+            conversationMessages.push({ role: "assistant", content: bufferedContent });
+            const reminderMessage: CoreMessage = {
+              role: "system",
+              content: "If you are done with your work, put '=== EOM ===' on its own line. Otherwise, continue with your planned actions."
+            };
             conversationMessages.push(reminderMessage);
             this.hasGeneratedContentPreviously = true;
             logInfo(
@@ -307,70 +305,73 @@ export class ReasonActLoop {
    * Process a single iteration of the stream and collect results
    */
   private async processIterationStream(
-    stream: AsyncIterable<StreamEvent>,
+    stream: any, // AI SDK stream result
     stateManager: StreamStateManager,
     toolHandler: ToolStreamHandler,
     eventContext: EventContext,
     context: ExecutionContext,
-    messages: Message[]
+    messages: CoreMessage[]
   ): Promise<{
-    events: StreamEvent[];
+    events: any[];
     hasToolCalls: boolean;
-    toolResults: ToolExecutionResult[];
+    toolResults: any[];
     assistantMessage: string;
   }> {
-    const events: StreamEvent[] = [];
+    const events: any[] = [];
     let hasToolCalls = false;
-    const toolResults: ToolExecutionResult[] = [];
+    const toolResults: any[] = [];
     let assistantMessage = "";
 
-    for await (const event of stream) {
+    // Process AI SDK stream
+    for await (const chunk of stream.fullStream) {
       logger.info("[processIterationStream]", {
         agent: context.agent.name,
-        type: event.type,
-        content: event.content,
+        type: chunk.type,
+        content: (chunk as any).textDelta || (chunk as any).toolName,
       });
-      events.push(event);
+      events.push(chunk);
 
-      switch (event.type) {
-        case "content":
-          await this.handleContentEvent(event, stateManager, eventContext, context);
-          // Buffer content instead of streaming immediately
-          // We'll decide whether to output it after processing all events
-          assistantMessage += event.content;
-          break;
-
-        case "tool_start": {
-          hasToolCalls = true;
-          break;
-        }
-
-        case "tool_complete": {
-          hasToolCalls = true;
-
-          const toolResult = await toolHandler.handleToolCompleteEvent(event, context);
-          toolResults.push(toolResult);
-          break;
-        }
-
-        case "done":
-          if (event.response) {
-            stateManager.setFinalResponse(event.response);
-            
-            // Log LLM metadata for debugging
-            logger.info("[ReasonActLoop] Received 'done' event", {
-              hasResponse: !!event.response,
-              model: event.response.model,
-              hasUsage: !!event.response.usage,
-            });
+      switch (chunk.type) {
+        case "text-delta":
+          const delta = (chunk as any).textDelta || '';
+          if (delta) {
+            assistantMessage += delta;
+            await this.agentPublisher.addStreamContent(delta, eventContext);
+            stateManager.appendContent(delta);
           }
           break;
 
-        case "error":
-          await this.handleErrorEvent(event, stateManager, eventContext);
+        case "tool-call": {
+          hasToolCalls = true;
+          // Tool call is starting
+          const toolName = (chunk as any).toolName;
+          const toolArgs = (chunk as any).args || {};
+          logger.info("[ReasonActLoop] Tool call starting", { toolName, toolArgs });
           break;
+        }
+
+        case "tool-result": {
+          hasToolCalls = true;
+          // Tool result received
+          const toolResult = (chunk as any).result;
+          logger.info("[ReasonActLoop] Tool result received", { toolResult });
+          break;
+        }
+
+        case "finish":
+          // Stream finished
+          logger.info("[ReasonActLoop] Stream finished");
+          break;
+
+        case "error":
+          const error = (chunk as any).error;
+          logger.error("[ReasonActLoop] Stream error", { error });
+          throw error;
+          break;
+          
         default:
-          logger.warn("[ReasonActLoop] Unhandled type!", event);
+          // Other chunk types (step-finish, etc.)
+          logger.debug("[ReasonActLoop] Other chunk type", { type: chunk.type });
       }
     }
 
@@ -416,11 +417,11 @@ export class ReasonActLoop {
 
   // Remove finalizeStream method as it's no longer needed
 
-  private createLLMStream(
+  private async createLLMStream(
     context: ExecutionContext,
-    messages: Message[],
+    messages: CoreMessage[],
     tools?: Tool[]
-  ): ReturnType<LLMService["stream"]> {
+  ) {
     const messagesPreview = messages.map((msg, index) => {
       const isToolResult = msg.role === "user" && msg.content.includes("Tool [");
       const preview = isToolResult
@@ -441,25 +442,19 @@ export class ReasonActLoop {
       messagesPreview
     });
 
-    return this.llmService.stream({
-      messages,
-      options: {
-        configName: context.agent.llmConfig,
-        agentName: context.agent.slug,
-      },
-      tools,
-      toolContext: {
-        ...context,
-        conversationCoordinator: context.conversationCoordinator,
-        agentPublisher: this.agentPublisher,
-      },
-    });
+    // Get AI SDK tools directly
+    const toolNames = tools?.map(t => t.name) || [];
+    const aiTools = toolNames.length > 0 ? getToolsObject(toolNames, context) : undefined;
+    
+    // Use the agent's llmConfig as the model string (will be resolved by LLMService)
+    const modelString = context.agent.llmConfig || "default";
+    return this.llmService.stream(modelString, messages, { tools: aiTools });
   }
 
   // Remove createStreamHandle method as it's no longer needed
 
-  private createFinalEvent(stateManager: StreamStateManager): StreamEvent {
-    const baseEvent: StreamEvent = {
+  private createFinalEvent(stateManager: StreamStateManager): any {
+    const baseEvent: any = {
       type: "done",
       response: stateManager.getFinalResponse() || {
         type: "text",
@@ -471,13 +466,13 @@ export class ReasonActLoop {
     // Add additional properties for AgentExecutor
     return Object.assign(baseEvent, {
       termination: undefined,
-    }) as StreamEvent;
+    });
   }
 
   private async *handleError(
     error: unknown,
     context: ExecutionContext
-  ): AsyncGenerator<StreamEvent> {
+  ): AsyncGenerator<any> {
     logError(
       "Streaming error",
       error,

@@ -1,33 +1,21 @@
+import { tool } from 'ai';
 import { getNDK } from "@/nostr";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
-import type {
-  ExecutionContext,
-  ParameterSchema,
-  Result,
-  Tool,
-  ToolError,
-  Validated,
-} from "@/tools/types";
-import { createZodSchema, failure, success } from "@/tools/types";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 
-// Define the input schema
 const agentsDiscoverSchema = z.object({
   searchText: z.string().optional().describe("Text to search for in agent name/description/role"),
   limit: z.coerce.number().default(50).describe("Maximum number of agents to return"),
 });
 
-// Define the output type - returns markdown formatted string
-interface AgentsDiscoverOutput {
+type AgentsDiscoverInput = z.infer<typeof agentsDiscoverSchema>;
+type AgentsDiscoverOutput = {
   markdown: string;
   agentsFound: number;
-}
+};
 
-/**
- * Tool: agents_discover
- * Discover AgentDefinition events from the Nostr network
- */
 /**
  * Format discovered agents as markdown
  */
@@ -62,68 +50,72 @@ function formatAgentsAsMarkdown(
   return lines.join("\n");
 }
 
-export const agentsDiscover: Tool<z.input<typeof agentsDiscoverSchema>, AgentsDiscoverOutput> = {
-  name: "agents_discover",
-  description:
-    "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
-  promptFragment:
-    "When showing the agents to the user, just use their nostr:id, the frontend will display them properly. You cannot use agents directly, you can only suggest them to the user.",
-  parameters: createZodSchema(agentsDiscoverSchema) as ParameterSchema<
-    z.input<typeof agentsDiscoverSchema>
-  >,
-  execute: async (
-    input: Validated<z.input<typeof agentsDiscoverSchema>>,
-    _context: ExecutionContext
-  ): Promise<Result<ToolError, AgentsDiscoverOutput>> => {
-    try {
-      const { searchText, limit = 50 } = input.value;
+/**
+ * Core implementation of the agents_discover functionality
+ * Shared between AI SDK and legacy Tool interfaces
+ */
+async function executeAgentsDiscover(
+  input: AgentsDiscoverInput,
+  context: ExecutionContext
+): Promise<AgentsDiscoverOutput> {
+  const { searchText, limit = 50 } = input;
 
-      const ndk = getNDK();
-      const discovery = new NDKAgentDiscovery(ndk);
+  const ndk = getNDK();
+  const discovery = new NDKAgentDiscovery(ndk);
 
-      // Discover agents with specified filters
-      const agents = await discovery.discoverAgents({
-        searchText,
-      });
+  // Discover agents with specified filters
+  const agents = await discovery.discoverAgents({
+    searchText,
+  });
 
-      // Format results with bech32 encoded IDs
-      let results = agents.map((agent) => {
-        // Get bech32 encoded ID from the NDKAgentDefinition event
-        const bech32Id = agent.encode();
+  // Format results with bech32 encoded IDs
+  let results = agents.map((agent) => {
+    // Get bech32 encoded ID from the NDKAgentDefinition event
+    const bech32Id = agent.encode();
 
-        return {
-          id: bech32Id,
-          title: agent.title || "Unnamed Agent",
-          role: agent.role || "assistant",
-          description: agent.description,
-          useCriteria: agent.useCriteria,
-          authorPubkey: agent.pubkey,
-          createdAt: agent.created_at,
-        };
-      });
+    return {
+      id: bech32Id,
+      title: agent.title || "Unnamed Agent",
+      role: agent.role || "assistant",
+      description: agent.description,
+      useCriteria: agent.useCriteria,
+      authorPubkey: agent.pubkey,
+      createdAt: agent.created_at,
+    };
+  });
 
-      // Apply limit if specified
-      if (limit && results.length > limit) {
-        results = results.slice(0, limit);
+  // Apply limit if specified
+  if (limit && results.length > limit) {
+    results = results.slice(0, limit);
+  }
+
+  logger.info(`Returning ${results.length} AgentDefinition events after limiting`);
+
+  // Format as markdown
+  const markdown = formatAgentsAsMarkdown(results);
+
+  return {
+    markdown,
+    agentsFound: results.length,
+  };
+}
+
+/**
+ * Create an AI SDK tool for discovering agents
+ * This is the primary implementation
+ */
+export function createAgentsDiscoverTool(context: ExecutionContext) {
+  return tool({
+    description: "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
+    parameters: agentsDiscoverSchema,
+    execute: async (input: AgentsDiscoverInput) => {
+      try {
+        return await executeAgentsDiscover(input, context);
+      } catch (error) {
+        logger.error("Failed to discover agents", { error });
+        throw new Error(`Failed to discover agents: ${error instanceof Error ? error.message : String(error)}`);
       }
+    },
+  });
+}
 
-      logger.info(`Returning ${results.length} AgentDefinition events after limiting`);
-
-      // Format as markdown
-      const markdown = formatAgentsAsMarkdown(results);
-
-      return success({
-        markdown,
-        agentsFound: results.length,
-      });
-    } catch (error) {
-      logger.error("Failed to discover agents", { error });
-      return failure({
-        kind: "execution",
-        tool: "agents_discover",
-        message: error instanceof Error ? error.message : String(error),
-        cause: error,
-      });
-    }
-  },
-};

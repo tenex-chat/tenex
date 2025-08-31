@@ -1,69 +1,622 @@
-import type { LLMProvider, ResolvedLLMConfig } from "@/llm/types";
+import type { TenexLLMs, LLMConfiguration } from "@/services/config/types";
 import { configService } from "@/services";
-import type { TenexLLMs } from "@/services/config/types";
 import inquirer from "inquirer";
-import { LLM_DEFAULTS } from "./constants";
-import { ModelSelector } from "./selection/ModelSelector";
-import { LLMTester } from "./testing/LLMTester";
-import { LLMConfigUI, type LLMConfigWithName } from "./ui/LLMConfigUI";
+import searchCheckbox from "@inquirer/search";
+import chalk from "chalk";
+import { AI_SDK_PROVIDERS } from "./types";
+import type { AISdkProvider } from "./types";
+import { fetchOpenRouterModels, getPopularModels } from "./providers/openrouter-models";
+import type { OpenRouterModel } from "./providers/openrouter-models";
 
 /**
- * LLM Configuration Editor - Orchestrates configuration management
- * Now focused purely on business logic, delegating to specialized utilities
+ * LLM Configuration Editor for managing named configurations
  */
 export class LLMConfigEditor {
-  private ui: LLMConfigUI;
-  private modelSelector: ModelSelector;
-  private tester: LLMTester;
-
   constructor(
     private configPath: string,
     private isGlobal = true
-  ) {
-    this.ui = new LLMConfigUI(isGlobal);
-    this.modelSelector = new ModelSelector();
-    this.tester = new LLMTester();
-  }
+  ) {}
 
   async showMainMenu(): Promise<void> {
     const llmsConfig = await this.loadConfig();
-    const configs = this.getConfigList(llmsConfig);
-
-    this.ui.displayCurrentConfigurations(configs, llmsConfig);
-
-    const action = await this.ui.promptMainMenuAction(configs, llmsConfig);
-    await this.handleMenuAction(action, llmsConfig);
-
+    
+    console.log(chalk.cyan("\n=== LLM Configuration ===\n"));
+    this.displayCurrentConfig(llmsConfig);
+    
+    const choices = [
+      { name: "Configure provider API keys", value: "providers" },
+      { name: "Add new configuration", value: "add" },
+      { name: "Edit existing configuration", value: "edit" },
+      { name: "Delete configuration", value: "delete" },
+      { name: "Change default configuration", value: "default" },
+      { name: "Test configuration", value: "test" },
+      { name: "Exit", value: "exit" }
+    ];
+    
+    const { action } = await inquirer.prompt([{
+      type: "list",
+      name: "action",
+      message: "What would you like to do?",
+      choices
+    }]);
+    
+    switch (action) {
+      case "providers":
+        await this.configureProviders(llmsConfig);
+        break;
+      case "add":
+        await this.addConfiguration(llmsConfig);
+        break;
+      case "edit":
+        await this.editConfiguration(llmsConfig);
+        break;
+      case "delete":
+        await this.deleteConfiguration(llmsConfig);
+        break;
+      case "default":
+        await this.setDefaultConfiguration(llmsConfig);
+        break;
+      case "test":
+        await this.testConfiguration(llmsConfig);
+        break;
+      case "exit":
+        return;
+    }
+    
     if (action !== "exit") {
       await this.showMainMenu();
     }
   }
 
   async runOnboardingFlow(): Promise<void> {
-    this.ui.displayMessages.setupStart();
-    let hasAddedConfig = false;
+    console.log(chalk.green("\n🚀 Welcome to TENEX LLM Setup!\n"));
+    console.log("Let's configure your AI providers and create your first configuration.\n");
+    
+    const llmsConfig = await this.loadConfig();
+    
+    // Step 1: Configure at least one provider
+    console.log(chalk.cyan("Step 1: Configure Provider API Keys"));
+    await this.configureProviders(llmsConfig);
+    
+    // Step 2: Create first configuration
+    console.log(chalk.cyan("\nStep 2: Create Your First Configuration"));
+    await this.addConfiguration(llmsConfig, true);
+    
+    // Step 3: Test configuration
+    const { shouldTest } = await inquirer.prompt([{
+      type: "confirm",
+      name: "shouldTest",
+      message: "Would you like to test your configuration?",
+      default: true
+    }]);
+    
+    if (shouldTest) {
+      await this.testConfiguration(llmsConfig);
+    }
+    
+    console.log(chalk.green("\n✅ LLM configuration complete!"));
+  }
 
-    while (true) {
-      const llmsConfig = await this.loadConfig();
-      const configs = this.getConfigList(llmsConfig);
-
-      this.ui.displayCurrentConfigurations(configs, llmsConfig);
-
-      const action = await this.ui.promptOnboardingAction(configs, llmsConfig, hasAddedConfig);
-
-      if (action === "add") {
-        await this.addConfiguration(llmsConfig);
-        hasAddedConfig = true;
-      } else if (action === "continue") {
-        this.ui.displayMessages.configurationComplete();
-        return;
-      } else {
-        await this.handleMenuAction(action, llmsConfig);
+  private async configureProviders(llmsConfig: TenexLLMs): Promise<void> {
+    const { providers } = await inquirer.prompt([{
+      type: "checkbox",
+      name: "providers",
+      message: "Select providers to configure:",
+      choices: AI_SDK_PROVIDERS.map(p => ({
+        name: this.getProviderDisplayName(p),
+        value: p,
+        checked: !!llmsConfig.providers[p]?.apiKey
+      }))
+    }]);
+    
+    for (const provider of providers) {
+      const currentKey = llmsConfig.providers[provider]?.apiKey;
+      const { apiKey } = await inquirer.prompt([{
+        type: "password",
+        name: "apiKey",
+        message: `Enter API key for ${this.getProviderDisplayName(provider)}:`,
+        default: currentKey,
+        mask: "*",
+        validate: (input: string) => {
+          if (!input.trim()) return "API key is required";
+          return true;
+        }
+      }]);
+      
+      if (!llmsConfig.providers[provider]) {
+        llmsConfig.providers[provider] = { apiKey: "" };
       }
+      llmsConfig.providers[provider]!.apiKey = apiKey;
+    }
+    
+    await this.saveConfig(llmsConfig);
+    console.log(chalk.green("✅ Provider API keys configured"));
+  }
+
+  private async addConfiguration(llmsConfig: TenexLLMs, isFirstConfig = false): Promise<void> {
+    const configuredProviders = Object.keys(llmsConfig.providers).filter(
+      p => llmsConfig.providers[p]?.apiKey
+    );
+    
+    if (configuredProviders.length === 0) {
+      console.log(chalk.yellow("⚠️  No providers configured. Please configure API keys first."));
+      return;
+    }
+    
+    // Get configuration name
+    const { name } = await inquirer.prompt([{
+      type: "input",
+      name: "name",
+      message: "Configuration name:",
+      default: isFirstConfig ? "default" : undefined,
+      validate: (input: string) => {
+        if (!input.trim()) return "Name is required";
+        if (llmsConfig.configurations[input]) return "Configuration already exists";
+        return true;
+      }
+    }]);
+    
+    // Select provider
+    const { provider } = await inquirer.prompt([{
+      type: "list",
+      name: "provider",
+      message: "Select provider:",
+      choices: configuredProviders.map(p => ({
+        name: this.getProviderDisplayName(p),
+        value: p
+      }))
+    }]);
+    
+    // Select model
+    let model: string;
+    if (provider === 'openrouter') {
+      model = await this.selectOpenRouterModel();
+    } else {
+      const { inputModel } = await inquirer.prompt([{
+        type: "input",
+        name: "inputModel",
+        message: "Enter model name:",
+        default: this.getDefaultModelForProvider(provider as AISdkProvider),
+        validate: (input: string) => {
+          if (!input.trim()) return "Model name is required";
+          return true;
+        }
+      }]);
+      model = inputModel;
+    }
+    
+    // Additional settings
+    const { temperature, maxTokens } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "temperature",
+        message: "Temperature (0-2, press enter to skip):",
+        validate: (input: string) => {
+          if (!input) return true;
+          const num = parseFloat(input);
+          if (isNaN(num) || num < 0 || num > 2) return "Temperature must be between 0 and 2";
+          return true;
+        }
+      },
+      {
+        type: "input",
+        name: "maxTokens",
+        message: "Max tokens (press enter to skip):",
+        validate: (input: string) => {
+          if (!input) return true;
+          const num = parseInt(input);
+          if (isNaN(num) || num <= 0) return "Max tokens must be a positive number";
+          return true;
+        }
+      }
+    ]);
+    
+    // Create configuration
+    const config: LLMConfiguration = {
+      provider,
+      model
+    };
+    
+    if (temperature) config.temperature = parseFloat(temperature);
+    if (maxTokens) config.maxTokens = parseInt(maxTokens);
+    
+    llmsConfig.configurations[name] = config;
+    
+    // Set as default if it's the first configuration or if user wants
+    if (isFirstConfig || !llmsConfig.default) {
+      llmsConfig.default = name;
+      console.log(chalk.green(`✅ Configuration "${name}" created and set as default`));
+    } else {
+      const { setAsDefault } = await inquirer.prompt([{
+        type: "confirm",
+        name: "setAsDefault",
+        message: "Set as default configuration?",
+        default: false
+      }]);
+      
+      if (setAsDefault) {
+        llmsConfig.default = name;
+      }
+      console.log(chalk.green(`✅ Configuration "${name}" created`));
+    }
+    
+    await this.saveConfig(llmsConfig);
+  }
+
+  private async editConfiguration(llmsConfig: TenexLLMs): Promise<void> {
+    const configNames = Object.keys(llmsConfig.configurations);
+    
+    if (configNames.length === 0) {
+      console.log(chalk.yellow("⚠️  No configurations to edit"));
+      return;
+    }
+    
+    const { name } = await inquirer.prompt([{
+      type: "list",
+      name: "name",
+      message: "Select configuration to edit:",
+      choices: configNames.map(n => ({
+        name: n === llmsConfig.default ? `${n} (default)` : n,
+        value: n
+      }))
+    }]);
+    
+    const config = llmsConfig.configurations[name];
+    
+    // Edit provider
+    const configuredProviders = Object.keys(llmsConfig.providers).filter(
+      p => llmsConfig.providers[p]?.apiKey
+    );
+    
+    const { provider } = await inquirer.prompt([{
+      type: "list",
+      name: "provider",
+      message: "Provider:",
+      default: config.provider,
+      choices: configuredProviders.map(p => ({
+        name: this.getProviderDisplayName(p),
+        value: p
+      }))
+    }]);
+    
+    // Edit model
+    let model: string;
+    if (provider === 'openrouter') {
+      model = await this.selectOpenRouterModel(config.model);
+    } else {
+      const { inputModel } = await inquirer.prompt([{
+        type: "input",
+        name: "inputModel",
+        message: "Model name:",
+        default: config.model,
+        validate: (input: string) => {
+          if (!input.trim()) return "Model name is required";
+          return true;
+        }
+      }]);
+      model = inputModel;
+    }
+    
+    // Edit additional settings
+    const { temperature, maxTokens } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "temperature",
+        message: "Temperature (0-2, press enter to skip):",
+        default: config.temperature?.toString(),
+        validate: (input: string) => {
+          if (!input) return true;
+          const num = parseFloat(input);
+          if (isNaN(num) || num < 0 || num > 2) return "Temperature must be between 0 and 2";
+          return true;
+        }
+      },
+      {
+        type: "input",
+        name: "maxTokens",
+        message: "Max tokens (press enter to skip):",
+        default: config.maxTokens?.toString(),
+        validate: (input: string) => {
+          if (!input) return true;
+          const num = parseInt(input);
+          if (isNaN(num) || num <= 0) return "Max tokens must be a positive number";
+          return true;
+        }
+      }
+    ]);
+    
+    // Update configuration
+    llmsConfig.configurations[name] = {
+      provider,
+      model,
+      ...(temperature && { temperature: parseFloat(temperature) }),
+      ...(maxTokens && { maxTokens: parseInt(maxTokens) })
+    };
+    
+    await this.saveConfig(llmsConfig);
+    console.log(chalk.green(`✅ Configuration "${name}" updated`));
+  }
+
+  private async deleteConfiguration(llmsConfig: TenexLLMs): Promise<void> {
+    const configNames = Object.keys(llmsConfig.configurations);
+    
+    if (configNames.length === 0) {
+      console.log(chalk.yellow("⚠️  No configurations to delete"));
+      return;
+    }
+    
+    const { name } = await inquirer.prompt([{
+      type: "list",
+      name: "name",
+      message: "Select configuration to delete:",
+      choices: configNames.map(n => ({
+        name: n === llmsConfig.default ? `${n} (default)` : n,
+        value: n
+      }))
+    }]);
+    
+    const { confirm } = await inquirer.prompt([{
+      type: "confirm",
+      name: "confirm",
+      message: `Are you sure you want to delete "${name}"?`,
+      default: false
+    }]);
+    
+    if (confirm) {
+      delete llmsConfig.configurations[name];
+      
+      // Update default if needed
+      if (llmsConfig.default === name) {
+        const remaining = Object.keys(llmsConfig.configurations);
+        llmsConfig.default = remaining.length > 0 ? remaining[0] : undefined;
+        
+        if (llmsConfig.default) {
+          console.log(chalk.yellow(`Default changed to "${llmsConfig.default}"`));
+        }
+      }
+      
+      await this.saveConfig(llmsConfig);
+      console.log(chalk.green(`✅ Configuration "${name}" deleted`));
     }
   }
 
-  // Configuration Management - Delegates to ConfigService
+  private async setDefaultConfiguration(llmsConfig: TenexLLMs): Promise<void> {
+    const configNames = Object.keys(llmsConfig.configurations);
+    
+    if (configNames.length === 0) {
+      console.log(chalk.yellow("⚠️  No configurations available"));
+      return;
+    }
+    
+    const { name } = await inquirer.prompt([{
+      type: "list",
+      name: "name",
+      message: "Select default configuration:",
+      choices: configNames.map(n => ({
+        name: n === llmsConfig.default ? `${n} (current default)` : n,
+        value: n
+      }))
+    }]);
+    
+    llmsConfig.default = name;
+    await this.saveConfig(llmsConfig);
+    console.log(chalk.green(`✅ Default configuration set to "${name}"`));
+  }
+
+  private async selectOpenRouterModel(currentModel?: string): Promise<string> {
+    console.log(chalk.gray("Fetching available OpenRouter models..."));
+    const openRouterModels = await fetchOpenRouterModels();
+    
+    if (openRouterModels.length > 0) {
+      console.log(chalk.green(`✓ Found ${openRouterModels.length} available models`));
+    }
+    
+    const { selectionMethod } = await inquirer.prompt([{
+      type: "list",
+      name: "selectionMethod",
+      message: "How would you like to select the model?",
+      choices: [
+        { name: "Quick select from popular models", value: "quick" },
+        { name: "Search all available models", value: "search" },
+        { name: "Type model ID manually", value: "manual" }
+      ]
+    }]);
+    
+    if (selectionMethod === 'quick') {
+      const popular = getPopularModels();
+      const choices = [];
+      for (const [category, models] of Object.entries(popular)) {
+        choices.push(new inquirer.Separator(`--- ${category} ---`));
+        choices.push(...models.map(m => ({
+          name: m,
+          value: m
+        })));
+      }
+      
+      const { selectedModel } = await inquirer.prompt([{
+        type: "list",
+        name: "selectedModel",
+        message: "Select model:",
+        default: currentModel,
+        choices,
+        pageSize: 15
+      }]);
+      return selectedModel;
+    } else if (selectionMethod === 'search' && openRouterModels.length > 0) {
+      const { selectedModel } = await inquirer.prompt([{
+        type: "search",
+        name: "selectedModel",
+        message: "Search for model (type to filter):",
+        source: async (input = '') => {
+          const filtered = openRouterModels.filter(m => 
+            m.id.toLowerCase().includes(input.toLowerCase()) ||
+            m.name.toLowerCase().includes(input.toLowerCase())
+          );
+          
+          return filtered.slice(0, 20).map(m => ({
+            name: `${m.id} ${chalk.gray(`- ${m.name}`)}`,
+            value: m.id,
+            short: m.id
+          }));
+        }
+      }]);
+      return selectedModel;
+    } else {
+      const { inputModel } = await inquirer.prompt([{
+        type: "input",
+        name: "inputModel",
+        message: "Enter model ID:",
+        default: currentModel || "openai/gpt-4",
+        validate: (input: string) => {
+          if (!input.trim()) return "Model ID is required";
+          return true;
+        }
+      }]);
+      return inputModel;
+    }
+  }
+
+  private async testConfiguration(llmsConfig: TenexLLMs): Promise<void> {
+    const configNames = Object.keys(llmsConfig.configurations);
+    
+    if (configNames.length === 0) {
+      console.log(chalk.yellow("⚠️  No configurations to test"));
+      return;
+    }
+    
+    const { name } = await inquirer.prompt([{
+      type: "list",
+      name: "name",
+      message: "Select configuration to test:",
+      choices: configNames.map(n => ({
+        name: n === llmsConfig.default ? `${n} (default)` : n,
+        value: n
+      }))
+    }]);
+    
+    const config = llmsConfig.configurations[name];
+    console.log(chalk.yellow(`\nTesting configuration "${name}"...`));
+    console.log(chalk.gray(`Provider: ${config.provider}, Model: ${config.model}`));
+    
+    try {
+      const { getLLMService } = await import("./service");
+      const service = getLLMService(
+        llmsConfig.providers,
+        llmsConfig.configurations,
+        llmsConfig.default
+      );
+      
+      // Format model string as provider:model
+      const modelString = `${config.provider}:${config.model}`;
+      
+      console.log(chalk.cyan("📡 Sending test message..."));
+      const result = await service.complete(modelString, [
+        { role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }
+      ], {
+        temperature: config.temperature,
+        maxTokens: config.maxTokens
+      });
+      
+      console.log(chalk.green("\n✅ Test successful!"));
+      console.log(chalk.white("Response: ") + chalk.cyan(result.text));
+      
+      // Show usage stats if available
+      if (result.usage) {
+        console.log(chalk.gray(`\nTokens used: ${result.usage.promptTokens} prompt + ${result.usage.completionTokens} completion = ${result.usage.totalTokens} total`));
+      }
+      
+      // Wait a moment so user can see the result
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error: any) {
+      console.log(chalk.red("\n❌ Test failed!"));
+      
+      // Better error reporting
+      if (error?.message) {
+        console.log(chalk.red(`Error: ${error.message}`));
+      }
+      
+      // Check for common issues
+      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+        console.log(chalk.yellow("\n💡 This usually means your API key is invalid or expired."));
+        console.log(chalk.yellow("   Please check your API key for this provider."));
+      } else if (error?.message?.includes('404')) {
+        console.log(chalk.yellow("\n💡 The model '${config.model}' may not be available."));
+        console.log(chalk.yellow("   Please verify the model name is correct."));
+      } else if (error?.message?.includes('rate limit')) {
+        console.log(chalk.yellow("\n💡 You've hit a rate limit. Please wait and try again."));
+      } else {
+        // Show full error details for debugging
+        console.log(chalk.gray("\nFull error details:"));
+        console.log(chalk.gray(JSON.stringify(error, null, 2)));
+      }
+      
+      // Wait so user can read the error
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
+
+  private displayCurrentConfig(llmsConfig: TenexLLMs): void {
+    // Show current default configuration
+    if (llmsConfig.default && llmsConfig.configurations[llmsConfig.default]) {
+      const defaultConfig = llmsConfig.configurations[llmsConfig.default];
+      console.log(chalk.bold("Current Default Configuration:"));
+      console.log(chalk.cyan(`  ${llmsConfig.default}`));
+      console.log(`    Provider: ${defaultConfig.provider}`);
+      console.log(`    Model: ${defaultConfig.model}`);
+      if (defaultConfig.temperature !== undefined) {
+        console.log(`    Temperature: ${defaultConfig.temperature}`);
+      }
+      if (defaultConfig.maxTokens !== undefined) {
+        console.log(`    Max Tokens: ${defaultConfig.maxTokens}`);
+      }
+    } else {
+      console.log(chalk.yellow("No default configuration set"));
+    }
+    
+    console.log(chalk.bold("\nConfigured Providers:"));
+    const providers = Object.keys(llmsConfig.providers).filter(
+      p => llmsConfig.providers[p]?.apiKey
+    );
+    if (providers.length === 0) {
+      console.log(chalk.gray("  None configured"));
+    } else {
+      providers.forEach(p => {
+        console.log(chalk.green(`  ✓ ${this.getProviderDisplayName(p)}`));
+      });
+    }
+    
+    console.log(chalk.bold("\nAll Configurations:"));
+    const configNames = Object.keys(llmsConfig.configurations);
+    if (configNames.length === 0) {
+      console.log(chalk.gray("  None"));
+    } else {
+      configNames.forEach(name => {
+        const config = llmsConfig.configurations[name];
+        const isDefault = name === llmsConfig.default;
+        console.log(`  ${isDefault ? chalk.cyan('• ') : '  '}${name}: ${config.provider}:${config.model}`);
+      });
+    }
+  }
+
+  private getProviderDisplayName(provider: string): string {
+    const names: Record<string, string> = {
+      openrouter: "OpenRouter (300+ models)",
+      anthropic: "Anthropic (Claude)",
+      openai: "OpenAI (GPT)"
+    };
+    return names[provider] || provider;
+  }
+
+  private getDefaultModelForProvider(provider: AISdkProvider): string {
+    const defaults: Record<AISdkProvider, string> = {
+      openrouter: "openai/gpt-4",
+      anthropic: "claude-3-5-sonnet-latest",
+      openai: "gpt-4"
+    };
+    return defaults[provider] || "";
+  }
+
   private async loadConfig(): Promise<TenexLLMs> {
     try {
       if (this.isGlobal) {
@@ -72,11 +625,10 @@ export class LLMConfigEditor {
       const config = await configService.loadConfig(this.configPath);
       return config.llms;
     } catch {
-      // Return empty config on error
       return {
+        providers: {},
         configurations: {},
-        defaults: {},
-        credentials: {},
+        default: undefined
       };
     }
   }
@@ -86,475 +638,6 @@ export class LLMConfigEditor {
       await configService.saveGlobalLLMs(config);
     } else {
       await configService.saveProjectLLMs(this.configPath, config);
-    }
-  }
-
-  private getConfigList(llmsConfig: TenexLLMs): LLMConfigWithName[] {
-    const configs: LLMConfigWithName[] = [];
-
-    for (const [key, value] of Object.entries(llmsConfig.configurations)) {
-      // Get credentials if they exist
-      const credentials = llmsConfig.credentials?.[value.provider];
-      const config: LLMConfigWithName = {
-        name: key,
-        provider: value.provider,
-        model: value.model,
-        apiKey: credentials?.apiKey,
-        baseUrl: credentials?.baseUrl,
-        temperature: value.temperature,
-        maxTokens: value.maxTokens,
-        enableCaching: value.enableCaching,
-      };
-      configs.push(config);
-    }
-
-    return configs;
-  }
-
-  private getExistingApiKeys(llmsConfig: TenexLLMs, provider: LLMProvider): string[] {
-    const keys = new Set<string>();
-
-    if (llmsConfig.credentials?.[provider]?.apiKey) {
-      const apiKey = llmsConfig.credentials[provider]?.apiKey;
-      if (apiKey) {
-        keys.add(apiKey);
-      }
-    }
-
-    return Array.from(keys);
-  }
-
-  // Menu Action Handler
-  private async handleMenuAction(action: string, llmsConfig: TenexLLMs): Promise<void> {
-    switch (action) {
-      case "add":
-        await this.addConfiguration(llmsConfig);
-        break;
-      case "test":
-        await this.testExistingConfiguration(llmsConfig);
-        break;
-      case "edit":
-        await this.editConfiguration(llmsConfig);
-        break;
-      case "remove":
-        await this.removeConfiguration(llmsConfig);
-        break;
-      case "default-agents":
-        await this.setDefaultConfiguration(llmsConfig, LLM_DEFAULTS.AGENTS);
-        break;
-      case "default-analyze":
-        await this.setDefaultConfiguration(llmsConfig, LLM_DEFAULTS.ANALYZE);
-        break;
-      case "default-orchestrator":
-        await this.setDefaultConfiguration(llmsConfig, LLM_DEFAULTS.ORCHESTRATOR);
-        break;
-      case "exit":
-        this.ui.displayMessages.configurationSaved();
-        break;
-    }
-  }
-
-  // Core Configuration Operations
-  private async addConfiguration(llmsConfig: TenexLLMs): Promise<void> {
-    this.ui.displayMessages.addingConfiguration();
-
-    // 1. Select provider
-    const provider = await this.ui.promptProviderSelection();
-
-    // 2. For Ollama or OpenAI Compatible, get URL first before fetching models
-    let customBaseUrl: string | undefined;
-    let openAICompatibleConfig: { baseUrl: string; model: string } | null = null;
-    
-    if (provider === "ollama") {
-      customBaseUrl = await this.ui.promptOllamaUrl();
-    } else if (provider === "openai-compatible") {
-      openAICompatibleConfig = await this.ui.promptOpenAICompatibleConfig();
-      if (!openAICompatibleConfig) {
-        return;
-      }
-      customBaseUrl = openAICompatibleConfig.baseUrl;
-    }
-
-    // 3. Fetch and select model
-    const existingApiKey =
-      provider !== "ollama" ? this.getExistingApiKeys(llmsConfig, provider)[0] : undefined;
-
-    this.ui.displayMessages.fetchingModels(provider);
-
-    let modelSelection;
-    
-    // For OpenAI Compatible, check if user already provided a model
-    if (provider === "openai-compatible" && openAICompatibleConfig?.model) {
-      modelSelection = { model: openAICompatibleConfig.model, supportsCaching: false };
-    } else {
-      try {
-        // Pass the custom URL to the model selector
-        modelSelection = await this.modelSelector.fetchAndSelectModel(
-          provider, 
-          existingApiKey,
-          customBaseUrl
-        );
-        if (!modelSelection) {
-          this.ui.displayMessages.noModelsAvailable(provider);
-          if (provider === "ollama") {
-            this.ui.displayMessages.ollamaNotRunning();
-            // Allow manual model entry for Ollama
-            const manualModel = await this.ui.promptManualOllamaModel();
-            if (manualModel) {
-              modelSelection = { model: manualModel, supportsCaching: false };
-            } else {
-              return;
-            }
-          } else if (provider === "openai-compatible") {
-            // For OpenAI Compatible, prompt for manual model entry
-            const { model } = await inquirer.prompt([
-              {
-                type: "input",
-                name: "model",
-                message: "Enter model name to use:",
-                validate: (input: string) => {
-                  if (!input.trim()) return "Model name is required";
-                  return true;
-                },
-              },
-            ]);
-            modelSelection = { model: model.trim(), supportsCaching: false };
-          } else {
-            return;
-          }
-        } else {
-          // Show success message (we can get count from the successful selection)
-          this.ui.displayMessages.modelsFound(0, provider); // Count will be shown by fetchAndSelectModel internally
-        }
-      } catch (error) {
-        this.ui.displayMessages.fetchModelsFailed(provider, error);
-        if (provider === "ollama") {
-          // Allow manual model entry for Ollama even on error
-          const manualModel = await this.ui.promptManualOllamaModel();
-          if (manualModel) {
-            modelSelection = { model: manualModel, supportsCaching: false };
-          } else {
-            return;
-          }
-        } else if (provider === "openai-compatible") {
-          // For OpenAI Compatible, prompt for manual model entry on error
-          const { model } = await inquirer.prompt([
-            {
-              type: "input",
-              name: "model",
-              message: "Enter model name to use:",
-              validate: (input: string) => {
-                if (!input.trim()) return "Model name is required";
-                return true;
-              },
-            },
-          ]);
-          modelSelection = { model: model.trim(), supportsCaching: false };
-        } else {
-          return;
-        }
-      }
-    }
-
-    // 4. Get API key
-    const existingKeys = this.getExistingApiKeys(llmsConfig, provider);
-    const apiKeyResult = await this.ui.promptApiKey(existingKeys, provider);
-
-    // 5. Configure settings
-    const defaultConfigName = this.modelSelector.generateDefaultConfigName(
-      provider,
-      modelSelection.model
-    );
-    const configPrompts = await this.ui.promptConfigurationSettings(
-      defaultConfigName,
-      llmsConfig.configurations,
-      modelSelection.supportsCaching,
-      provider,
-      modelSelection.model
-    );
-
-    // 6. Build and test configuration
-    const newConfig: ResolvedLLMConfig = {
-      provider,
-      model: modelSelection.model,
-      enableCaching: configPrompts.enableCaching ?? modelSelection.supportsCaching,
-    };
-
-    if (apiKeyResult.apiKey?.trim()) {
-      newConfig.apiKey = apiKeyResult.apiKey;
-    }
-
-    if (provider === "openrouter") {
-      newConfig.baseUrl = "https://openrouter.ai/api/v1";
-    } else if (provider === "ollama" && customBaseUrl) {
-      newConfig.baseUrl = customBaseUrl;
-    } else if (provider === "openai-compatible" && customBaseUrl) {
-      newConfig.baseUrl = customBaseUrl;
-    }
-
-    this.ui.displayMessages.testingConfiguration();
-    const testSuccessful = await this.tester.testLLMConfig(newConfig);
-
-    if (testSuccessful) {
-      this.ui.displayMessages.testSuccessful();
-    } else {
-      this.ui.displayMessages.testFailed();
-
-      const shouldRetry = await this.ui.promptRetryOnTestFailure();
-      if (shouldRetry) {
-        this.ui.displayMessages.retryPrompt();
-        await this.addConfiguration(llmsConfig);
-        return;
-      }
-
-      this.ui.displayMessages.testFailureNotSaved();
-      return;
-    }
-
-    // 7. Save configuration
-    llmsConfig.configurations[configPrompts.configName] = {
-      provider,
-      model: modelSelection.model,
-      enableCaching: configPrompts.enableCaching ?? modelSelection.supportsCaching,
-    };
-
-    if (configPrompts.setAsDefault) {
-      if (!llmsConfig.defaults) {
-        llmsConfig.defaults = {};
-      }
-      llmsConfig.defaults[LLM_DEFAULTS.AGENTS] = configPrompts.configName;
-    }
-
-    // Save credentials and baseUrl
-    if (this.isGlobal) {
-      if (!llmsConfig.credentials) {
-        llmsConfig.credentials = {};
-      }
-      
-      if (provider === "ollama") {
-        // For Ollama, only store baseUrl if custom
-        if (customBaseUrl) {
-          llmsConfig.credentials[provider] = {
-            baseUrl: customBaseUrl,
-          };
-        }
-      } else if (provider === "openai-compatible") {
-        // For OpenAI Compatible, store both API key and baseUrl
-        llmsConfig.credentials[provider] = {
-          apiKey: apiKeyResult.apiKey || "",
-          baseUrl: customBaseUrl,
-        };
-      } else if (apiKeyResult.apiKey) {
-        // For other providers, store API key and baseUrl if applicable
-        llmsConfig.credentials[provider] = {
-          apiKey: apiKeyResult.apiKey,
-          baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
-        };
-      }
-    }
-
-    await this.saveConfig(llmsConfig);
-    this.ui.displayMessages.configurationAdded(configPrompts.configName);
-  }
-
-  private async editConfiguration(llmsConfig: TenexLLMs): Promise<void> {
-    const configs = this.getConfigList(llmsConfig);
-    const configName = await this.ui.promptConfigurationToEdit(configs);
-
-    const config = llmsConfig.configurations[configName];
-    if (!config) {
-      this.ui.displayMessages.configurationNotFound(configName);
-      return;
-    }
-
-    // Create LLMConfigWithName from the base config
-    const configWithName: LLMConfigWithName = {
-      name: configName,
-      ...config,
-      apiKey: llmsConfig.credentials?.[config.provider]?.apiKey,
-      baseUrl: llmsConfig.credentials?.[config.provider]?.baseUrl,
-    };
-
-    this.ui.displayMessages.editingConfiguration(configName);
-    const field = await this.ui.promptFieldToEdit();
-
-    switch (field) {
-      case "model":
-        await this.editModel(configWithName, llmsConfig);
-        break;
-      case "apiKey":
-        await this.editApiKey(configWithName, llmsConfig);
-        break;
-      case "enableCaching":
-        await this.editCaching(configWithName, llmsConfig);
-        break;
-      case "name":
-        await this.editConfigName(configWithName, configName, llmsConfig);
-        break;
-    }
-
-    await this.saveConfig(llmsConfig);
-    this.ui.displayMessages.configurationUpdated();
-  }
-
-  private async editModel(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
-    try {
-      const apiKey = llmsConfig.credentials?.[config.provider]?.apiKey;
-      const modelSelection = await this.modelSelector.fetchAndSelectModel(
-        config.provider as LLMProvider,
-        apiKey
-      );
-
-      if (!modelSelection) {
-        this.ui.displayMessages.noModelsAvailable(config.provider);
-        return;
-      }
-
-      // Update the original config in llmsConfig
-      const originalConfig = llmsConfig.configurations[config.name];
-      if (originalConfig) {
-        originalConfig.model = modelSelection.model;
-      }
-    } catch (error) {
-      this.ui.displayMessages.fetchModelsFailed2(error);
-    }
-  }
-
-  private async editApiKey(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
-    if (config.provider === "ollama") {
-      this.ui.displayMessages.ollamaNoApiKey();
-      return;
-    }
-
-    const newKey = await this.ui.promptNewApiKey();
-
-    // Always update credentials
-    if (!llmsConfig.credentials) {
-      llmsConfig.credentials = {};
-    }
-    if (!llmsConfig.credentials[config.provider]) {
-      llmsConfig.credentials[config.provider] = {};
-    }
-    const providerCredentials = llmsConfig.credentials[config.provider];
-    if (providerCredentials) {
-      providerCredentials.apiKey = newKey;
-    }
-  }
-
-  private async editCaching(config: LLMConfigWithName, llmsConfig: TenexLLMs): Promise<void> {
-    const enableCaching = await this.ui.promptEnableCaching(config.enableCaching ?? false);
-    // Update the original config in llmsConfig
-    const originalConfig = llmsConfig.configurations[config.name];
-    if (originalConfig) {
-      originalConfig.enableCaching = enableCaching;
-    }
-  }
-
-  private async editConfigName(
-    _config: LLMConfigWithName,
-    oldName: string,
-    llmsConfig: TenexLLMs
-  ): Promise<void> {
-    const newName = await this.ui.promptNewConfigName(oldName, llmsConfig.configurations);
-
-    if (newName !== oldName) {
-      // Copy the original config to the new name
-      const originalConfig = llmsConfig.configurations[oldName];
-      if (originalConfig) {
-        llmsConfig.configurations[newName] = originalConfig;
-        delete llmsConfig.configurations[oldName];
-      }
-
-      // Update defaults if needed
-      if (llmsConfig.defaults) {
-        for (const [key, value] of Object.entries(llmsConfig.defaults)) {
-          if (value === oldName) {
-            llmsConfig.defaults[key] = newName;
-          }
-        }
-      }
-    }
-  }
-
-  private async removeConfiguration(llmsConfig: TenexLLMs): Promise<void> {
-    const configs = this.getConfigList(llmsConfig);
-    const configName = await this.ui.promptConfigurationToRemove(configs);
-    const confirmed = await this.ui.promptConfirmRemoval(configName);
-
-    if (confirmed) {
-      delete llmsConfig.configurations[configName];
-
-      // Update defaults if needed
-      if (llmsConfig.defaults) {
-        for (const [key, value] of Object.entries(llmsConfig.defaults)) {
-          if (value === configName) {
-            delete llmsConfig.defaults[key];
-          }
-        }
-      }
-
-      await this.saveConfig(llmsConfig);
-      this.ui.displayMessages.configurationRemoved(configName);
-    }
-  }
-
-  private async setDefaultConfiguration(llmsConfig: TenexLLMs, defaultType: string): Promise<void> {
-    const configs = this.getConfigList(llmsConfig);
-    const currentDefault = llmsConfig.defaults?.[defaultType] || "none";
-    const typeLabel = this.getTypeLabelForDefault(defaultType);
-
-    this.ui.displayMessages.settingDefault(typeLabel);
-    this.ui.displayMessages.currentDefault(currentDefault);
-
-    const configName = await this.ui.promptDefaultConfiguration(configs, currentDefault, typeLabel);
-
-    if (!llmsConfig.defaults) {
-      llmsConfig.defaults = {};
-    }
-    llmsConfig.defaults[defaultType] = configName;
-    await this.saveConfig(llmsConfig);
-    this.ui.displayMessages.defaultSet(configName, typeLabel);
-  }
-
-  private getTypeLabelForDefault(defaultType: string): string {
-    switch (defaultType) {
-      case LLM_DEFAULTS.AGENTS:
-        return "agent";
-      case LLM_DEFAULTS.ANALYZE:
-        return "analyze tool";
-      case LLM_DEFAULTS.ORCHESTRATOR:
-        return "orchestrator";
-      default:
-        return "configuration";
-    }
-  }
-
-  private async testExistingConfiguration(llmsConfig: TenexLLMs): Promise<void> {
-    const configs = this.getConfigList(llmsConfig);
-    const configName = await this.ui.promptConfigurationToTest(configs);
-
-    const config = llmsConfig.configurations[configName];
-    if (!config) {
-      this.ui.displayMessages.configurationNotFound(configName);
-      return;
-    }
-
-    this.ui.displayMessages.testingExistingConfig(configName);
-
-    try {
-      const success = await this.tester.testExistingConfiguration(
-        configName,
-        llmsConfig.configurations,
-        llmsConfig.credentials
-      );
-
-      if (success) {
-        this.ui.displayMessages.testSuccessful();
-      } else {
-        this.ui.displayMessages.testFailed();
-      }
-    } catch {
-      this.ui.displayMessages.testFailed();
     }
   }
 }

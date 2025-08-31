@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readPathTool } from "../implementations/readPath";
 import { shellTool } from "../implementations/shell";
-import { analyze } from "../implementations/analyze";
 import { type ToolName, getAllTools, getTool, getTools } from "../registry";
 
 describe("Tool Registry", () => {
@@ -27,19 +26,18 @@ describe("Tool Registry", () => {
 
   describe("getTools", () => {
     it("should return array of existing tools", () => {
-      const tools = getTools(["read_path", "analyze", "shell"]);
-      expect(tools).toHaveLength(3);
+      const tools = getTools(["read_path", "shell"]);
+      expect(tools).toHaveLength(2);
       expect(tools[0]).toBe(readPathTool);
-      expect(tools[1]).toBe(analyze);
-      expect(tools[2]).toBe(shellTool);
+      expect(tools[1]).toBe(shellTool);
     });
 
     it("should filter out non-existent tools", () => {
       // @ts-expect-error Testing with invalid tool name
-      const tools = getTools(["read_path", "non_existent" as ToolName, "analyze"]);
+      const tools = getTools(["read_path", "non_existent" as ToolName, "shell"]);
       expect(tools).toHaveLength(2);
       expect(tools[0]).toBe(readPathTool);
-      expect(tools[1]).toBe(analyze);
+      expect(tools[1]).toBe(shellTool);
     });
 
     it("should return empty array for all non-existent tools", () => {

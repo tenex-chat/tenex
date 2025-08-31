@@ -37,7 +37,7 @@ describe("AgentExecutor", () => {
               slug: "test-agent",
               pubkey: "test-agent-pubkey",
               systemPrompt: "You are the test-agent agent",
-              tools: ["analyze"],
+              tools: ["shell"],
               backend: "claude",
             },
           ],
@@ -169,7 +169,7 @@ describe("AgentExecutor", () => {
       slug: "test-agent",
       pubkey: "test-agent-pubkey",
       description: "Test agent for unit tests",
-      tools: ["analyze", "complete"],
+      tools: ["shell", "complete"],
       systemPrompt: "You are the test-agent agent. Help users with their tasks.",
       conversationStarters: [],
       customInstructions: {},
@@ -367,7 +367,7 @@ describe("AgentExecutor", () => {
         ClaudeBackend: class {
           async execute(_messages: Message[], tools: Tool[], context: ExecutionContext) {
             expect(tools.length).toBe(1);
-            expect(tools[0].name).toBe("analyze");
+            expect(tools[0].name).toBe("shell");
             context.onComplete?.({
               content: "Tools loaded",
               toolCalls: [],

@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 import { MessageBuilder } from "./MessageBuilder";
 import type { AgentState, Conversation } from "./types";
 
@@ -24,8 +24,8 @@ export class AgentConversationContext {
     agentState: AgentState,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): Promise<Message[]> {
-    const messages: Message[] = [];
+  ): Promise<CoreMessage[]> {
+    const messages: CoreMessage[] = [];
 
     // Process history up to (but not including) the triggering event
     for (const event of conversation.history) {
@@ -50,7 +50,7 @@ export class AgentConversationContext {
         agentState.lastSeenPhase,
         conversation.phase
       );
-      messages.push(new Message("system", phaseMessage + "\n\n" + phaseInstructions));
+      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
     }
 
     // Add the triggering event last
@@ -85,8 +85,8 @@ export class AgentConversationContext {
     delegationSummary?: string,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): Promise<Message[]> {
-    const messages: Message[] = [];
+  ): Promise<CoreMessage[]> {
+    const messages: CoreMessage[] = [];
 
     // Add missed messages block if there are any
     if (missedEvents.length > 0) {
@@ -104,7 +104,7 @@ export class AgentConversationContext {
         agentState.lastSeenPhase,
         conversation.phase
       );
-      messages.push(new Message("system", phaseMessage + "\n\n" + phaseInstructions));
+      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
     }
 
     // Add triggering event
@@ -132,8 +132,8 @@ export class AgentConversationContext {
     agentState: AgentState,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): Message[] {
-    const messages: Message[] = [];
+  ): CoreMessage[] {
+    const messages: CoreMessage[] = [];
 
     // Add the delegation responses block
     const delegationBlock = MessageBuilder.buildDelegationResponsesBlock(
@@ -148,7 +148,7 @@ export class AgentConversationContext {
         agentState.lastSeenPhase,
         conversation.phase
       );
-      messages.push(new Message("system", phaseMessage + "\n\n" + phaseInstructions));
+      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
     }
 
     // Note: Triggering event would typically already be in the delegation responses

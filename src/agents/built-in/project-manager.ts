@@ -314,5 +314,5 @@ Remember, you are intelligently transcribing a document, not adding your own fla
 `,
   useCriteria:
     "Default agent for ALL new conversations unless user @mentions a specific agent. Primary workflow coordinator responsible for phase management, understanding user intent, and delegating work to specialists. ALWAYS handles REFLECTION phase to capture learnings. Engages in CHAT to clarify requirements, coordinates VERIFICATION, and orchestrates the entire workflow.",
-  llmConfig: "agents",
+  llmConfig: "default",
 };

@@ -1,4 +1,4 @@
-import { LLMRouter } from "@/llm/router";
+// LLMRouter removed - using AI SDK directly
 import type { CompletionRequest, ResolvedLLMConfig } from "@/llm/types";
 import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";

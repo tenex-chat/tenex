@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
-import { loadLLMRouter } from "@/llm";
+import { getLLMServiceFromConfig } from "@/llm/service";
 import { shutdownNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
@@ -48,8 +48,8 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const dTag = project.tagValue("d") || "";
     logger.info(`Starting listener for project: ${titleTag} (${dTag})`);
 
-    // Load LLM router
-    const llmService = await loadLLMRouter(projectPath);
+    // Load LLM service from config
+    const llmService = await getLLMServiceFromConfig();
 
     // Initialize MCP service
     await mcpService.initialize(projectPath);

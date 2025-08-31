@@ -63,7 +63,7 @@ describe("AgentRegistry", () => {
         role: "Software Developer",
         expertise: "Full-stack development",
         instructions: "Write clean code",
-        tools: ["read_path", "analyze"],
+        tools: ["read_path", "shell"],
         llmConfig: "default",
       };
 
@@ -100,14 +100,14 @@ describe("AgentRegistry", () => {
         expertise: "Full-stack development",
         instructions: "Write clean code",
         nsec: "",
-        tools: ["read_path", "analyze"],
+        tools: ["read_path", "shell"],
         llmConfig: "default",
       });
 
       expect(developer).toBeDefined();
       expect(developer?.name).toBe("Developer");
       expect(developer?.role).toBe("Software Developer");
-      expect(developer?.tools.map((t) => t.name)).toEqual(["read_path", "analyze"]);
+      expect(developer?.tools.map((t) => t.name)).toEqual(["read_path", "shell"]);
 
       // Ensure agent reviewer
       const reviewer = await registry.ensureAgent("reviewer", {
@@ -166,7 +166,7 @@ describe("AgentRegistry", () => {
         expertise: "Testing",
         instructions: "Test everything",
         nsec: "",
-        tools: ["analyze"],
+        tools: ["shell"],
         llmConfig: "default",
       };
 
@@ -252,7 +252,7 @@ describe("AgentRegistry", () => {
         expertise: "Testing",
         instructions: "Test everything",
         nsec: "",
-        tools: ["read_path", "analyze"],
+        tools: ["read_path", "shell"],
         llmConfig: "fast",
       };
 
@@ -268,7 +268,7 @@ describe("AgentRegistry", () => {
         name: "TestAgent",
         role: "Tester",
         instructions: "Test everything",
-        tools: ["read_path", "analyze"],
+        tools: ["read_path", "shell"],
         llmConfig: "fast",
       });
 
@@ -301,7 +301,7 @@ describe("AgentRegistry", () => {
         expertise: "Full-stack development",
         instructions: "Write clean code",
         nsec: "",
-        tools: ["analyze"],
+        tools: ["shell"],
       });
     });
 
@@ -412,7 +412,7 @@ describe("AgentRegistry", () => {
         role: "Software Developer",
         expertise: "Full-stack development",
         instructions: "Write clean code",
-        tools: ["read_path", "analyze"],
+        tools: ["read_path", "shell"],
         llmConfig: "default",
       };
 

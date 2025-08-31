@@ -1,12 +1,11 @@
+import { tool } from 'ai';
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { fileExists, readFile } from "@/lib/fs";
-import type { ExecutionContext, Result, Tool, ToolError, Validated } from "@/tools/types";
-import { createZodSchema, failure, success } from "@/tools/types";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import * as path from "node:path";
 import { z } from "zod";
 
-// Define the input schema - no inputs needed
 const agentsListSchema = z.object({
   includeGlobal: z
     .boolean()
@@ -20,8 +19,7 @@ const agentsListSchema = z.object({
 
 type AgentsListInput = z.infer<typeof agentsListSchema>;
 
-// Define the output type
-interface AgentInfo {
+type AgentInfo = {
   slug: string;
   name: string;
   role: string;
@@ -33,9 +31,9 @@ interface AgentInfo {
   isGlobal?: boolean;
   isBuiltIn?: boolean;
   eventId?: string;
-}
+};
 
-interface AgentsListOutput {
+type AgentsListOutput = {
   success: boolean;
   message?: string;
   error?: string;
@@ -46,23 +44,17 @@ interface AgentsListOutput {
     global: number;
     builtIn: number;
   };
-}
+};
 
 /**
- * Tool: agents_list
- * List all available agents in the project with their configurations and system prompts
+ * Core implementation of the agents_list functionality
+ * Shared between AI SDK and legacy Tool interfaces
  */
-export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
-  name: "agents_list",
-  description:
-    "List all available agents in the project, including their system prompts and configurations",
-  parameters: createZodSchema(agentsListSchema),
-  execute: async (
-    input: Validated<AgentsListInput>,
-    _context: ExecutionContext
-  ): Promise<Result<ToolError, AgentsListOutput>> => {
-    try {
-      const { includeGlobal = true, verbose = false } = input.value;
+async function executeAgentsList(
+  input: AgentsListInput,
+  context: ExecutionContext
+): Promise<AgentsListOutput> {
+  const { includeGlobal = true, verbose = false } = input;
 
       const projectPath = process.cwd();
       const agents: AgentInfo[] = [];
@@ -207,25 +199,35 @@ export const agentsList: Tool<AgentsListInput, AgentsListOutput> = {
       logger.info(`  Global: ${globalAgents}`);
       logger.info(`  Built-in: ${builtInAgents}`);
 
-      return success({
-        success: true,
-        message: `Found ${agents.length} agents`,
-        agents,
-        summary: {
-          total: agents.length,
-          project: projectAgents,
-          global: globalAgents,
-          builtIn: builtInAgents,
-        },
-      });
-    } catch (error) {
-      logger.error("Failed to list agents", { error });
-      return failure({
-        kind: "execution",
-        tool: "agents_list",
-        message: error instanceof Error ? error.message : String(error),
-        cause: error,
-      });
-    }
-  },
-};
+  return {
+    success: true,
+    message: `Found ${agents.length} agents`,
+    agents,
+    summary: {
+      total: agents.length,
+      project: projectAgents,
+      global: globalAgents,
+      builtIn: builtInAgents,
+    },
+  };
+}
+
+/**
+ * Create an AI SDK tool for listing agents
+ * This is the primary implementation
+ */
+export function createAgentsListTool(context: ExecutionContext) {
+  return tool({
+    description: "List all available agents in the project, including their system prompts and configurations",
+    parameters: agentsListSchema,
+    execute: async (input: AgentsListInput) => {
+      try {
+        return await executeAgentsList(input, context);
+      } catch (error) {
+        logger.error("Failed to list agents", { error });
+        throw new Error(`Failed to list agents: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  });
+}
+

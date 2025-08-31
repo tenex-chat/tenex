@@ -1,9 +1,9 @@
-import type { ToolExecutionResult } from "@/tools/executor";
+// ToolExecutionResult removed - using AI SDK tools only
 
 /**
  * Format a tool result as a string for inclusion in the conversation
  */
-export function formatToolResultAsString(result: ToolExecutionResult): string {
+export function formatToolResultAsString(result: any): string {
   const toolInfo = result.toolName ? `[${result.toolName}]` : "[Unknown Tool]";
   const argsInfo = result.toolArgs && Object.keys(result.toolArgs).length > 0
     ? ` with args: ${JSON.stringify(result.toolArgs)}`

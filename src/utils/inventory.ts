@@ -1,11 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { loadLLMRouter } from "@/llm";
+import { getLLMServiceFromConfig } from "@/llm/service";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { Message } from "multi-llm-ts";
 import { generateRepomixOutput } from "./repomix.js";
 import "@/prompts"; // This ensures all fragments are registered
 import type { AgentInstance } from "@/agents/types";
@@ -120,28 +119,26 @@ async function generateMainInventory(
     .add("main-inventory-generation", { repomixContent, focusFiles })
     .build();
 
-  const llmRouter = await loadLLMRouter(projectPath);
+  const llmService = await getLLMServiceFromConfig();
 
-  // Debug: Log the router configuration
-  logger.debug("[inventory] LLM Router loaded", {
-    availableConfigs: 'getConfigKeys' in llmRouter ? llmRouter.getConfigKeys() : [],
-  });
+  // Debug: Log the LLM service loaded
+  logger.debug("[inventory] LLM Service loaded");
 
-  const userMessage = new Message("user", prompt);
+  const userMessage = { role: "user" as const, content: prompt };
 
   logger.debug("[inventory] Calling LLM with configName", {
     configName: "defaults.analyze",
     expectedResolution: "Should resolve to gemini-2.5",
   });
 
-  const response = await llmRouter.complete({
-    messages: [userMessage],
-    options: {
+  const response = await llmService.complete(
+    "defaults.analyze",
+    [userMessage],
+    {
       temperature: 0.3,
       maxTokens: 4000,
-      configName: "defaults.analyze",
-    },
-  });
+    }
+  );
 
   const content = response.content || "";
 

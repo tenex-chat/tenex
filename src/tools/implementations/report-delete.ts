@@ -1,17 +1,15 @@
+import { tool } from 'ai';
 import { ReportManager } from "@/services/ReportManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import type { Tool } from "../types";
-import { createZodSchema, success, failure } from "../types";
+import type { ExecutionContext } from "@/agents/execution/types";
 
 const reportDeleteSchema = z.object({
   slug: z.string().describe("The slug identifier (d-tag) of the report to delete"),
 });
 
-interface ReportDeleteInput {
-  slug: string;
-}
+type ReportDeleteInput = z.infer<typeof reportDeleteSchema>;
 
 interface ReportDeleteOutput {
   success: boolean;
@@ -20,61 +18,50 @@ interface ReportDeleteOutput {
   message: string;
 }
 
-export const reportDeleteTool: Tool<ReportDeleteInput, ReportDeleteOutput> = {
-  name: "report_delete",
-  description: "Mark an NDKArticle report as deleted",
+/**
+ * Core implementation of report deletion functionality
+ */
+async function executeReportDelete(
+  input: ReportDeleteInput,
+  context: ExecutionContext
+): Promise<ReportDeleteOutput> {
+  const { slug } = input;
 
-  promptFragment: `Mark a report as deleted by clearing its content and adding a deleted tag.
+  logger.info("🗑️ Deleting report", {
+    slug,
+    agent: context.agent.name,
+    phase: context.phase,
+  });
 
-This will:
-- Empty the content of the article
-- Add a "deleted" tag to mark it as deleted
-- The report will be filtered out from reports_list results
-- The slug remains reserved and can be reused later
+  const reportManager = new ReportManager();
+  
+  const articleId = await reportManager.deleteReport(slug, context.agent);
+  
+  logger.info("✅ Report deleted successfully", {
+    slug,
+    articleId,
+    agent: context.agent.name,
+  });
 
-Note: This is a soft delete - the article still exists but is marked as deleted.`,
+  return {
+    success: true,
+    articleId: `nostr:${articleId}`,
+    slug,
+    message: `Report "${slug}" marked as deleted`,
+  };
+}
 
-  parameters: createZodSchema(reportDeleteSchema),
-
-  execute: async (input, context) => {
-    const { slug } = input.value;
-
-    logger.info("🗑️ Deleting report", {
-      slug,
-      agent: context.agent.name,
-      phase: context.phase,
-    });
-
-    try {
-      const reportManager = new ReportManager();
-      
-      const articleId = await reportManager.deleteReport(slug, context.agent);
-      
-      logger.info("✅ Report deleted successfully", {
-        slug,
-        articleId,
-        agent: context.agent.name,
-      });
-
-      return success({
-        success: true,
-        articleId: `nostr:${articleId}`,
-        slug,
-        message: `Report "${slug}" marked as deleted`,
-      });
-    } catch (error) {
-      logger.error("❌ Report delete tool failed", {
-        error: formatAnyError(error),
-        slug,
-        agent: context.agent.name,
-        phase: context.phase,
-      });
-
-      return failure({
-        kind: "execution" as const,
-        tool: "report_delete",
-        message: formatAnyError(error),
-      });
-    }
-  },
-};
+/**
+ * Create an AI SDK tool for deleting reports
+ */
+export function createReportDeleteTool(context: ExecutionContext) {
+  return tool({
+    description: "Mark an NDKArticle report as deleted",
+    
+    parameters: reportDeleteSchema,
+    
+    execute: async (input: ReportDeleteInput) => {
+      return await executeReportDelete(input, context);
+    },
+  });
+}

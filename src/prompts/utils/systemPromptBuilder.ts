@@ -3,7 +3,7 @@ import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import type { Tool } from "@/tools/types";
+// Tool type removed - using AI SDK tools only
 import "@/prompts/fragments/10-phase-definitions";
 import "@/prompts/fragments/10-referenced-article";
 import "@/prompts/fragments/20-voice-mode";
@@ -29,7 +29,7 @@ export interface BuildSystemPromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  mcpTools?: Tool[];
+  mcpTools?: any[];
   triggeringEvent?: NDKEvent;
 }
 
@@ -42,7 +42,7 @@ export interface BuildStandalonePromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  mcpTools?: Tool[];
+  mcpTools?: any[];
   triggeringEvent?: NDKEvent;
 }
 

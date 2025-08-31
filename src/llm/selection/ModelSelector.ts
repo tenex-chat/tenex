@@ -1,6 +1,6 @@
 import type { LLMProvider } from "@/llm/types";
 import search from "@inquirer/search";
-import type { ModelsList } from "multi-llm-ts";
+// Removed ModelsList import - using simple string arrays now
 import { getModelsForProvider } from "../models";
 
 export interface ModelSelectionResult {
@@ -54,7 +54,7 @@ export class ModelSelector {
 
     return {
       model,
-      supportsCaching: false, // We don't have this info from multi-llm-ts
+      supportsCaching: false, // We don't have this info available
     };
   }
 
@@ -64,12 +64,12 @@ export class ModelSelector {
     ollamaUrl?: string
   ): Promise<ModelSelectionResult | null> {
     try {
-      const modelsList = await getModelsForProvider(provider, existingApiKey, ollamaUrl);
-      if (!modelsList || modelsList.chat.length === 0) {
+      const models = await getModelsForProvider(provider, existingApiKey, ollamaUrl);
+      if (!models || models.length === 0) {
         return null;
       }
 
-      const availableModels = modelsList.chat.map((m) => (typeof m === "string" ? m : m.id));
+      const availableModels = models;
 
       if (provider === "openrouter") {
         return await this.selectOpenRouterModelWithPricing(availableModels);
@@ -81,9 +81,9 @@ export class ModelSelector {
     }
   }
 
-  getAvailableModelCount(modelsList: ModelsList | null): number {
-    if (!modelsList || !modelsList.chat) return 0;
-    return modelsList.chat.length;
+  getAvailableModelCount(models: string[] | null): number {
+    if (!models) return 0;
+    return models.length;
   }
 
   shouldSupportCaching(provider: LLMProvider, model: string, supportsCaching: boolean): boolean {

@@ -58,41 +58,54 @@ export const TenexAgentsSchema = z.record(
 // LLM SCHEMA (llms.json)
 // =====================================================================================
 
-import type { LLMModelConfig, ProviderAuth } from "@/llm/types";
-
-export interface TenexLLMs {
-  configurations: {
-    [namedConfig: string]: LLMModelConfig;
-  };
-  defaults?: {
-    agents?: string;
-    [agentSlug: string]: string | undefined;
-  };
-  credentials: {
-    [namedCredential: string]: ProviderAuth;
-  };
+/**
+ * Individual LLM configuration
+ */
+export interface LLMConfiguration {
+  provider: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  [key: string]: any; // Allow additional provider-specific settings
 }
 
-import { LLM_PROVIDERS } from "@/llm/types";
+/**
+ * Main LLM configuration structure
+ */
+export interface TenexLLMs {
+  providers: {
+    openrouter?: {
+      apiKey: string;
+    };
+    anthropic?: {
+      apiKey: string;
+    };
+    openai?: {
+      apiKey: string;
+    };
+    [key: string]: { apiKey: string } | undefined;
+  };
+  configurations: {
+    [name: string]: LLMConfiguration;
+  };
+  default?: string;
+}
+
+export const LLMConfigurationSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  temperature: z.number().optional(),
+  maxTokens: z.number().optional(),
+  topP: z.number().optional(),
+}).passthrough(); // Allow additional properties
 
 export const TenexLLMsSchema = z.object({
-  configurations: z.record(
-    z.object({
-      provider: z.enum(LLM_PROVIDERS),
-      model: z.string(),
-      temperature: z.number().optional(),
-      maxTokens: z.number().optional(),
-      enableCaching: z.boolean().optional(),
-    })
-  ),
-  defaults: z.record(z.string()).optional().default({}),
-  credentials: z.record(
-    z.object({
-      apiKey: z.string().optional(),
-      baseUrl: z.string().optional(),
-      headers: z.record(z.string()).optional(),
-    })
-  ),
+  providers: z.record(z.object({
+    apiKey: z.string(),
+  })).default({}),
+  configurations: z.record(LLMConfigurationSchema).default({}),
+  default: z.string().optional(),
 });
 
 // =====================================================================================

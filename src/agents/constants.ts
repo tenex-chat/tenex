@@ -1,8 +1,3 @@
-import { delegateExternalTool } from "@/tools/implementations/delegate_external";
-import { claudeCode } from "@/tools/implementations/claude_code";
-import { delegateTool } from "../tools/implementations/delegate";
-import { lessonLearnTool } from "../tools/implementations/learn";
-import { readPathTool } from "../tools/implementations/readPath";
 import type { AgentInstance } from "./types";
 
 // Agent slug constants
@@ -29,10 +24,10 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
   if (agent.slug === PROJECT_MANAGER_AGENT) {
     // PM has delegate_phase instead of delegate
     return [
-      readPathTool.name,
-      lessonLearnTool.name,
-      claudeCode.name,
-      delegateExternalTool.name,
+      "read_path",
+      "lesson_learn",
+      "claude_code",
+      "delegate_external",
       "write_context_file",
       "shell",
       "discover_capabilities",
@@ -45,12 +40,11 @@ export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
 
   // Base tools for all other agents
   const tools = [
-    readPathTool.name,
-    lessonLearnTool.name,
-    // analyze.name,
-    claudeCode.name,
-    delegateExternalTool.name, // All agents can delegate to external agents
-    delegateTool.name, // Non-PM agents use regular delegate
+    "read_path",
+    "lesson_learn",
+    "claude_code",
+    "delegate_external", // All agents can delegate to external agents
+    "delegate", // Non-PM agents use regular delegate
   ];
 
   return tools;

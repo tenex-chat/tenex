@@ -1,10 +1,11 @@
+import { tool } from 'ai';
 import { ClaudeTaskExecutor } from "@/claude/task-executor";
 import type { Phase } from "@/conversations/phases";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { randomUUID } from "crypto";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
-import { createToolDefinition, failure, success } from "../types";
 
 /**
  * Strips thinking blocks from content.
@@ -24,21 +25,24 @@ const claudeCodeSchema = z.object({
   branch: z.string().optional().describe("Optional branch name for the task"),
 });
 
-interface ClaudeCodeOutput {
+type ClaudeCodeInput = z.infer<typeof claudeCodeSchema>;
+type ClaudeCodeOutput = {
   sessionId?: string;
   totalCost: number;
   messageCount: number;
   duration: number;
   response: string;
-}
+};
 
-export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>, ClaudeCodeOutput>({
-  name: "claude_code",
-  description:
-    "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development.",
-  schema: claudeCodeSchema,
-  execute: async (input, context) => {
-    const { prompt, systemPrompt, title, branch } = input.value;
+/**
+ * Core implementation of the claude_code functionality
+ * Shared between AI SDK and legacy Tool interfaces
+ */
+async function executeClaudeCode(
+  input: ClaudeCodeInput,
+  context: ExecutionContext
+): Promise<ClaudeCodeOutput> {
+  const { prompt, systemPrompt, title, branch } = input;
 
     // Strip thinking blocks from prompts
     const cleanedPrompt = stripThinkingBlocks(prompt);
@@ -136,11 +140,7 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
       });
 
       if (!result.success) {
-        return failure({
-          kind: "execution" as const,
-          tool: "claude_code",
-          message: `Claude code execution failed: ${result.error || "Unknown error"}`,
-        });
+        throw new Error(`Claude code execution failed: ${result.error || "Unknown error"}`);
       }
 
       // Update the Claude session ID in the conversation's agent state for this phase
@@ -186,22 +186,35 @@ export const claudeCode = createToolDefinition<z.infer<typeof claudeCodeSchema>,
         response
       });
 
-      return success({
+      return {
         sessionId: result.sessionId,
         totalCost: result.totalCost,
         messageCount: result.messageCount,
         duration: result.duration,
         response,
-      });
+      };
     } catch (error) {
       logger.error("Claude Code tool failed", { error });
-
-      return failure({
-        kind: "execution" as const,
-        tool: "claude_code",
-        message: formatAnyError(error),
-        cause: error,
-      });
+      throw new Error(`Claude Code execution failed: ${formatAnyError(error)}`);
     }
-  },
-});
+}
+
+/**
+ * Create an AI SDK tool for Claude Code execution
+ * This is the primary implementation
+ */
+export function createClaudeCodeTool(context: ExecutionContext) {
+  return tool({
+    description: "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development.",
+    parameters: claudeCodeSchema,
+    execute: async (input: ClaudeCodeInput) => {
+      try {
+        return await executeClaudeCode(input, context);
+      } catch (error) {
+        logger.error("Claude Code tool failed", { error });
+        throw new Error(`Claude Code execution failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  });
+}
+

@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
-import type { Tool } from "@/tools/types";
+// Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -54,7 +54,7 @@ export class MCPService {
   private static instance: MCPService;
   private clients: Map<string, MCPClient> = new Map();
   private isInitialized = false;
-  private cachedTools: Tool[] = [];
+  private cachedTools: any[] = [];
   private projectPath?: string;
 
   private constructor() {}
@@ -202,12 +202,12 @@ export class MCPService {
   }
 
   // Synchronous method to get cached tools
-  getCachedTools(): Tool[] {
+  getCachedTools(): any[] {
     return this.cachedTools;
   }
 
-  private async fetchAvailableTools(): Promise<Tool[]> {
-    const tools: Tool[] = [];
+  private async fetchAvailableTools(): Promise<any[]> {
+    const tools: any[] = [];
 
     for (const [serverName, mcpClient] of this.clients) {
       try {
@@ -229,7 +229,7 @@ export class MCPService {
     return tools;
   }
 
-  private convertMCPToolToTenexTool(serverName: string, mcpTool: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }): Tool {
+  private convertMCPToolToTenexTool(serverName: string, mcpTool: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }): any {
     // Use the adapter to create a type-safe tool with Zod schemas
     // Cast mcpTool to MCPTool interface for the adapter
     const typedTool: MCPToolInterface = {
@@ -242,7 +242,7 @@ export class MCPService {
     };
     return adaptMCPTool(typedTool, serverName, (args) =>
       this.executeTool(serverName, mcpTool.name, args)
-    ) as Tool;
+    );
   }
 
   async executeTool(

@@ -1,6 +1,37 @@
 import { logger } from "@/utils/logger";
-import { type ModelsList, loadModels, loadOpenRouterModels } from "multi-llm-ts";
 import type { LLMProvider } from "./types";
+
+// Simple model lists - no need to fetch dynamically
+// OpenRouter handles 300+ models, we just need to know the string format
+
+export const KNOWN_MODELS = {
+  openai: [
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-3.5-turbo",
+    "gpt-4o",
+    "gpt-4o-mini",
+  ],
+  anthropic: [
+    "claude-3-opus",
+    "claude-3-sonnet", 
+    "claude-3-haiku",
+    "claude-3.5-sonnet",
+  ],
+  google: [
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+  ],
+  // OpenRouter handles all these through provider prefixes
+  openrouter: [
+    "openai/gpt-4",
+    "anthropic/claude-3-sonnet",
+    "google/gemini-2.0-flash",
+    "meta-llama/llama-3.3-70b-instruct",
+    // ... 300+ more models
+  ]
+};
 
 /**
  * Get available models for a provider
@@ -9,45 +40,14 @@ export async function getModelsForProvider(
   provider: LLMProvider,
   apiKey?: string,
   ollamaUrl?: string
-): Promise<ModelsList | null> {
-  try {
-    if (provider === "openrouter" && apiKey) {
-      return await loadOpenRouterModels({ apiKey });
-    }
-
-    const providerMap: Record<string, string> = {
-      mistral: "mistralai",
-      groq: "groq",
-      deepseek: "deepseek",
-      anthropic: "anthropic",
-      openai: "openai",
-      google: "google",
-      ollama: "ollama",
-    };
-
-    const mappedProvider = providerMap[provider] || provider;
-    
-    // For Ollama, pass the custom URL if provided
-    if (provider === "ollama" && ollamaUrl) {
-      return await loadModels(mappedProvider, { baseURL: ollamaUrl });
-    }
-    
-    // For OpenAI Compatible, try to fetch models from the endpoint
-    if (provider === "openai-compatible" && ollamaUrl) {
-      // Use OpenAI provider with custom baseUrl
-      try {
-        return await loadModels("openai", { baseURL: ollamaUrl });
-      } catch {
-        // If fetching fails, return empty to allow manual entry
-        return null;
-      }
-    }
-    
-    return await loadModels(mappedProvider, {});
-  } catch (error) {
-    logger.error(`Failed to load models for provider ${provider}:`, error);
-    return null;
+): Promise<string[] | null> {
+  // For OpenRouter, models are specified as provider/model
+  if (provider === "openrouter") {
+    return KNOWN_MODELS.openrouter;
   }
+  
+  // Return known models for each provider
+  return KNOWN_MODELS[provider as keyof typeof KNOWN_MODELS] || null;
 }
 
 /**
@@ -55,35 +55,6 @@ export async function getModelsForProvider(
  */
 export async function getAllModels(
   credentials?: Record<string, string>
-): Promise<Record<string, ModelsList>> {
-  const providers: LLMProvider[] = [
-    "openai",
-    "anthropic",
-    "google",
-    "groq",
-    "deepseek",
-    "ollama",
-    "mistral",
-  ];
-
-  const results: Record<string, ModelsList> = {};
-
-  await Promise.all(
-    providers.map(async (provider) => {
-      const models = await getModelsForProvider(provider, credentials?.[provider]);
-      if (models) {
-        results[provider] = models;
-      }
-    })
-  );
-
-  // Handle OpenRouter separately if credentials are provided
-  if (credentials?.openrouter) {
-    const openRouterModels = await getModelsForProvider("openrouter", credentials.openrouter);
-    if (openRouterModels) {
-      results.openrouter = openRouterModels;
-    }
-  }
-
-  return results;
+): Promise<Record<string, string[]>> {
+  return KNOWN_MODELS;
 }

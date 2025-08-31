@@ -4,7 +4,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
-import type { Tool } from "@/tools/types";
+// Tool type removed - using AI SDK tools only
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
 import { logError, logInfo, logWarning } from "@/utils/logger";
@@ -77,7 +77,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       const phase = (ALL_PHASES.includes(options.phase as Phase) ? options.phase : "chat") as Phase;
 
       // Initialize MCP service to get tools
-      let mcpTools: Tool[] = [];
+      let mcpTools: any[] = [];
       try {
         await mcpService.initialize(projectPath);
         mcpTools = mcpService.getCachedTools();

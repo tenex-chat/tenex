@@ -1,9 +1,9 @@
+import { tool } from 'ai';
 import { ReportManager } from "@/services/ReportManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import type { Tool } from "../types";
-import { createZodSchema, success, failure } from "../types";
+import type { ExecutionContext } from "@/agents/execution/types";
 
 const reportReadSchema = z.object({
   identifier: z
@@ -11,9 +11,7 @@ const reportReadSchema = z.object({
     .describe("The slug (d-tag) or naddr1... identifier of the article to read"),
 });
 
-interface ReportReadInput {
-  identifier: string;
-}
+type ReportReadInput = z.infer<typeof reportReadSchema>;
 
 interface ReportReadOutput {
   success: boolean;
@@ -31,99 +29,84 @@ interface ReportReadOutput {
   message?: string;
 }
 
-export const reportReadTool: Tool<ReportReadInput, ReportReadOutput> = {
-  name: "report_read",
-  description: "Read an NDKArticle report by slug or naddr identifier",
+/**
+ * Core implementation of report reading functionality
+ */
+async function executeReportRead(
+  input: ReportReadInput,
+  context: ExecutionContext
+): Promise<ReportReadOutput> {
+  const { identifier } = input;
 
-  promptFragment: `Read a report (NDKArticle) by its slug or naddr identifier.
+  logger.info("📖 Reading report", {
+    identifier,
+    agent: context.agent.name,
+    phase: context.phase,
+  });
 
-You can provide either:
-- A slug (d-tag) - will search for articles with this d-tag from the current agent
-- An naddr1... identifier - will fetch the specific article directly
+  const reportManager = new ReportManager();
+  
+  // Use agent pubkey for slug lookups
+  const report = await reportManager.readReport(identifier, context.agent.pubkey);
 
-The tool will return:
-- The article content and metadata
-- The author's npub
-- Associated hashtags
-- Project reference if tagged
-
-Use this to retrieve and analyze previously written reports.`,
-
-  parameters: createZodSchema(reportReadSchema),
-
-  execute: async (input, context) => {
-    const { identifier } = input.value;
-
-    logger.info("📖 Reading report", {
+  if (!report) {
+    logger.info("📭 No report found", {
       identifier,
       agent: context.agent.name,
-      phase: context.phase,
     });
 
-    try {
-      const reportManager = new ReportManager();
-      
-      // Use agent pubkey for slug lookups
-      const report = await reportManager.readReport(identifier, context.agent.pubkey);
+    return {
+      success: false,
+      message: `No report found with identifier: ${identifier}`,
+    };
+  }
 
-      if (!report) {
-        logger.info("📭 No report found", {
-          identifier,
-          agent: context.agent.name,
-        });
+  // Check if the report is deleted
+  if (report.isDeleted) {
+    logger.info("🗑️ Report is deleted", {
+      identifier,
+      agent: context.agent.name,
+    });
 
-        return success({
-          success: false,
-          message: `No report found with identifier: ${identifier}`,
-        });
-      }
+    return {
+      success: false,
+      message: `Report "${identifier}" has been deleted`,
+    };
+  }
 
-      // Check if the report is deleted
-      if (report.isDeleted) {
-        logger.info("🗑️ Report is deleted", {
-          identifier,
-          agent: context.agent.name,
-        });
+  logger.info("✅ Report read successfully", {
+    slug: report.slug,
+    title: report.title,
+    agent: context.agent.name,
+  });
 
-        return success({
-          success: false,
-          message: `Report "${identifier}" has been deleted`,
-        });
-      }
+  return {
+    success: true,
+    article: {
+      id: report.id,
+      slug: report.slug,
+      title: report.title,
+      summary: report.summary,
+      content: report.content,
+      author: report.author,
+      publishedAt: report.publishedAt,
+      hashtags: report.hashtags,
+      projectReference: report.projectReference,
+    },
+  };
+}
 
-      logger.info("✅ Report read successfully", {
-        slug: report.slug,
-        title: report.title,
-        agent: context.agent.name,
-      });
-
-      return success({
-        success: true,
-        article: {
-          id: report.id,
-          slug: report.slug,
-          title: report.title,
-          summary: report.summary,
-          content: report.content,
-          author: report.author,
-          publishedAt: report.publishedAt,
-          hashtags: report.hashtags,
-          projectReference: report.projectReference,
-        },
-      });
-    } catch (error) {
-      logger.error("❌ Report read tool failed", {
-        error: formatAnyError(error),
-        identifier,
-        agent: context.agent.name,
-        phase: context.phase,
-      });
-
-      return failure({
-        kind: "execution" as const,
-        tool: "report_read",
-        message: formatAnyError(error),
-      });
-    }
-  },
-};
+/**
+ * Create an AI SDK tool for reading reports
+ */
+export function createReportReadTool(context: ExecutionContext) {
+  return tool({
+    description: "Read an NDKArticle report by slug or naddr identifier",
+    
+    parameters: reportReadSchema,
+    
+    execute: async (input: ReportReadInput) => {
+      return await executeReportRead(input, context);
+    },
+  });
+}

@@ -1,7 +1,7 @@
-import { deserializeToolResult, isSerializedToolResult } from "@/llm/ToolResult";
+// Tool result handling removed - handled by AI SDK
 import type { ErrorIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { ToolExecutionResult } from "@/tools/executor";
+// ToolExecutionResult removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logError, logDebug } from "@/utils/logger";
 import type { StreamStateManager } from "./StreamStateManager";
@@ -24,7 +24,7 @@ export class ToolStreamHandler {
   async handleToolCompleteEvent(
     event: { tool: string; result: unknown },
     context: ExecutionContext
-  ): Promise<ToolExecutionResult> {
+  ): Promise<any> {
     // Parse the tool result first to get metadata
     const toolResult = this.parseToolResult(event);
 
@@ -41,28 +41,16 @@ export class ToolStreamHandler {
   /**
    * Parse tool result from event
    */
-  private parseToolResult(event: { tool: string; result: unknown }): ToolExecutionResult {
-    if (!event.result || typeof event.result !== "object") {
-      throw new Error(`Tool '${event.tool}' returned invalid result format`);
-    }
-
-    const result = event.result as Record<string, unknown>;
-
-    // Tool results must include the typed result
-    if (!result.__typedResult || !isSerializedToolResult(result.__typedResult)) {
-      throw new Error(
-        `Tool '${event.tool}' returned invalid result format. Missing or invalid __typedResult.`
-      );
-    }
-
-    return deserializeToolResult(result.__typedResult);
+  private parseToolResult(event: { tool: string; result: unknown }): any {
+    // With AI SDK tools, just return the result as-is
+    return event.result;
   }
 
   /**
    * Publish tool error if execution failed
    */
   private async publishToolError(
-    toolResult: ToolExecutionResult,
+    toolResult: any,
     toolName: string,
     context: ExecutionContext
   ): Promise<void> {

@@ -1,10 +1,10 @@
+import { tool } from 'ai';
 import { getNDK } from "@/nostr";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKProject } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
-import type { Tool } from "../types";
-import { createZodSchema, failure, success } from "../types";
 
 const createProjectSchema = z.object({
   title: z.string().describe("The title/name of the project"),
@@ -16,54 +16,20 @@ const createProjectSchema = z.object({
   mcpServers: z.array(z.string()).optional().describe("Array of MCP announcement event IDs to include in the project"),
 });
 
-interface CreateProjectInput {
-  title: string;
-  description?: string;
-  repository?: string;
-  image?: string;
-  tags?: string[];
-  agents?: string[];
-  mcpServers?: string[];
-}
-
-interface CreateProjectOutput {
+type CreateProjectInput = z.infer<typeof createProjectSchema>;
+type CreateProjectOutput = {
   id: string;
-}
+};
 
 /**
- * Create Project tool - publishes a new NDKProject event to Nostr
- * Not available to any agent by default - must be explicitly assigned
+ * Core implementation of the create_project functionality
+ * Shared between AI SDK and legacy Tool interfaces
  */
-export const createProjectTool: Tool<CreateProjectInput, CreateProjectOutput> = {
-  name: "create_project",
-  description: "Create and publish a new NDKProject event to Nostr",
-
-  promptFragment: `Create a new NDKProject event and publish it to Nostr.
-
-This tool allows agents to create new projects.
-The project will be published using the current agent's signer.
-
-Required:
-- title: The project name
-- description: Project description
-
-Optional:
-- repository: Git repository URL
-- image: Project image URL
-- tags: Additional tags for categorization
-- agents: Array of agent definition event IDs (format: "nevent1..." or "note1...")
-- mcpServers: Array of MCP announcement event IDs (format: "nevent1..." or "note1...")
-
-To find available agents and MCP servers:
-- Use agents_discover() to search for agent definitions on Nostr
-- Use discover_capabilities() to find MCP server announcements
-
-The created project will be a kind 31933 replaceable event.`,
-
-  parameters: createZodSchema(createProjectSchema),
-
-  execute: async (input, context) => {
-    const { title, description, repository, image, tags, agents, mcpServers } = input.value;
+async function executeCreateProject(
+  input: CreateProjectInput,
+  context: ExecutionContext
+): Promise<CreateProjectOutput> {
+  const { title, description, repository, image, tags, agents, mcpServers } = input;
 
     const ndk = getNDK();
     if (!ndk) {
@@ -72,11 +38,7 @@ The created project will be a kind 31933 replaceable event.`,
         error,
         agent: context.agent.name,
       });
-      return failure({
-        kind: "execution",
-        tool: "create_project",
-        message: error,
-      });
+      throw new Error(error);
     }
 
     logger.info("📝 Creating new NDKProject", {
@@ -153,7 +115,7 @@ The created project will be a kind 31933 replaceable event.`,
         id: `nostr:${project.encode()}`,
       };
 
-      return success(result);
+      return result;
     } catch (error) {
       const errorMessage = formatAnyError(error);
       logger.error("❌ Failed to create NDKProject", {
@@ -162,11 +124,26 @@ The created project will be a kind 31933 replaceable event.`,
         agent: context.agent.name,
       });
 
-      return failure({
-        kind: "execution",
-        tool: "create_project",
-        message: `Failed to create project: ${errorMessage}`,
-      });
+      throw new Error(`Failed to create project: ${errorMessage}`);
     }
-  },
-};
+}
+
+/**
+ * Create an AI SDK tool for creating projects
+ * This is the primary implementation
+ */
+export function createCreateProjectTool(context: ExecutionContext) {
+  return tool({
+    description: "Create and publish a new NDKProject event to Nostr",
+    parameters: createProjectSchema,
+    execute: async (input: CreateProjectInput) => {
+      try {
+        return await executeCreateProject(input, context);
+      } catch (error) {
+        logger.error("Failed to create project", { error });
+        throw new Error(`Failed to create project: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  });
+}
+

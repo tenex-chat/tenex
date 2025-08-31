@@ -1,4 +1,10 @@
-import type { ToolError } from "@/tools/types";
+// ToolError removed - define it locally if needed
+interface ToolError {
+  kind: 'validation' | 'execution' | 'system';
+  message: string;
+  field?: string;
+  tool?: string;
+}
 
 /**
  * Comprehensive error formatter that handles all error types in the codebase

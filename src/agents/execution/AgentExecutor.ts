@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
-import type { LLMService } from "@/llm/types";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import {
@@ -12,7 +11,7 @@ import { mcpService } from "@/services/mcp/MCPService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger, logInfo } from "@/utils/logger";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 import { ReasonActLoop } from "./ReasonActLoop";
 import type { ExecutionContext } from "./types";
 import "@/prompts/fragments/01-specialist-identity";
@@ -164,7 +163,7 @@ export class AgentExecutor {
     context: ExecutionContext,
     _triggeringEvent: NDKEvent
   ): Promise<Message[]> {
-    const messages: Message[] = [];
+    const messages: CoreMessage[] = [];
 
     // Get fresh conversation data
     const conversation = context.conversationCoordinator.getConversation(context.conversationId);
@@ -249,7 +248,7 @@ export class AgentExecutor {
       // Fallback: No context available - use absolute minimal prompt
       logger.warn("No context available for agent execution, using minimal prompt");
       messages.push(
-        new Message("system", `You are ${context.agent.name}. ${context.agent.instructions || ""}`)
+        { role: "system", content: `You are ${context.agent.name}. ${context.agent.instructions || ""}` }
       );
     }
 
@@ -280,7 +279,7 @@ DO NOT use delegate(), delegate_phase(), or any other tool.
 
 === END CRITICAL NOTIFICATION ===`;
 
-      messages.push(new Message("system", delegationCompletionInstruction));
+      messages.push({ role: "system", content: delegationCompletionInstruction });
       logger.info(`[AgentExecutor] 🔁 Starting delegation completion flow for ${context.agent.name}`, {
         conversationId: context.conversationId,
         agentSlug: context.agent.slug,
@@ -310,7 +309,7 @@ Provide a transparent, honest analysis of:
 Be completely transparent about your internal process. If you made a mistake or could have done better, acknowledge it. The goal is to help the user understand exactly how you arrived at your decision.
 === END DEBUG MODE ===`;
 
-      messages.push(new Message("system", debugMetaCognitionPrompt));
+      messages.push({ role: "system", content: debugMetaCognitionPrompt });
       logger.info(`[AgentExecutor] Debug mode activated for agent ${context.agent.name}`, {
         conversationId: context.conversationId,
         agentSlug: context.agent.slug,
@@ -335,7 +334,7 @@ Be completely transparent about your internal process. If you made a mistake or 
    */
   private async executeWithStreaming(
     context: ExecutionContext,
-    messages: Message[]
+    messages: CoreMessage[]
   ): Promise<void> {
     // Get tools for response processing - use agent's configured tools
     const tools = context.agent.tools || [];

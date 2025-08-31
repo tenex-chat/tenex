@@ -1,4 +1,4 @@
-import type { Tool } from "@/tools/types";
+// Tool type removed - using AI SDK tools only
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
@@ -34,7 +34,7 @@ export interface AgentInstance {
   /** LLM configuration identifier */
   llmConfig: string;
   /** Tool instances available to this agent */
-  tools: Tool[];
+  tools: any[];
   /** Whether this agent has access to MCP tools (defaults to true except for orchestrator) */
   mcp?: boolean;
   /** NDKAgentDefinition event ID for persisted configuration */

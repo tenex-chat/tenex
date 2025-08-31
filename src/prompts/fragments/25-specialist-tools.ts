@@ -1,7 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "@/prompts/core/FragmentRegistry";
 import type { PromptFragment } from "@/prompts/core/types";
-import type { Tool } from "@/tools/types";
 
 /**
  * Tools fragment for specialist agents ONLY.
@@ -17,7 +16,7 @@ import type { Tool } from "@/tools/types";
  */
 interface SpecialistToolsArgs {
   agent: AgentInstance;
-  mcpTools?: Tool[];
+  mcpTools?: any[];
 }
 
 export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
@@ -44,35 +43,71 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       sections.push("### Core Tools\n");
       
       // Group tools by category for better organization
-      const coreTools: Tool[] = [];
-      const agentTools: Tool[] = [];
-      const delegationTools: Tool[] = [];
-      const reportTools: Tool[] = [];
-      const otherTools: Tool[] = [];
+      const coreTools: string[] = [];
+      const agentTools: string[] = [];
+      const delegationTools: string[] = [];
+      const reportTools: string[] = [];
+      const otherTools: string[] = [];
       
-      for (const tool of agent.tools) {
-        if (["lesson_get", "lesson_learn", "read_path"].includes(tool.name)) {
-          coreTools.push(tool);
-        } else if (tool.name.startsWith("agents_")) {
-          agentTools.push(tool);
-        } else if (tool.name.includes("delegate")) {
-          delegationTools.push(tool);
-        } else if (tool.name.includes("report")) {
-          reportTools.push(tool);
+      // agent.tools is now an array of tool names (strings)
+      for (const toolName of agent.tools) {
+        if (typeof toolName !== 'string') continue;
+        
+        if (["lesson_get", "lesson_learn", "read_path"].includes(toolName)) {
+          coreTools.push(toolName);
+        } else if (toolName.startsWith("agents_")) {
+          agentTools.push(toolName);
+        } else if (toolName.includes("delegate")) {
+          delegationTools.push(toolName);
+        } else if (toolName.includes("report")) {
+          reportTools.push(toolName);
         } else {
-          otherTools.push(tool);
+          otherTools.push(toolName);
         }
       }
+      
+      // Tool descriptions mapping
+      const toolDescriptions: Record<string, string> = {
+        // Core tools
+        "lesson_get": "Retrieve lessons learned from previous work",
+        "lesson_learn": "Record new lessons and insights for future reference",
+        "read_path": "Read a file or directory from the filesystem",
+        
+        // Agent management tools
+        "agents_discover": "Discover available agents and their capabilities",
+        "agents_hire": "Hire a new agent for the project",
+        "agents_list": "List all agents in the project",
+        "agents_read": "Read detailed information about a specific agent",
+        "agents_write": "Update agent configuration and tools",
+        
+        // Delegation tools
+        "delegate": "Delegate tasks to other agents",
+        "delegate_phase": "Delegate entire project phases to agents",
+        "delegate_external": "Delegate to external project agents",
+        
+        // Report tools
+        "report_write": "Write a report or document",
+        "report_read": "Read an existing report",
+        "reports_list": "List all available reports",
+        "report_delete": "Delete a report",
+        
+        // Other tools
+        "shell": "Execute shell commands",
+        "write_context_file": "Write context files for the project",
+        "generate_inventory": "Generate inventory of project structure",
+        "discover_capabilities": "Discover MCP server capabilities",
+        "nostr_projects": "Manage Nostr project configurations",
+        "claude_code": "Use Claude Code for complex tasks",
+        "create_project": "Create a new project",
+      };
       
       // Display core tools first
       if (coreTools.length > 0) {
         sections.push("#### Essential Tools (Available to All Agents)\n");
-        for (const tool of coreTools) {
-          sections.push(`**${tool.name}**`);
-          sections.push(`${tool.description}`);
-          if (tool.promptFragment) {
-            sections.push(`\n${tool.promptFragment}`);
-          }
+        for (const toolName of coreTools) {
+          const description = toolDescriptions[toolName] || "Tool for specialized tasks";
+          sections.push(`**${toolName}**`);
+          sections.push(`${description}`);
           sections.push("");
         }
       }
@@ -80,12 +115,10 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       // Display delegation tools
       if (delegationTools.length > 0) {
         sections.push("#### Delegation Tools\n");
-        for (const tool of delegationTools) {
-          sections.push(`**${tool.name}**`);
-          sections.push(`${tool.description}`);
-          if (tool.promptFragment) {
-            sections.push(`\n${tool.promptFragment}`);
-          }
+        for (const toolName of delegationTools) {
+          const description = toolDescriptions[toolName] || "Tool for delegation tasks";
+          sections.push(`**${toolName}**`);
+          sections.push(`${description}`);
           sections.push("");
         }
       }
@@ -93,12 +126,10 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       // Display agent management tools
       if (agentTools.length > 0) {
         sections.push("#### Agent Management Tools\n");
-        for (const tool of agentTools) {
-          sections.push(`**${tool.name}**`);
-          sections.push(`${tool.description}`);
-          if (tool.promptFragment) {
-            sections.push(`\n${tool.promptFragment}`);
-          }
+        for (const toolName of agentTools) {
+          const description = toolDescriptions[toolName] || "Tool for agent management";
+          sections.push(`**${toolName}**`);
+          sections.push(`${description}`);
           sections.push("");
         }
       }
@@ -106,12 +137,10 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       // Display report tools
       if (reportTools.length > 0) {
         sections.push("#### Report Tools\n");
-        for (const tool of reportTools) {
-          sections.push(`**${tool.name}**`);
-          sections.push(`${tool.description}`);
-          if (tool.promptFragment) {
-            sections.push(`\n${tool.promptFragment}`);
-          }
+        for (const toolName of reportTools) {
+          const description = toolDescriptions[toolName] || "Tool for report management";
+          sections.push(`**${toolName}**`);
+          sections.push(`${description}`);
           sections.push("");
         }
       }
@@ -119,12 +148,10 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       // Display other specialized tools
       if (otherTools.length > 0) {
         sections.push("#### Specialized Tools\n");
-        for (const tool of otherTools) {
-          sections.push(`**${tool.name}**`);
-          sections.push(`${tool.description}`);
-          if (tool.promptFragment) {
-            sections.push(`\n${tool.promptFragment}`);
-          }
+        for (const toolName of otherTools) {
+          const description = toolDescriptions[toolName] || "Tool for specialized tasks";
+          sections.push(`**${toolName}**`);
+          sections.push(`${description}`);
           sections.push("");
         }
       }
@@ -136,7 +163,7 @@ export const specialistToolsFragment: PromptFragment<SpecialistToolsArgs> = {
       sections.push("Additional tools are available from MCP servers:\n");
 
       // Group tools by server
-      const toolsByServer = new Map<string, Tool[]>();
+      const toolsByServer = new Map<string, any[]>();
       for (const tool of mcpTools) {
         const [serverName] = tool.name.split("/");
         if (!serverName) continue;

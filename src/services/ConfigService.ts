@@ -91,11 +91,10 @@ export class ConfigService {
     const globalLLMs = await this.loadTenexLLMs(globalPath);
     const projectLLMs = projPath
       ? await this.loadTenexLLMs(projPath)
-      : { configurations: {}, defaults: {}, credentials: {} };
+      : { providers: {}, models: {} };
     const llms: TenexLLMs = {
-      configurations: { ...globalLLMs.configurations, ...projectLLMs.configurations },
-      defaults: { ...globalLLMs.defaults, ...projectLLMs.defaults },
-      credentials: { ...globalLLMs.credentials, ...projectLLMs.credentials },
+      providers: { ...globalLLMs.providers, ...projectLLMs.providers },
+      models: { ...globalLLMs.models, ...projectLLMs.models },
     };
 
     // Load MCP (merge global and project)
@@ -133,9 +132,9 @@ export class ConfigService {
 
   async loadTenexLLMs(basePath: string): Promise<TenexLLMs> {
     return this.loadConfigFile(this.getConfigFilePath(basePath, LLMS_FILE), TenexLLMsSchema, {
+      providers: {},
       configurations: {},
-      defaults: {},
-      credentials: {},
+      default: undefined
     });
   }
 
