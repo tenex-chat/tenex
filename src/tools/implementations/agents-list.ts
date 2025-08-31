@@ -29,7 +29,6 @@ type AgentInfo = {
   tools?: string[];
   mcp?: boolean;
   isGlobal?: boolean;
-  isBuiltIn?: boolean;
   eventId?: string;
 };
 
@@ -42,7 +41,6 @@ type AgentsListOutput = {
     total: number;
     project: number;
     global: number;
-    builtIn: number;
   };
 };
 
@@ -65,7 +63,6 @@ async function executeAgentsList(
       
       let projectAgents = 0;
       let globalAgents = 0;
-      let builtInAgents = 0;
 
       // Read project registry
       if (await fileExists(projectRegistryPath)) {
@@ -91,7 +88,6 @@ async function executeAgentsList(
                   tools: agentDef.tools,
                   mcp: agentDef.mcp,
                   isGlobal: false,
-                  isBuiltIn: false,
                   eventId: entry.eventId,
                 });
                 projectAgents++;
@@ -139,7 +135,6 @@ async function executeAgentsList(
                     tools: agentDef.tools,
                     mcp: agentDef.mcp,
                     isGlobal: true,
-                    isBuiltIn: false,
                     eventId: entry.eventId,
                   });
                   globalAgents++;
@@ -154,42 +149,9 @@ async function executeAgentsList(
         }
       }
 
-      // Load built-in agents from the active registry
-      try {
-        const registry = new AgentRegistry(projectPath, false);
-        await registry.loadFromProject();
-        
-        const allAgents = registry.getAllAgents();
-        for (const agent of allAgents) {
-          if (agent.isBuiltIn) {
-            // Skip if already loaded
-            if (agents.some(a => a.slug === agent.slug)) {
-              continue;
-            }
-            
-            agents.push({
-              slug: agent.slug,
-              name: agent.name,
-              role: agent.role,
-              description: agent.description,
-              instructions: verbose ? agent.instructions : undefined,
-              useCriteria: agent.useCriteria,
-              tools: agent.tools.map(t => t.name),
-              mcp: agent.mcp,
-              isGlobal: agent.isGlobal,
-              isBuiltIn: true,
-              eventId: agent.eventId,
-            });
-            builtInAgents++;
-          }
-        }
-      } catch (error) {
-        logger.debug("Failed to load built-in agents from registry", { error });
-      }
 
-      // Sort agents by type (built-in first, then project, then global) and name
+      // Sort agents by type (project first, then global) and name
       agents.sort((a, b) => {
-        if (a.isBuiltIn !== b.isBuiltIn) return a.isBuiltIn ? -1 : 1;
         if (a.isGlobal !== b.isGlobal) return a.isGlobal ? 1 : -1;
         return a.name.localeCompare(b.name);
       });
@@ -197,7 +159,6 @@ async function executeAgentsList(
       logger.info(`Listed ${agents.length} agents`);
       logger.info(`  Project: ${projectAgents}`);
       logger.info(`  Global: ${globalAgents}`);
-      logger.info(`  Built-in: ${builtInAgents}`);
 
   return {
     success: true,
@@ -207,7 +168,6 @@ async function executeAgentsList(
       total: agents.length,
       project: projectAgents,
       global: globalAgents,
-      builtIn: builtInAgents,
     },
   };
 }
@@ -230,4 +190,3 @@ export function createAgentsListTool(context: ExecutionContext) {
     },
   });
 }
-

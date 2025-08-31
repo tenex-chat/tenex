@@ -603,7 +603,7 @@ describe("E2E: Nostr Network Resilience", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verify",
                         reason: "Verifying stateful execution."
                     })
@@ -612,7 +612,7 @@ describe("E2E: Nostr Network Resilience", () => {
             },
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     phase: "verify"
                 },
                 response: {
@@ -665,7 +665,7 @@ describe("E2E: Nostr Network Resilience", () => {
         );
 
         // Verify state was maintained
-        assertAgentSequence(trace, ["planner", "executor", "project-manager"]);
+        assertAgentSequence(trace, ["planner", "executor", "test-pm"]);
         assertPhaseTransitions(trace, ["plan", "execute", "verify"]);
         
         // Check that state references are consistent

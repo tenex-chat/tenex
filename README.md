@@ -18,7 +18,7 @@ Unlike traditional AI assistants where you interact with a single entity, TENEX 
 ## ✨ Key Features
 
 ### 🤖 **Multi-Agent Architecture**
-- **Specialized Agents**: Built-in agents for planning, execution, and project management
+- **Specialized Agents**: Agents for planning, execution, and project management fetched from Nostr
 - **Dynamic Routing**: Intelligent task delegation based on agent capabilities and context
 - **Parallel Execution**: Multiple agents can work simultaneously on different aspects of your project
 - **Custom Agents**: Extensible system allowing you to define domain-specific experts
@@ -40,7 +40,7 @@ Every interaction follows a structured lifecycle ensuring quality and completene
 - Persistent knowledge base stored on Nostr
 
 ### 🔧 **Powerful Tool System**
-- **Built-in Tools**: File operations, code analysis, shell execution, Git integration
+- **Comprehensive Tools**: File operations, code analysis, shell execution, Git integration
 - **MCP Integration**: Model Context Protocol support for dynamic tool loading
 - **Type-Safe**: Comprehensive validation and error handling
 - **Composable**: Tools can be combined for complex operations

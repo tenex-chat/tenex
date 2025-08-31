@@ -120,7 +120,7 @@ describe("E2E: Concurrent Multiple Conversations", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verify",
                         reason: "User A implementation complete. Verifying."
                     })
@@ -130,7 +130,7 @@ describe("E2E: Concurrent Multiple Conversations", () => {
             // Verification for auth
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     phase: "verify",
                     userMessage: /User A/i
                 },
@@ -246,7 +246,7 @@ describe("E2E: Concurrent Multiple Conversations", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verify",
                         reason: "User B implementation complete. Verifying."
                     })
@@ -256,7 +256,7 @@ describe("E2E: Concurrent Multiple Conversations", () => {
             // Verification for payment
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     phase: "verify",
                     userMessage: /User B/i
                 },
@@ -312,11 +312,11 @@ describe("E2E: Concurrent Multiple Conversations", () => {
         ]);
 
         // Verify conversation A workflow
-        assertAgentSequence(traceA, ["planner", "executor", "project-manager"]);
+        assertAgentSequence(traceA, ["planner", "executor", "test-pm"]);
         assertPhaseTransitions(traceA, ["plan", "execute", "verify"]);
         
         // Verify conversation B workflow
-        assertAgentSequence(traceB, ["planner", "executor", "project-manager"]);
+        assertAgentSequence(traceB, ["planner", "executor", "test-pm"]);
         assertPhaseTransitions(traceB, ["plan", "execute", "verify"]);
 
         // Verify conversations didn't interfere with each other

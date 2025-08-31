@@ -331,7 +331,7 @@ describe("E2E: Agent Error Recovery", () => {
                 priority: 95
             },
             
-            // Orchestrator routes to project-manager
+            // Orchestrator routes to PM (test-pm)
             {
                 trigger: {
                     systemPrompt: /You must respond with ONLY a JSON object/,
@@ -339,7 +339,7 @@ describe("E2E: Agent Error Recovery", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verify",
                         reason: "Plan completed after recovery. Verifying results."
                     })
@@ -350,7 +350,7 @@ describe("E2E: Agent Error Recovery", () => {
             // Project manager verifies
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     phase: "verify"
                 },
                 response: {
@@ -391,7 +391,7 @@ describe("E2E: Agent Error Recovery", () => {
         );
 
         // Verify recovery from multiple failures
-        assertAgentSequence(trace, ["planner", "project-manager"]);
+        assertAgentSequence(trace, ["planner", "test-pm"]);
         assertPhaseTransitions(trace, ["plan", "verify"]);
         
         // Verify multiple shell failures before success

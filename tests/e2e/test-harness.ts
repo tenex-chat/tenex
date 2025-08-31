@@ -201,38 +201,82 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         })
     }));
     
-    // Create test agent
-    const testAgent = {
-        name: "test-agent",
-        slug: "test-agent",
-        pubkey: "test-agent-pubkey",
-        description: "Test agent for E2E tests",
-        role: "Test Agent",
-        instructions: "You are a test agent for E2E testing",
-        systemPrompt: "You are a test agent for E2E testing",
-        allowedTools: ["writeContextFile", "analyze"],
+    // Create test agents - first one becomes PM
+    const pmAgent = {
+        name: "test-pm",
+        slug: "test-pm",
+        pubkey: "test-pm-pubkey",
+        eventId: "test-pm-event-id",
+        description: "Test PM agent for E2E tests",
+        role: "Project Manager",
+        instructions: "You are a test PM agent for E2E testing",
+        systemPrompt: "You are a test PM agent for E2E testing",
+        allowedTools: ["delegate_phase", "writeContextFile", "analyze"],
         tools: [],
-        isBuiltIn: false,
         llmConfig: { model: "claude-3-sonnet-20240229", provider: "anthropic" }
     };
     
-    // Mock project context to avoid complex initialization
-    mock.module("@/services/ProjectContext", () => ({
-        getProjectContext: () => ({
-            project: { 
-                id: "test-project", 
-                pubkey: "test-pubkey",
-                tagValue: (tag: string) => tag === "title" ? "Test Project" : null,
-                tags: [["title", "Test Project"]]
-            },
-            signer: { privateKey: () => "test-key" },
+    const executorAgent = {
+        name: "executor",
+        slug: "executor",
+        pubkey: "executor-pubkey",
+        eventId: "executor-event-id",
+        description: "Executor agent for E2E tests",
+        role: "Executor",
+        instructions: "You are an executor agent for E2E testing",
+        systemPrompt: "You are an executor agent for E2E testing",
+        allowedTools: ["shell", "writeContextFile"],
+        tools: [],
+        llmConfig: { model: "claude-3-sonnet-20240229", provider: "anthropic" }
+    };
+    
+    const plannerAgent = {
+        name: "planner",
+        slug: "planner",
+        pubkey: "planner-pubkey",
+        eventId: "planner-event-id",
+        description: "Planner agent for E2E tests",
+        role: "Planner",
+        instructions: "You are a planner agent for E2E testing",
+        systemPrompt: "You are a planner agent for E2E testing",
+        allowedTools: ["analyze"],
+        tools: [],
+        llmConfig: { model: "claude-3-sonnet-20240229", provider: "anthropic" }
+    };
+    
+    // Mock project context with dynamic PM (first agent)
+    const agentsMap = new Map([
+        ["test-pm", pmAgent],      // First agent becomes PM
+        ["executor", executorAgent],
+        ["planner", plannerAgent]
+    ]);
+    
+    const mockProjectContext = {
+        project: { 
+            id: "test-project", 
             pubkey: "test-pubkey",
-            orchestrator: null,
-            agents: new Map([["test-agent", testAgent]]),
-            agentLessons: new Map(),
-            initialize: () => {},
-            getLessonsForAgent: () => []  // Add missing method
-        }),
+            tagValue: (tag: string) => tag === "title" ? "Test Project" : null,
+            tags: [
+                ["title", "Test Project"],
+                ["agent", "test-pm-event-id"],    // First agent tag - becomes PM
+                ["agent", "executor-event-id"],
+                ["agent", "planner-event-id"]
+            ]
+        },
+        signer: { privateKey: () => "test-key" },
+        pubkey: "test-pubkey",
+        orchestrator: null,
+        agents: agentsMap,
+        agentLessons: new Map(),
+        projectManager: pmAgent,  // Set the PM
+        getProjectManager: () => pmAgent,  // Dynamic PM getter
+        getAgent: (slug: string) => agentsMap.get(slug),
+        initialize: () => {},
+        getLessonsForAgent: () => []
+    };
+    
+    mock.module("@/services/ProjectContext", () => ({
+        getProjectContext: () => mockProjectContext,
         setProjectContext: async () => {},
         isProjectContextInitialized: () => true
     }));
@@ -245,7 +289,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
     const agentRegistry = new AgentRegistry(projectPath);
     await agentRegistry.loadFromProject();
     
-    // Ensure built-in agents are loaded
+    // Verify agents are loaded  
     const agents = agentRegistry.getAllAgents();
     if (agents.length === 0) {
         console.error("Warning: No agents loaded in registry");
@@ -267,9 +311,10 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         conversationCoordinator,
         agentRegistry,
         configService: ConfigService,
+        projectContext: mockProjectContext,  // Add project context
         services: {
             configService: ConfigService,
-            projectContext: null
+            projectContext: mockProjectContext
         },
         projectConfig: {
             title: "Test Project",
@@ -577,8 +622,12 @@ export async function executeConversationFlow(
                         // End conversation in specific scenarios:
                         // 1. If certain phases are completed
                         // 2. If workflow is complete
+                        // Check if PM agent (first agent in project) completed certain phases
+                        const pmAgent = context.projectContext.getProjectManager();
+                        const isPMAgent = targetAgent === pmAgent.slug;
+                        
                         if (targetAgent === 'orchestrator' || 
-                            (targetAgent === 'project-manager' && 
+                            (isPMAgent && 
                              (routingDecision.phase === 'verification' || routingDecision.phase === 'plan'))) {
                             return trace;
                         }

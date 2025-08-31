@@ -124,7 +124,7 @@ async function handleReplyLogic(
   { conversationCoordinator, agentExecutor }: EventHandlerContext
 ): Promise<void> {
   const projectCtx = getProjectContext();
-  const projectManager = projectCtx.getAgent("project-manager");
+  const projectManager = projectCtx.getProjectManager();
   if (!projectManager) {
     throw new Error("Project Manager agent not found - required for conversation coordination");
   }

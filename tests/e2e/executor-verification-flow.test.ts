@@ -71,7 +71,7 @@ describe("E2E: Executor-Verification Flow", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verification",
                         reason: "Executor completed implementation. Routing to project-manager for verification."
                     })
@@ -82,7 +82,7 @@ describe("E2E: Executor-Verification Flow", () => {
             // 4. Project Manager finds issues
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     iterationCount: 1  // First verification
                 },
                 response: {
@@ -107,7 +107,7 @@ describe("E2E: Executor-Verification Flow", () => {
             {
                 trigger: {
                     systemPrompt: /You must respond with ONLY a JSON object/,
-                    previousAgent: "project-manager"  // After PM calls continue
+                    previousAgent: "test-pm"  // After PM calls continue
                 },
                 response: {
                     content: JSON.stringify({
@@ -152,7 +152,7 @@ describe("E2E: Executor-Verification Flow", () => {
                 },
                 response: {
                     content: JSON.stringify({
-                        agents: ["project-manager"],
+                        agents: ["test-pm"],  // Dynamic PM
                         phase: "verification",
                         reason: "Executor implemented security fixes. Routing to project-manager for final verification."
                     })
@@ -163,7 +163,7 @@ describe("E2E: Executor-Verification Flow", () => {
             // 8. Project Manager approves
             {
                 trigger: {
-                    agentName: "project-manager",
+                    agentName: "test-pm",  // Dynamic PM
                     iterationCount: 2  // Second verification
                 },
                 response: {
@@ -237,11 +237,11 @@ describe("E2E: Executor-Verification Flow", () => {
             "orchestrator",     // Initial routing
             "executor",        // First implementation
             "orchestrator",    // Route to verification
-            "project-manager", // Find issues
+            "test-pm", // Find issues
             "orchestrator",    // Route back to executor
             "executor",        // Fix issues
             "orchestrator",    // Route to verification again
-            "project-manager"  // Final approval
+            "test-pm"  // Final approval
         );
         
         // Verify phase transitions
@@ -254,12 +254,12 @@ describe("E2E: Executor-Verification Flow", () => {
         
         // Verify tool calls
         assertToolCalls(trace, "executor", "continue", "continue");
-        assertToolCalls(trace, "project-manager", "continue");
+        assertToolCalls(trace, "test-pm", "continue");
         
         // Verify feedback was propagated
         const feedbackPropagated = assertFeedbackPropagated(
             trace,
-            "project-manager",
+            "test-pm",
             "executor",
             "security"
         );
@@ -267,7 +267,7 @@ describe("E2E: Executor-Verification Flow", () => {
         
         // Verify conversation completed
         const finalExecution = trace.executions[trace.executions.length - 1];
-        expect(finalExecution.agent).toBe("project-manager");
+        expect(finalExecution.agent).toBe("test-pm");
         
         // Verify security issues were mentioned and fixed
         const executorMessages = trace.executions

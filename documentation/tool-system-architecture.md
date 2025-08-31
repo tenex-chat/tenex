@@ -2,7 +2,7 @@
 
 ## Overview
 
-The TENEX tool system provides a type-safe, composable infrastructure for agent capabilities. It serves as the execution layer that bridges agent intentions with concrete actions, supporting both built-in tools and dynamically loaded MCP (Model Context Protocol) tools. The system follows functional programming principles with algebraic data types, explicit error handling through Result types, and strong type safety via Zod schemas.
+The TENEX tool system provides a type-safe, composable infrastructure for agent capabilities. It serves as the execution layer that bridges agent intentions with concrete actions, supporting both core tools and dynamically loaded MCP (Model Context Protocol) tools. The system follows functional programming principles with algebraic data types, explicit error handling through Result types, and strong type safety via Zod schemas.
 
 ## Core Philosophy
 
@@ -109,7 +109,7 @@ The registry provides:
 - Batch tool retrieval for agent assignment
 - Tool discovery for dynamic loading
 
-### 5. Built-in Tool Implementations
+### 5. Core Tool Implementations
 
 #### File System Tools
 - **read_path**: Reads files with project boundary validation
@@ -214,7 +214,7 @@ Tools are assigned to agents based on capabilities:
 #### Assignment Rules
 1. **Orchestrator**: No tools (uses routing backend)
 2. **Project Manager**: All tools including shell, inventory generation
-3. **Other Built-in Agents**: Standard tools
+3. **Other Agents**: Standard tools
 4. **Custom Agents**: Configurable tool sets
 
 The assignment system ensures:

@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { ProjectContext } from "@/services/ProjectContext";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 // Tool type removed - using AI SDK tools only
 import "@/prompts/fragments/10-phase-definitions";
@@ -31,6 +32,7 @@ export interface BuildSystemPromptOptions {
   agentLessons?: Map<string, NDKAgentLesson[]>;
   mcpTools?: any[];
   triggeringEvent?: NDKEvent;
+  projectContext?: ProjectContext; // For PM detection
 }
 
 export interface BuildStandalonePromptOptions {
@@ -72,8 +74,10 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     },
   });
 
-  // Add PROJECT.md as separate cacheable message for project-manager
-  if (options.agent.slug === "project-manager") {
+  // Add PROJECT.md as separate cacheable message for project manager (determined dynamically)
+  // Check if this agent is the PM by comparing pubkeys
+  const projectContext = options.projectContext;
+  if (projectContext && options.agent.pubkey === projectContext.getProjectManager().pubkey) {
     const projectMdContent = buildProjectMdContent(options);
     if (projectMdContent) {
       messages.push({

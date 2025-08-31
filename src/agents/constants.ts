@@ -1,7 +1,5 @@
 import type { AgentInstance } from "./types";
 
-// Agent slug constants
-export const PROJECT_MANAGER_AGENT = "project-manager" as const;
 
 /**
  * Core tools that ALL agents must have access to regardless of configuration.
@@ -18,33 +16,25 @@ export const CORE_AGENT_TOOLS = [
 
 /**
  * Get all available tools for an agent based on their role
+ * Note: Since PM is now dynamic (first agent in project), we can't determine
+ * PM-specific tools here. Tool assignment should be done via agent definition events.
  */
-export function getDefaultToolsForAgent(agent: AgentInstance): string[] {
-  // Special handling for project manager - different tool set
-  if (agent.slug === PROJECT_MANAGER_AGENT) {
-    // PM has delegate_phase instead of delegate
-    return [
-      "read_path",
-      "lesson_learn",
-      "claude_code",
-      "delegate_external",
-      "write_context_file",
-      "shell",
-      "discover_capabilities",
-      "agents_hire",
-      "agents_discover",
-      "nostr_projects",
-      "delegate_phase", // PM uses delegate_phase instead of delegate
-    ];
-  }
-
-  // Base tools for all other agents
+export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
+  // Default tools for all agents
+  // Specific tools should be configured via agent definition events
   const tools = [
     "read_path",
-    "lesson_learn",
+    "lesson_learn", 
     "claude_code",
     "delegate_external", // All agents can delegate to external agents
-    "delegate", // Non-PM agents use regular delegate
+    "delegate", // Regular delegate for all agents
+    "write_context_file",
+    "shell",
+    "discover_capabilities",
+    "agents_hire",
+    "agents_discover",
+    "nostr_projects",
+    "delegate_phase", // Available to all agents
   ];
 
   return tools;

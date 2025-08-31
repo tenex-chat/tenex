@@ -81,7 +81,7 @@ export const agentAddCommand = new Command("add")
           await globalRegistry.loadFromProject();
           const globalAgent = globalRegistry.getAgent(name) || globalRegistry.getAgentByName(name);
 
-          if (globalAgent && !globalAgent.isBuiltIn) {
+          if (globalAgent) {
             const confirmed = await confirm({
               message: `A global agent named "${name}" already exists. Do you want to create a project-specific version that will override it?`,
               default: false,

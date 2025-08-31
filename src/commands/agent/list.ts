@@ -47,8 +47,7 @@ export const agentListCommand = new Command("list")
           if (globalAgents.length > 0) {
             logger.info("Global agents:");
             for (const agent of globalAgents) {
-              const marker = agent.isBuiltIn ? " (built-in)" : "";
-              logger.info(`  - ${agent.slug}: ${agent.name}${marker}`);
+              logger.info(`  - ${agent.slug}: ${agent.name}`);
               logger.info(`    Role: ${agent.role}`);
               if (agent.description) {
                 logger.info(`    Description: ${agent.description}`);
@@ -89,12 +88,10 @@ export const agentListCommand = new Command("list")
 
           // Categorize agents
           for (const agent of projectAgents) {
-            if (!agent.isBuiltIn) {
-              if (globalAgentSlugs.has(agent.slug)) {
-                overriddenAgents.push(agent);
-              } else {
-                projectOnlyAgents.push(agent);
-              }
+            if (globalAgentSlugs.has(agent.slug)) {
+              overriddenAgents.push(agent);
+            } else {
+              projectOnlyAgents.push(agent);
             }
           }
 

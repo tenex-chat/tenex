@@ -42,7 +42,7 @@ Critical component handling real-time LLM response streaming, tool execution coo
 ### Tool and Integration Systems
 
 #### 10. [Tool System Architecture](./tool-system-architecture.md)
-Type-safe, composable infrastructure for agent capabilities. Bridges agent intentions with concrete actions through built-in tools and MCP integration with comprehensive validation and error handling.
+Type-safe, composable infrastructure for agent capabilities. Bridges agent intentions with concrete actions through comprehensive tools and MCP integration with validation and error handling.
 
 #### 11. [MCP Integration Architecture](./mcp-integration-architecture.md)
 Model Context Protocol integration enabling dynamic tool loading from external servers. Provides seamless adapter layer between MCP tools and TENEX's internal tool system.

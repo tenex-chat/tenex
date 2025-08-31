@@ -2,7 +2,7 @@ import type { AgentInstance } from "./types";
 
 /**
  * Normalize an agent name to kebab-case
- * Handles common variations like "Project Manager" → "project-manager"
+ * Handles common variations like "Project Manager" → "project-manager" for slug normalization
  * @param name The name to normalize
  * @returns The normalized name
  */

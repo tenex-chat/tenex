@@ -61,11 +61,6 @@ export const agentRemoveCommand = new Command("remove")
         process.exit(1);
       }
 
-      // Check if it's a built-in agent
-      if (agent.isBuiltIn) {
-        logger.error("Cannot remove built-in agents");
-        process.exit(1);
-      }
 
       // Confirm deletion unless --force is used
       if (!options.force) {

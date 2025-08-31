@@ -23,11 +23,7 @@ mock.module("@/services", () => ({
   getProjectContext: mock(),
 }));
 
-// Mock built-in agents to avoid them being loaded during tests
-const mockGetBuiltInAgents = mock(() => []);
-mock.module("@/agents/builtInAgents", () => ({
-  getBuiltInAgents: mockGetBuiltInAgents,
-}));
+// No more built-in agents to mock
 
 describe("AgentRegistry", () => {
   let registry: AgentRegistry;

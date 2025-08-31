@@ -2,7 +2,8 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { type NDKProject } from "@nostr-dev-kit/ndk";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -59,18 +60,36 @@ export class ProjectContext {
       agentDetails: Array.from(agents.entries()).map(([slug, agent]) => ({
         slug,
         name: agent.name,
-        isBuiltIn: agent.isBuiltIn,
+        eventId: agent.eventId,
       })),
     });
 
-    // Find the project manager agent
-    const projectManagerAgent = agents.get("project-manager");
+    // Find the project manager agent - it's the first agent in the project's agent tags
+    const firstAgentTag = project.tags.find((tag: string[]) => tag[0] === "agent" && tag[1]);
+    if (!firstAgentTag) {
+      throw new Error(
+        "No agents found in project event. Project must have at least one agent tag."
+      );
+    }
+
+    const pmEventId = firstAgentTag[1];
+    let projectManagerAgent: AgentInstance | undefined;
+    
+    // Find the agent with matching eventId
+    for (const agent of agents.values()) {
+      if (agent.eventId === pmEventId) {
+        projectManagerAgent = agent;
+        break;
+      }
+    }
 
     if (!projectManagerAgent) {
       throw new Error(
-        "Project Manager agent not found. Ensure AgentRegistry.loadFromProject() is called before initializing ProjectContext."
+        `Project Manager agent not found. First agent in project (eventId: ${pmEventId}) not loaded in registry.`
       );
     }
+
+    logger.info(`Using "${projectManagerAgent.name}" as Project Manager (first agent in project)`);
 
     // Hardwire to project manager's signer and pubkey
     this.signer = projectManagerAgent.signer;
@@ -97,6 +116,10 @@ export class ProjectContext {
     }
 
     return undefined;
+  }
+
+  getProjectManager(): AgentInstance {
+    return this.projectManager;
   }
 
   getProjectAgent(): AgentInstance {
@@ -153,10 +176,16 @@ export class ProjectContext {
     this.project = newProject;
     this.agents = new Map(newAgents);
 
-    // Update project manager reference if it exists in new agents
-    const newProjectManager = newAgents.get("project-manager");
-    if (newProjectManager) {
-      this.projectManager = newProjectManager;
+    // Update project manager reference - use first agent from project tags
+    const firstAgentTag = newProject.tags.find((tag: string[]) => tag[0] === "agent" && tag[1]);
+    if (firstAgentTag) {
+      const pmEventId = firstAgentTag[1];
+      for (const agent of newAgents.values()) {
+        if (agent.eventId === pmEventId) {
+          this.projectManager = agent;
+          break;
+        }
+      }
     }
 
     logger.info("ProjectContext updated with new data", {

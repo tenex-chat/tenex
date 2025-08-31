@@ -231,7 +231,7 @@ This ensures tools and context remain consistent across agent turns.
 
 ### 2. Execution System
 
-- **AgentExecutor**: Consumes built contexts for LLM interaction
+- **AgentExecutor**: Consumes constructed contexts for LLM interaction
 - **ReasonActLoop**: The unified execution implementation uses context consistently
 - **NostrPublisher**: Updates conversation state after agent responses
 
