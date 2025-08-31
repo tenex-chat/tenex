@@ -18,7 +18,7 @@ import "@/prompts/fragments/24-retrieved-lessons";
 import "@/prompts/fragments/30-project-inventory";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 
 export interface BuildSystemPromptOptions {
   // Required data
@@ -49,7 +49,7 @@ export interface BuildStandalonePromptOptions {
 }
 
 export interface SystemMessage {
-  message: Message;
+  message: CoreMessage;
   metadata?: {
     cacheable?: boolean;
     cacheKey?: string;
@@ -68,7 +68,7 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
   // Build the main system prompt
   const mainPrompt = buildMainSystemPrompt(options);
   messages.push({
-    message: new Message("system", mainPrompt),
+    message: { role: "system", content: mainPrompt },
     metadata: {
       description: "Main system prompt",
     },
@@ -81,7 +81,7 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     const projectMdContent = buildProjectMdContent(options);
     if (projectMdContent) {
       messages.push({
-        message: new Message("system", projectMdContent),
+        message: { role: "system", content: projectMdContent },
         metadata: {
           cacheable: true,
           cacheKey: `project-md-${options.project.id}`,
@@ -95,7 +95,7 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
   const inventoryContent = buildProjectInventoryContent(options);
   if (inventoryContent) {
     messages.push({
-      message: new Message("system", inventoryContent),
+      message: { role: "system", content: inventoryContent },
       metadata: {
         cacheable: true,
         cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
@@ -214,7 +214,7 @@ export function buildStandaloneSystemPromptMessages(
   // Build the main system prompt
   const mainPrompt = buildStandaloneMainPrompt(options);
   messages.push({
-    message: new Message("system", mainPrompt),
+    message: { role: "system", content: mainPrompt },
     metadata: {
       description: "Main standalone system prompt",
     },

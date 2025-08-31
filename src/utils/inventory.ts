@@ -140,7 +140,7 @@ async function generateMainInventory(
     }
   );
 
-  const content = response.content || "";
+  const content = response.text || "";
 
   // Extract complex modules from JSON at the end
   const complexModules = await extractComplexModules(content, projectPath);
@@ -196,7 +196,7 @@ async function generateModuleGuide(
   const contextDir = path.dirname(inventoryPath);
   const guideFilePath = path.join(contextDir, module.suggestedFilename);
 
-  await fs.writeFile(guideFilePath, response.content || "", "utf-8");
+  await fs.writeFile(guideFilePath, response.text || "", "utf-8");
   logger.info("Module guide saved", {
     module: module.name,
     guideFilePath,
@@ -319,23 +319,23 @@ async function fallbackExtractComplexModules(
       .add("complex-modules-extraction", { content })
       .build();
 
-    const llmRouter = await loadLLMRouter(projectPath);
-    const userMessage = new Message("user", cleanupPrompt);
+    const llmService = await getLLMServiceFromConfig();
+    const userMessage = { role: "user" as const, content: cleanupPrompt };
 
     logger.debug("[inventory] Calling LLM for fallback extraction", {
       configName: "defaults.analyze",
     });
 
-    const response = await llmRouter.complete({
-      messages: [userMessage],
-      options: {
+    const response = await llmService.complete(
+      "defaults.analyze",
+      [userMessage],
+      {
         temperature: 0.1,
         maxTokens: 1000,
-        configName: "defaults.analyze",
-      },
-    });
+      }
+    );
 
-    const fallbackContent = response.content || "";
+    const fallbackContent = response.text || "";
     const jsonMatch = fallbackContent.match(JSON_BLOCK_REGEX);
 
     if (jsonMatch) {

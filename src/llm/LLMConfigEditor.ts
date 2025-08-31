@@ -23,12 +23,15 @@ export class LLMConfigEditor {
     console.log(chalk.cyan("\n=== LLM Configuration ===\n"));
     this.displayCurrentConfig(llmsConfig);
     
+    const currentDefault = llmsConfig.default && llmsConfig.configurations[llmsConfig.default] 
+      ? llmsConfig.default 
+      : "none";
+    
     const choices = [
       { name: "Configure provider API keys", value: "providers" },
       { name: "Add new configuration", value: "add" },
-      { name: "Edit existing configuration", value: "edit" },
       { name: "Delete configuration", value: "delete" },
-      { name: "Change default configuration", value: "default" },
+      { name: `Default configuration: ${chalk.cyan(currentDefault)}`, value: "default" },
       { name: "Test configuration", value: "test" },
       { name: "Exit", value: "exit" }
     ];
@@ -47,9 +50,6 @@ export class LLMConfigEditor {
       case "add":
         await this.addConfiguration(llmsConfig);
         break;
-      case "edit":
-        await this.editConfiguration(llmsConfig);
-        break;
       case "delete":
         await this.deleteConfiguration(llmsConfig);
         break;
@@ -60,7 +60,7 @@ export class LLMConfigEditor {
         await this.testConfiguration(llmsConfig);
         break;
       case "exit":
-        return;
+        process.exit(0);
     }
     
     if (action !== "exit") {
@@ -522,7 +522,10 @@ export class LLMConfigEditor {
       
       // Show usage stats if available
       if (result.usage) {
-        console.log(chalk.gray(`\nTokens used: ${result.usage.promptTokens} prompt + ${result.usage.completionTokens} completion = ${result.usage.totalTokens} total`));
+        const promptTokens = result.usage.promptTokens || '?';
+        const completionTokens = result.usage.completionTokens || '?';
+        const totalTokens = result.usage.totalTokens || '?';
+        console.log(chalk.gray(`\nTokens used: ${promptTokens} prompt + ${completionTokens} completion = ${totalTokens} total`));
       }
       
       // Wait a moment so user can see the result
@@ -557,24 +560,7 @@ export class LLMConfigEditor {
   }
 
   private displayCurrentConfig(llmsConfig: TenexLLMs): void {
-    // Show current default configuration
-    if (llmsConfig.default && llmsConfig.configurations[llmsConfig.default]) {
-      const defaultConfig = llmsConfig.configurations[llmsConfig.default];
-      console.log(chalk.bold("Current Default Configuration:"));
-      console.log(chalk.cyan(`  ${llmsConfig.default}`));
-      console.log(`    Provider: ${defaultConfig.provider}`);
-      console.log(`    Model: ${defaultConfig.model}`);
-      if (defaultConfig.temperature !== undefined) {
-        console.log(`    Temperature: ${defaultConfig.temperature}`);
-      }
-      if (defaultConfig.maxTokens !== undefined) {
-        console.log(`    Max Tokens: ${defaultConfig.maxTokens}`);
-      }
-    } else {
-      console.log(chalk.yellow("No default configuration set"));
-    }
-    
-    console.log(chalk.bold("\nConfigured Providers:"));
+    console.log(chalk.bold("Configured Providers:"));
     const providers = Object.keys(llmsConfig.providers).filter(
       p => llmsConfig.providers[p]?.apiKey
     );
@@ -586,7 +572,7 @@ export class LLMConfigEditor {
       });
     }
     
-    console.log(chalk.bold("\nAll Configurations:"));
+    console.log(chalk.bold("\nConfigurations:"));
     const configNames = Object.keys(llmsConfig.configurations);
     if (configNames.length === 0) {
       console.log(chalk.gray("  None"));
@@ -594,7 +580,9 @@ export class LLMConfigEditor {
       configNames.forEach(name => {
         const config = llmsConfig.configurations[name];
         const isDefault = name === llmsConfig.default;
-        console.log(`  ${isDefault ? chalk.cyan('• ') : '  '}${name}: ${config.provider}:${config.model}`);
+        const marker = isDefault ? chalk.cyan('• ') : '  ';
+        const defaultTag = isDefault ? chalk.gray(' (default)') : '';
+        console.log(`  ${marker}${name}${defaultTag}: ${config.provider}:${config.model}`);
       });
     }
   }

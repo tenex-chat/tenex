@@ -1,7 +1,7 @@
 import { openRouterPricing } from "@/llm/pricing";
 import type { CompletionResponse } from "@/llm/types";
 import type { LLMMetadata } from "@/nostr/types";
-import type { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 
 interface ResponseWithUsage {
   usage?: {
@@ -17,7 +17,7 @@ interface ResponseWithUsage {
 
 export async function buildLLMMetadata(
   response: CompletionResponse,
-  messages: Message[]
+  messages: CoreMessage[]
 ): Promise<LLMMetadata | undefined> {
   if (!response.usage) {
     return undefined;

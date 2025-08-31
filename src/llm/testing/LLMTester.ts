@@ -1,7 +1,9 @@
-// LLMRouter removed - using AI SDK directly
-import type { CompletionRequest, ResolvedLLMConfig } from "@/llm/types";
+// LLM Configuration Tester - using AI SDK directly
+import { getLLMServiceFromConfig } from "@/llm/service";
+import type { ResolvedLLMConfig } from "@/llm/types";
 import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
+import type { CoreMessage } from "ai";
 
 /**
  * LLM Configuration Tester - Tests LLM configurations
@@ -12,24 +14,20 @@ export class LLMTester {
    */
   async testLLMConfig(config: ResolvedLLMConfig): Promise<boolean> {
     try {
-      // Create a temporary router with just this config for testing
-      const router = new LLMRouter({
-        configs: { test: config },
-        defaults: { agents: "test" },
-      });
+      // Use the LLM service directly for testing
+      const llmService = await getLLMServiceFromConfig();
+      
+      const messages: CoreMessage[] = [
+        { role: "user", content: "Say 'test successful' if you can read this." }
+      ];
 
-      const { Message } = await import("multi-llm-ts");
-      const request: CompletionRequest = {
-        messages: [
-          new Message("user", "Say 'test successful' if you can read this."),
-        ],
-        options: {
-          configName: "test",
-        },
-      };
-
-      const response = await router.complete(request);
-      const responseText = response.content?.toLowerCase() || "";
+      const response = await llmService.complete(
+        "test",
+        messages,
+        { temperature: 0.1, maxTokens: 100 }
+      );
+      
+      const responseText = response.text?.toLowerCase() || "";
       return responseText.includes("test") && responseText.includes("successful");
     } catch (error) {
       logger.error("LLM test failed", { error });

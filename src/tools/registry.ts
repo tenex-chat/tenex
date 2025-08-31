@@ -4,6 +4,7 @@
  * Central registry for all AI SDK tools in the TENEX system.
  */
 
+import type { CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { createReadPathTool } from "./implementations/readPath";
 import { createWriteContextFileTool } from "./implementations/writeContextFile";
@@ -56,9 +57,15 @@ export type ToolName =
   | "report_delete";
 
 /**
+ * AI SDK Tool type - this is what the tool() function returns
+ * CoreTool includes the description and parameters properties we need
+ */
+export type AISdkTool = CoreTool<any, any>;
+
+/**
  * Tool factory type - functions that create AI SDK tools with context
  */
-export type ToolFactory = (context: ExecutionContext) => any;
+export type ToolFactory = (context: ExecutionContext) => AISdkTool;
 
 /**
  * Registry of tool factories
@@ -92,9 +99,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
  * Get a single tool by name
  * @param name - The tool name
  * @param context - Execution context for the tool
- * @returns The instantiated tool or undefined if not found
+ * @returns The instantiated AI SDK tool or undefined if not found
  */
-export function getTool(name: ToolName, context: ExecutionContext): any {
+export function getTool(name: ToolName, context: ExecutionContext): AISdkTool | undefined {
   const factory = toolFactories[name];
   return factory ? factory(context) : undefined;
 }
@@ -103,23 +110,23 @@ export function getTool(name: ToolName, context: ExecutionContext): any {
  * Get multiple tools by name
  * @param names - Array of tool names
  * @param context - Execution context for the tools
- * @returns Array of instantiated tools
+ * @returns Array of instantiated AI SDK tools
  */
-export function getTools(names: ToolName[], context: ExecutionContext): any[] {
+export function getTools(names: ToolName[], context: ExecutionContext): AISdkTool[] {
   return names
     .map(name => getTool(name, context))
-    .filter(tool => tool !== undefined);
+    .filter((tool): tool is AISdkTool => tool !== undefined);
 }
 
 /**
  * Get all available tools
  * @param context - Execution context for the tools
- * @returns Array of all instantiated tools
+ * @returns Array of all instantiated AI SDK tools
  */
-export function getAllTools(context: ExecutionContext): any[] {
+export function getAllTools(context: ExecutionContext): AISdkTool[] {
   return Object.keys(toolFactories).map(name => 
     getTool(name as ToolName, context)
-  );
+  ).filter((tool): tool is AISdkTool => tool !== undefined);
 }
 
 /**
@@ -128,8 +135,8 @@ export function getAllTools(context: ExecutionContext): any[] {
  * @param context - Execution context for the tools
  * @returns Object with tools keyed by name
  */
-export function getToolsObject(names: ToolName[], context: ExecutionContext): Record<string, any> {
-  const tools: Record<string, any> = {};
+export function getToolsObject(names: ToolName[], context: ExecutionContext): Record<string, AISdkTool> {
+  const tools: Record<string, AISdkTool> = {};
   
   for (const name of names) {
     const tool = getTool(name, context);
@@ -146,14 +153,34 @@ export function getToolsObject(names: ToolName[], context: ExecutionContext): Re
  * @param context - Execution context for the tools
  * @returns Object with all tools keyed by name
  */
-export function getAllToolsObject(context: ExecutionContext): Record<string, any> {
-  const tools: Record<string, any> = {};
+export function getAllToolsObject(context: ExecutionContext): Record<string, AISdkTool> {
+  const tools: Record<string, AISdkTool> = {};
   
   for (const name of Object.keys(toolFactories) as ToolName[]) {
-    tools[name] = getTool(name, context);
+    const tool = getTool(name, context);
+    if (tool) {
+      tools[name] = tool;
+    }
   }
   
   return tools;
+}
+
+/**
+ * Check if a tool name is valid
+ * @param name - The tool name to check
+ * @returns True if the tool name is valid
+ */
+export function isValidToolName(name: string): name is ToolName {
+  return name in toolFactories;
+}
+
+/**
+ * Get all valid tool names
+ * @returns Array of all valid tool names
+ */
+export function getAllToolNames(): ToolName[] {
+  return Object.keys(toolFactories) as ToolName[];
 }
 
 // Legacy exports for backward compatibility (will be removed later)

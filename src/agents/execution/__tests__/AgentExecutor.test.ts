@@ -3,7 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import { createMockLLMService } from "@/test-utils";
 import type { NDK } from "@nostr-dev-kit/ndk";
-import { Message } from "multi-llm-ts";
+import type { CoreMessage } from "ai";
 import { AgentExecutor } from "../AgentExecutor";
 import type { ExecutionContext } from "../types";
 
@@ -147,7 +147,7 @@ describe("AgentExecutor", () => {
         },
       })),
       buildAgentMessages: mock(async () => ({
-        messages: [new Message("user", "Test user message")],
+        messages: [{ role: "user" as const, content: "Test user message" }],
         claudeSessionId: undefined,
       })),
       buildOrchestratorRoutingContext: mock(async () => ({

@@ -2,7 +2,7 @@ import type { CompletionIntent, EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildLLMMetadata } from "@/prompts/utils/llmMetadata";
 // ToolExecutionResult removed - using AI SDK tools only
-import { getToolsObject } from "@/tools/registry";
+import { getToolsObject, type AISdkTool } from "@/tools/registry";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger, logInfo, logError } from "@/utils/logger";
 import { detectAndStripEOM } from "@/utils/eom-utils";
@@ -30,7 +30,7 @@ export class ReasonActLoop {
   /**
    * Core execution implementation for all agents
    */
-  async execute(messages: Array<CoreMessage>, tools: any[], context: ExecutionContext): Promise<void> {
+  async execute(messages: Array<CoreMessage>, tools: AISdkTool[], context: ExecutionContext): Promise<void> {
     this.startTime = Date.now();
     this.hasGeneratedContentPreviously = false; // Reset for each execution
 
@@ -49,7 +49,7 @@ export class ReasonActLoop {
   async *executeStreamingInternal(
     context: ExecutionContext,
     messages: CoreMessage[],
-    tools?: Tool[]
+    tools?: AISdkTool[]
   ): AsyncGenerator<any, void, unknown> {
 
     // Initialize handlers
@@ -420,7 +420,7 @@ export class ReasonActLoop {
   private async createLLMStream(
     context: ExecutionContext,
     messages: CoreMessage[],
-    tools?: Tool[]
+    tools?: AISdkTool[]
   ) {
     const messagesPreview = messages.map((msg, index) => {
       const isToolResult = msg.role === "user" && msg.content.includes("Tool [");
@@ -513,7 +513,7 @@ export class ReasonActLoop {
 
   private logExecutionStart(
     context: ExecutionContext,
-    tools?: Tool[]
+    tools?: AISdkTool[]
   ): void {
     logInfo(
       "🔄 Starting ReasonActLoop",

@@ -60,8 +60,8 @@ export class MockLLMService implements LLMService {
       await new Promise((resolve) => setTimeout(resolve, response.streamDelay));
     }
 
-    // Convert to CompletionResponse format that matches multi-llm-ts v4
-    // LlmResponse expects toolCalls with LlmToolCallInfo[] structure (name, params, result)
+    // Convert to CompletionResponse format
+    // toolCalls with proper structure
     const toolCallsInfo = response.toolCalls
       ? response.toolCalls.map((tc) => {
           // Convert our mock format to LlmToolCallInfo format

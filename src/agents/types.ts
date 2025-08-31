@@ -33,8 +33,8 @@ export interface AgentInstance {
   useCriteria?: string;
   /** LLM configuration identifier */
   llmConfig: string;
-  /** Tool instances available to this agent */
-  tools: any[];
+  /** Tool names available to this agent (stored as strings, converted to tools at runtime) */
+  tools: string[];
   /** Whether this agent has access to MCP tools (defaults to true except for orchestrator) */
   mcp?: boolean;
   /** NDKAgentDefinition event ID for persisted configuration */

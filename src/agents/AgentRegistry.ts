@@ -11,7 +11,6 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
-import type { ToolName } from "@/tools/registry";
 // Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -556,25 +555,8 @@ export class AgentRegistry {
 
     // Update the agent tools in memory
     // Filter to only valid tool names
-    const validToolNames = newToolNames.filter((name): name is ToolName => {
-      // Check if the tool name is valid
-      const validTools: ToolName[] = [
-        "read_path",
-        "write_context_file",
-        "generate_inventory",
-        "lesson_learn",
-        "lesson_get",
-        "shell",
-        "agents_discover",
-        "agents_hire",
-        "discover_capabilities",
-        "delegate",
-        "delegate_phase",
-        "nostr_projects",
-        "claude_code",
-      ];
-      return validTools.includes(name as ToolName);
-    });
+    const { isValidToolName } = await import("@/tools/registry");
+    const validToolNames = newToolNames.filter(isValidToolName);
     agent.tools = validToolNames;
 
     // Find the registry entry by pubkey
@@ -779,39 +761,14 @@ export class AgentRegistry {
     }
 
     // Validate tool names - we now store tool names as strings, not instances
+    const { isValidToolName } = await import("@/tools/registry");
     const validToolNames: string[] = [];
     const unknownTools: string[] = [];
     const requestedMcpTools: string[] = [];
     const unknownNonMcpTools: string[] = [];
     
-    // Check which tools are valid
-    const validTools: ToolName[] = [
-      "read_path",
-      "write_context_file",
-      "generate_inventory",
-      "lesson_learn",
-      "lesson_get",
-      "shell",
-      "agents_discover",
-      "agents_hire",
-      "agents_list",
-      "agents_read",
-      "agents_write",
-      "discover_capabilities",
-      "delegate",
-      "delegate_phase",
-      "nostr_projects",
-      "claude_code",
-      "create_project",
-      "delegate_external",
-      "report_write",
-      "report_read",
-      "reports_list",
-      "report_delete",
-    ];
-    
     for (const toolName of toolNames) {
-      if (validTools.includes(toolName as ToolName)) {
+      if (isValidToolName(toolName)) {
         validToolNames.push(toolName);
       } else {
         // Check if it's an MCP tool (starts with "mcp__")
