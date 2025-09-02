@@ -1,9 +1,9 @@
 import type { AgentInstance } from "@/agents/types";
 import { logger, logInfo } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 import { AgentConversationContext } from "../AgentConversationContext";
-import { MessageBuilder } from "../MessageBuilder";
+import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/systemPromptBuilder";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
@@ -23,9 +23,6 @@ export class ConversationCoordinator {
   private persistence: IConversationPersistenceService;
   private eventProcessor: ConversationEventProcessor;
   
-  // Simple execution lock - only one conversation can execute at a time
-  private currentlyExecuting: string | null = null;
-  private executionQueue: Array<{conversationId: string; agentPubkey: string}> = [];
 
   constructor(
     projectPath: string,
@@ -173,20 +170,7 @@ export class ConversationCoordinator {
 
     const from = conversation.phase;
 
-    // Handle EXECUTE phase entry with simple lock
-    if (phase === PHASES.EXECUTE && from !== PHASES.EXECUTE) {
-      const canExecute = await this.requestExecution(conversation.id, agentPubkey);
-      
-      if (!canExecute) {
-        // Already queued, return false to prevent phase transition
-        return false;
-      }
-    }
-
-    // Handle EXECUTE phase exit
-    if (from === PHASES.EXECUTE && phase !== PHASES.EXECUTE) {
-      await this.releaseExecution(conversation.id);
-    }
+    // No execution queue logic needed
 
     // Create transition record
     const transition: PhaseTransition = {
@@ -233,7 +217,7 @@ export class ConversationCoordinator {
     conversationId: string,
     targetAgent: AgentInstance,
     triggeringEvent?: NDKEvent
-  ): Promise<{ messages: CoreMessage[]; claudeSessionId?: string }> {
+  ): Promise<{ messages: ModelMessage[]; claudeSessionId?: string }> {
     const conversation = this.store.get(conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);
@@ -257,9 +241,9 @@ export class ConversationCoordinator {
     let phaseInstructions: string | undefined;
     
     if (needsPhaseInstructions) {
-      const instructions = MessageBuilder.buildPhaseInstructions(conversation.phase, conversation);
+      const instructions = buildPhaseInstructions(conversation.phase, conversation);
       if (agentState.lastSeenPhase) {
-        phaseInstructions = MessageBuilder.formatPhaseTransitionMessage(
+        phaseInstructions = formatPhaseTransitionMessage(
           agentState.lastSeenPhase,
           conversation.phase,
           instructions
@@ -376,156 +360,6 @@ export class ConversationCoordinator {
     return conversation?.history || [];
   }
 
-  /**
-   * Request execution lock for a conversation
-   */
-  private async requestExecution(conversationId: string, agentPubkey: string): Promise<boolean> {
-    // If already executing this conversation, allow it
-    if (this.currentlyExecuting === conversationId) {
-      return true;
-    }
-    
-    // If nothing is executing, take the lock
-    if (!this.currentlyExecuting) {
-      this.currentlyExecuting = conversationId;
-      logger.info(`[ConversationCoordinator] Execution lock acquired for ${conversationId}`);
-      return true;
-    }
-    
-    // Check if already in queue
-    const existingIndex = this.executionQueue.findIndex(e => e.conversationId === conversationId);
-    if (existingIndex >= 0) {
-      return false; // Already queued
-    }
-    
-    // Add to queue
-    this.executionQueue.push({ conversationId, agentPubkey });
-    const position = this.executionQueue.length;
-    
-    logger.info(`[ConversationCoordinator] Conversation ${conversationId} queued at position ${position}`);
-    
-    // Update conversation with queue status
-    const conversation = this.store.get(conversationId);
-    if (conversation) {
-      conversation.metadata.queueStatus = {
-        isQueued: true,
-        position,
-        message: this.formatQueueMessage(position),
-      };
-      await this.persistence.save(conversation);
-    }
-    
-    return false;
-  }
-  
-  /**
-   * Release execution lock
-   */
-  private async releaseExecution(conversationId: string): Promise<void> {
-    if (this.currentlyExecuting !== conversationId) {
-      return; // Not holding the lock
-    }
-    
-    logger.info(`[ConversationCoordinator] Releasing execution lock for ${conversationId}`);
-    this.currentlyExecuting = null;
-    
-    // Process next in queue
-    await this.processNextInQueue();
-  }
-  
-  /**
-   * Process next conversation in queue
-   */
-  private async processNextInQueue(): Promise<void> {
-    if (this.executionQueue.length === 0) {
-      return; // Queue is empty
-    }
-    
-    const next = this.executionQueue.shift();
-    if (!next) return;
-    
-    // Grant execution to next conversation
-    this.currentlyExecuting = next.conversationId;
-    
-    // Clear queue status from conversation
-    const conversation = this.store.get(next.conversationId);
-    if (conversation) {
-      conversation.metadata.queueStatus = undefined;
-      await this.persistence.save(conversation);
-      
-      logger.info(`[ConversationCoordinator] Execution lock granted to ${next.conversationId} from queue`);
-      
-      // The conversation will naturally progress to EXECUTE phase
-      // when it's next processed
-    }
-  }
-  
-  /**
-   * Force release the current execution lock
-   */
-  async forceReleaseExecution(): Promise<string | null> {
-    if (!this.currentlyExecuting) {
-      return null;
-    }
-    
-    const released = this.currentlyExecuting;
-    logger.info(`[ConversationCoordinator] Force releasing execution lock for ${released}`);
-    
-    this.currentlyExecuting = null;
-    await this.processNextInQueue();
-    
-    return released;
-  }
-  
-  /**
-   * Get execution status
-   */
-  getExecutionStatus(): { active: string | null; queued: string[] } {
-    return {
-      active: this.currentlyExecuting,
-      queued: this.executionQueue.map(e => e.conversationId),
-    };
-  }
-  
-  /**
-   * Remove conversation from queue
-   */
-  async removeFromQueue(conversationId: string): Promise<boolean> {
-    const initialLength = this.executionQueue.length;
-    this.executionQueue = this.executionQueue.filter(e => e.conversationId !== conversationId);
-    
-    if (this.executionQueue.length !== initialLength) {
-      // Update positions for remaining queued conversations
-      for (let i = 0; i < this.executionQueue.length; i++) {
-        const conv = this.store.get(this.executionQueue[i].conversationId);
-        if (conv?.metadata.queueStatus) {
-          conv.metadata.queueStatus.position = i + 1;
-          conv.metadata.queueStatus.message = this.formatQueueMessage(i + 1);
-          await this.persistence.save(conv);
-        }
-      }
-      return true;
-    }
-    
-    return false;
-  }
-  
-  /**
-   * Clear all queued conversations
-   */
-  async clearQueue(): Promise<void> {
-    // Clear queue status from all queued conversations
-    for (const entry of this.executionQueue) {
-      const conversation = this.store.get(entry.conversationId);
-      if (conversation) {
-        conversation.metadata.queueStatus = undefined;
-        await this.persistence.save(conversation);
-      }
-    }
-    
-    this.executionQueue = [];
-    logger.info("[ConversationCoordinator] Execution queue cleared");
-  }
 
   /**
    * Clean up conversation metadata
@@ -562,8 +396,5 @@ export class ConversationCoordinator {
 
 
 
-  private formatQueueMessage(position: number): string {
-    return `🚦 Execution Queue Status\n\nYour conversation has been added to the execution queue.\n\nQueue Position: ${position}\n\nYou will be automatically notified when execution begins.`;
-  }
 
 }

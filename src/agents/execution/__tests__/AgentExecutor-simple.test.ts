@@ -37,7 +37,7 @@ describe("AgentExecutor - Backend Selection", () => {
       }));
 
       const AgentExecutor = require("../AgentExecutor").AgentExecutor;
-      const executor = new AgentExecutor({}, {}, {});
+      const executor = new AgentExecutor({});
 
       // Access private method via prototype
       const backend = executor.getBackend(mockAgent);
@@ -55,7 +55,7 @@ describe("AgentExecutor - Backend Selection", () => {
       }));
 
       const AgentExecutor = require("../AgentExecutor").AgentExecutor;
-      const executor = new AgentExecutor({}, {}, {});
+      const executor = new AgentExecutor({});
 
       // Access private method via prototype
       const backend = executor.getBackend(mockAgent);
@@ -73,7 +73,7 @@ describe("AgentExecutor - Backend Selection", () => {
       }));
 
       const AgentExecutor = require("../AgentExecutor").AgentExecutor;
-      const executor = new AgentExecutor({}, {}, {});
+      const executor = new AgentExecutor({});
 
       // Access private method via prototype
       const backend = executor.getBackend(mockAgent);

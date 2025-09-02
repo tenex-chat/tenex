@@ -13,11 +13,11 @@ const shellSchema = z.object({
   command: z.string().describe("The shell command to execute"),
   cwd: z
     .string()
-    .optional()
+    .nullable()
     .describe("Working directory for the command (defaults to project root)"),
   timeout: z.coerce
     .number()
-    .optional()
+    .nullable()
     .describe(
       `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`
     ),
@@ -44,7 +44,6 @@ async function executeShell(
       throw new Error("Shell tool is restricted to the project manager agent only");
     }
   } catch (error) {
-    // If we can't get project context, deny access
     throw new Error("Unable to verify project manager status");
   }
 
@@ -105,7 +104,7 @@ export function createShellTool(context: ExecutionContext) {
     description:
       "Execute shell commands in the project directory (restricted to project-manager agent only)",
     
-    parameters: shellSchema,
+    inputSchema: shellSchema,
     
     execute: async (input: ShellInput) => {
       try {

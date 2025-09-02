@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
-import type { Message, CompletionResponse } from "@/llm/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { ModelMessage } from "@ai-sdk/provider-utils";
 
 interface LLMLogEntry {
   timestamp: string;
@@ -46,13 +46,57 @@ interface LLMLogEntry {
  * Creates clear, human-readable logs with exact messages and responses
  */
 export class LLMLogger {
-  private readonly logDir: string;
+  private logDir: string | null = null;
+  private agent: string | null = null;
 
-  constructor(projectPath: string) {
+  constructor() {
+    // Public constructor for dependency injection
+  }
+
+  /**
+   * Initialize the logger with a project path
+   * Must be called before using the logger
+   */
+  initialize(projectPath: string): void {
     this.logDir = join(projectPath, ".tenex", "logs", "llms");
+    console.log(`[LLMLogger] Initialized with project path: ${projectPath}, logDir: ${this.logDir}`);
+  }
+
+  /**
+   * Set the agent name for this logger instance
+   */
+  setAgent(agent: string): void {
+    this.agent = agent;
+  }
+
+  /**
+   * Get the current agent name
+   */
+  getAgent(): string | null {
+    return this.agent;
+  }
+
+  /**
+   * Create a new LLMLogger instance with the agent set
+   */
+  withAgent(agent: string): LLMLogger {
+    const logger = new LLMLogger();
+    logger.logDir = this.logDir;
+    logger.agent = agent;
+    return logger;
+  }
+
+  /**
+   * Check if the logger has been initialized
+   */
+  isInitialized(): boolean {
+    return this.logDir !== null;
   }
 
   private async ensureLogDirectory(): Promise<void> {
+    if (!this.logDir) {
+      throw new Error("[LLMLogger] Not initialized. Call initialize() with project path first.");
+    }
     try {
       await fs.mkdir(this.logDir, { recursive: true });
     } catch (error) {
@@ -74,14 +118,17 @@ export class LLMLogger {
   }
 
   private getLogFilePath(filename: string): string {
+    if (!this.logDir) {
+      throw new Error("[LLMLogger] Not initialized. Call initialize() with project path first.");
+    }
     return join(this.logDir, filename);
   }
 
   /**
-   * Log an LLM request immediately, returns a unique ID for updating with response
+   * Log an LLM request
    */
   async logLLMRequest(params: {
-    agent: string;
+    agent?: string;
     rootEvent?: NDKEvent;
     triggeringEvent?: NDKEvent;
     conversationId?: string;
@@ -89,16 +136,24 @@ export class LLMLogger {
     configKey: string;
     provider: string;
     model: string;
-    messages: Message[];
+    messages: ModelMessage[];
     tools?: Array<{ name: string; description?: string }>;
     startTime: number;
-  }): Promise<string> {
+  }): Promise<void> {
+    console.log(`[LLMLogger] logLLMRequest called, initialized: ${this.isInitialized()}, logDir: ${this.logDir}`);
+    if (!this.isInitialized()) {
+      console.warn("[LLMLogger] Not initialized. Skipping request logging. logDir:", this.logDir);
+      return;
+    }
     await this.ensureLogDirectory();
 
-    const requestId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const agent = params.agent || this.agent;
+    if (!agent) {
+      throw new Error('[LLMLogger] Agent name is required for logging');
+    }
     const logEntry: LLMLogEntry = {
       timestamp: new Date().toISOString(),
-      agent: params.agent,
+      agent,
       rootEventId: params.rootEvent?.id,
       triggeringEventId: params.triggeringEvent?.id,
       conversationId: params.conversationId,
@@ -120,32 +175,38 @@ export class LLMLogger {
     
     try {
       // Append to JSONL file (one JSON object per line)
-      await fs.appendFile(filepath, JSON.stringify({ ...logEntry, requestId }) + "\n", "utf-8");
+      await fs.appendFile(filepath, JSON.stringify({ ...logEntry, type: 'request' }) + "\n", "utf-8");
       console.log(`[LLMLogger] Logged LLM request to ${filename}`);
     } catch (error) {
       console.error("[LLMLogger] Failed to write log:", error);
     }
 
-    return requestId;
   }
 
   /**
-   * Update a previously logged request with its response
+   * Log an LLM response
    */
   async logLLMResponse(params: {
-    requestId: string;
-    agent: string;
+    agent?: string;
     response?: CompletionResponse;
     error?: Error;
     endTime: number;
     startTime: number;
   }): Promise<void> {
+    if (!this.isInitialized()) {
+      console.warn("[LLMLogger] Not initialized. Skipping response logging.");
+      return;
+    }
     const filename = this.getLogFileName();
     const filepath = this.getLogFilePath(filename);
 
+    const agent = params.agent || this.agent;
+    if (!agent) {
+      throw new Error('[LLMLogger] Agent name is required for logging');
+    }
     const responseEntry: Partial<LLMLogEntry> = {
       timestamp: new Date().toISOString(),
-      agent: params.agent,
+      agent,
       durationMs: params.endTime - params.startTime
     };
 
@@ -174,8 +235,8 @@ export class LLMLogger {
     }
 
     try {
-      // Append response entry with the same requestId
-      await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, requestId: params.requestId, type: 'response' }) + "\n", "utf-8");
+      // Append response entry
+      await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, type: 'response' }) + "\n", "utf-8");
       console.log(`[LLMLogger] Logged LLM response to ${filename}`);
     } catch (error) {
       console.error("[LLMLogger] Failed to write response log:", error);
@@ -186,7 +247,7 @@ export class LLMLogger {
    * Log an LLM request and response (backward compatibility)
    */
   async logLLMInteraction(params: {
-    agent: string;
+    agent?: string;
     rootEvent?: NDKEvent;
     triggeringEvent?: NDKEvent;
     conversationId?: string;
@@ -202,8 +263,8 @@ export class LLMLogger {
     endTime: number;
   }): Promise<void> {
     // First log the request
-    const requestId = await this.logLLMRequest({
-      agent: params.agent,
+    await this.logLLMRequest({
+      agent: params.agent || this.agent,
       rootEvent: params.rootEvent,
       triggeringEvent: params.triggeringEvent,
       conversationId: params.conversationId,
@@ -219,8 +280,7 @@ export class LLMLogger {
     // Then log the response if we have one
     if (params.response || params.error) {
       await this.logLLMResponse({
-        requestId,
-        agent: params.agent,
+        agent: params.agent || this.agent,
         response: params.response,
         error: params.error,
         endTime: params.endTime,
@@ -233,6 +293,10 @@ export class LLMLogger {
    * Get recent log files
    */
   async getRecentLogs(limit: number = 10): Promise<string[]> {
+    if (!this.logDir) {
+      console.warn("[LLMLogger] Not initialized. Cannot get recent logs.");
+      return [];
+    }
     try {
       await this.ensureLogDirectory();
       const files = await fs.readdir(this.logDir);
@@ -262,18 +326,4 @@ export class LLMLogger {
       return null;
     }
   }
-}
-
-// Singleton instance
-let llmLogger: LLMLogger | null = null;
-
-export function initializeLLMLogger(projectPath: string): LLMLogger {
-  if (!llmLogger) {
-    llmLogger = new LLMLogger(projectPath);
-  }
-  return llmLogger;
-}
-
-export function getLLMLogger(): LLMLogger | null {
-  return llmLogger;
 }

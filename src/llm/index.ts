@@ -1,5 +1,8 @@
 // Export service
-export { LLMService, getLLMService } from "./service";
+export { LLMService } from "./service";
+
+// Export factory
+export { LLMServiceFactory, llmServiceFactory } from "./LLMServiceFactory";
 
 // Export types
 export * from "./types";

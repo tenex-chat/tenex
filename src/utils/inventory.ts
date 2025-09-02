@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getLLMServiceFromConfig } from "@/llm/service";
+// LLMLogger will be accessed from ProjectContext
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -119,7 +119,9 @@ async function generateMainInventory(
     .add("main-inventory-generation", { repomixContent, focusFiles })
     .build();
 
-  const llmService = await getLLMServiceFromConfig();
+  const projectCtx = getProjectContext();
+  const llmLogger = projectCtx.llmLogger;
+  const llmService = configService.createLLMService(llmLogger);
 
   // Debug: Log the LLM service loaded
   logger.debug("[inventory] LLM Service loaded");
@@ -134,6 +136,7 @@ async function generateMainInventory(
   const response = await llmService.complete(
     "defaults.analyze",
     [userMessage],
+    "inventory-generator",
     {
       temperature: 0.3,
       maxTokens: 4000,
@@ -319,7 +322,9 @@ async function fallbackExtractComplexModules(
       .add("complex-modules-extraction", { content })
       .build();
 
-    const llmService = await getLLMServiceFromConfig();
+    const projectCtx = getProjectContext();
+  const llmLogger = projectCtx.llmLogger;
+  const llmService = configService.createLLMService(llmLogger);
     const userMessage = { role: "user" as const, content: cleanupPrompt };
 
     logger.debug("[inventory] Calling LLM for fallback extraction", {
@@ -329,6 +334,7 @@ async function fallbackExtractComplexModules(
     const response = await llmService.complete(
       "defaults.analyze",
       [userMessage],
+      "inventory-search",
       {
         temperature: 0.1,
         maxTokens: 1000,

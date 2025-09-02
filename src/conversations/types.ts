@@ -40,11 +40,6 @@ export interface ConversationMetadata {
     content: string;
     dTag: string;
   }; // NDKArticle referenced by kind:11 event (30023)
-  queueStatus?: {
-    isQueued: boolean;
-    position: number;
-    message: string;
-  }; // Execution queue status when waiting for EXECUTE phase
 }
 
 export interface PhaseTransition {

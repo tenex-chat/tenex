@@ -4,21 +4,18 @@ import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-// Tool type removed - using AI SDK tools only
-import "@/prompts/fragments/10-phase-definitions";
-import "@/prompts/fragments/10-referenced-article";
-import "@/prompts/fragments/20-voice-mode";
-import "@/prompts/fragments/35-specialist-completion-guidance";
-import "@/prompts/fragments/30-project-md";
-import "@/prompts/fragments/01-specialist-identity";
-import "@/prompts/fragments/25-specialist-tools";
-import "@/prompts/fragments/85-specialist-reasoning";
-import "@/prompts/fragments/15-specialist-available-agents";
-import "@/prompts/fragments/24-retrieved-lessons";
-import "@/prompts/fragments/30-project-inventory";
-import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
+import { 
+    addCoreAgentFragments, 
+    addSpecialistFragments, 
+    addDelegatedTaskContext,
+    buildPhaseInstructions as buildPhaseInstructionsFromCompositions,
+    formatPhaseTransitionMessage as formatPhaseTransitionFromCompositions
+} from "./fragmentCompositions";
+
+// Import fragment registration manifest
+import "@/prompts/fragments"; // This auto-registers all fragments
 
 export interface BuildSystemPromptOptions {
   // Required data
@@ -49,12 +46,30 @@ export interface BuildStandalonePromptOptions {
 }
 
 export interface SystemMessage {
-  message: CoreMessage;
+  message: ModelMessage;
   metadata?: {
     cacheable?: boolean;
     cacheKey?: string;
     description?: string;
   };
+}
+
+/**
+ * Export phase instruction building for use by other modules
+ */
+export function buildPhaseInstructions(phase: Phase, conversation?: Conversation): string {
+  return buildPhaseInstructionsFromCompositions(phase, conversation);
+}
+
+/**
+ * Export phase transition formatting for use by other modules
+ */
+export function formatPhaseTransitionMessage(
+  lastSeenPhase: Phase,
+  currentPhase: Phase,
+  phaseInstructions: string
+): string {
+  return formatPhaseTransitionFromCompositions(lastSeenPhase, currentPhase, phaseInstructions);
 }
 
 /**
@@ -122,7 +137,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     triggeringEvent,
   } = options;
 
-  // Build system prompt with all agent and phase context
   const systemPromptBuilder = new PromptBuilder();
 
   // Add specialist identity
@@ -132,47 +146,26 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     projectOwnerPubkey: project.pubkey,
   });
 
-  // Check if this is a delegated task (NDKTask kind 1934)
-  const isDelegatedTask = triggeringEvent?.kind === 1934;
-  if (isDelegatedTask) {
-    // Add special instructions for delegated tasks
-    systemPromptBuilder.add("delegated-task-context", {
-      taskDescription: triggeringEvent?.content || "Complete the assigned task",
-    });
-  }
+  // Add delegated task context if applicable
+  addDelegatedTaskContext(systemPromptBuilder, triggeringEvent);
 
-  // Add available agents for specialists
-  systemPromptBuilder.add("specialist-available-agents", {
-    agents: availableAgents,
-    currentAgent: agent,
-  });
-
-  // Add voice mode instructions if this is a voice mode event
-  if (isVoiceMode(triggeringEvent)) {
-    systemPromptBuilder.add("voice-mode", {
-      isVoiceMode: true,
-    });
-  }
-
-  // Add referenced article context if present
-  if (conversation?.metadata?.referencedArticle) {
-    systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
-  }
-
-  // Keep phase-definitions as it's foundational knowledge
-  // Remove phase-context and phase-constraints as they'll be injected dynamically
-  systemPromptBuilder.add("phase-definitions", {}).add("retrieved-lessons", {
+  // Add core agent fragments using shared composition
+  addCoreAgentFragments(
+    systemPromptBuilder,
     agent,
     phase,
     conversation,
-    agentLessons: agentLessons || new Map(),
-  });
+    agentLessons,
+    triggeringEvent
+  );
 
-  // Add tools for specialists
-  systemPromptBuilder.add("specialist-tools", {
+  // Add specialist-specific fragments
+  addSpecialistFragments(
+    systemPromptBuilder,
     agent,
-    mcpTools,
-  });
+    availableAgents,
+    mcpTools
+  );
 
   return systemPromptBuilder.build();
 }
@@ -246,45 +239,35 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
   });
 
-  // Add available agents if any (for potential delegations in standalone mode)
-  if (availableAgents.length > 1) {
-    systemPromptBuilder.add("specialist-available-agents", {
-      agents: availableAgents,
-      currentAgent: agent,
-    });
-  }
+  // Add delegated task context if applicable
+  addDelegatedTaskContext(systemPromptBuilder, triggeringEvent);
 
-  // Add voice mode instructions if applicable
-  if (isVoiceMode(triggeringEvent)) {
-    systemPromptBuilder.add("voice-mode", {
-      isVoiceMode: true,
-    });
-  }
-
-  // Add referenced article context if present
-  if (conversation?.metadata?.referencedArticle) {
-    systemPromptBuilder.add("referenced-article", conversation.metadata.referencedArticle);
-  }
-
-  // Keep phase definitions as foundational knowledge
-  systemPromptBuilder.add("phase-definitions", {}).add("retrieved-lessons", {
+  // Add core agent fragments using shared composition
+  addCoreAgentFragments(
+    systemPromptBuilder,
     agent,
     phase,
     conversation,
-    agentLessons: agentLessons || new Map(),
-  });
+    agentLessons,
+    triggeringEvent
+  );
 
-  // Add tools
-  systemPromptBuilder.add("specialist-tools", {
-    agent,
-    mcpTools,
-  });
-
-  // Specialists use reasoning tags
-  // systemPromptBuilder.add("specialist-reasoning", {});
-
-  // Add completion guidance for non-orchestrator agents
-  systemPromptBuilder.add("specialist-completion-guidance", {});
+  // Add specialist-specific fragments only if multiple agents available
+  if (availableAgents.length > 1) {
+    addSpecialistFragments(
+      systemPromptBuilder,
+      agent,
+      availableAgents,
+      mcpTools
+    );
+  } else {
+    // Just add tools for single agent mode
+    systemPromptBuilder.add("specialist-tools", {
+      agent,
+      mcpTools,
+    });
+    systemPromptBuilder.add("specialist-completion-guidance", {});
+  }
 
   return systemPromptBuilder.build();
 }

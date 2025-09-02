@@ -1,7 +1,6 @@
 import type { TenexLLMs, LLMConfiguration } from "@/services/config/types";
 import { configService } from "@/services";
 import inquirer from "inquirer";
-import searchCheckbox from "@inquirer/search";
 import chalk from "chalk";
 import { AI_SDK_PROVIDERS } from "./types";
 import type { AISdkProvider } from "./types";
@@ -126,7 +125,10 @@ export class LLMConfigEditor {
       if (!llmsConfig.providers[provider]) {
         llmsConfig.providers[provider] = { apiKey: "" };
       }
-      llmsConfig.providers[provider]!.apiKey = apiKey;
+      const providerConfig = llmsConfig.providers[provider];
+      if (providerConfig) {
+        providerConfig.apiKey = apiKey;
+      }
     }
     
     await this.saveConfig(llmsConfig);
@@ -405,6 +407,7 @@ export class LLMConfigEditor {
 
   private async selectOpenRouterModel(currentModel?: string): Promise<string> {
     console.log(chalk.gray("Fetching available OpenRouter models..."));
+    
     const openRouterModels = await fetchOpenRouterModels();
     
     if (openRouterModels.length > 0) {
@@ -506,8 +509,8 @@ export class LLMConfigEditor {
         llmsConfig.default
       );
       
-      // Format model string as provider:model
-      const modelString = `${config.provider}:${config.model}`;
+      // Use the configuration name to test it
+      const modelString = name;
       
       console.log(chalk.cyan("📡 Sending test message..."));
       const result = await service.complete(modelString, [

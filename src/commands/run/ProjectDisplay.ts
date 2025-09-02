@@ -3,7 +3,8 @@ import { logger } from "@/utils/logger";
 const logInfo = logger.info.bind(logger);
 
 import type { AgentInstance } from "@/agents/types";
-import { getProjectContext } from "@/services";
+import { getProjectContext, configService } from "@/services";
+import { getLLMService } from "@/llm/service";
 import chalk from "chalk";
 
 export class ProjectDisplay {
@@ -57,19 +58,36 @@ export class ProjectDisplay {
         eventId: agent.eventId,
         pubkey: agent.pubkey,
       });
-      this.displayAgentBySlug(slug, agent);
+      await this.displayAgentBySlug(slug, agent);
     }
   }
 
-  private displayAgentBySlug(slug: string, agent: AgentInstance): void {
+  private async displayAgentBySlug(slug: string, agent: AgentInstance): Promise<void> {
     // Display agent information
     logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
     logInfo(chalk.gray("Slug:        ") + chalk.white(slug));
     logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
-    logInfo(chalk.gray("LLM Config:  ") + chalk.magenta(agent.llmConfig || "default"));
+    
+    // Resolve and display the actual model that will be used
+    const modelString = agent.llmConfig || "default";
+    try {
+      const config = await configService.loadConfig();
+      
+      // Check if configuration exists
+      const llmConfig = config.llms.configurations?.[modelString] || 
+                       (modelString === "default" && config.llms.default ? config.llms.configurations?.[config.llms.default] : null);
+      
+      if (llmConfig) {
+        logInfo(chalk.gray("Model:       ") + chalk.magenta(`${llmConfig.provider}:${llmConfig.model}`));
+      } else {
+        logInfo(chalk.gray("Model:       ") + chalk.red(`Configuration not found: ${modelString}`));
+      }
+    } catch (error) {
+      logInfo(chalk.gray("Model:       ") + chalk.red(`Error resolving model: ${modelString}`));
+    }
 
     // Display tools - CRITICAL for debugging tool loading issues
-    const toolNames = agent.tools.map((t) => t.name).join(", ");
+    const toolNames = agent.tools.join(", ");
     const toolCount = agent.tools.length;
     logInfo(chalk.gray("Tools:       ") + chalk.cyan(`[${toolCount}] ${toolNames || "none"}`));
 

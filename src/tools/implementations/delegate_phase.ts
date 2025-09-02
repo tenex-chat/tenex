@@ -30,7 +30,7 @@ const delegatePhaseSchema = z.object({
     ),
   title: z
     .string()
-    .optional()
+    .nullable()
     .describe("Title for this conversation (if not already set)"),
 });
 
@@ -117,7 +117,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 export function createDelegatePhaseTool(context: ExecutionContext) {
   return tool({
     description: "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
-    parameters: delegatePhaseSchema,
+    inputSchema: delegatePhaseSchema,
     execute: async (input: DelegatePhaseInput) => {
       return await executeDelegatePhase(input, context);
     },

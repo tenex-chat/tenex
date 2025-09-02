@@ -7,7 +7,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logWarning } from "@/utils/logger";
+import { logger, logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
@@ -33,10 +33,9 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
-  private conversationCoordinator?: unknown; // Using unknown to avoid circular dependency
 
-  constructor(conversationCoordinator: unknown) {
-    this.conversationCoordinator = conversationCoordinator;
+  constructor() {
+    // No dependencies needed
   }
 
   async startPublishing(projectPath: string): Promise<void> {
@@ -85,12 +84,6 @@ export class StatusPublisher {
       event.tag(["tool", tool.name, ...tool.agents]);
     }
 
-    // Add queue tags if present
-    if (intent.queue) {
-      for (const conversationId of intent.queue) {
-        event.tag(["queue", conversationId]);
-      }
-    }
 
     return event;
   }
@@ -125,11 +118,11 @@ export class StatusPublisher {
       await this.gatherToolInfo(intent);
 
       // Gather queue info
-      await this.gatherQueueInfo(intent);
+      // Queue functionality removed
 
       // Create and publish the status event directly
       const event = this.createStatusEvent(intent);
-      
+
       // Sign and publish with project signer
       await event.sign(projectCtx.signer);
       await event.publish();
@@ -201,11 +194,11 @@ export class StatusPublisher {
       const projectCtx = getProjectContext();
       const toolAgentMap = new Map<string, Set<string>>();
 
-      // First, add ALL tools from the registry (even if unassigned)
-      const { getAllTools } = await import("@/tools/registry");
-      const allTools = getAllTools();
-      for (const tool of allTools) {
-        toolAgentMap.set(tool.name, new Set());
+      // First, add ALL tool names from the registry (even if unassigned)
+      const { getAllToolNames } = await import("@/tools/registry");
+      const allToolNames = getAllToolNames();
+      for (const toolName of allToolNames) {
+        toolAgentMap.set(toolName, new Set());
       }
 
       // Then build a map of tool name -> set of agent slugs that have access
@@ -213,8 +206,12 @@ export class StatusPublisher {
         // Get the agent's configured tools
         const agentTools = agent.tools || [];
 
-        for (const tool of agentTools) {
-          const toolName = tool.name;
+        for (const toolName of agentTools) {
+          // Skip invalid tool names
+          if (!toolName) {
+            logWarning(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
+            continue;
+          }
           const toolAgents = toolAgentMap.get(toolName);
           if (toolAgents) {
             toolAgents.add(agentSlug);
@@ -226,7 +223,26 @@ export class StatusPublisher {
           try {
             const mcpTools = mcpService.getCachedTools();
             for (const mcpTool of mcpTools) {
-              const toolName = mcpTool.name;
+              let toolName = mcpTool.name;
+              
+              // If tool doesn't have a name, compute one from description
+              if (!toolName && mcpTool.description) {
+                // Generate a name from the description
+                // Take first few words, lowercase, replace spaces with underscores
+                const words = mcpTool.description.toLowerCase()
+                  .replace(/[^a-z0-9\s]/g, '') // Remove special chars
+                  .split(/\s+/)
+                  .slice(0, 4); // Take first 4 words max
+                toolName = `mcp_${words.join('_')}`;
+                logger.debug(`Generated MCP tool name '${toolName}' from description: ${mcpTool.description}`);
+              }
+              
+              // Still skip if we couldn't generate a name
+              if (!toolName) {
+                logWarning(`Skipping MCP tool without name or description: ${JSON.stringify(mcpTool)}`);
+                continue;
+              }
+              
               if (!toolAgentMap.has(toolName)) {
                 toolAgentMap.set(toolName, new Set());
               }
@@ -243,42 +259,19 @@ export class StatusPublisher {
       }
 
       // Convert the map to tool entries
+      // Include ALL tools with valid names, even if no agents are assigned
       for (const [toolName, agentSlugs] of toolAgentMap) {
-        const agentArray = Array.from(agentSlugs).sort(); // Sort for consistency
-        intent.tools.push({
-          name: toolName,
-          agents: agentArray,
-        });
+        if (toolName) {
+          const agentArray = Array.from(agentSlugs).sort(); // Sort for consistency
+          intent.tools.push({
+            name: toolName,
+            agents: agentArray, // Can be empty array for unassigned tools
+          });
+        }
       }
     } catch (err) {
       logWarning(`Could not add tool tags to status event: ${formatAnyError(err)}`);
     }
   }
 
-  private async gatherQueueInfo(intent: StatusIntent): Promise<void> {
-    try {
-      if (!this.conversationCoordinator) {
-        // No queue manager available, skip queue tags
-        return;
-      }
-
-      // Get the execution queue state
-      const queueState = (this.conversationCoordinator as { getExecutionStatus: () => { active: string | null; queued: string[] } }).getExecutionStatus();
-
-      // Add queue entries in order
-      // First: the active conversation (if any)
-      if (queueState.active) {
-        intent.queue = intent.queue || [];
-        intent.queue.push(queueState.active);
-      }
-
-      // Then: all queued conversations in order
-      for (const conversationId of queueState.queued) {
-        intent.queue = intent.queue || [];
-        intent.queue.push(conversationId);
-      }
-    } catch (err) {
-      logWarning(`Could not add queue tags to status event: ${formatAnyError(err)}`);
-    }
-  }
 }

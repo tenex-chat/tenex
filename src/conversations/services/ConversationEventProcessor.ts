@@ -159,10 +159,6 @@ export class ConversationEventProcessor {
       conversation.metadata.readFiles = undefined;
     }
 
-    // Clear queue status if present
-    if (conversation.metadata.queueStatus) {
-      conversation.metadata.queueStatus = undefined;
-    }
   }
 
   /**

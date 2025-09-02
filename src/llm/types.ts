@@ -1,6 +1,6 @@
 // Export AI SDK types directly
 export type { 
-  ModelMessage as CoreMessage,
+  ModelMessage,
   Tool as CoreTool,
   ToolCall as CoreToolCall,
   ToolResult as CoreToolResult,

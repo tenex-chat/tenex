@@ -1,7 +1,6 @@
-import { openRouterPricing } from "@/llm/pricing";
 import type { CompletionResponse } from "@/llm/types";
 import type { LLMMetadata } from "@/nostr/types";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 interface ResponseWithUsage {
   usage?: {
@@ -17,7 +16,7 @@ interface ResponseWithUsage {
 
 export async function buildLLMMetadata(
   response: CompletionResponse,
-  messages: CoreMessage[]
+  messages: ModelMessage[]
 ): Promise<LLMMetadata | undefined> {
   if (!response.usage) {
     return undefined;
@@ -62,17 +61,8 @@ export async function calculateCost(response: ResponseWithUsage, model: string):
     return openRouterCost;
   }
 
-  // Calculate cost based on model pricing
-  const modelId = await openRouterPricing.findModelId(model);
-  if (modelId && response.usage) {
-    return await openRouterPricing.calculateCost(
-      modelId,
-      response.usage.promptTokens,
-      response.usage.completionTokens
-    );
-  }
-
   // Fallback: rough estimate based on typical pricing
+  // No hardcoded pricing - just use a generic estimate
   if (response.usage) {
     const { promptTokens, completionTokens } = response.usage;
     return ((promptTokens + completionTokens) / 1_000_000) * 1.0;

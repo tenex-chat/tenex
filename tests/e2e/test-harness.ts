@@ -11,7 +11,7 @@ import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
 import { ConversationCoordinator } from "@/conversations";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { ToolCall } from "@/llm/types";
-import { Message } from "multi-llm-ts";
+import type { ModelMessage as Message } from "ai";
 import { ConfigService } from "@/services/ConfigService";
 import { EVENT_KINDS } from "@/llm/types";
 import type { ProjectContext } from "@/services/project/ProjectContext";

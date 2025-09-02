@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readPathTool } from "../implementations/readPath";
+import { readPathTool } from "../implementations/read_path";
 import { shellTool } from "../implementations/shell";
 import { type ToolName, getAllTools, getTool, getTools } from "../registry";
 

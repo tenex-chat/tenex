@@ -42,10 +42,10 @@ export class NDKProjectStatus extends NDKEvent {
    * Returns an array of {pubkey, slug} objects
    */
   get agents(): Array<{ pubkey: string; slug: string }> {
-    const agentTags = this.tags.filter((tag) => tag[0] === "agent");
+    const agentTags = this.tags.filter((tag) => tag[0] === "agent" && tag[1] && tag[2]);
     return agentTags.map((tag) => ({
-      pubkey: tag[1] || "",
-      slug: tag[2] || "",
+      pubkey: tag[1],
+      slug: tag[2],
     }));
   }
 
@@ -86,9 +86,9 @@ export class NDKProjectStatus extends NDKEvent {
    * Returns an array of {modelSlug, agents} objects where agents is an array of agent slugs
    */
   get models(): Array<{ modelSlug: string; agents: string[] }> {
-    const modelTags = this.tags.filter((tag) => tag[0] === "model");
+    const modelTags = this.tags.filter((tag) => tag[0] === "model" && tag[1]);
     return modelTags.map((tag) => ({
-      modelSlug: tag[1] || "",
+      modelSlug: tag[1],
       agents: tag.slice(2).filter((a) => a), // Get all agent slugs from index 2 onwards
     }));
   }
@@ -178,9 +178,9 @@ export class NDKProjectStatus extends NDKEvent {
    * Returns an array of {toolName, agents} objects where agents is an array of agent slugs
    */
   get tools(): Array<{ toolName: string; agents: string[] }> {
-    const toolTags = this.tags.filter((tag) => tag[0] === "tool");
+    const toolTags = this.tags.filter((tag) => tag[0] === "tool" && tag[1]);
     return toolTags.map((tag) => ({
-      toolName: tag[1] || "",
+      toolName: tag[1],
       agents: tag.slice(2).filter((a) => a), // Get all agent slugs from index 2 onwards
     }));
   }

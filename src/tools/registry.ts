@@ -4,30 +4,30 @@
  * Central registry for all AI SDK tools in the TENEX system.
  */
 
-import type { CoreTool } from "ai";
+import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
-import { createReadPathTool } from "./implementations/readPath";
-import { createWriteContextFileTool } from "./implementations/writeContextFile";
-import { createGenerateInventoryTool } from "./implementations/generateInventory";
+import { createReadPathTool } from "./implementations/read_path";
+import { createWriteContextFileTool } from "./implementations/write_context_file";
+import { createGenerateInventoryTool } from "./implementations/generate_inventory";
 import { createLessonLearnTool } from "./implementations/learn";
-import { createLessonGetTool } from "./implementations/lessonGet";
+import { createLessonGetTool } from "./implementations/lesson_get";
 import { createShellTool } from "./implementations/shell";
-import { createAgentsDiscoverTool } from "./implementations/agents-discover";
-import { createAgentsHireTool } from "./implementations/agents-hire";
-import { createAgentsListTool } from "./implementations/agents-list";
-import { createAgentsReadTool } from "./implementations/agents-read";
-import { createAgentsWriteTool } from "./implementations/agents-write";
-import { createMcpDiscoverTool } from "./implementations/mcp-discover";
+import { createAgentsDiscoverTool } from "./implementations/agents_discover";
+import { createAgentsHireTool } from "./implementations/agents_hire";
+import { createAgentsListTool } from "./implementations/agents_list";
+import { createAgentsReadTool } from "./implementations/agents_read";
+import { createAgentsWriteTool } from "./implementations/agents_write";
+import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegatePhaseTool } from "./implementations/delegate_phase";
-import { createNostrProjectsTool } from "./implementations/nostr-projects";
+import { createNostrProjectsTool } from "./implementations/nostr_projects";
 import { createClaudeCodeTool } from "./implementations/claude_code";
 import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateExternalTool } from "./implementations/delegate_external";
-import { createReportWriteTool } from "./implementations/report-write";
-import { createReportReadTool } from "./implementations/report-read";
-import { createReportsListTool } from "./implementations/reports-list";
-import { createReportDeleteTool } from "./implementations/report-delete";
+import { createReportWriteTool } from "./implementations/report_write";
+import { createReportReadTool } from "./implementations/report_read";
+import { createReportsListTool } from "./implementations/reports_list";
+import { createReportDeleteTool } from "./implementations/report_delete";
 
 /**
  * Tool names available in the system
@@ -130,6 +130,14 @@ export function getAllTools(context: ExecutionContext): AISdkTool[] {
 }
 
 /**
+ * Get all available tool names
+ * @returns Array of all tool names in the registry
+ */
+export function getAllToolNames(): ToolName[] {
+  return Object.keys(toolFactories) as ToolName[];
+}
+
+/**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include
  * @param context - Execution context for the tools
@@ -175,15 +183,4 @@ export function isValidToolName(name: string): name is ToolName {
   return name in toolFactories;
 }
 
-/**
- * Get all valid tool names
- * @returns Array of all valid tool names
- */
-export function getAllToolNames(): ToolName[] {
-  return Object.keys(toolFactories) as ToolName[];
-}
 
-// Legacy exports for backward compatibility (will be removed later)
-export const aiSdkToolFactories = toolFactories;
-export const getAiSdkTools = getToolsObject;
-export const getAllAiSdkTools = getAllToolsObject;

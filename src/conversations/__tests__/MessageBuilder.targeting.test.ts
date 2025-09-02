@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { MessageBuilder } from "../MessageBuilder";
+import { MessageRoleAssigner } from "../processors/MessageRoleAssigner";
+import { NostrEntityProcessor } from "../processors/NostrEntityProcessor";
+import { DelegationFormatter } from "../processors/DelegationFormatter";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentInstance } from "@/agents/types";
 
@@ -42,7 +44,7 @@ mock.module("@/utils/logger", () => ({
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 
-describe("MessageBuilder - Message Targeting", () => {
+describe("MessageRoleAssigner - Message Targeting", () => {
   let mockProjectContext: any;
   
   beforeEach(() => {
@@ -93,7 +95,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format broadcast message as 'user' role for all agents", async () => {
       const event = createEvent("user-pubkey", []); // No p-tags means broadcast
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Hello everyone",
         "code-writer"
@@ -108,7 +110,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"] // Targeting code-writer
       ]);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Please write some code",
         "code-writer"
@@ -123,14 +125,14 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"] // Targeting code-writer
       ]);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Please write some code",
         "reviewer" // Different agent viewing the message
       );
       
       expect(message.role).toBe("system");
-      expect(message.content).toBe("[TestUser → code-writer]: Please write some code");
+      expect(message.content).toBe("[User (TestUser) → code-writer]: Please write some code");
     });
     
     it("should handle multiple targeted agents", async () => {
@@ -140,7 +142,7 @@ describe("MessageBuilder - Message Targeting", () => {
       ]);
       
       // For a targeted agent
-      const message1 = await MessageBuilder.formatEventAsMessage(
+      const message1 = await MessageRoleAssigner.assignRole(
         event,
         "Please collaborate on this",
         "code-writer"
@@ -150,14 +152,14 @@ describe("MessageBuilder - Message Targeting", () => {
       expect(message1.content).toBe("Please collaborate on this");
       
       // For a non-targeted agent
-      const message2 = await MessageBuilder.formatEventAsMessage(
+      const message2 = await MessageRoleAssigner.assignRole(
         event,
         "Please collaborate on this",
         "project-manager"
       );
       
       expect(message2.role).toBe("system");
-      expect(message2.content).toBe("[TestUser → code-writer, reviewer]: Please collaborate on this");
+      expect(message2.content).toBe("[User (TestUser) → code-writer, reviewer]: Please collaborate on this");
     });
     
     it("should handle p-tags for non-agent entities gracefully", async () => {
@@ -166,7 +168,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent1-pubkey"]  // code-writer
       ]);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Mixed p-tags message",
         "reviewer"
@@ -174,7 +176,7 @@ describe("MessageBuilder - Message Targeting", () => {
       
       // Should only show the agent that was targeted
       expect(message.role).toBe("system");
-      expect(message.content).toBe("[TestUser → code-writer]: Mixed p-tags message");
+      expect(message.content).toBe("[User (TestUser) → code-writer]: Mixed p-tags message");
     });
   });
   
@@ -182,7 +184,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format agent's own message as 'assistant' role", async () => {
       const event = createEvent("agent1-pubkey", []); // code-writer's pubkey
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "I've written the code",
         "code-writer"
@@ -195,7 +197,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should format broadcast agent message as 'system' role with attribution", async () => {
       const event = createEvent("agent1-pubkey", []); // code-writer's pubkey, no p-tags (broadcast)
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "I've written the code",
         "reviewer" // Different agent viewing
@@ -210,7 +212,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent2-pubkey"] // code-writer targeting reviewer
       ]);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Can you review this code?",
         "reviewer" // Targeted agent viewing
@@ -225,7 +227,7 @@ describe("MessageBuilder - Message Targeting", () => {
         ["p", "agent2-pubkey"] // code-writer targeting reviewer
       ]);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Can you review this code?",
         "project-manager" // Non-targeted agent observing
@@ -242,7 +244,7 @@ describe("MessageBuilder - Message Targeting", () => {
       ]);
       
       // For one of the targeted agents
-      const message1 = await MessageBuilder.formatEventAsMessage(
+      const message1 = await MessageRoleAssigner.assignRole(
         event,
         "Need input from both of you",
         "reviewer"
@@ -252,7 +254,7 @@ describe("MessageBuilder - Message Targeting", () => {
       expect(message1.content).toBe("[code-writer → @reviewer]: Need input from both of you");
       
       // For the other targeted agent
-      const message2 = await MessageBuilder.formatEventAsMessage(
+      const message2 = await MessageRoleAssigner.assignRole(
         event,
         "Need input from both of you",
         "project-manager"
@@ -268,7 +270,7 @@ describe("MessageBuilder - Message Targeting", () => {
       const event = createEvent("", []); // Empty pubkey
       event.pubkey = undefined as any; // Force undefined
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Anonymous message",
         "code-writer"
@@ -282,7 +284,7 @@ describe("MessageBuilder - Message Targeting", () => {
     it("should handle unknown non-user pubkeys gracefully", async () => {
       const event = createEvent("unknown-agent-pubkey", []);
       
-      const message = await MessageBuilder.formatEventAsMessage(
+      const message = await MessageRoleAssigner.assignRole(
         event,
         "Message from unknown",
         "code-writer"

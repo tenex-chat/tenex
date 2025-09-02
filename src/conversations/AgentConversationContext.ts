@@ -1,8 +1,11 @@
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { CoreMessage } from "ai";
-import { MessageBuilder } from "./MessageBuilder";
+import type { ModelMessage } from "ai";
+import { NostrEntityProcessor } from "./processors/NostrEntityProcessor";
+import { MessageRoleAssigner } from "./processors/MessageRoleAssigner";
+import { DelegationFormatter } from "./processors/DelegationFormatter";
 import type { AgentState, Conversation } from "./types";
+import type { Phase } from "./phases";
 
 /**
  * Orchestrates message building for a specific agent in a conversation.
@@ -24,8 +27,8 @@ export class AgentConversationContext {
     agentState: AgentState,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): Promise<CoreMessage[]> {
-    const messages: CoreMessage[] = [];
+  ): Promise<ModelMessage[]> {
+    const messages: ModelMessage[] = [];
 
     // Process history up to (but not including) the triggering event
     for (const event of conversation.history) {
@@ -34,8 +37,8 @@ export class AgentConversationContext {
         break; // Don't include the triggering event in history
       }
 
-      const processed = await MessageBuilder.processNostrEntities(event.content);
-      const message = await MessageBuilder.formatEventAsMessage(
+      const processed = await NostrEntityProcessor.processEntities(event.content);
+      const message = await MessageRoleAssigner.assignRole(
         event, 
         processed, 
         this.agentSlug, 
@@ -46,7 +49,7 @@ export class AgentConversationContext {
 
     // Add phase transition message if needed
     if (phaseInstructions) {
-      const phaseMessage = MessageBuilder.buildPhaseTransitionMessage(
+      const phaseMessage = this.buildSimplePhaseTransitionMessage(
         agentState.lastSeenPhase,
         conversation.phase
       );
@@ -55,8 +58,8 @@ export class AgentConversationContext {
 
     // Add the triggering event last
     if (triggeringEvent && triggeringEvent.content) {
-      const processed = await MessageBuilder.processNostrEntities(triggeringEvent.content);
-      const message = await MessageBuilder.formatEventAsMessage(
+      const processed = await NostrEntityProcessor.processEntities(triggeringEvent.content);
+      const message = await MessageRoleAssigner.assignRole(
         triggeringEvent,
         processed,
         this.agentSlug,
@@ -85,12 +88,12 @@ export class AgentConversationContext {
     delegationSummary?: string,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): Promise<CoreMessage[]> {
-    const messages: CoreMessage[] = [];
+  ): Promise<ModelMessage[]> {
+    const messages: ModelMessage[] = [];
 
     // Add missed messages block if there are any
     if (missedEvents.length > 0) {
-      const missedBlock = await MessageBuilder.buildMissedMessagesBlock(
+      const missedBlock = await DelegationFormatter.buildMissedMessagesBlock(
         missedEvents,
         this.agentSlug,
         delegationSummary
@@ -100,7 +103,7 @@ export class AgentConversationContext {
 
     // Add phase transition if needed
     if (phaseInstructions) {
-      const phaseMessage = MessageBuilder.buildPhaseTransitionMessage(
+      const phaseMessage = this.buildSimplePhaseTransitionMessage(
         agentState.lastSeenPhase,
         conversation.phase
       );
@@ -109,8 +112,8 @@ export class AgentConversationContext {
 
     // Add triggering event
     if (triggeringEvent && triggeringEvent.content) {
-      const processed = await MessageBuilder.processNostrEntities(triggeringEvent.content);
-      const message = await MessageBuilder.formatEventAsMessage(
+      const processed = await NostrEntityProcessor.processEntities(triggeringEvent.content);
+      const message = await MessageRoleAssigner.assignRole(
         triggeringEvent,
         processed,
         this.agentSlug,
@@ -132,11 +135,11 @@ export class AgentConversationContext {
     agentState: AgentState,
     triggeringEvent?: NDKEvent,
     phaseInstructions?: string
-  ): CoreMessage[] {
-    const messages: CoreMessage[] = [];
+  ): ModelMessage[] {
+    const messages: ModelMessage[] = [];
 
     // Add the delegation responses block
-    const delegationBlock = MessageBuilder.buildDelegationResponsesBlock(
+    const delegationBlock = DelegationFormatter.buildDelegationResponsesBlock(
       responses,
       originalRequest
     );
@@ -144,7 +147,7 @@ export class AgentConversationContext {
 
     // Add phase transition if needed  
     if (phaseInstructions) {
-      const phaseMessage = MessageBuilder.buildPhaseTransitionMessage(
+      const phaseMessage = this.buildSimplePhaseTransitionMessage(
         agentState.lastSeenPhase,
         conversation.phase
       );
@@ -169,6 +172,14 @@ export class AgentConversationContext {
     return event.tagValue?.("claude-session");
   }
 
-
-
+  /**
+   * Build simple phase transition message (without instructions)
+   * This is the simple format, different from the full transition with instructions
+   */
+  private buildSimplePhaseTransitionMessage(fromPhase: Phase | undefined, toPhase: Phase): string {
+    if (fromPhase) {
+      return `=== PHASE TRANSITION: ${fromPhase.toUpperCase()} → ${toPhase.toUpperCase()} ===`;
+    }
+    return `=== CURRENT PHASE: ${toPhase.toUpperCase()} ===`;
+  }
 }

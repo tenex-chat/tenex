@@ -1,6 +1,5 @@
 import { tool } from 'ai';
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
-import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
@@ -10,17 +9,17 @@ const lessonLearnSchema = z.object({
   lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
   detailed: z
     .string()
-    .optional()
+    .nullable()
     .describe("Detailed version with richer explanation when deeper context is needed"),
   category: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"
     ),
   hashtags: z
     .array(z.string())
-    .optional()
+    .nullable()
     .describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 
@@ -101,7 +100,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 export function createLessonLearnTool(context: ExecutionContext) {
   return tool({
     description: "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
-    parameters: lessonLearnSchema,
+    inputSchema: lessonLearnSchema,
     execute: async (input: LessonLearnInput) => {
       return await executeLessonLearn(input, context);
     },

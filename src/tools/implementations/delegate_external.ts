@@ -4,6 +4,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { parseNostrUser, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
@@ -12,12 +13,12 @@ const delegateExternalSchema = z.object({
   content: z.string().describe("The content of the chat message to send"),
   parentEventId: z
     .string()
-    .optional()
+    .nullable()
     .describe("Optional parent event ID to reply to. If provided, will create a reply (kind:1111)"),
   recipient: z.string().describe("The recipient's pubkey or npub (will be p-tagged)"),
   projectId: z
     .string()
-    .optional()
+    .nullable()
     .describe("Optional project event ID (naddr1...) to reference in the message. This should be the project the agent you are delegating TO works on (if you know it)"),
 });
 
@@ -28,36 +29,29 @@ type DelegateExternalOutput = DelegationResponses;
 async function executeDelegateExternal(input: DelegateExternalInput, context: ExecutionContext): Promise<DelegateExternalOutput> {
   const { content, parentEventId, recipient, projectId } = input;
 
-  // Clean the recipient - strip nostr: prefix if present
-  const cleanRecipient = recipient.replace(/^nostr:/, "");
+  const ndk = getNDK();
+  
+  // Parse recipient using the utility function
+  const pubkey = parseNostrUser(recipient, ndk);
+  if (!pubkey) {
+    throw new Error(`Invalid recipient format: ${recipient}`);
+  }
 
   logger.info("🚀 Delegating to external agent", {
     agent: context.agent.name,
     hasParent: !!parentEventId,
     hasProject: !!projectId,
-    recipientPrefix: cleanRecipient.substring(0, 8),
+    recipientPubkey: pubkey.substring(0, 8),
     contentLength: content.length,
   });
 
-  const ndk = getNDK();
   let chatEvent: NDKEvent;
 
-  // Strip optional nostr: prefix from IDs
-  const cleanParentId = parentEventId?.replace(/^nostr:/, "");
-  const cleanProjectId = projectId?.replace(/^nostr:/, "");
+  // Normalize optional IDs
+  const cleanParentId = normalizeNostrIdentifier(parentEventId);
+  const cleanProjectId = normalizeNostrIdentifier(projectId);
 
-  logger.debug("Processing recipient", { cleanRecipient });
-
-  // Convert npub to hex pubkey if needed
-  let pubkey = cleanRecipient;
-  if (cleanRecipient.startsWith('npub')) {
-    pubkey = ndk.getUser({ npub: cleanRecipient }).pubkey;
-  } else {
-    // Validate it's a proper hex pubkey (64 hex characters)
-    if (!/^[0-9a-f]{64}$/i.test(pubkey)) {
-      throw new Error(`Invalid pubkey format: ${pubkey.substring(0, 16)}... (must be 64 hex characters or npub)`);
-    }
-  }
+  logger.debug("Processing recipient", { pubkey });
 
   if (cleanParentId) {
     // Fetch the parent event and create a reply
@@ -182,7 +176,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 export function createDelegateExternalTool(context: ExecutionContext) {
   return tool({
     description: "Delegate a task to an external agent or user and wait synchronously for their response, optionally as a reply or referencing a project",
-    parameters: delegateExternalSchema,
+    inputSchema: delegateExternalSchema,
     execute: async (input: DelegateExternalInput) => {
       return await executeDelegateExternal(input, context);
     },

@@ -84,7 +84,6 @@ export interface TenexLLMs {
     openai?: {
       apiKey: string;
     };
-    [key: string]: { apiKey: string } | undefined;
   };
   configurations: {
     [name: string]: LLMConfiguration;

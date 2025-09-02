@@ -24,7 +24,6 @@ export  class AgentRouter {
   static resolveTargetAgents(
     event: NDKEvent,
     projectContext: ProjectContext,
-    projectManager: AgentInstance
   ): AgentInstance[] {
     const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
 
@@ -96,7 +95,6 @@ export  class AgentRouter {
   static getRoutingReasons(
     event: NDKEvent,
     targetAgents: AgentInstance[],
-    projectContext: ProjectContext
   ): string {
     if (targetAgents.length === 0) {
       return "No agents assigned (event will not be processed)";
@@ -121,7 +119,6 @@ export  class AgentRouter {
   static getRoutingReason(
     event: NDKEvent,
     targetAgent: AgentInstance | null,
-    projectContext: ProjectContext
   ): string {
     if (!targetAgent) {
       return "No agent assigned (event will not be processed)";

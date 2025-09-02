@@ -4,7 +4,6 @@ import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
-import type { LLMService } from "../llm/types";
 import { EVENT_KINDS } from "../llm/types";
 import { getProjectContext } from "../services";
 import { DelegationRegistry } from "../services/DelegationRegistry";
@@ -30,7 +29,6 @@ export class EventHandler {
 
   constructor(
     private projectPath: string,
-    private llmService: LLMService
   ) {}
 
   async initialize(): Promise<void> {
@@ -42,7 +40,7 @@ export class EventHandler {
       this.projectPath,
       undefined // default persistence
     );
-    this.agentExecutor = new AgentExecutor(this.llmService, this.conversationCoordinator);
+    this.agentExecutor = new AgentExecutor(this.conversationCoordinator);
 
     // Initialize components
     await this.conversationCoordinator.initialize();
@@ -271,28 +269,25 @@ export class EventHandler {
         // Extract tool names from tags (format: ["tool", "<tool-name>"])
         const newToolNames = toolTags.map((tag) => tag[1]).filter((name) => name);
 
-        logger.info("Received tools config change request", {
+        logger.debug("Received tools config change request", {
           agentPubkey,
           agentSlug: agent.slug,
-          newTools: newToolNames,
+          toolCount: newToolNames.length,
           eventId: event.id,
-          from: event.pubkey,
         });
 
         // Update the agent's tools persistently
         const updated = await agentRegistry.updateAgentTools(agentPubkey, newToolNames);
 
         if (updated) {
-          logger.info("Updated and persisted tools configuration for agent", {
-            agentName: agent.name,
-            agentPubkey: agent.pubkey,
-            newTools: newToolNames,
+          logger.info("Updated tools configuration", {
+            agent: agent.slug,
+            toolCount: newToolNames.length,
           });
         } else {
           logger.warn("Failed to update tools configuration", {
-            agentName: agent.name,
-            agentPubkey: agent.pubkey,
-            newTools: newToolNames,
+            agent: agent.slug,
+            reason: "update returned false",
           });
         }
       }

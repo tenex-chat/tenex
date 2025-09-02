@@ -2,8 +2,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AGENTS_FILE, CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
+import { llmServiceFactory } from "@/llm/LLMServiceFactory";
+import type { LLMService } from "@/llm/service";
+import type { LLMLogger } from "@/logging/LLMLogger";
 import type {
   ConfigFile,
+  LLMConfiguration,
   LoadedConfig,
   TenexAgents,
   TenexConfig,
@@ -28,6 +32,7 @@ import type { z } from "zod";
 export class ConfigService {
   private static instance: ConfigService;
   private cache = new Map<string, { data: unknown; timestamp: number }>();
+  private loadedConfig?: LoadedConfig;
 
   private constructor() {}
 
@@ -91,10 +96,11 @@ export class ConfigService {
     const globalLLMs = await this.loadTenexLLMs(globalPath);
     const projectLLMs = projPath
       ? await this.loadTenexLLMs(projPath)
-      : { providers: {}, models: {} };
+      : { providers: {}, configurations: {}, default: undefined };
     const llms: TenexLLMs = {
       providers: { ...globalLLMs.providers, ...projectLLMs.providers },
-      models: { ...globalLLMs.models, ...projectLLMs.models },
+      configurations: { ...globalLLMs.configurations, ...projectLLMs.configurations },
+      default: projectLLMs.default ?? globalLLMs.default,
     };
 
     // Load MCP (merge global and project)
@@ -107,7 +113,13 @@ export class ConfigService {
       enabled: projectMCP.enabled !== undefined ? projectMCP.enabled : globalMCP.enabled,
     };
 
-    return { config, agents, llms, mcp };
+    const loadedConfig = { config, agents, llms, mcp };
+    this.loadedConfig = loadedConfig;
+    
+    // Initialize the LLM factory with provider configs
+    llmServiceFactory.initializeProviders(llms.providers);
+    
+    return loadedConfig;
   }
 
   // =====================================================================================
@@ -184,6 +196,78 @@ export class ConfigService {
       mcp,
       TenexMCPSchema
     );
+  }
+
+  // =====================================================================================
+  // LLM SERVICE CREATION
+  // =====================================================================================
+
+  /**
+   * Get LLM configuration by name
+   */
+  getLLMConfig(configName?: string): LLMConfiguration {
+    if (!this.loadedConfig) {
+      throw new Error("Config not loaded. Call loadConfig() first.");
+    }
+
+    // If configName is "default" or not provided, use the actual default from config
+    let name = configName;
+    if (!name || name === "default") {
+      name = this.loadedConfig.llms.default;
+      if (!name) {
+        // If no default is configured, try to use the first available configuration
+        const available = Object.keys(this.loadedConfig.llms.configurations);
+        if (available.length > 0) {
+          name = available[0];
+          logger.warn(`No default LLM configured, using first available: ${name}`);
+        } else {
+          throw new Error("No LLM configurations available");
+        }
+      }
+    }
+    
+    // Try to get the configuration
+    let config = this.loadedConfig.llms.configurations[name];
+    
+    // If configuration not found, fallback to default
+    if (!config && name !== this.loadedConfig.llms.default) {
+      const defaultName = this.loadedConfig.llms.default;
+      if (defaultName) {
+        logger.warn(`LLM configuration "${name}" not found, falling back to default: ${defaultName}`);
+        config = this.loadedConfig.llms.configurations[defaultName];
+        
+        // If even the default isn't found, try first available
+        if (!config) {
+          const available = Object.keys(this.loadedConfig.llms.configurations);
+          if (available.length > 0) {
+            logger.warn(`Default configuration "${defaultName}" not found, using first available: ${available[0]}`);
+            config = this.loadedConfig.llms.configurations[available[0]];
+          }
+        }
+      }
+    }
+    
+    // If still no config found, throw error
+    if (!config) {
+      const available = Object.keys(this.loadedConfig.llms.configurations);
+      throw new Error(
+        `No valid LLM configuration found. Requested: "${configName || 'default'}". ` +
+        `Available: ${available.length > 0 ? available.join(", ") : "none"}`
+      );
+    }
+
+    return config;
+  }
+
+  /**
+   * Create an LLM service for a named configuration
+   */
+  createLLMService(
+    llmLogger: LLMLogger,
+    configName?: string
+  ): LLMService {
+    const config = this.getLLMConfig(configName);
+    return llmServiceFactory.createService(llmLogger, config);
   }
 
   // =====================================================================================

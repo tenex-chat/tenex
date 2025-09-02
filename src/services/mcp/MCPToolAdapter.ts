@@ -38,8 +38,10 @@ export function adaptMCPTool(
 ): any {
   const namespacedName = `mcp__${serverName}__${mcpTool.name}`;
 
-  // Create simple AI SDK tool
+  // Create AI SDK compatible tool object
+  // Note: MCP tools use double underscore convention for namespacing
   return {
+    name: namespacedName,
     description: mcpTool.description || `Tool from ${serverName}`,
     parameters: mcpTool.inputSchema ? mcpSchemaToAiSdk(mcpTool.inputSchema) : z.object({}),
     execute: async (args: Record<string, unknown>) => {

@@ -2,9 +2,9 @@ import * as path from "node:path";
 import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
-import { getLLMServiceFromConfig } from "@/llm/service";
+// LLMLogger will be accessed from ProjectContext
 import { shutdownNDK } from "@/nostr/ndkClient";
-import { getProjectContext } from "@/services";
+import { configService, getProjectContext } from "@/services";
 import { mcpService } from "@/services/mcp/MCPService";
 import { StatusPublisher } from "@/services/status";
 import { handleCliError } from "@/utils/cli-error";
@@ -49,7 +49,8 @@ async function runProjectListener(projectPath: string): Promise<void> {
     logger.info(`Starting listener for project: ${titleTag} (${dTag})`);
 
     // Load LLM service from config
-    const llmService = await getLLMServiceFromConfig();
+    const llmLogger = projectCtx.llmLogger;
+    const llmService = configService.createLLMService(llmLogger);
 
     // Initialize MCP service
     await mcpService.initialize(projectPath);
@@ -62,9 +63,8 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const subscriptionManager = new SubscriptionManager(eventHandler, projectPath);
     await subscriptionManager.start();
 
-    // Start status publisher with ConversationCoordinator from event handler
-    const conversationCoordinator = eventHandler.getConversationCoordinator();
-    const statusPublisher = new StatusPublisher(conversationCoordinator);
+    // Start status publisher
+    const statusPublisher = new StatusPublisher();
     await statusPublisher.startPublishing(projectPath);
 
     // Set up graceful shutdown

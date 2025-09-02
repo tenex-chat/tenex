@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { LLMLogger } from "@/logging/LLMLogger";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { type NDKProject } from "@nostr-dev-kit/ndk";
@@ -48,8 +49,14 @@ export class ProjectContext {
    */
   public conversationCoordinator?: ConversationCoordinator;
 
-  constructor(project: NDKProject, agents: Map<string, AgentInstance>) {
+  /**
+   * LLM Logger instance for this project
+   */
+  public readonly llmLogger: LLMLogger;
+
+  constructor(project: NDKProject, agents: Map<string, AgentInstance>, llmLogger: LLMLogger) {
     this.project = project;
+    this.llmLogger = llmLogger;
 
     // Debug logging
     logger.debug("Initializing ProjectContext", {
@@ -203,8 +210,8 @@ let projectContext: ProjectContext | undefined;
 /**
  * Initialize the project context. Should be called once during project startup.
  */
-export async function setProjectContext(project: NDKProject, agents: Map<string, AgentInstance>): Promise<void> {
-  projectContext = new ProjectContext(project, agents);
+export async function setProjectContext(project: NDKProject, agents: Map<string, AgentInstance>, llmLogger: LLMLogger): Promise<void> {
+  projectContext = new ProjectContext(project, agents, llmLogger);
   // Note: publishProjectStatus() should be called explicitly after context is set
   // to avoid duplicate events during initialization
 }

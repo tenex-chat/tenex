@@ -1,183 +1,307 @@
-import { generateText, streamText } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import type { CoreMessage } from 'ai';
-import type { AISdkProvider } from './types';
-import type { TenexLLMs, LLMConfiguration } from '@/services/config/types';
+import type { LLMLogger } from "@/logging/LLMLogger";
+import type { AISdkTool } from "@/tools/registry";
+import { logger } from "@/utils/logger";
+import {
+    type LanguageModelUsage,
+    type LanguageModelV1,
+    type StepResult,
+    generateText,
+    stepCountIs,
+    streamText,
+} from "ai";
+import type { ModelMessage, ProviderRegistry } from "ai";
+import { EventEmitter } from "tseep";
+
+// Define the event types for LLMService
+interface LLMServiceEvents {
+    content: (data: { delta: string }) => void;
+    "tool-will-execute": (data: { toolName: string; toolCallId: string; args: unknown }) => void;
+    "tool-did-execute": (data: {
+        toolName: string;
+        toolCallId: string;
+        result: unknown;
+        error?: boolean;
+    }) => void;
+    complete: (data: {
+        message: string;
+        steps: StepResult<Record<string, AISdkTool>>[];
+    }) => void;
+    "stream-error": (data: { error: unknown }) => void;
+}
 
 /**
- * LLM Service that supports multiple AI SDK providers
+ * LLM Service for runtime execution with AI SDK providers
+ * Pure runtime concerns - no configuration management
  */
-export class LLMService {
-  private providers: Map<string, any> = new Map();
-  private configurations: Map<string, LLMConfiguration> = new Map();
-  private defaultConfiguration?: string;
-  
-  constructor(
-    providerConfigs: Record<string, { apiKey: string }>,
-    configurations?: Record<string, LLMConfiguration>,
-    defaultConfig?: string
-  ) {
-    // Initialize configured providers
-    for (const [provider, config] of Object.entries(providerConfigs)) {
-      if (config?.apiKey) {
-        this.initializeProvider(provider as AISdkProvider, config.apiKey);
-      }
-    }
-    
-    // Store configurations
-    if (configurations) {
-      for (const [name, config] of Object.entries(configurations)) {
-        this.configurations.set(name, config);
-      }
-    }
-    
-    this.defaultConfiguration = defaultConfig;
-  }
-  
-  private initializeProvider(provider: AISdkProvider, apiKey: string) {
-    switch (provider) {
-      case 'openrouter':
-        this.providers.set(provider, createOpenRouter({ 
-          apiKey,
-          headers: { 
-            'X-Title': 'TENEX',
-            'HTTP-Referer': 'https://github.com/pablof7z/tenex'
-          }
-        }));
-        break;
-      case 'anthropic':
-        // Dynamically import Anthropic provider when needed
-        import('@ai-sdk/anthropic').then(({ createAnthropic }) => {
-          this.providers.set(provider, createAnthropic({ apiKey }));
-        }).catch(() => {
-          console.warn(`Anthropic provider not installed. Run: npm install @ai-sdk/anthropic`);
+export class LLMService extends EventEmitter<LLMServiceEvents> {
+    private readonly provider: string;
+    private readonly model: string;
+    private readonly temperature?: number;
+    private readonly maxTokens?: number;
+
+    constructor(
+        private readonly llmLogger: LLMLogger,
+        private readonly registry: ProviderRegistry,
+        provider: string,
+        model: string,
+        temperature?: number,
+        maxTokens?: number
+    ) {
+        super();
+        this.provider = provider;
+        this.model = model;
+        this.temperature = temperature;
+        this.maxTokens = maxTokens;
+        
+        logger.debug("[LLMService] Initialized", {
+            provider: this.provider,
+            model: this.model,
+            temperature: this.temperature,
+            maxTokens: this.maxTokens
         });
-        break;
-      case 'openai':
-        // Dynamically import OpenAI provider when needed
-        import('@ai-sdk/openai').then(({ createOpenAI }) => {
-          this.providers.set(provider, createOpenAI({ apiKey }));
-        }).catch(() => {
-          console.warn(`OpenAI provider not installed. Run: npm install @ai-sdk/openai`);
+    }
+
+    /**
+     * Get a language model from the registry.
+     * This method encapsulates the AI SDK's requirement for concatenated strings.
+     */
+    private getLanguageModel(): LanguageModelV1 {
+        // AI SDK requires this format - we encapsulate it here
+        return this.registry.languageModel(`${this.provider}:${this.model}`);
+    }
+
+    async complete(
+        messages: ModelMessage[],
+        tools: Record<string, unknown>,
+        options?: {
+            temperature?: number;
+            maxTokens?: number;
+        }
+    ): Promise<unknown> {
+        const model = this.getLanguageModel();
+        const startTime = Date.now();
+
+        // Log the request
+        this.llmLogger.logLLMRequest({
+            provider: this.provider,
+            model: this.model,
+            messages,
+            tools: Object.keys(tools).map((name) => ({ name })),
+            startTime,
+        }).catch(err => {
+            logger.error("[LLMService] Failed to log request", { error: err });
         });
-        break;
+
+        try {
+            const result = await generateText({
+                model,
+                messages,
+                tools,
+                temperature: options?.temperature ?? this.temperature,
+                maxTokens: options?.maxTokens ?? this.maxTokens,
+            });
+
+            const duration = Date.now() - startTime;
+
+            // Log the response
+            this.llmLogger.logLLMResponse({
+                response: {
+                    content: result.text,
+                    usage: result.usage,
+                },
+                endTime: Date.now(),
+                startTime,
+            }).catch(err => {
+                logger.error("[LLMService] Failed to log response", { error: err });
+            });
+
+            logger.info("[LLMService] Complete response received", {
+                model: `${this.provider}:${this.model}`,
+                duration,
+                usage: result.usage,
+                toolCallCount: result.toolCalls?.length || 0,
+                responseLength: result.text?.length || 0,
+            });
+
+            return result;
+        } catch (error) {
+            const duration = Date.now() - startTime;
+
+            this.llmLogger.logLLMResponse({
+                error: error as Error,
+                endTime: Date.now(),
+                startTime,
+            }).catch(err => {
+                logger.error("[LLMService] Failed to log error", { error: err });
+            });
+
+            logger.error("[LLMService] Complete failed", {
+                model: `${this.provider}:${this.model}`,
+                duration,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
     }
-  }
-  
-  private resolveModelString(modelString: string): { 
-    provider: string; 
-    model: string;
-    temperature?: number;
-    maxTokens?: number;
-  } {
-    // Check if it's a configuration name
-    const config = this.configurations.get(modelString);
-    if (config) {
-      return {
-        provider: config.provider,
-        model: config.model,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens
-      };
+
+    async stream(
+        messages: ModelMessage[],
+        tools: Record<string, AISdkTool>
+    ): Promise<void> {
+        const model = this.getLanguageModel();
+
+        // Create message preview for logging
+        const messagesPreview = messages.map((msg) => {
+            const content = typeof msg.content === "string" ? msg.content : "[complex content]";
+            const preview = content.length > 500 ? `${content.substring(0, 500)}...` : content;
+            return preview;
+        });
+
+        // Log the request
+        this.llmLogger.logLLMRequest({
+            provider: this.provider,
+            model: this.model,
+            messages,
+            tools: Object.keys(tools).map((name) => ({ name })),
+            startTime: Date.now(),
+        }).catch(err => {
+            logger.error("[LLMService] Failed to log request", { error: err });
+        });
+
+        logger.info("[LLMService] Calling stream", {
+            model: `${this.provider}:${this.model}`,
+            messageCount: messages.length,
+            toolCount: Object.keys(tools).length,
+            toolNames: Object.keys(tools).join(", "),
+            temperature: this.temperature,
+            maxTokens: this.maxTokens,
+            messagesPreview,
+        });
+
+        const startTime = Date.now();
+
+        // Create the stream outside the promise
+        const { textStream } = streamText({
+            model,
+            messages,
+            tools: tools,
+            stopWhen: stepCountIs(20),
+            onStepFinish: this.handleStepFinish.bind(this),
+            onChunk: this.handleChunk.bind(this),
+            onFinish: this.createFinishHandler(startTime),
+        });
+
+        // Consume the stream (this is what triggers everything!)
+        try {
+            logger.info("[LLMService] Stream started", {
+                model: this.model,
+            });
+
+            // CRITICAL: This loop is what actually triggers the stream execution
+            for await (const textPart of textStream) {
+                process.stdout.write(textPart);
+            }
+        } catch (error) {
+            await this.handleStreamError(error, startTime);
+            throw error;
+        }
     }
-    
-    // Check if it's the special "default" keyword
-    if (modelString === 'default' && this.defaultConfiguration) {
-      const defaultConfig = this.configurations.get(this.defaultConfiguration);
-      if (defaultConfig) {
-        return {
-          provider: defaultConfig.provider,
-          model: defaultConfig.model,
-          temperature: defaultConfig.temperature,
-          maxTokens: defaultConfig.maxTokens
+
+    private handleStepFinish(opts: any): void {
+        console.log('onStepFinish');
+    }
+
+    private handleChunk(event: { chunk: any }): void {
+        const chunk = event.chunk;
+
+        switch (chunk.type) {
+            case "text-delta":
+                if (chunk.text) {
+                    this.handleTextDelta(chunk.text);
+                }
+                break;
+            case "tool-call":
+                this.handleToolCall(chunk.toolCallId, chunk.toolName, chunk.input);
+                break;
+            case "tool-result":
+                this.handleToolResult(chunk.toolCallId, chunk.toolName, chunk.output);
+                break;
+        }
+    }
+
+    private createFinishHandler(startTime: number) {
+        return async (e: StepResult<Record<string, AISdkTool>> & {
+            steps: StepResult<Record<string, AISdkTool>>[];
+            totalUsage: LanguageModelUsage;
+        }) => {
+            const duration = Date.now() - startTime;
+
+            try {
+                await this.llmLogger.logLLMResponse({
+                    response: {
+                        content: e.text,
+                        usage: e.totalUsage,
+                    },
+                    endTime: Date.now(),
+                    startTime,
+                });
+
+                logger.info("[LLMService] Stream finished", {
+                    duration,
+                    toolsExecuted: e.experimental_toolInvocations?.length || 0,
+                    model: this.model,
+                    startTime,
+                });
+
+                this.emit("complete", {
+                    message: e.text || "",
+                    steps: e.steps,
+                });
+            } catch (error) {
+                logger.error("[LLMService] Error in onFinish handler", {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                throw error;
+            }
         };
-      }
     }
-    
-    // Otherwise parse as "provider:model" format
-    const parts = modelString.split(':');
-    if (parts.length === 2) {
-      return { provider: parts[0], model: parts[1] };
-    }
-    
-    // Default to openrouter for backward compatibility
-    return { provider: 'openrouter', model: modelString };
-  }
-  
-  private getProvider(providerName: string) {
-    const provider = this.providers.get(providerName);
-    if (!provider) {
-      throw new Error(`Provider ${providerName} not configured. Please run 'tenex setup llm' to configure it.`);
-    }
-    return provider;
-  }
-  
-  async complete(
-    modelString: string, 
-    messages: CoreMessage[], 
-    options?: {
-      tools?: Record<string, any>;
-      temperature?: number;
-      maxTokens?: number;
-    }
-  ) {
-    const resolved = this.resolveModelString(modelString);
-    const llmProvider = this.getProvider(resolved.provider);
-    
-    return generateText({
-      model: llmProvider(resolved.model),
-      messages,
-      tools: options?.tools,
-      maxRetries: 0,  // Manual control for RAL
-      temperature: options?.temperature ?? resolved.temperature ?? 0.7,
-      maxTokens: options?.maxTokens ?? resolved.maxTokens
-    });
-  }
-  
-  async stream(
-    modelString: string, 
-    messages: CoreMessage[], 
-    options?: {
-      tools?: Record<string, any>;
-      temperature?: number;
-      maxTokens?: number;
-    }
-  ) {
-    const resolved = this.resolveModelString(modelString);
-    const llmProvider = this.getProvider(resolved.provider);
-    
-    return streamText({
-      model: llmProvider(resolved.model),
-      messages,
-      tools: options?.tools,
-      maxRetries: 0,  // Manual control for RAL
-      temperature: options?.temperature ?? resolved.temperature ?? 0.7,
-      maxTokens: options?.maxTokens ?? resolved.maxTokens
-    });
-  }
-}
 
-// Create service from config
-let service: LLMService | null = null;
+    private async handleStreamError(error: unknown, startTime: number): Promise<void> {
+        console.log('error', error);
+        const duration = Date.now() - startTime;
 
-export function getLLMService(
-  providerConfigs: Record<string, { apiKey: string }>,
-  configurations?: Record<string, LLMConfiguration>,
-  defaultConfig?: string
-): LLMService {
-  if (!service) {
-    service = new LLMService(providerConfigs, configurations, defaultConfig);
-  }
-  return service;
-}
+        await this.llmLogger.logLLMResponse({
+            error: error as Error,
+            endTime: Date.now(),
+            startTime,
+        }).catch(err => {
+            logger.error("[LLMService] Failed to log error response", { error: err });
+        });
 
-// Helper to get service from config file
-export async function getLLMServiceFromConfig(): Promise<LLMService> {
-  const { configService } = await import('@/services');
-  const config = await configService.loadConfig();
-  return getLLMService(
-    config.llms.providers,
-    config.llms.configurations,
-    config.llms.default
-  );
+        logger.error("[LLMService] Stream failed", {
+            model: `${this.provider}:${this.model}`,
+            duration,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+
+    private handleTextDelta(text: string): void {
+        this.emit("content", { delta: text });
+    }
+
+    private handleToolCall(toolCallId: string, toolName: string, args: unknown): void {
+        this.emit("tool-will-execute", {
+            toolName,
+            toolCallId,
+            args,
+        });
+    }
+
+    private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
+        this.emit("tool-did-execute", {
+            toolName,
+            toolCallId,
+            result,
+        });
+    }
 }

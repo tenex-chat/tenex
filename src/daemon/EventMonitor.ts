@@ -118,6 +118,7 @@ export class EventMonitor implements IEventMonitor {
     const projectPubkey = pubkey || eventPubkey;
 
     // Encode as naddr
+    // Note: identifier can be empty for parameterized replaceable events without a d tag
     return nip19.naddrEncode({
       identifier: identifier || "",
       pubkey: projectPubkey,

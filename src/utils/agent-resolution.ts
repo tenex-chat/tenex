@@ -1,6 +1,6 @@
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
-import { NDKUser } from "@nostr-dev-kit/ndk";
+import { parseNostrUser } from "@/utils/nostr-entity-parser";
 
 /**
  * Resolve a recipient string to a pubkey
@@ -11,18 +11,10 @@ export function resolveRecipientToPubkey(recipient: string): string | null {
   // Trim whitespace
   recipient = recipient.trim();
 
-  // Check if it's an npub
-  if (recipient.startsWith("npub")) {
-    try {
-      return new NDKUser({ npub: recipient }).pubkey;
-    } catch (error) {
-      logger.debug("Failed to decode npub", { recipient, error });
-    }
-  }
-
-  // Check if it's a hex pubkey (64 characters)
-  if (/^[0-9a-f]{64}$/i.test(recipient)) {
-    return recipient.toLowerCase();
+  // Try to parse as a Nostr user identifier (npub, nprofile, hex, with/without nostr: prefix)
+  const parsedPubkey = parseNostrUser(recipient);
+  if (parsedPubkey) {
+    return parsedPubkey;
   }
 
   // Try to resolve as agent slug or name (case-insensitive)

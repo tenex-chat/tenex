@@ -3,7 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import { createMockLLMService } from "@/test-utils";
 import type { NDK } from "@nostr-dev-kit/ndk";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 import { AgentExecutor } from "../AgentExecutor";
 import type { ExecutionContext } from "../types";
 
@@ -209,7 +209,7 @@ describe("AgentExecutor", () => {
 
   describe("constructor", () => {
     it("should create an AgentExecutor instance", () => {
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       expect(executor).toBeDefined();
     });
   });
@@ -230,7 +230,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -259,7 +259,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -292,7 +292,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -311,7 +311,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
 
       try {
         await executor.execute(mockContext);
@@ -340,7 +340,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       await executor.execute(mockContext);
 
       // Should use default backend successfully
@@ -376,7 +376,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockLLM, mockNDK, mockConversationCoordinator);
+      const executor = new AgentExecutor(mockConversationCoordinator);
       await executor.execute(mockContext);
 
       expect(mockContext.onComplete).toHaveBeenCalledWith({

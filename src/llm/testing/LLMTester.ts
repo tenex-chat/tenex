@@ -1,9 +1,10 @@
 // LLM Configuration Tester - using AI SDK directly
-import { getLLMServiceFromConfig } from "@/llm/service";
+import { LLMLogger } from "@/logging/LLMLogger";
 import type { ResolvedLLMConfig } from "@/llm/types";
+import { configService } from "@/services";
 import type { TenexLLMs } from "@/services/config/types";
 import { logger } from "@/utils/logger";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 /**
  * LLM Configuration Tester - Tests LLM configurations
@@ -15,15 +16,17 @@ export class LLMTester {
   async testLLMConfig(config: ResolvedLLMConfig): Promise<boolean> {
     try {
       // Use the LLM service directly for testing
-      const llmService = await getLLMServiceFromConfig();
+      // Create a test logger (not initialized, but that's ok for testing)
+      const llmLogger = new LLMLogger();
+      const llmService = configService.createLLMService(llmLogger);
       
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         { role: "user", content: "Say 'test successful' if you can read this." }
       ];
 
       const response = await llmService.complete(
-        "test",
         messages,
+        {},
         { temperature: 0.1, maxTokens: 100 }
       );
       

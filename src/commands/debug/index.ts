@@ -59,7 +59,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       logInfo(`${chalk.white("Role:")} ${agent.role}`);
       logInfo(`${chalk.white("Phase:")} ${options.phase}`);
       if (agent.tools && agent.tools.length > 0) {
-        logInfo(`${chalk.white("Tools:")} ${agent.tools.map((t) => t.name).join(", ")}`);
+        logInfo(`${chalk.white("Tools:")} ${agent.tools.join(", ")}`);
       }
     } else {
       logWarning(`Note: Agent '${options.agent}' not found in registry`);

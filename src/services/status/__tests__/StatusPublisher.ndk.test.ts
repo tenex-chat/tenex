@@ -19,8 +19,7 @@ describe("StatusPublisher with NDK utilities", () => {
 
   beforeEach(() => {
     fixture = new TENEXTestFixture();
-    const mockConversationCoordinator = {} as any; // Mock ConversationCoordinator for tests
-    publisher = new StatusPublisher(undefined, mockConversationCoordinator);
+    publisher = new StatusPublisher();
   });
 
   afterEach(() => {
@@ -305,56 +304,4 @@ describe("StatusPublisher with NDK utilities", () => {
     });
   });
 
-  describe("queue management", () => {
-    it("should update queue status", async () => {
-      await withTestEnvironment(async (fixture) => {
-        const { signer } = await getTestUserWithSigner("carol", fixture.ndk);
-
-        mock.module("@/services", () => ({
-          getProjectContext: () => ({
-            project: { 
-              id: "queue-project",
-              pubkey: "project-pubkey",
-              tagReference: () => ["a", "31933:project-pubkey:queue-project"]
-            },
-            signer,
-            agents: new Map(),
-          }),
-          isProjectContextInitialized: () => true,
-          configService: {
-            loadConfig: mock(async () => ({ llms: { configurations: {}, defaults: {} } })),
-          },
-        }));
-
-        mock.module("@/nostr/ndkClient", () => ({
-          getNDK: () => fixture.ndk,
-        }));
-
-        const relay = fixture.createMockRelay("wss://queue.relay");
-        await relay.connect();
-
-        await publisher.startPublishing("/test/project");
-
-        // Add items to queue
-        publisher.updateQueueStatus(["task-1", "task-2", "task-3"]);
-
-        // Trigger immediate publish
-        await publisher.publishStatus();
-
-        // Find the latest status event
-        const statusMessages = relay.messageLog.filter(
-          log => log.direction === "out" && log.message.includes("EVENT")
-        );
-        const latestMessage = statusMessages[statusMessages.length - 1];
-        const [, eventData] = JSON.parse(latestMessage.message);
-
-        // Verify queue tags
-        const queueTags = eventData.tags.filter((tag: string[]) => tag[0] === "queue");
-        expect(queueTags).toHaveLength(3);
-        expect(queueTags).toContainEqual(["queue", "task-1"]);
-        expect(queueTags).toContainEqual(["queue", "task-2"]);
-        expect(queueTags).toContainEqual(["queue", "task-3"]);
-      });
-    });
-  });
 });

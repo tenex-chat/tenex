@@ -1,4 +1,3 @@
-import { logger } from "@/utils/logger";
 import type { LLMProvider } from "./types";
 
 // Simple model lists - no need to fetch dynamically
@@ -37,9 +36,7 @@ export const KNOWN_MODELS = {
  * Get available models for a provider
  */
 export async function getModelsForProvider(
-  provider: LLMProvider,
-  apiKey?: string,
-  ollamaUrl?: string
+  provider: LLMProvider
 ): Promise<string[] | null> {
   // For OpenRouter, models are specified as provider/model
   if (provider === "openrouter") {
@@ -53,8 +50,6 @@ export async function getModelsForProvider(
 /**
  * Get all available models grouped by provider
  */
-export async function getAllModels(
-  credentials?: Record<string, string>
-): Promise<Record<string, string[]>> {
+export async function getAllModels(): Promise<typeof KNOWN_MODELS> {
   return KNOWN_MODELS;
 }

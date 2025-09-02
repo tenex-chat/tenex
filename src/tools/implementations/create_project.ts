@@ -2,18 +2,18 @@ import { tool } from 'ai';
 import { getNDK } from "@/nostr";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
-
 const createProjectSchema = z.object({
   title: z.string().describe("The title/name of the project"),
-  description: z.string().optional().describe("Description of the project"),
-  repository: z.string().optional().describe("Repository URL for the project"),
-  image: z.string().optional().describe("Image URL for the project"),
-  tags: z.array(z.string()).optional().describe("Additional tags for the project"),
-  agents: z.array(z.string()).optional().describe("Array of agent definition event IDs to include in the project"),
-  mcpServers: z.array(z.string()).optional().describe("Array of MCP announcement event IDs to include in the project"),
+  description: z.string().nullable().describe("Description of the project"),
+  repository: z.string().nullable().describe("Repository URL for the project"),
+  image: z.string().nullable().describe("Image URL for the project"),
+  tags: z.array(z.string()).nullable().describe("Additional tags for the project"),
+  agents: z.array(z.string()).nullable().describe("Array of agent definition event IDs to include in the project"),
+  mcpServers: z.array(z.string()).nullable().describe("Array of MCP announcement event IDs to include in the project"),
 });
 
 type CreateProjectInput = z.infer<typeof createProjectSchema>;
@@ -77,24 +77,26 @@ async function executeCreateProject(
       // Add agent event IDs
       if (agents && agents.length > 0) {
         agents.forEach(agentEventId => {
-          // Strip "nostr:" prefix if present (common mistake)
-          const cleanEventId = agentEventId.startsWith("nostr:") 
-            ? agentEventId.substring(6) 
-            : agentEventId;
-          // Add agent tags with event ID
-          project.tags.push(["agent", cleanEventId]);
+          // Normalize the event ID (handles nostr: prefix and validates format)
+          const cleanEventId = normalizeNostrIdentifier(agentEventId);
+          if (cleanEventId) {
+            project.tags.push(["agent", cleanEventId]);
+          } else {
+            logger.warn(`Invalid agent event ID format: ${agentEventId}`);
+          }
         });
       }
 
       // Add MCP server event IDs
       if (mcpServers && mcpServers.length > 0) {
         mcpServers.forEach(mcpEventId => {
-          // Strip "nostr:" prefix if present (common mistake)
-          const cleanEventId = mcpEventId.startsWith("nostr:") 
-            ? mcpEventId.substring(6) 
-            : mcpEventId;
-          // Add mcp tags with event ID
-          project.tags.push(["mcp", cleanEventId]);
+          // Normalize the event ID (handles nostr: prefix and validates format)
+          const cleanEventId = normalizeNostrIdentifier(mcpEventId);
+          if (cleanEventId) {
+            project.tags.push(["mcp", cleanEventId]);
+          } else {
+            logger.warn(`Invalid MCP event ID format: ${mcpEventId}`);
+          }
         });
       }
 
@@ -135,7 +137,7 @@ async function executeCreateProject(
 export function createCreateProjectTool(context: ExecutionContext) {
   return tool({
     description: "Create and publish a new NDKProject event to Nostr",
-    parameters: createProjectSchema,
+    inputSchema: createProjectSchema,
     execute: async (input: CreateProjectInput) => {
       try {
         return await executeCreateProject(input, context);

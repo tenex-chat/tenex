@@ -18,7 +18,6 @@ import {
   type ErrorIntent,
   type EventContext,
   type LessonIntent,
-  type StatusIntent,
   type StreamingIntent,
   type TypingIntent,
 } from "./AgentEventEncoder";
@@ -31,119 +30,13 @@ import {
 export class AgentPublisher {
   private agent: AgentInstance;
   private encoder: AgentEventEncoder;
-  
-  // Streaming state - ensures buffered content is published before tool events
-  private streamingBuffer?: {
-    content: string;
-    context: EventContext;
-    sequenceNumber: number;
-    metadata?: Record<string, unknown>;
-  };
+  private streamSequence = 0;
 
   constructor(agent: AgentInstance, conversationCoordinator: ConversationCoordinator) {
     this.agent = agent;
     this.encoder = new AgentEventEncoder(conversationCoordinator);
   }
 
-  /**
-   * Add content to the streaming buffer and publish streaming progress events.
-   * Creates a new buffer if needed, or adds to existing buffer.
-   */
-  async addStreamContent(content: string, context?: EventContext): Promise<void> {
-    // Initialize buffer if needed
-    if (!this.streamingBuffer) {
-      if (!context) {
-        throw new Error("EventContext required when starting a new stream");
-      }
-      this.streamingBuffer = {
-        content: "",
-        context,
-        sequenceNumber: 0,
-        metadata: {},
-      };
-    }
-
-    // Add content to buffer
-    this.streamingBuffer.content += content;
-    this.streamingBuffer.sequenceNumber++;
-
-    // Publish streaming progress event (kind:21111)
-    const streamingIntent: StreamingIntent = {
-      type: "streaming",
-      content: this.streamingBuffer.content,
-      sequence: this.streamingBuffer.sequenceNumber,
-    };
-    
-    await this.streaming(streamingIntent, this.streamingBuffer.context);
-  }
-
-  /**
-   * Publish the buffered stream content as a final event.
-   * Clears the buffer after publishing.
-   */
-  async publishStreamContent(metadata?: Record<string, unknown>): Promise<NDKEvent | undefined> {
-    if (!this.streamingBuffer || !this.streamingBuffer.content.trim()) {
-      return undefined;
-    }
-
-    // Store metadata for later use if provided
-    if (metadata) {
-      this.streamingBuffer.metadata = { ...this.streamingBuffer.metadata, ...metadata };
-    }
-
-    // Create a conversation intent with the buffered content
-    const conversationIntent: ConversationIntent = {
-      type: "conversation",
-      content: this.streamingBuffer.content,
-    };
-
-    // Add metadata to context if available
-    const contextWithMetadata: EventContext = {
-      ...this.streamingBuffer.context,
-      ...(this.streamingBuffer.metadata || {}),
-    };
-
-    // Publish as kind:1111 conversation event
-    const event = this.encoder.encodeConversation(conversationIntent, contextWithMetadata);
-    
-    // Sign and publish
-    await event.sign(this.agent.signer);
-    await event.publish();
-
-    logger.debug("Stream content published", {
-      eventId: event.id,
-      contentLength: this.streamingBuffer.content.length,
-      sequenceCount: this.streamingBuffer.sequenceNumber,
-    });
-
-    // Clear the buffer
-    this.streamingBuffer = undefined;
-
-    return event;
-  }
-
-  /**
-   * Get the current buffered content without publishing it.
-   * Used by RAL for implicit completion.
-   */
-  getBufferedContent(): string {
-    return this.streamingBuffer?.content || "";
-  }
-
-  /**
-   * Check if there's buffered content.
-   */
-  hasBufferedContent(): boolean {
-    return !!(this.streamingBuffer && this.streamingBuffer.content.trim());
-  }
-
-  /**
-   * Clear the streaming buffer without publishing.
-   * Used to prevent double-publishing when content is handled elsewhere.
-   */
-  clearBuffer(): void {
-    this.streamingBuffer = undefined;
-  }
 
   /**
    * Flush any buffered streaming content before publishing other events.
@@ -216,7 +109,7 @@ export class AgentPublisher {
         phase: intent.phase,
       })),
       delegatingAgent: this.agent,
-      rootConversationId: context.rootEvent?.id || "",
+      rootConversationId: context.rootEvent.id,
       originalRequest: intent.request,
     });
 
@@ -322,26 +215,6 @@ export class AgentPublisher {
   }
 
   /**
-   * Publish a project status event.
-   */
-  async status(intent: StatusIntent): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
-    logger.debug("Dispatching status", {
-      agent: this.agent.name,
-      agentCount: intent.agents.length,
-    });
-
-    const event = this.encoder.encodeProjectStatus(intent);
-
-    // Sign and publish
-    await event.sign(this.agent.signer);
-    await event.publish();
-
-    return event;
-  }
-
-  /**
    * Publish a lesson learned event.
    */
   async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
@@ -364,6 +237,40 @@ export class AgentPublisher {
 
     return lessonEvent;
   }
+
+  /**
+   * Handle content streaming from LLMService.
+   * Adds content to buffer and publishes streaming events.
+   */
+  async handleContent(
+    event: { delta: string },
+    context: EventContext
+  ): Promise<void> {
+    // Stream the delta directly
+    const streamingIntent: StreamingIntent = {
+      type: "streaming",
+      content: event.delta,
+      sequence: ++this.streamSequence,
+    };
+    
+    await this.streaming(streamingIntent, context);
+  }
+
+  /**
+   * Handle tool about to execute.
+   * Flushes buffer and publishes accumulated content.
+   */
+  async handleToolWillExecute(
+    event: { toolName: string; toolCallId: string; args: any },
+    context: EventContext
+  ): Promise<void> {
+    // Just log for now - tools handle their own events
+    logger.debug('[AgentPublisher] Tool will execute', {
+      toolName: event.toolName,
+      toolCallId: event.toolCallId
+    });
+  }
+
 
   /**
    * Create a task event that references the triggering event.

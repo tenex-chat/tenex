@@ -49,14 +49,6 @@ export interface StreamingIntent {
   sequence: number;
 }
 
-export interface StatusIntent {
-  type: "status";
-  agents: Array<{ pubkey: string; slug: string }>;
-  models: Array<{ slug: string; agents: string[] }>;
-  tools: Array<{ name: string; agents: string[] }>;
-  queue?: string[];
-}
-
 export interface LessonIntent {
   type: "lesson";
   title: string;
@@ -73,7 +65,6 @@ export type AgentIntent =
   | ErrorIntent
   | TypingIntent
   | StreamingIntent
-  | StatusIntent
   | LessonIntent;
 
 // Execution context provided by RAL
@@ -350,43 +341,6 @@ export class AgentEventEncoder {
     return event;
   }
 
-  /**
-   * Encode a project status intent.
-   */
-  encodeProjectStatus(intent: StatusIntent): NDKEvent {
-    const event = new NDKEvent(getNDK());
-    event.kind = EVENT_KINDS.PROJECT_STATUS;
-    event.content = "";
-
-    // Add project tag
-    this.aTagProject(event);
-
-    this.pTagProjectOwner(event);
-
-    // Add agent pubkeys
-    for (const agent of intent.agents) {
-      event.tag(["agent", agent.pubkey, agent.slug]);
-    }
-
-    // Add model access tags
-    for (const model of intent.models) {
-      event.tag(["model", model.slug, ...model.agents]);
-    }
-
-    // Add tool access tags
-    for (const tool of intent.tools) {
-      event.tag(["tool", tool.name, ...tool.agents]);
-    }
-
-    // Add queue tags if present
-    if (intent.queue) {
-      for (const conversationId of intent.queue) {
-        event.tag(["queue", conversationId]);
-      }
-    }
-
-    return event;
-  }
 
   aTagProject(event: NDKEvent): undefined {
     const projectCtx = getProjectContext();

@@ -79,7 +79,7 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
 export function createDelegateTool(context: ExecutionContext) {
   return tool({
     description: "Delegate a task or question to one or more agents and wait for their responses",
-    parameters: delegateSchema,
+    inputSchema: delegateSchema,
     execute: async (input: DelegateInput) => {
       return await executeDelegate(input, context);
     },

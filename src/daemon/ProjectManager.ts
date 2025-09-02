@@ -7,11 +7,9 @@ import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { configService, setProjectContext } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { initializeLLMLogger } from "@/logging/LLMLogger";
-import { fetchAgentDefinition } from "@/utils/agentFetcher";
+import { LLMLogger } from "@/logging/LLMLogger";
 import { ensureTenexInGitignore, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
-import { toKebabCase } from "@/utils/string";
 // createAgent functionality has been moved to AgentRegistry
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -74,13 +72,34 @@ export class ProjectManager implements IProjectManager {
       const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
       const agentRegistry = new AgentRegistry(projectPath, false);
 
-      // Load the registry first to get global agents loaded
-      await agentRegistry.loadFromProject(project);
+      // First, fetch and install agents from Nostr (source of truth)
+      logger.info(`Installing ${projectData.agentEventIds.length} agents from Nostr events`);
+      const { installAgentFromEvent } = await import("@/utils/agentInstaller");
+      
+      for (const eventId of projectData.agentEventIds) {
+        try {
+          logger.debug(`Installing agent from event: ${eventId}`);
+          await installAgentFromEvent(eventId, projectPath, project, undefined, ndk);
+        } catch (error) {
+          logger.error(`Failed to install agent ${eventId} from Nostr`, { error });
+        }
+      }
 
-      // Fetch and save agent and MCP definitions
-      await this.fetchAndSaveCapabilities(projectPath, projectData, ndk, project, agentRegistry);
+      // Install MCP servers
+      for (const eventId of projectData.mcpEventIds) {
+        try {
+          const event = await ndk.fetchEvent(eventId);
+          if (event) {
+            const mcpTool = NDKMCPTool.from(event);
+            await installMCPServerFromEvent(projectPath, mcpTool);
+            logger.info("Installed MCP server", { eventId, name: mcpTool.name });
+          }
+        } catch (error) {
+          logger.error(`Failed to fetch or install MCP server ${eventId}`, { error });
+        }
+      }
 
-      // Reload to pick up any new agents that were added
+      // Now load from local files (which were just created/updated)
       await agentRegistry.loadFromProject(project);
       const agentMap = agentRegistry.getAllAgentsMap();
       const loadedAgents = new Map();
@@ -89,8 +108,12 @@ export class ProjectManager implements IProjectManager {
         loadedAgents.set(slug, agent);
       }
 
+      // Create and initialize LLM logger
+      const llmLogger = new LLMLogger();
+      llmLogger.initialize(projectPath);
+
       // Now set the project context once with all agents loaded
-      await setProjectContext(project, loadedAgents);
+      await setProjectContext(project, loadedAgents, llmLogger);
 
       // Republish kind:0 events for all agents
       await agentRegistry.republishAllAgentProfiles(project);
@@ -168,6 +191,26 @@ export class ProjectManager implements IProjectManager {
       // Load agents using AgentRegistry
       const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
       const agentRegistry = new AgentRegistry(projectPath, false);
+      
+      // First, fetch and install agents from Nostr (source of truth)
+      const agentEventIds = project.tags
+        .filter((t) => t[0] === "agent" && t[1])
+        .map((t) => t[1])
+        .filter(Boolean) as string[];
+      
+      logger.info(`Installing ${agentEventIds.length} agents from Nostr events`);
+      const { installAgentFromEvent } = await import("@/utils/agentInstaller");
+      
+      for (const eventId of agentEventIds) {
+        try {
+          logger.debug(`Installing agent from event: ${eventId}`);
+          await installAgentFromEvent(eventId, projectPath, project, undefined, ndk);
+        } catch (error) {
+          logger.error(`Failed to install agent ${eventId} from Nostr`, { error });
+        }
+      }
+      
+      // Now load from local files (which were just created/updated)
       await agentRegistry.loadFromProject(project);
 
       // Get all agents from registry
@@ -190,8 +233,12 @@ export class ProjectManager implements IProjectManager {
         loadedAgentsSlugs: Array.from(loadedAgents.keys()),
       });
 
+      // Create and initialize LLM logger
+      const llmLogger = new LLMLogger();
+      llmLogger.initialize(projectPath);
+
       // Initialize ProjectContext
-      await setProjectContext(project, loadedAgents);
+      await setProjectContext(project, loadedAgents, llmLogger);
 
       // Initialize ConversationCoordinator for CLI commands
       const projectCtx = (await import("@/services")).getProjectContext();
@@ -206,9 +253,7 @@ export class ProjectManager implements IProjectManager {
       // Republish kind:0 events for all agents on project load
       await agentRegistry.republishAllAgentProfiles(project);
 
-      // UnifiedLogger initialization removed
-      // Initialize LLM logger for clear request/response logging
-      initializeLLMLogger(projectPath);
+      // LLM logger is now initialized and passed to ProjectContext above
     } catch (error: unknown) {
       // Only log if it's not a missing project configuration error
       // The MCP server command will handle this specific error with a friendlier message
@@ -229,6 +274,10 @@ export class ProjectManager implements IProjectManager {
   }
 
   private projectToProjectData(project: NDKProject): ProjectData {
+    if (!project.dTag) {
+      throw new Error("Project missing required d tag identifier");
+    }
+    
     const repoTag = project.tagValue("repo");
     const titleTag = project.tagValue("title");
     const hashtagTags = project.tags
@@ -247,7 +296,7 @@ export class ProjectManager implements IProjectManager {
       .filter(Boolean) as string[];
 
     return {
-      identifier: project.dTag || "",
+      identifier: project.dTag,
       pubkey: project.pubkey,
       naddr: project.encode(),
       title: titleTag || "Untitled Project",
@@ -294,59 +343,6 @@ export class ProjectManager implements IProjectManager {
     logger.info("Created project structure with config", { projectPath });
   }
 
-  private async fetchAndSaveCapabilities(
-    projectPath: string,
-    project: ProjectData,
-    ndk: NDK,
-    ndkProject: NDKProject | undefined,
-    agentRegistry: import("@/agents/AgentRegistry").AgentRegistry
-  ): Promise<void> {
-    const agentsDir = path.join(projectPath, ".tenex", "agents");
-    await fs.mkdir(agentsDir, { recursive: true });
-
-    // Process agent tags
-    for (const eventId of project.agentEventIds) {
-      try {
-        const agent = await fetchAgentDefinition(eventId, ndk);
-        if (agent) {
-          // Generate a slug for the agent (kebab-case of the name)
-          const slug = toKebabCase(agent.title);
-
-          // Use AgentRegistry.ensureAgent to handle all file operations
-          await agentRegistry.ensureAgent(
-            slug,
-            {
-              name: agent.title,
-              role: agent.role,
-              description: agent.description,
-              instructions: agent.instructions,
-              useCriteria: agent.useCriteria,
-              eventId: eventId,
-            },
-            ndkProject
-          );
-
-          logger.info("Saved agent definition", { eventId, name: agent.title });
-        }
-      } catch (error) {
-        logger.error("Failed to fetch agent definition", { error, eventId });
-      }
-    }
-
-    // Process MCP tags
-    for (const eventId of project.mcpEventIds) {
-      try {
-        const event = await ndk.fetchEvent(eventId);
-        if (event) {
-          const mcpTool = NDKMCPTool.from(event);
-          await installMCPServerFromEvent(projectPath, mcpTool);
-          logger.info("Installed MCP server", { eventId, name: mcpTool.name });
-        }
-      } catch (error) {
-        logger.error("Failed to fetch or install MCP server", { error, eventId });
-      }
-    }
-  }
 
   private async projectExists(projectPath: string): Promise<boolean> {
     try {

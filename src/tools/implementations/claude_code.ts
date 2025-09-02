@@ -6,7 +6,6 @@ import { logger } from "@/utils/logger";
 import { randomUUID } from "crypto";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
-
 /**
  * Strips thinking blocks from content.
  * Removes everything between <thinking> and </thinking> tags.
@@ -19,10 +18,10 @@ const claudeCodeSchema = z.object({
   prompt: z.string().min(1).describe("The prompt for Claude Code to execute"),
   systemPrompt: z
     .string()
-    .optional()
+    .nullable()
     .describe("Optional system prompt to provide additional context or constraints"),
   title: z.string().describe("Title for the task"),
-  branch: z.string().optional().describe("Optional branch name for the task"),
+  branch: z.string().nullable().describe("Optional branch name for the task"),
 });
 
 type ClaudeCodeInput = z.infer<typeof claudeCodeSchema>;
@@ -206,7 +205,7 @@ async function executeClaudeCode(
 export function createClaudeCodeTool(context: ExecutionContext) {
   return tool({
     description: "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development.",
-    parameters: claudeCodeSchema,
+    inputSchema: claudeCodeSchema,
     execute: async (input: ClaudeCodeInput) => {
       try {
         return await executeClaudeCode(input, context);

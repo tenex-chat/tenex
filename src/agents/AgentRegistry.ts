@@ -48,7 +48,7 @@ export class AgentRegistry {
     }
   }
 
-  async loadFromProject(ndkProject?: NDKProject): Promise<void> {
+  async loadFromProject(): Promise<void> {
     // Ensure .tenex directory exists
     const tenexDir = this.basePath.endsWith(".tenex")
       ? this.basePath
@@ -190,7 +190,7 @@ export class AgentRegistry {
         name: config.name,
         role: config.role,
         description: config.description,
-        instructions: config.instructions || "",
+        instructions: config.instructions,
         useCriteria: config.useCriteria,
         llmConfig: config.llmConfig,
       };
@@ -235,7 +235,7 @@ export class AgentRegistry {
           name: config.name,
           role: config.role,
           description: config.description,
-          instructions: config.instructions || "",
+          instructions: config.instructions,
           useCriteria: config.useCriteria,
           llmConfig: config.llmConfig,
         };
@@ -512,7 +512,7 @@ export class AgentRegistry {
           name: agent.name,
           role: agent.role,
           description: agent.description,
-          instructions: agent.instructions || "",
+          instructions: agent.instructions,
           useCriteria: agent.useCriteria,
           llmConfig: newLLMConfig,
         };
@@ -585,7 +585,7 @@ export class AgentRegistry {
           name: agent.name,
           role: agent.role,
           description: agent.description,
-          instructions: agent.instructions || "",
+          instructions: agent.instructions,
           useCriteria: agent.useCriteria,
           llmConfig: agent.llmConfig,
           tools: newToolNames,
@@ -598,9 +598,9 @@ export class AgentRegistry {
       // Save the updated definition
       await writeJsonFile(definitionPath, agentDefinition);
 
-      logger.info(`Updated tools for agent ${agent.name} (${agent.slug})`, {
-        newTools: newToolNames,
-        file: registryInfo.entry.file,
+      logger.debug(`Persisted tools to ${registryInfo.entry.file}`, {
+        agent: agent.slug,
+        toolCount: newToolNames.length,
       });
 
       return true;
@@ -678,7 +678,8 @@ export class AgentRegistry {
     // Load agent definition from file
     const definitionPath = path.join(agentsDir, registryEntry.file);
     if (!(await fileExists(definitionPath))) {
-      logger.error(`Agent definition file not found: ${definitionPath}`);
+      // Missing file is not an error - it's a cache miss that will trigger fetch from Nostr
+      logger.debug(`Agent definition file not found (cache miss): ${definitionPath}`);
       return null;
     }
 
@@ -701,7 +702,7 @@ export class AgentRegistry {
     const config: AgentConfig = {
       name: agentDefinition.name,
       role: agentDefinition.role,
-      instructions: agentDefinition.instructions || "",
+      instructions: agentDefinition.instructions,
       useCriteria: agentDefinition.useCriteria,
       nsec: registryEntry.nsec,
       eventId: registryEntry.eventId,
@@ -738,7 +739,7 @@ export class AgentRegistry {
       signer,
       role: agentDefinition.role,
       description: agentDefinition.description,
-      instructions: agentDefinition.instructions || "",
+      instructions: agentDefinition.instructions,
       useCriteria: agentDefinition.useCriteria,
       llmConfig: agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
       tools: [], // Will be set next
@@ -864,7 +865,7 @@ export class AgentRegistry {
       name: config.name,
       role: config.role,
       description: config.description,
-      instructions: config.instructions || "",
+      instructions: config.instructions,
       useCriteria: config.useCriteria,
       llmConfig: config.llmConfig,
       tools: config.tools,

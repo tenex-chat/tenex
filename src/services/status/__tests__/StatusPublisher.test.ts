@@ -59,7 +59,7 @@ describe("StatusPublisher", () => {
   let publisher: StatusPublisher;
 
   beforeEach(() => {
-    publisher = new StatusPublisher(undefined);
+    publisher = new StatusPublisher();
     // Clear all mock calls
     mockPublish.mockClear();
     mockSign.mockClear();
