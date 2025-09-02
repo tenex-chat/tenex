@@ -13,7 +13,7 @@ export class LLMTester {
   /**
    * Test an LLM configuration
    */
-  async testLLMConfig(config: ResolvedLLMConfig): Promise<boolean> {
+  async testLLMConfig(): Promise<boolean> {
     try {
       // Use the LLM service directly for testing
       // Create a test logger (not initialized, but that's ok for testing)

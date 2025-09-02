@@ -1,7 +1,6 @@
 import { tool } from 'ai';
 import { getNDK } from "@/nostr";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 const agentsDiscoverSchema = z.object({
@@ -54,8 +53,7 @@ function formatAgentsAsMarkdown(
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsDiscover(
-  input: AgentsDiscoverInput,
-  context: ExecutionContext
+  input: AgentsDiscoverInput
 ): Promise<AgentsDiscoverOutput> {
   const { searchText, limit = 50 } = input;
 
@@ -103,13 +101,13 @@ async function executeAgentsDiscover(
  * Create an AI SDK tool for discovering agents
  * This is the primary implementation
  */
-export function createAgentsDiscoverTool(context: ExecutionContext) {
+export function createAgentsDiscoverTool(): ReturnType<typeof tool> {
   return tool({
     description: "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
     inputSchema: agentsDiscoverSchema,
     execute: async (input: AgentsDiscoverInput) => {
       try {
-        return await executeAgentsDiscover(input, context);
+        return await executeAgentsDiscover(input);
       } catch (error) {
         logger.error("Failed to discover agents", { error });
         throw new Error(`Failed to discover agents: ${error instanceof Error ? error.message : String(error)}`);

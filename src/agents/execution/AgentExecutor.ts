@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
-import type { ConversationIntent, EventContext } from "@/nostr/AgentEventEncoder";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import {
     buildStandaloneSystemPromptMessages,
@@ -13,7 +13,6 @@ import { logInfo, logger } from "@/utils/logger";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { getToolsObject } from "@/tools/registry";
-import { detectAndStripEOM } from "@/utils/eom-utils";
 import type { ExecutionContext } from "./types";
 import "@/prompts/fragments"; // Import fragment registration manifest
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";

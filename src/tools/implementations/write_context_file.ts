@@ -146,7 +146,7 @@ async function executeWriteContextFile(
 /**
  * Create an AI SDK tool for writing context files
  */
-export function createWriteContextFileTool(context: ExecutionContext) {
+export function createWriteContextFileTool(): ReturnType<typeof tool> {
   return tool({
     description:
       "Write or update a specification file in the context/ directory. You must have read this file recently before writing to it.",

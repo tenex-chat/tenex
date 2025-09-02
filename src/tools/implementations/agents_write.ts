@@ -40,8 +40,7 @@ interface AgentsWriteOutput {
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsWrite(
-  input: AgentsWriteInput,
-  context: ExecutionContext
+  input: AgentsWriteInput
 ): Promise<AgentsWriteOutput> {
   const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, mcp } = input;
 
@@ -173,13 +172,13 @@ async function executeAgentsWrite(
  * Create an AI SDK tool for writing agents
  * This is the primary implementation
  */
-export function createAgentsWriteTool(context: ExecutionContext) {
+export function createAgentsWriteTool(): ReturnType<typeof tool> {
   return tool({
     description: "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
     inputSchema: agentsWriteSchema,
     execute: async (input: AgentsWriteInput) => {
       try {
-        return await executeAgentsWrite(input, context);
+        return await executeAgentsWrite(input);
       } catch (error) {
         logger.error("Failed to write agent definition", { error });
         throw new Error(`Failed to write agent definition: ${error instanceof Error ? error.message : String(error)}`);

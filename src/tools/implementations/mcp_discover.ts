@@ -103,7 +103,7 @@ async function executeMcpDiscover(input: McpDiscoverInput, _context: ExecutionCo
 }
 
 // AI SDK tool factory
-export function createMcpDiscoverTool(context: ExecutionContext) {
+export function createMcpDiscoverTool(): ReturnType<typeof tool> {
   return tool({
     description: "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
     inputSchema: mcpDiscoverSchema,

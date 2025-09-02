@@ -83,7 +83,7 @@ async function executeReportWrite(input: ReportWriteInput, context: ExecutionCon
 }
 
 // AI SDK tool factory
-export function createReportWriteTool(context: ExecutionContext) {
+export function createReportWriteTool(): ReturnType<typeof tool> {
   return tool({
     description: "Generate or update an NDKArticle report for the current project",
     inputSchema: reportWriteSchema,

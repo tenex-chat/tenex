@@ -77,7 +77,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       const phase = (ALL_PHASES.includes(options.phase as Phase) ? options.phase : "chat") as Phase;
 
       // Initialize MCP service to get tools
-      let mcpTools: any[] = [];
+      let mcpTools: Record<string, unknown>[] = [];
       try {
         await mcpService.initialize(projectPath);
         mcpTools = mcpService.getCachedTools();

@@ -261,8 +261,7 @@ export class AgentPublisher {
    * Flushes buffer and publishes accumulated content.
    */
   async handleToolWillExecute(
-    event: { toolName: string; toolCallId: string; args: any },
-    context: EventContext
+    event: { toolName: string; toolCallId: string; args: unknown }
   ): Promise<void> {
     // Just log for now - tools handle their own events
     logger.debug('[AgentPublisher] Tool will execute', {

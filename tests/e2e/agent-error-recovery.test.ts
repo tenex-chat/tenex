@@ -8,7 +8,7 @@ import {
     assertPhaseTransitions,
     assertToolCalls,
     type E2ETestContext
-} from "../test-harness";
+} from "@/test-utils/e2e-harness";
 import type { MockLLMResponse } from "@/test-utils/mock-llm/types";
 import { conversationalLogger } from "@/test-utils/conversational-logger";
 

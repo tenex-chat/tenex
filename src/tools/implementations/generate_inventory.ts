@@ -81,7 +81,7 @@ The inventory provides comprehensive information about the codebase structure, s
 }
 
 // AI SDK tool factory
-export function createGenerateInventoryTool(context: ExecutionContext) {
+export function createGenerateInventoryTool(): ReturnType<typeof tool> {
   return tool({
     description: "Generate a comprehensive project inventory using repomix + LLM analysis",
     inputSchema: generateInventorySchema,

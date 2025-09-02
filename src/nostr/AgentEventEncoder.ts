@@ -201,10 +201,8 @@ export class AgentEventEncoder {
     this.addStandardTags(event, context);
 
     logger.debug("Encoded delegation request", {
-      recipientCount: intent.recipients.length,
       phase: intent.phase,
       recipients: intent.recipients.map((r) => r.substring(0, 8)),
-      kind: 1111,
     });
 
     return [event];

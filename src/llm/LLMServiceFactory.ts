@@ -4,8 +4,10 @@ import { logger } from "@/utils/logger";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { ollama } from "ollama-ai-provider-v2";
 import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
+import { createMockProvider } from "./providers/MockProvider";
 
 /**
  * Factory for creating LLM services with proper provider initialization
@@ -20,6 +22,29 @@ export class LLMServiceFactory {
      */
     initializeProviders(providerConfigs: Record<string, { apiKey: string }>): void {
         this.providers.clear();
+        
+        // Check if mock mode is enabled
+        if (process.env.USE_MOCK_LLM === 'true') {
+            logger.debug("[LLMServiceFactory] Mock LLM mode enabled via USE_MOCK_LLM environment variable");
+            
+            // Load mock scenarios from file if specified
+            const mockConfig = undefined;
+            if (process.env.MOCK_LLM_SCENARIOS) {
+                try {
+                    // TODO: Load scenarios from file
+                    logger.debug(`[LLMServiceFactory] Loading mock scenarios from: ${process.env.MOCK_LLM_SCENARIOS}`);
+                } catch (error) {
+                    logger.warn("[LLMServiceFactory] Failed to load mock scenarios, using defaults", {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+            
+            this.providers.set("mock", createMockProvider(mockConfig));
+            
+            // In mock mode, we only use the mock provider
+            // Other providers can still be initialized but won't be used by default
+        }
         
         for (const [name, config] of Object.entries(providerConfigs)) {
             if (!config?.apiKey) {
@@ -54,6 +79,26 @@ export class LLMServiceFactory {
                         logger.debug(`[LLMServiceFactory] Initialized OpenAI provider`);
                         break;
                         
+                    case "ollama": {
+                        // For Ollama, apiKey is actually the base URL (default: http://localhost:11434)
+                        const baseURL = config.apiKey === "local" ? "http://localhost:11434" : config.apiKey;
+                        
+                        // ollama-ai-provider-v2 needs a wrapper to work with the registry
+                        // It expects the model name to be provided when creating the model instance
+                        const ollamaProvider = {
+                            languageModel: (modelId: string) => {
+                                return ollama({
+                                    baseURL,
+                                    model: modelId
+                                });
+                            }
+                        };
+                        
+                        this.providers.set(name, ollamaProvider as Provider);
+                        logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL}`);
+                        break;
+                    }
+                        
                     default:
                         logger.warn(`[LLMServiceFactory] Unknown provider type: ${name}`);
                 }
@@ -79,7 +124,6 @@ export class LLMServiceFactory {
         }
         
         this.initialized = true;
-        logger.info(`[LLMServiceFactory] Initialized ${this.providers.size} providers`);
     }
 
     /**
@@ -93,20 +137,27 @@ export class LLMServiceFactory {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }
 
+        // If mock mode is enabled, always use mock provider regardless of config
+        const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
+        
         // Verify the provider exists
-        if (!this.providers.has(config.provider)) {
+        if (!this.providers.has(actualProvider)) {
             const available = Array.from(this.providers.keys());
             throw new Error(
-                `Provider "${config.provider}" not available. ` +
+                `Provider "${actualProvider}" not available. ` +
                 `Initialized providers: ${available.length > 0 ? available.join(", ") : "none"}`
             );
+        }
+
+        if (actualProvider === 'mock' && actualProvider !== config.provider) {
+            logger.debug(`[LLMServiceFactory] Using mock provider instead of ${config.provider} due to USE_MOCK_LLM=true`);
         }
 
         // Use the shared registry for all services
         return new LLMService(
             llmLogger,
             this.registry,
-            config.provider,
+            actualProvider,
             config.model,
             config.temperature,
             config.maxTokens

@@ -8,7 +8,7 @@ import NDK, { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk';
  * @param ndk - NDK instance for validation
  * @returns The parsed pubkey or null if invalid
  */
-export function parseNostrUser(input: string | undefined, ndk?: NDK): string | null {
+export function parseNostrUser(input: string | undefined): string | null {
     if (!input) return null;
     
     try {

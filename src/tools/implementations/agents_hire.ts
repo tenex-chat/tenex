@@ -34,8 +34,7 @@ type AgentsHireOutput = {
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsHire(
-  input: AgentsHireInput,
-  context: ExecutionContext
+  input: AgentsHireInput
 ): Promise<AgentsHireOutput> {
   const { eventId: rawEventId, slug } = input;
 
@@ -157,13 +156,13 @@ async function executeAgentsHire(
  * Create an AI SDK tool for hiring agents
  * This is the primary implementation
  */
-export function createAgentsHireTool(context: ExecutionContext) {
+export function createAgentsHireTool(): ReturnType<typeof tool> {
   return tool({
     description: "Hire (add) a new agent from the Nostr network to the current project using its event ID",
     inputSchema: agentsHireSchema,
     execute: async (input: AgentsHireInput) => {
       try {
-        return await executeAgentsHire(input, context);
+        return await executeAgentsHire(input);
       } catch (error) {
         logger.error("Failed to hire agent", { error });
         throw new Error(`Failed to hire agent: ${error instanceof Error ? error.message : String(error)}`);

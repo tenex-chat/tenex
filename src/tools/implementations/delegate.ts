@@ -76,7 +76,7 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
 }
 
 // AI SDK tool factory
-export function createDelegateTool(context: ExecutionContext) {
+export function createDelegateTool(): ReturnType<typeof tool> {
   return tool({
     description: "Delegate a task or question to one or more agents and wait for their responses",
     inputSchema: delegateSchema,

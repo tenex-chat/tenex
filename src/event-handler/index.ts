@@ -81,7 +81,7 @@ export class EventHandler {
       }
       
       // Process p-tags to show agent slugs where possible
-      let pTags: any[];
+      let pTags: string[][] = [];
       try {
         pTags = event.getMatchingTags("p");
       } catch (err) {
@@ -106,7 +106,7 @@ export class EventHandler {
       }
     } catch {
       // Project context might not be available, continue with pubkey
-      let pTags: any[];
+      let pTags: string[][] = [];
       try {
         pTags = event.getMatchingTags("p");
       } catch (err) {

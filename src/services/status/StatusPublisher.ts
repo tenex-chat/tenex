@@ -101,13 +101,40 @@ export class StatusPublisher {
         queue: [],
       };
 
-      // Gather agent info
+      // Gather agent info - preserve order from NDKProject
       if (isProjectContextInitialized()) {
+        // Get agent tags from project in their original order
+        const projectAgentTags = projectCtx.project.tags
+          .filter((tag) => tag[0] === "agent" && tag[1]);
+        
+        // Track which agents we've already added (by slug)
+        const addedAgentSlugs = new Set<string>();
+        
+        // First, add agents that have eventIds in the order they appear in the project
+        for (const agentTag of projectAgentTags) {
+          const eventId = agentTag[1];
+          
+          // Find agent with matching eventId
+          for (const [agentSlug, agent] of projectCtx.agents) {
+            if (agent.eventId === eventId) {
+              intent.agents.push({
+                pubkey: agent.pubkey,
+                slug: agentSlug,
+              });
+              addedAgentSlugs.add(agentSlug);
+              break;
+            }
+          }
+        }
+        
+        // Then add any remaining agents (global or inline agents without eventIds)
         for (const [agentSlug, agent] of projectCtx.agents) {
-          intent.agents.push({
-            pubkey: agent.pubkey,
-            slug: agentSlug,
-          });
+          if (!addedAgentSlugs.has(agentSlug)) {
+            intent.agents.push({
+              pubkey: agent.pubkey,
+              slug: agentSlug,
+            });
+          }
         }
       }
 

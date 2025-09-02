@@ -43,7 +43,7 @@ async function executeShell(
     if (context.agent.pubkey !== pmAgent.pubkey) {
       throw new Error("Shell tool is restricted to the project manager agent only");
     }
-  } catch (error) {
+  } catch {
     throw new Error("Unable to verify project manager status");
   }
 
@@ -99,7 +99,7 @@ async function executeShell(
 /**
  * Create an AI SDK tool for executing shell commands
  */
-export function createShellTool(context: ExecutionContext) {
+export function createShellTool(): ReturnType<typeof tool> {
   return tool({
     description:
       "Execute shell commands in the project directory (restricted to project-manager agent only)",

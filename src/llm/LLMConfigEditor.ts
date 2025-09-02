@@ -5,7 +5,7 @@ import chalk from "chalk";
 import { AI_SDK_PROVIDERS } from "./types";
 import type { AISdkProvider } from "./types";
 import { fetchOpenRouterModels, getPopularModels } from "./providers/openrouter-models";
-import type { OpenRouterModel } from "./providers/openrouter-models";
+import { fetchOllamaModels, getPopularOllamaModels } from "./providers/ollama-models";
 
 /**
  * LLM Configuration Editor for managing named configurations
@@ -97,42 +97,138 @@ export class LLMConfigEditor {
   }
 
   private async configureProviders(llmsConfig: TenexLLMs): Promise<void> {
-    const { providers } = await inquirer.prompt([{
-      type: "checkbox",
-      name: "providers",
-      message: "Select providers to configure:",
-      choices: AI_SDK_PROVIDERS.map(p => ({
-        name: this.getProviderDisplayName(p),
-        value: p,
-        checked: !!llmsConfig.providers[p]?.apiKey
-      }))
-    }]);
+    // Show which providers are already configured
+    const configuredProviders = AI_SDK_PROVIDERS.filter(p => !!llmsConfig.providers[p]?.apiKey);
+    const unconfiguredProviders = AI_SDK_PROVIDERS.filter(p => !llmsConfig.providers[p]?.apiKey);
     
-    for (const provider of providers) {
-      const currentKey = llmsConfig.providers[provider]?.apiKey;
-      const { apiKey } = await inquirer.prompt([{
-        type: "password",
-        name: "apiKey",
-        message: `Enter API key for ${this.getProviderDisplayName(provider)}:`,
-        default: currentKey,
-        mask: "*",
-        validate: (input: string) => {
-          if (!input.trim()) return "API key is required";
+    if (configuredProviders.length > 0) {
+      console.log(chalk.gray("\nAlready configured:"));
+      configuredProviders.forEach(p => {
+        console.log(chalk.green(`  ✓ ${this.getProviderDisplayName(p)}`));
+      });
+    }
+    
+    if (unconfiguredProviders.length === 0) {
+      console.log(chalk.yellow("\n⚠️  All providers are already configured"));
+      const { reconfigure } = await inquirer.prompt([{
+        type: "confirm",
+        name: "reconfigure",
+        message: "Would you like to reconfigure existing providers?",
+        default: false
+      }]);
+      
+      if (!reconfigure) {
+        return;
+      }
+      
+      // If reconfiguring, let them select which ones
+      const { providers } = await inquirer.prompt([{
+        type: "checkbox",
+        name: "providers",
+        message: "Select providers to reconfigure:",
+        choices: configuredProviders.map(p => ({
+          name: this.getProviderDisplayName(p),
+          value: p
+        }))
+      }]);
+      
+      for (const provider of providers) {
+        await this.configureProvider(provider, llmsConfig);
+      }
+    } else {
+      // Ask which unconfigured providers to set up
+      const { providers } = await inquirer.prompt([{
+        type: "checkbox",
+        name: "providers",
+        message: "Select providers to configure:",
+        choices: unconfiguredProviders.map(p => ({
+          name: this.getProviderDisplayName(p),
+          value: p
+        })),
+        validate: (input: string[]) => {
+          if (input.length === 0) return "Please select at least one provider";
           return true;
         }
       }]);
       
-      if (!llmsConfig.providers[provider]) {
-        llmsConfig.providers[provider] = { apiKey: "" };
-      }
-      const providerConfig = llmsConfig.providers[provider];
-      if (providerConfig) {
-        providerConfig.apiKey = apiKey;
+      for (const provider of providers) {
+        await this.configureProvider(provider, llmsConfig);
       }
     }
     
     await this.saveConfig(llmsConfig);
     console.log(chalk.green("✅ Provider API keys configured"));
+  }
+
+  private async configureProvider(provider: string, llmsConfig: TenexLLMs): Promise<void> {
+      if (provider === 'ollama') {
+        // For Ollama, ask for base URL instead of API key
+        const currentUrl = llmsConfig.providers[provider]?.apiKey || 'local';
+        const { ollamaConfig } = await inquirer.prompt([{
+          type: "list",
+          name: "ollamaConfig",
+          message: "Ollama configuration:",
+          choices: [
+            { name: "Use local Ollama (http://localhost:11434)", value: "local" },
+            { name: "Use custom Ollama URL", value: "custom" }
+          ],
+          default: currentUrl === 'local' ? 'local' : 'custom'
+        }]);
+        
+        let baseUrl = 'local';
+        if (ollamaConfig === 'custom') {
+          const { customUrl } = await inquirer.prompt([{
+            type: "input",
+            name: "customUrl",
+            message: "Enter Ollama base URL:",
+            default: currentUrl !== 'local' ? currentUrl : 'http://localhost:11434',
+            validate: (input: string) => {
+              if (!input.trim()) return "URL is required";
+              try {
+                new URL(input);
+                return true;
+              } catch {
+                return "Please enter a valid URL";
+              }
+            }
+          }]);
+          baseUrl = customUrl;
+        }
+        
+        if (!llmsConfig.providers[provider]) {
+          llmsConfig.providers[provider] = { apiKey: "" };
+        }
+        const providerConfig = llmsConfig.providers[provider];
+        if (providerConfig) {
+          providerConfig.apiKey = baseUrl;
+        }
+      } else {
+        // For other providers, ask for API key
+        const currentKey = llmsConfig.providers[provider]?.apiKey;
+        const { apiKey } = await inquirer.prompt([{
+          type: "password",
+          name: "apiKey",
+          message: `Enter API key for ${this.getProviderDisplayName(provider)} (press Enter to keep existing):`,
+          default: currentKey,
+          mask: "*",
+          validate: (input: string) => {
+            // Allow empty input if there's an existing key
+            if (!input.trim() && !currentKey) return "API key is required";
+            return true;
+          }
+        }]);
+        
+        // Only update if a new key was provided (not empty)
+        if (apiKey && apiKey.trim()) {
+          if (!llmsConfig.providers[provider]) {
+            llmsConfig.providers[provider] = { apiKey: "" };
+          }
+          const providerConfig = llmsConfig.providers[provider];
+          if (providerConfig) {
+            providerConfig.apiKey = apiKey;
+          }
+        }
+      }
   }
 
   private async addConfiguration(llmsConfig: TenexLLMs, isFirstConfig = false): Promise<void> {
@@ -145,20 +241,7 @@ export class LLMConfigEditor {
       return;
     }
     
-    // Get configuration name
-    const { name } = await inquirer.prompt([{
-      type: "input",
-      name: "name",
-      message: "Configuration name:",
-      default: isFirstConfig ? "default" : undefined,
-      validate: (input: string) => {
-        if (!input.trim()) return "Name is required";
-        if (llmsConfig.configurations[input]) return "Configuration already exists";
-        return true;
-      }
-    }]);
-    
-    // Select provider
+    // Select provider first
     const { provider } = await inquirer.prompt([{
       type: "list",
       name: "provider",
@@ -173,6 +256,8 @@ export class LLMConfigEditor {
     let model: string;
     if (provider === 'openrouter') {
       model = await this.selectOpenRouterModel();
+    } else if (provider === 'ollama') {
+      model = await this.selectOllamaModel();
     } else {
       const { inputModel } = await inquirer.prompt([{
         type: "input",
@@ -212,6 +297,19 @@ export class LLMConfigEditor {
         }
       }
     ]);
+    
+    // Get configuration name at the end
+    const { name } = await inquirer.prompt([{
+      type: "input",
+      name: "name",
+      message: "Configuration name:",
+      default: isFirstConfig ? "default" : undefined,
+      validate: (input: string) => {
+        if (!input.trim()) return "Name is required";
+        if (llmsConfig.configurations[input]) return "Configuration already exists";
+        return true;
+      }
+    }]);
     
     // Create configuration
     const config: LLMConfiguration = {
@@ -285,6 +383,8 @@ export class LLMConfigEditor {
     let model: string;
     if (provider === 'openrouter') {
       model = await this.selectOpenRouterModel(config.model);
+    } else if (provider === 'ollama') {
+      model = await this.selectOllamaModel(config.model);
     } else {
       const { inputModel } = await inquirer.prompt([{
         type: "input",
@@ -405,28 +505,53 @@ export class LLMConfigEditor {
     console.log(chalk.green(`✅ Default configuration set to "${name}"`));
   }
 
-  private async selectOpenRouterModel(currentModel?: string): Promise<string> {
-    console.log(chalk.gray("Fetching available OpenRouter models..."));
+  private async selectOllamaModel(currentModel?: string): Promise<string> {
+    console.log(chalk.gray("Fetching available Ollama models..."));
     
-    const openRouterModels = await fetchOpenRouterModels();
+    const ollamaModels = await fetchOllamaModels();
     
-    if (openRouterModels.length > 0) {
-      console.log(chalk.green(`✓ Found ${openRouterModels.length} available models`));
-    }
-    
-    const { selectionMethod } = await inquirer.prompt([{
-      type: "list",
-      name: "selectionMethod",
-      message: "How would you like to select the model?",
-      choices: [
-        { name: "Quick select from popular models", value: "quick" },
-        { name: "Search all available models", value: "search" },
-        { name: "Type model ID manually", value: "manual" }
-      ]
-    }]);
-    
-    if (selectionMethod === 'quick') {
-      const popular = getPopularModels();
+    if (ollamaModels.length > 0) {
+      console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
+      
+      // Add "Type manually..." option at the end of the list
+      const choices = [
+        ...ollamaModels.map(m => ({
+          name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
+          value: m.name
+        })),
+        new inquirer.Separator(),
+        { name: chalk.cyan("→ Type model name manually"), value: "__manual__" }
+      ];
+      
+      const { selectedModel } = await inquirer.prompt([{
+        type: "list",
+        name: "selectedModel",
+        message: "Select model:",
+        choices,
+        default: currentModel,
+        pageSize: 15
+      }]);
+      
+      if (selectedModel === "__manual__") {
+        const { inputModel } = await inquirer.prompt([{
+          type: "input",
+          name: "inputModel",
+          message: "Enter model name (e.g., llama3.1:8b):",
+          default: currentModel || "llama3.1:8b",
+          validate: (input: string) => {
+            if (!input.trim()) return "Model name is required";
+            return true;
+          }
+        }]);
+        return inputModel;
+      }
+      
+      return selectedModel;
+    } else {
+      console.log(chalk.yellow("⚠️  No Ollama models found. Make sure Ollama is running."));
+      console.log(chalk.gray("Showing popular models (you'll need to pull them first)."));
+      
+      const popular = getPopularOllamaModels();
       const choices = [];
       for (const [category, models] of Object.entries(popular)) {
         choices.push(new inquirer.Separator(`--- ${category} ---`));
@@ -436,6 +561,10 @@ export class LLMConfigEditor {
         })));
       }
       
+      // Add manual entry option at the end
+      choices.push(new inquirer.Separator());
+      choices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__" });
+      
       const { selectedModel } = await inquirer.prompt([{
         type: "list",
         name: "selectedModel",
@@ -444,38 +573,140 @@ export class LLMConfigEditor {
         choices,
         pageSize: 15
       }]);
+      
+      if (selectedModel === "__manual__") {
+        const { inputModel } = await inquirer.prompt([{
+          type: "input",
+          name: "inputModel",
+          message: "Enter model name (e.g., llama3.1:8b):",
+          default: currentModel || "llama3.1:8b",
+          validate: (input: string) => {
+            if (!input.trim()) return "Model name is required";
+            return true;
+          }
+        }]);
+        return inputModel;
+      }
+      
       return selectedModel;
-    } else if (selectionMethod === 'search' && openRouterModels.length > 0) {
-      const { selectedModel } = await inquirer.prompt([{
-        type: "search",
-        name: "selectedModel",
-        message: "Search for model (type to filter):",
-        source: async (input = '') => {
-          const filtered = openRouterModels.filter(m => 
-            m.id.toLowerCase().includes(input.toLowerCase()) ||
-            m.name.toLowerCase().includes(input.toLowerCase())
-          );
-          
-          return filtered.slice(0, 20).map(m => ({
-            name: `${m.id} ${chalk.gray(`- ${m.name}`)}`,
-            value: m.id,
-            short: m.id
-          }));
+    }
+  }
+
+  private async selectOpenRouterModel(currentModel?: string): Promise<string> {
+    console.log(chalk.gray("Fetching available OpenRouter models..."));
+    
+    const openRouterModels = await fetchOpenRouterModels();
+    
+    if (openRouterModels.length > 0) {
+      console.log(chalk.green(`✓ Found ${openRouterModels.length} available models`));
+      
+      // Group models by provider for better organization
+      const modelsByProvider: Record<string, typeof openRouterModels> = {};
+      for (const model of openRouterModels) {
+        const provider = model.id.split('/')[0] || 'other';
+        if (!modelsByProvider[provider]) {
+          modelsByProvider[provider] = [];
         }
+        modelsByProvider[provider].push(model);
+      }
+      
+      // Build choices with all models organized by provider
+      const choices = [];
+      const sortedProviders = Object.keys(modelsByProvider).sort();
+      
+      for (const provider of sortedProviders) {
+        choices.push(new inquirer.Separator(chalk.yellow(`--- ${provider.toUpperCase()} ---`)));
+        const providerModels = modelsByProvider[provider];
+        
+        for (const model of providerModels) {
+          const pricing = `$${model.pricing.prompt}/$${model.pricing.completion}/1M`;
+          const context = `${Math.round(model.context_length / 1000)}k`;
+          const freeTag = model.id.endsWith(':free') ? chalk.green(' [FREE]') : '';
+          
+          choices.push({
+            name: `${model.id}${freeTag} ${chalk.gray(`- ${context} context, ${pricing}`)}`,
+            value: model.id,
+            short: model.id
+          });
+        }
+      }
+      
+      // Add manual entry option at the end
+      choices.push(new inquirer.Separator());
+      choices.push({ name: chalk.cyan("→ Type model ID manually"), value: "__manual__" });
+      
+      const { selectedModel } = await inquirer.prompt([{
+        type: "list",
+        name: "selectedModel",
+        message: "Select model:",
+        choices,
+        default: currentModel,
+        pageSize: 20,
+        loop: false
       }]);
+      
+      if (selectedModel === "__manual__") {
+        const { inputModel } = await inquirer.prompt([{
+          type: "input",
+          name: "inputModel",
+          message: "Enter model ID:",
+          default: currentModel || "openai/gpt-4",
+          validate: (input: string) => {
+            if (!input.trim()) return "Model ID is required";
+            return true;
+          }
+        }]);
+        return inputModel;
+      }
+      
       return selectedModel;
     } else {
-      const { inputModel } = await inquirer.prompt([{
-        type: "input",
-        name: "inputModel",
-        message: "Enter model ID:",
-        default: currentModel || "openai/gpt-4",
-        validate: (input: string) => {
-          if (!input.trim()) return "Model ID is required";
-          return true;
-        }
+      console.log(chalk.yellow("⚠️  Failed to fetch models from OpenRouter API"));
+      console.log(chalk.gray("You can still enter a model ID manually or select from popular models."));
+      
+      const { selectionMethod } = await inquirer.prompt([{
+        type: "list",
+        name: "selectionMethod",
+        message: "How would you like to select the model?",
+        choices: [
+          { name: "Quick select from popular models", value: "quick" },
+          { name: "Type model ID manually", value: "manual" }
+        ]
       }]);
-      return inputModel;
+      
+      if (selectionMethod === 'quick') {
+        const popular = getPopularModels();
+        const choices = [];
+        for (const [category, models] of Object.entries(popular)) {
+          choices.push(new inquirer.Separator(`--- ${category} ---`));
+          choices.push(...models.map(m => ({
+            name: m,
+            value: m
+          })));
+        }
+        
+        const { selectedModel } = await inquirer.prompt([{
+          type: "list",
+          name: "selectedModel",
+          message: "Select model:",
+          default: currentModel,
+          choices,
+          pageSize: 15
+        }]);
+        return selectedModel;
+      } else {
+        const { inputModel } = await inquirer.prompt([{
+          type: "input",
+          name: "inputModel",
+          message: "Enter model ID:",
+          default: currentModel || "openai/gpt-4",
+          validate: (input: string) => {
+            if (!input.trim()) return "Model ID is required";
+            return true;
+          }
+        }]);
+        return inputModel;
+      }
     }
   }
 
@@ -502,54 +733,62 @@ export class LLMConfigEditor {
     console.log(chalk.gray(`Provider: ${config.provider}, Model: ${config.model}`));
     
     try {
-      const { getLLMService } = await import("./service");
-      const service = getLLMService(
-        llmsConfig.providers,
-        llmsConfig.configurations,
-        llmsConfig.default
-      );
+      // Import the factory and create a mock logger
+      const { llmServiceFactory } = await import("./LLMServiceFactory");
       
-      // Use the configuration name to test it
-      const modelString = name;
+      // Initialize providers if not already done
+      llmServiceFactory.initializeProviders(llmsConfig.providers);
+      
+      // Create a simple mock logger for testing
+      const mockLogger = {
+        logLLMRequest: async () => {},
+        logLLMResponse: async () => {}
+      };
+      
+      // Create the service for the specific configuration
+      const service = llmServiceFactory.createService(mockLogger as Parameters<typeof llmServiceFactory.createService>[0], config);
       
       console.log(chalk.cyan("📡 Sending test message..."));
-      const result = await service.complete(modelString, [
+      const result = await service.complete([
         { role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }
-      ], {
+      ], {}, {
         temperature: config.temperature,
         maxTokens: config.maxTokens
       });
       
       console.log(chalk.green("\n✅ Test successful!"));
-      console.log(chalk.white("Response: ") + chalk.cyan(result.text));
+      const resultText = 'text' in result ? result.text : '';
+      console.log(chalk.white("Response: ") + chalk.cyan(resultText));
       
       // Show usage stats if available
-      if (result.usage) {
-        const promptTokens = result.usage.promptTokens || '?';
-        const completionTokens = result.usage.completionTokens || '?';
-        const totalTokens = result.usage.totalTokens || '?';
+      if ('usage' in result && result.usage) {
+        const usage = result.usage as { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+        const promptTokens = usage.promptTokens || '?';
+        const completionTokens = usage.completionTokens || '?';
+        const totalTokens = usage.totalTokens || '?';
         console.log(chalk.gray(`\nTokens used: ${promptTokens} prompt + ${completionTokens} completion = ${totalTokens} total`));
       }
       
       // Wait a moment so user can see the result
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.log(chalk.red("\n❌ Test failed!"));
       
       // Better error reporting
-      if (error?.message) {
-        console.log(chalk.red(`Error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage) {
+        console.log(chalk.red(`Error: ${errorMessage}`));
       }
       
       // Check for common issues
-      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+      if (errorMessage?.includes('401') || errorMessage?.includes('Unauthorized')) {
         console.log(chalk.yellow("\n💡 This usually means your API key is invalid or expired."));
         console.log(chalk.yellow("   Please check your API key for this provider."));
-      } else if (error?.message?.includes('404')) {
-        console.log(chalk.yellow("\n💡 The model '${config.model}' may not be available."));
+      } else if (errorMessage?.includes('404')) {
+        console.log(chalk.yellow(`\n💡 The model '${config.model}' may not be available.`));
         console.log(chalk.yellow("   Please verify the model name is correct."));
-      } else if (error?.message?.includes('rate limit')) {
+      } else if (errorMessage?.includes('rate limit')) {
         console.log(chalk.yellow("\n💡 You've hit a rate limit. Please wait and try again."));
       } else {
         // Show full error details for debugging
@@ -594,7 +833,8 @@ export class LLMConfigEditor {
     const names: Record<string, string> = {
       openrouter: "OpenRouter (300+ models)",
       anthropic: "Anthropic (Claude)",
-      openai: "OpenAI (GPT)"
+      openai: "OpenAI (GPT)",
+      ollama: "Ollama (Local models)"
     };
     return names[provider] || provider;
   }
@@ -603,7 +843,8 @@ export class LLMConfigEditor {
     const defaults: Record<AISdkProvider, string> = {
       openrouter: "openai/gpt-4",
       anthropic: "claude-3-5-sonnet-latest",
-      openai: "gpt-4"
+      openai: "gpt-4",
+      ollama: "llama3.1:8b"
     };
     return defaults[provider] || "";
   }

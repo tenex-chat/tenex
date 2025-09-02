@@ -75,7 +75,7 @@ async function executeReadPath(
  * Create an AI SDK tool for reading paths
  * This is the primary implementation
  */
-export function createReadPathTool(context: ExecutionContext) {
+export function createReadPathTool(): ReturnType<typeof tool> {
   return tool({
     description:
       "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories.",

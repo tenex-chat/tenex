@@ -207,11 +207,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     }
 
-    private handleStepFinish(opts: any): void {
+    private handleStepFinish(): void {
         console.log('onStepFinish');
     }
 
-    private handleChunk(event: { chunk: any }): void {
+    private handleChunk(event: { chunk: unknown }): void {
         const chunk = event.chunk;
 
         switch (chunk.type) {

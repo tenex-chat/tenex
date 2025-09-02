@@ -47,8 +47,7 @@ type AgentsListOutput = {
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsList(
-  input: AgentsListInput,
-  context: ExecutionContext
+  input: AgentsListInput
 ): Promise<AgentsListOutput> {
   const { includeGlobal = true, verbose = false } = input;
 
@@ -174,13 +173,13 @@ async function executeAgentsList(
  * Create an AI SDK tool for listing agents
  * This is the primary implementation
  */
-export function createAgentsListTool(context: ExecutionContext) {
+export function createAgentsListTool(): ReturnType<typeof tool> {
   return tool({
     description: "List all available agents in the project, including their system prompts and configurations",
     inputSchema: agentsListSchema,
     execute: async (input: AgentsListInput) => {
       try {
-        return await executeAgentsList(input, context);
+        return await executeAgentsList(input);
       } catch (error) {
         logger.error("Failed to list agents", { error });
         throw new Error(`Failed to list agents: ${error instanceof Error ? error.message : String(error)}`);

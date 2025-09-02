@@ -54,7 +54,7 @@ export async function buildLLMMetadata(
   };
 }
 
-export async function calculateCost(response: ResponseWithUsage, model: string): Promise<number> {
+export async function calculateCost(response: ResponseWithUsage): Promise<number> {
   // Check if OpenRouter already calculated the cost
   const openRouterCost = response.experimental_providerMetadata?.openrouter?.usage?.total_cost;
   if (openRouterCost !== undefined) {

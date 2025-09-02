@@ -4,7 +4,6 @@ const logInfo = logger.info.bind(logger);
 
 import type { AgentInstance } from "@/agents/types";
 import { getProjectContext, configService } from "@/services";
-import { getLLMService } from "@/llm/service";
 import chalk from "chalk";
 
 export class ProjectDisplay {
@@ -82,7 +81,7 @@ export class ProjectDisplay {
       } else {
         logInfo(chalk.gray("Model:       ") + chalk.red(`Configuration not found: ${modelString}`));
       }
-    } catch (error) {
+    } catch {
       logInfo(chalk.gray("Model:       ") + chalk.red(`Error resolving model: ${modelString}`));
     }
 

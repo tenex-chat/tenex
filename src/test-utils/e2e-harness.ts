@@ -166,9 +166,8 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
                 // 2. Handle tool calls if present
                 if (response.toolCalls && response.toolCalls.length > 0) {
                     for (const toolCall of response.toolCalls) {
-                        const toolName = toolCall.function.name;
-                        const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
                         // Add tool handlers as needed
+                        // toolCall.function.name and toolCall.function.arguments are available if needed
                     }
                 }
                 
@@ -337,17 +336,6 @@ export async function cleanupE2ETest(context: E2ETestContext | undefined): Promi
 /**
  * Create a mock publisher for testing
  */
-function createMockPublisher() {
-    return {
-        publishResponse: async () => {},
-        publishError: async () => {},
-        publishTypingIndicator: async () => {},
-        stopTypingIndicator: async () => {},
-        cleanup: () => {}
-    };
-}
-
-
 
 /**
  * Create a conversation from a user message
@@ -496,8 +484,7 @@ export async function executeConversationFlow(
     };
     
     // Track conversation state
-    let currentMessage = initialMessage;
-    let lastAgentExecuted: string | null = null;
+    const currentMessage = initialMessage;
     
     while (iteration < maxIterations) {
         iteration++;
@@ -609,7 +596,6 @@ export async function executeConversationFlow(
                     
                     // Check for continue tool - means we need to go back to orchestrator
                     if (toolName === 'continue') {
-                        lastAgentExecuted = targetAgent;
                         // Update mock LLM context for next iteration
                         if ((context.mockLLM as any).updateContext) {
                             (context.mockLLM as any).updateContext({
@@ -630,10 +616,8 @@ export async function executeConversationFlow(
                             (isPMAgent && 
                              (routingDecision.phase === 'verification' || routingDecision.phase === 'plan'))) {
                             return trace;
-                        }
                     }
                 }
-            }
             
             // Check for phase transitions
             const newState = await getConversationState(context, conversationId);
@@ -784,7 +768,7 @@ function extractRoutingDecision(orchestratorResult: AgentExecutionResult): Routi
         if (parsed.agents && Array.isArray(parsed.agents)) {
             return parsed;
         }
-    } catch (_e) {
+    } catch {
         // Not a routing decision
     }
     return null;

@@ -114,7 +114,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(context: ExecutionContext) {
+export function createDelegatePhaseTool(): ReturnType<typeof tool> {
   return tool({
     description: "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
     inputSchema: delegatePhaseSchema,

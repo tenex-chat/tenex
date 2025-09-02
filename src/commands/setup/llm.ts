@@ -43,9 +43,10 @@ export const llmCommand = new Command("llm")
 
       const llmManager = new LLMConfigEditor(configPath, isGlobal);
       await llmManager.showMainMenu();
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Handle SIGINT (Ctrl+C) gracefully - just exit without error
-      if (error?.message?.includes('SIGINT') || error?.message?.includes('force closed')) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage?.includes('SIGINT') || errorMessage?.includes('force closed')) {
         process.exit(0);
       }
       // Only show error for actual problems

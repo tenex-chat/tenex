@@ -1,400 +1,273 @@
-import type {
-  CompletionRequest,
-  CompletionResponse,
-  LLMService,
-  StreamEvent,
-} from "@/llm/types";
-import { NDKProjectStatus } from "@/events/NDKProjectStatus";
-import { getNDK } from "@/nostr/ndkClient";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
+import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import { logger } from "@/utils/logger";
+import { MockLanguageModelV2 } from "ai/test";
+import type { LanguageModelV2 } from "@ai-sdk/provider";
+import type { Provider } from "ai";
 
-export interface MockScenario {
-  name: string;
-  description?: string;
-  triggers: {
-    contentMatch?: RegExp | string;
-    agentName?: string;
-    phase?: string;
-    hasTools?: string[];
-  };
-  events: MockEventToPublish[];
-  response: {
-    content?: string;
-    toolCalls?: Array<{
-      name: string;
-      params: Record<string, unknown>;
-    }>;
-    error?: Error;
-    delay?: number;
-  };
-}
+/**
+ * Creates a mock provider that integrates MockLLMService with AI SDK
+ * This allows us to use the mock service through the standard LLMServiceFactory
+ */
+export function createMockProvider(config?: MockLLMConfig): Provider {
+    const mockService = new MockLLMService(config);
+    
+    // Create a factory function that returns a language model
+    const createLanguageModel = (modelId: string): LanguageModelV2 => {
+        logger.info(`[MockProvider] Creating language model for: ${modelId}`);
+        
+        return new MockLanguageModelV2({
+            provider: "mock",
+            modelId: modelId || "mock-model",
+            
+            doGenerate: async (options) => {
+                // Extract messages - the prompt can be either an array or an object with messages
+                const messages = Array.isArray(options?.prompt) 
+                    ? options.prompt 
+                    : options?.prompt?.messages;
+                
+                logger.debug("[MockProvider] doGenerate called", {
+                    hasPrompt: !!options?.prompt,
+                    messageCount: messages?.length || 0,
+                    toolCount: Object.keys(options?.tools || {}).length,
+                });
+                
+                if (!messages || messages.length === 0) {
+                    logger.warn("[MockProvider] doGenerate called with no messages");
+                    return {
+                        finishReason: "stop" as const,
+                        usage: { inputTokens: 0, outputTokens: 0 },
+                        text: "Mock response: no messages provided",
+                        toolCalls: [],
+                        warnings: [],
+                        logprobs: undefined,
+                        response: {
+                            id: `mock-${Date.now()}`,
+                            timestamp: new Date(),
+                            modelId,
+                        },
+                    };
+                }
 
-export interface MockEventToPublish {
-  type: "project-status" | "typing-start" | "typing-stop" | "task" | "reply";
-  delay?: number; // ms before publishing
-  data: Record<string, unknown>;
-}
+                // Convert AI SDK messages to our Message format
+                const convertedMessages = messages.map(msg => ({
+                    role: msg.role,
+                    content: Array.isArray(msg.content) 
+                        ? msg.content.map(part => {
+                            if (part.type === "text") return part.text;
+                            return "[non-text content]";
+                        }).join(" ")
+                        : typeof msg.content === "string" ? msg.content : "",
+                }));
 
-export interface MockProviderConfig {
-  scenarios: MockScenario[];
-  defaultResponse?: {
-    content: string;
-    toolCalls?: Array<{
-      name: string;
-      params: Record<string, unknown>;
-    }>;
-  };
-  publishEvents?: boolean;
-  debug?: boolean;
+                // Call MockLLMService
+                const response = await mockService.complete({
+                    messages: convertedMessages,
+                    options: {
+                        configName: modelId,
+                    },
+                });
+
+                // Convert response to AI SDK v2 format
+                const text = response.content || "";
+                const toolCalls = response.toolCalls?.map((tc, index) => ({
+                    toolCallType: "function" as const,
+                    toolCallId: `call_${index}`,
+                    toolName: tc.name,
+                    arguments: tc.params || {},
+                })) || [];
+
+                return {
+                    finishReason: "stop" as const,
+                    usage: {
+                        inputTokens: response.usage?.prompt_tokens || 100,
+                        outputTokens: response.usage?.completion_tokens || 50,
+                    },
+                    text,
+                    toolCalls,
+                    warnings: [],
+                    logprobs: undefined,
+                    response: {
+                        id: `mock-${Date.now()}`,
+                        timestamp: new Date(),
+                        modelId,
+                    },
+                };
+            },
+            
+            doStream: async (options) => {
+                // Extract messages - the prompt can be either an array or an object with messages
+                const messages = Array.isArray(options?.prompt) 
+                    ? options.prompt 
+                    : options?.prompt?.messages;
+                
+                logger.debug("[MockProvider] doStream called", {
+                    hasPrompt: !!options?.prompt,
+                    messageCount: messages?.length || 0,
+                    toolCount: Object.keys(options?.tools || {}).length,
+                });
+                
+                if (!messages || messages.length === 0) {
+                    logger.warn("[MockProvider] doStream called with no messages");
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue({
+                                type: "text-delta",
+                                delta: "Mock response: no messages provided",
+                            });
+                            controller.enqueue({
+                                type: "finish",
+                                finishReason: "stop",
+                                usage: { inputTokens: 0, outputTokens: 0 },
+                                logprobs: undefined,
+                            });
+                            controller.close();
+                        },
+                    });
+                    return {
+                        stream,
+                        warnings: [],
+                        response: {
+                            id: `mock-stream-${Date.now()}`,
+                            timestamp: new Date(),
+                            modelId,
+                        },
+                    };
+                }
+
+                // Convert messages
+                const convertedMessages = messages.map(msg => ({
+                    role: msg.role,
+                    content: Array.isArray(msg.content) 
+                        ? msg.content.map(part => {
+                            if (part.type === "text") return part.text;
+                            return "[non-text content]";
+                        }).join(" ")
+                        : typeof msg.content === "string" ? msg.content : "",
+                }));
+
+                // Get the mock service's stream
+                const streamEvents = mockService.stream({
+                    messages: convertedMessages,
+                    options: {
+                        configName: modelId,
+                    },
+                });
+
+                // Create a ReadableStream that emits AI SDK v2 stream parts
+                const stream = new ReadableStream({
+                    async start(controller) {
+                        try {
+                            const toolCalls: Array<{
+                                toolCallId: string;
+                                toolName: string;
+                                arguments: unknown;
+                            }> = [];
+
+                            for await (const event of streamEvents) {
+                                switch (event.type) {
+                                    case "content":
+                                        controller.enqueue({
+                                            type: "text-delta",
+                                            delta: event.content,
+                                        });
+                                        break;
+
+                                    case "tool_start": {
+                                        const toolCallId = `call_${toolCalls.length}`;
+                                        const toolCall = {
+                                            toolCallId,
+                                            toolName: event.tool,
+                                            arguments: event.args,
+                                        };
+                                        toolCalls.push(toolCall);
+                                        
+                                        controller.enqueue({
+                                            type: "tool-call-delta",
+                                            toolCallType: "function" as const,
+                                            toolCallId,
+                                            toolName: event.tool,
+                                            argsTextDelta: JSON.stringify(event.args),
+                                        });
+                                        break;
+                                    }
+
+                                    case "done": {
+                                        controller.enqueue({
+                                            type: "finish",
+                                            finishReason: "stop",
+                                            usage: {
+                                                inputTokens: event.response?.usage?.prompt_tokens || 100,
+                                                outputTokens: event.response?.usage?.completion_tokens || 50,
+                                            },
+                                            logprobs: undefined,
+                                        });
+                                        break;
+                                    }
+
+                                    case "error": {
+                                        controller.enqueue({
+                                            type: "error",
+                                            error: new Error(event.error),
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            controller.close();
+                        } catch (error) {
+                            controller.error(error);
+                        }
+                    },
+                });
+
+                return {
+                    stream,
+                    warnings: [],
+                    response: {
+                        id: `mock-stream-${Date.now()}`,
+                        timestamp: new Date(),
+                        modelId,
+                    },
+                };
+            },
+        });
+    };
+    
+    // Create a custom provider that can handle any model ID
+    const provider: Provider = {
+        languageModel: (modelId: string) => {
+            return createLanguageModel(modelId);
+        },
+        textEmbeddingModel: () => {
+            throw new Error("Mock provider does not support embedding models");
+        },
+        // Provider type from 'ai' package may have slightly different interface
+        // Cast as needed
+    } as Provider;
+    
+    return provider;
 }
 
 /**
- * Mock LLM Provider for testing iOS-backend integration
- * 
- * This provider simulates LLM responses and publishes Nostr events
- * to test the full conversation flow without using real LLM APIs.
+ * Global mock service instance for test configuration
  */
-export class MockLLMProvider implements LLMService {
-  private scenarios: MockScenario[];
-  private config: MockProviderConfig;
-  private requestHistory: Array<{
-    request: CompletionRequest;
-    scenario: MockScenario | null;
-    response: MockScenario['response'] | undefined;
-    timestamp: Date;
-  }> = [];
+let globalMockService: MockLLMService | null = null;
 
-  constructor(config: MockProviderConfig) {
-    this.config = config;
-    this.scenarios = config.scenarios || [];
-  }
-
-  async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    const scenario = this.findMatchingScenario(request);
-    
-    if (this.config.debug) {
-      logger.info("MockLLMProvider: Processing request", {
-        messages: request.messages.length,
-        matchedScenario: scenario?.name || "default",
-      });
+/**
+ * Get or create the global mock service
+ */
+export function getGlobalMockService(config?: MockLLMConfig): MockLLMService {
+    if (!globalMockService) {
+        globalMockService = new MockLLMService(config);
     }
-
-    // Publish mock events if configured
-    if (this.config.publishEvents && scenario) {
-      await this.publishMockEvents(scenario, request);
-    }
-
-    // Get response from scenario or default
-    const response: MockScenario['response'] = scenario?.response || this.config.defaultResponse || {
-      content: "Mock response: No matching scenario found",
-    };
-
-    // Record request for debugging
-    this.requestHistory.push({
-      request,
-      scenario,
-      response,
-      timestamp: new Date(),
-    });
-
-    // Simulate delay if specified
-    if (response.delay) {
-      await new Promise((resolve) => setTimeout(resolve, response.delay));
-    }
-
-    // Handle error scenario
-    if (response.error) {
-      throw response.error;
-    }
-
-    // Build completion response
-    const toolCalls = response.toolCalls?.map((tc) => ({
-      name: tc.name,
-      params: tc.params,
-      result: null,
-    }));
-
-    return {
-      type: "text",
-      content: response.content || "",
-      toolCalls,
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 5,
-        total_tokens: 15,
-      },
-    } as CompletionResponse;
-  }
-
-  async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
-    const scenario = this.findMatchingScenario(request);
-    const response: MockScenario['response'] = scenario?.response || this.config.defaultResponse || {
-      content: "Mock stream response",
-    };
-
-    // Simulate streaming
-    if (response.content) {
-      const words = response.content.split(" ");
-      for (const word of words) {
-        yield { type: "content", content: `${word} ` };
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-
-    // Send tool calls
-    if (response.toolCalls) {
-      for (const toolCall of response.toolCalls) {
-        yield {
-          type: "tool_start",
-          tool: toolCall.name,
-          args: toolCall.params,
-        };
-      }
-    }
-
-    yield {
-      type: "done",
-      response: {
-        type: "text",
-        content: response.content || "",
-        toolCalls: [],
-        usage: {
-          prompt_tokens: 10,
-          completion_tokens: 5,
-        },
-      },
-    };
-  }
-
-  private findMatchingScenario(request: CompletionRequest): MockScenario | null {
-    const lastMessage = request.messages[request.messages.length - 1];
-    const systemMessage = request.messages.find((m) => m.role === "system");
-    
-    for (const scenario of this.scenarios) {
-      const triggers = scenario.triggers;
-      
-      // Check content match
-      if (triggers.contentMatch) {
-        const pattern = typeof triggers.contentMatch === "string" 
-          ? new RegExp(triggers.contentMatch, "i")
-          : triggers.contentMatch;
-        
-        if (!pattern.test(lastMessage.content)) {
-          continue;
-        }
-      }
-
-      // Check agent name from system prompt
-      if (triggers.agentName && systemMessage) {
-        if (!systemMessage.content.toLowerCase().includes(triggers.agentName.toLowerCase())) {
-          continue;
-        }
-      }
-
-      // Check phase from system prompt
-      if (triggers.phase && systemMessage) {
-        const phaseRegex = new RegExp(`phase[:\\s]+${triggers.phase}`, "i");
-        if (!phaseRegex.test(systemMessage.content)) {
-          continue;
-        }
-      }
-
-      // All conditions matched
-      return scenario;
-    }
-
-    return null;
-  }
-
-  private async publishMockEvents(scenario: MockScenario, _request: CompletionRequest): Promise<void> {
-    
-    for (const mockEvent of scenario.events) {
-      // Wait if delay specified
-      if (mockEvent.delay) {
-        await new Promise((resolve) => setTimeout(resolve, mockEvent.delay));
-      }
-
-      switch (mockEvent.type) {
-        case "project-status":
-          await this.publishProjectStatus(mockEvent.data);
-          break;
-        
-        case "typing-start":
-          await this.publishTypingIndicator(true, mockEvent.data);
-          break;
-        
-        case "typing-stop":
-          await this.publishTypingIndicator(false, mockEvent.data);
-          break;
-        
-        case "task":
-          await this.publishTask(mockEvent.data);
-          break;
-        
-        case "reply":
-          await this.publishReply(mockEvent.data);
-          break;
-      }
-    }
-  }
-
-  private async publishProjectStatus(data: Record<string, unknown>): Promise<void> {
-    const ndk = getNDK();
-    const status = new NDKProjectStatus(ndk);
-    
-    status.projectReference = data.projectReference as string || "31933:mock-pubkey:test-project";
-    status.status = data.status as string || "Mock agents online";
-    
-    // Add agents
-    const agents = data.agents as Array<{ pubkey: string; slug: string; isGlobal?: boolean }> || [
-      { pubkey: "mock-executor", slug: "executor" },
-      { pubkey: "mock-planner", slug: "planner" },
-    ];
-    
-    for (const agent of agents) {
-      const tag = ["agent", agent.pubkey, agent.slug];
-      if (agent.isGlobal) tag.push("global");
-      status.tags.push(tag);
-    }
-
-    // Add models
-    const models = data.models as Record<string, string[]> || {
-      "mock-model": ["executor", "planner"],
-    };
-    
-    for (const [modelSlug, agentSlugs] of Object.entries(models)) {
-      status.addModel(modelSlug, agentSlugs);
-    }
-
-    // Add tools
-    const tools = data.tools as Record<string, string[]> || {
-      "shell": ["executor"],
-      "readPath": ["executor", "planner"],
-    };
-    
-    for (const [toolName, agentSlugs] of Object.entries(tools)) {
-      status.addTool(toolName, agentSlugs);
-    }
-
-    await status.publish();
-    
-    if (this.config.debug) {
-      logger.info("MockLLMProvider: Published project status", {
-        agents: agents.length,
-        models: Object.keys(models).length,
-        tools: Object.keys(tools).length,
-      });
-    }
-  }
-
-  private async publishTypingIndicator(isStart: boolean, data: Record<string, unknown>): Promise<void> {
-    const ndk = getNDK();
-    const event = new NDKEvent(ndk);
-    
-    event.kind = isStart ? 24111 : 24112;
-    event.content = data.message as string || "Mock agent is thinking...";
-    
-    event.tags = [
-      ["e", data.conversationId as string || "mock-conversation-id"],
-      ["a", data.projectReference as string || "31933:mock-pubkey:test-project"],
-    ];
-    
-    if (isStart && data.phase) {
-      event.tags.push(["phase", data.phase as string]);
-    }
-    
-    await event.publish();
-    
-    if (this.config.debug) {
-      logger.info(`MockLLMProvider: Published typing ${isStart ? "start" : "stop"}`, {
-        phase: data.phase,
-      });
-    }
-  }
-
-  private async publishTask(data: Record<string, unknown>): Promise<void> {
-    const ndk = getNDK();
-    const event = new NDKEvent(ndk);
-    
-    event.kind = 1934; // Task kind
-    event.content = data.content as string || "Mock task";
-    
-    event.tags = [
-      ["e", data.conversationId as string || "mock-conversation-id"],
-      ["a", data.projectReference as string || "31933:mock-pubkey:test-project"],
-      ["status", data.status as string || "pending"],
-    ];
-    
-    const hashtags = data.hashtags as string[] || ["mock", "test"];
-    for (const tag of hashtags) {
-      event.tags.push(["t", tag]);
-    }
-    
-    await event.publish();
-    
-    if (this.config.debug) {
-      logger.info("MockLLMProvider: Published task", {
-        status: data.status,
-        tags: hashtags,
-      });
-    }
-  }
-
-  private async publishReply(data: Record<string, unknown>): Promise<void> {
-    const ndk = getNDK();
-    const event = new NDKEvent(ndk);
-    
-    event.kind = data.kind as number || 1111; // Generic reply
-    event.content = data.content as string || "Mock reply";
-    
-    event.tags = data.tags as string[][] || [
-      ["e", "parent-event-id"],
-      ["p", "parent-pubkey"],
-    ];
-    
-    await event.publish();
-    
-    if (this.config.debug) {
-      logger.info("MockLLMProvider: Published reply", {
-        kind: event.kind,
-      });
-    }
-  }
-
-  // Utility methods for testing
-  getRequestHistory(): Array<{
-    request: CompletionRequest;
-    scenario: MockScenario | null;
-    response: MockScenario['response'] | undefined;
-    timestamp: Date;
-  }> {
-    return this.requestHistory;
-  }
-
-  clearHistory(): void {
-    this.requestHistory = [];
-  }
-
-  addScenario(scenario: MockScenario): void {
-    this.scenarios.push(scenario);
-  }
-
-  removeScenario(name: string): void {
-    this.scenarios = this.scenarios.filter((s) => s.name !== name);
-  }
+    return globalMockService;
 }
 
-// Factory function for easy creation
-export function createMockLLMProvider(config: Partial<MockProviderConfig> = {}): MockLLMProvider {
-  const defaultConfig: MockProviderConfig = {
-    scenarios: [],
-    publishEvents: true,
-    debug: process.env.DEBUG === "true",
-    defaultResponse: {
-      content: "This is a mock response from the test LLM provider",
-    },
-  };
-
-  return new MockLLMProvider({ ...defaultConfig, ...config });
+/**
+ * Reset the global mock service
+ */
+export function resetGlobalMockService(): void {
+    globalMockService = null;
 }
