@@ -2,7 +2,6 @@ import { tool } from 'ai';
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { getProjectContext } from "@/services/ProjectContext";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as path from "node:path";

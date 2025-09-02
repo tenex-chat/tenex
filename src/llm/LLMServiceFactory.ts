@@ -4,7 +4,7 @@ import { logger } from "@/utils/logger";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { ollama } from "ollama-ai-provider-v2";
+import { createOllama } from "ollama-ai-provider-v2";
 import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
 import { createMockProvider } from "./providers/MockProvider";
@@ -80,22 +80,24 @@ export class LLMServiceFactory {
                         break;
                         
                     case "ollama": {
-                        // For Ollama, apiKey is actually the base URL (default: http://localhost:11434)
-                        const baseURL = config.apiKey === "local" ? "http://localhost:11434" : config.apiKey;
+                        // For Ollama, apiKey is actually the base URL
+                        // The library expects the URL to include /api path
+                        let baseURL: string | undefined;
+                        if (config.apiKey === "local") {
+                            // Use default (library provides http://127.0.0.1:11434/api)
+                            baseURL = undefined;
+                        } else {
+                            // Custom URL - ensure it ends with /api
+                            baseURL = config.apiKey.endsWith('/api') 
+                                ? config.apiKey 
+                                : config.apiKey.replace(/\/$/, '') + '/api';
+                        }
                         
-                        // ollama-ai-provider-v2 needs a wrapper to work with the registry
-                        // It expects the model name to be provided when creating the model instance
-                        const ollamaProvider = {
-                            languageModel: (modelId: string) => {
-                                return ollama({
-                                    baseURL,
-                                    model: modelId
-                                });
-                            }
-                        };
+                        // Create Ollama provider with custom base URL if provided
+                        const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
                         
                         this.providers.set(name, ollamaProvider as Provider);
-                        logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL}`);
+                        logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || 'default (http://localhost:11434)'}`);
                         break;
                     }
                         

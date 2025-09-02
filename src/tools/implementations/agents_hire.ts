@@ -1,7 +1,6 @@
 import { tool } from 'ai';
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";

@@ -105,9 +105,10 @@ function mcpPropertyToZod(prop: MCPPropertyDefinition): z.ZodSchema {
       return z.number().int().describe(prop.description || '');
     case 'boolean':
       return z.boolean().describe(prop.description || '');
-    case 'array':
+    case 'array': {
       const itemSchema = prop.items ? mcpPropertyToZod(prop.items) : z.unknown();
       return z.array(itemSchema).describe(prop.description || '');
+    }
     case 'object':
       if (prop.properties) {
         const shape: Record<string, z.ZodSchema> = {};

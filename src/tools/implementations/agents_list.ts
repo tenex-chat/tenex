@@ -1,6 +1,5 @@
 import { tool } from 'ai';
 import { fileExists, readFile } from "@/lib/fs";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import * as path from "node:path";
 import { z } from "zod";

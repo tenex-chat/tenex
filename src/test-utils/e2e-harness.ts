@@ -24,6 +24,7 @@ export interface E2ETestContext {
     conversationCoordinator: ConversationCoordinator;
     agentRegistry: AgentRegistry;
     configService: typeof ConfigService;
+    projectContext: ProjectContext;
     services: {
         configService: typeof ConfigService;
         projectContext: ProjectContext;
