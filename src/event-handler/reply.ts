@@ -152,7 +152,7 @@ async function handleReplyLogic(
   }
 
   // 3. Determine target agents
-  let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx, projectManager);
+  let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
   if (targetAgents.length === 0) {
     logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
     return;
@@ -161,7 +161,7 @@ async function handleReplyLogic(
   // 4. Filter out self-replies
   const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
   if (nonSelfReplyAgents.length === 0) {
-    const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents, projectCtx);
+    const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents);
     logInfo(
       chalk.gray(
         `Skipping self-reply: all target agents would process their own message (${routingReasons})`

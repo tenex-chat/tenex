@@ -2,14 +2,16 @@ import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import {
+    type StreamTextOnStepFinishCallback,
     type LanguageModelUsage,
-    type LanguageModelV1,
+    type LanguageModel,
     type StepResult,
+    type TextStreamPart,
     generateText,
     stepCountIs,
     streamText,
 } from "ai";
-import type { ModelMessage, ProviderRegistry } from "ai";
+import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 
 // Define the event types for LLMService
@@ -27,6 +29,9 @@ interface LLMServiceEvents {
         steps: StepResult<Record<string, AISdkTool>>[];
     }) => void;
     "stream-error": (data: { error: unknown }) => void;
+    // Add index signatures for EventEmitter compatibility
+    [key: string]: (...args: any[]) => void;
+    [key: symbol]: (...args: any[]) => void;
 }
 
 /**
@@ -41,7 +46,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     constructor(
         private readonly llmLogger: LLMLogger,
-        private readonly registry: ProviderRegistry,
+        private readonly registry: any,
         provider: string,
         model: string,
         temperature?: number,
@@ -52,12 +57,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
-        
+
         logger.debug("[LLMService] Initialized", {
             provider: this.provider,
             model: this.model,
             temperature: this.temperature,
-            maxTokens: this.maxTokens
+            maxTokens: this.maxTokens,
         });
     }
 
@@ -65,14 +70,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      * Get a language model from the registry.
      * This method encapsulates the AI SDK's requirement for concatenated strings.
      */
-    private getLanguageModel(): LanguageModelV1 {
+    private getLanguageModel(): LanguageModel {
         // AI SDK requires this format - we encapsulate it here
         return this.registry.languageModel(`${this.provider}:${this.model}`);
     }
 
     async complete(
         messages: ModelMessage[],
-        tools: Record<string, unknown>,
+        tools: Record<string, AISdkTool>,
         options?: {
             temperature?: number;
             maxTokens?: number;
@@ -82,15 +87,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const startTime = Date.now();
 
         // Log the request
-        this.llmLogger.logLLMRequest({
-            provider: this.provider,
-            model: this.model,
-            messages,
-            tools: Object.keys(tools).map((name) => ({ name })),
-            startTime,
-        }).catch(err => {
-            logger.error("[LLMService] Failed to log request", { error: err });
-        });
+        this.llmLogger
+            .logLLMRequest({
+                provider: this.provider,
+                model: this.model,
+                messages,
+                tools: Object.keys(tools).map((name) => ({ name })),
+                startTime,
+            })
+            .catch((err) => {
+                logger.error("[LLMService] Failed to log request", { error: err });
+            });
 
         try {
             const result = await generateText({
@@ -98,22 +105,24 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 messages,
                 tools,
                 temperature: options?.temperature ?? this.temperature,
-                maxTokens: options?.maxTokens ?? this.maxTokens,
+                maxOutputTokens: options?.maxTokens ?? this.maxTokens,
             });
 
             const duration = Date.now() - startTime;
 
             // Log the response
-            this.llmLogger.logLLMResponse({
-                response: {
-                    content: result.text,
-                    usage: result.usage,
-                },
-                endTime: Date.now(),
-                startTime,
-            }).catch(err => {
-                logger.error("[LLMService] Failed to log response", { error: err });
-            });
+            this.llmLogger
+                .logLLMResponse({
+                    response: {
+                        content: result.text,
+                        usage: result.usage,
+                    },
+                    endTime: Date.now(),
+                    startTime,
+                })
+                .catch((err) => {
+                    logger.error("[LLMService] Failed to log response", { error: err });
+                });
 
             logger.info("[LLMService] Complete response received", {
                 model: `${this.provider}:${this.model}`,
@@ -127,13 +136,15 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         } catch (error) {
             const duration = Date.now() - startTime;
 
-            this.llmLogger.logLLMResponse({
-                error: error as Error,
-                endTime: Date.now(),
-                startTime,
-            }).catch(err => {
-                logger.error("[LLMService] Failed to log error", { error: err });
-            });
+            this.llmLogger
+                .logLLMResponse({
+                    error: error as Error,
+                    endTime: Date.now(),
+                    startTime,
+                })
+                .catch((err) => {
+                    logger.error("[LLMService] Failed to log error", { error: err });
+                });
 
             logger.error("[LLMService] Complete failed", {
                 model: `${this.provider}:${this.model}`,
@@ -144,10 +155,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     }
 
-    async stream(
-        messages: ModelMessage[],
-        tools: Record<string, AISdkTool>
-    ): Promise<void> {
+    async stream(messages: ModelMessage[], tools: Record<string, AISdkTool>): Promise<void> {
         const model = this.getLanguageModel();
 
         // Create message preview for logging
@@ -158,15 +166,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         });
 
         // Log the request
-        this.llmLogger.logLLMRequest({
-            provider: this.provider,
-            model: this.model,
-            messages,
-            tools: Object.keys(tools).map((name) => ({ name })),
-            startTime: Date.now(),
-        }).catch(err => {
-            logger.error("[LLMService] Failed to log request", { error: err });
-        });
+        this.llmLogger
+            .logLLMRequest({
+                provider: this.provider,
+                model: this.model,
+                messages,
+                tools: Object.keys(tools).map((name) => ({ name })),
+                startTime: Date.now(),
+            })
+            .catch((err) => {
+                logger.error("[LLMService] Failed to log request", { error: err });
+            });
 
         logger.info("[LLMService] Calling stream", {
             model: `${this.provider}:${this.model}`,
@@ -185,6 +195,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             model,
             messages,
             tools: tools,
+            temperature: this.temperature,
+            maxOutputTokens: this.maxTokens,
             stopWhen: stepCountIs(20),
             onStepFinish: this.handleStepFinish.bind(this),
             onChunk: this.handleChunk.bind(this),
@@ -199,7 +211,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
             // CRITICAL: This loop is what actually triggers the stream execution
             for await (const textPart of textStream) {
-                process.stdout.write(textPart);
+                // process.stdout.write(textPart);
             }
         } catch (error) {
             await this.handleStreamError(error, startTime);
@@ -207,12 +219,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     }
 
-    private handleStepFinish(): void {
-        console.log('onStepFinish');
+    private handleStepFinish(step: StreamTextOnStepFinishCallback<Record<string, AISdkTool>>): void {
+        console.log("onStepFinish");
     }
 
-    private handleChunk(event: { chunk: unknown }): void {
+    private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
+        if (chunk.type !== 'text-delta') console.log("LLMService chunk", chunk);
 
         switch (chunk.type) {
             case "text-delta":
@@ -230,10 +243,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private createFinishHandler(startTime: number) {
-        return async (e: StepResult<Record<string, AISdkTool>> & {
-            steps: StepResult<Record<string, AISdkTool>>[];
-            totalUsage: LanguageModelUsage;
-        }) => {
+        return async (
+            e: StepResult<Record<string, AISdkTool>> & {
+                steps: StepResult<Record<string, AISdkTool>>[];
+                totalUsage: LanguageModelUsage;
+            }
+        ) => {
             const duration = Date.now() - startTime;
 
             try {
@@ -248,7 +263,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
                 logger.info("[LLMService] Stream finished", {
                     duration,
-                    toolsExecuted: e.experimental_toolInvocations?.length || 0,
                     model: this.model,
                     startTime,
                 });
@@ -267,16 +281,18 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private async handleStreamError(error: unknown, startTime: number): Promise<void> {
-        console.log('error', error);
+        console.log("error", error);
         const duration = Date.now() - startTime;
 
-        await this.llmLogger.logLLMResponse({
-            error: error as Error,
-            endTime: Date.now(),
-            startTime,
-        }).catch(err => {
-            logger.error("[LLMService] Failed to log error response", { error: err });
-        });
+        await this.llmLogger
+            .logLLMResponse({
+                error: error as Error,
+                endTime: Date.now(),
+                startTime,
+            })
+            .catch((err) => {
+                logger.error("[LLMService] Failed to log error response", { error: err });
+            });
 
         logger.error("[LLMService] Stream failed", {
             model: `${this.provider}:${this.model}`,

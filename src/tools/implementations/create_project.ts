@@ -134,7 +134,7 @@ async function executeCreateProject(
  * Create an AI SDK tool for creating projects
  * This is the primary implementation
  */
-export function createCreateProjectTool(): ReturnType<typeof tool> {
+export function createCreateProjectTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Create and publish a new NDKProject event to Nostr",
     inputSchema: createProjectSchema,

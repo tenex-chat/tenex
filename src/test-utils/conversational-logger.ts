@@ -2,6 +2,18 @@
  * Conversational logger that formats test output as a natural dialog
  * showing phase transitions and agent interactions
  */
+
+import type { MockLLMResponse } from "./mock-llm/types";
+
+interface ToolCall {
+  function?: string | {
+    name?: string;
+    arguments?: string;
+  };
+  name?: string;
+  args?: string;
+}
+
 export class ConversationalLogger {
   private static instance: ConversationalLogger;
   private conversationStartTime: Date = new Date();
@@ -80,7 +92,7 @@ export class ConversationalLogger {
     agentName: string,
     response: {
       content?: string;
-      toolCalls?: unknown[];
+      toolCalls?: ToolCall[];
       phase?: string;
       reason?: string;
     }
@@ -121,7 +133,7 @@ export class ConversationalLogger {
     }
   }
 
-  logToolExecution(agentName: string, toolName: string, toolCall: unknown): void {
+  logToolExecution(agentName: string, toolName: string, toolCall: ToolCall): void {
     const formattedAgent = this.formatAgentName(agentName);
     const timeStamp = this.formatTime();
 
@@ -237,14 +249,17 @@ export class ConversationalLogger {
     console.log(`🏁 [${timeStamp}] Test completed: ${status} ${testName || ""}`);
   }
 
-  logMatchedResponse(mockResponse: unknown): void {
+  logMatchedResponse(mockResponse: MockLLMResponse): void {
     const timeStamp = this.formatTime();
     const trigger = mockResponse.trigger;
-    const agentName = trigger.agentName || this.currentAgent;
+    const agentName = typeof trigger.agentName === 'string' 
+      ? trigger.agentName 
+      : (trigger.agentName?.toString() || this.currentAgent);
 
     let triggerDescription = "";
     if (trigger.agentName) {
-      triggerDescription += `Agent: ${this.formatAgentName(trigger.agentName)}`;
+      const agentNameStr = typeof trigger.agentName === 'string' ? trigger.agentName : trigger.agentName.toString();
+      triggerDescription += `Agent: ${this.formatAgentName(agentNameStr)}`;
     }
     if (trigger.phase) {
       triggerDescription += `, Phase: ${trigger.phase}`;
@@ -266,7 +281,7 @@ export class ConversationalLogger {
 
     // Log tool calls if present
     if (mockResponse.response.toolCalls && mockResponse.response.toolCalls.length > 0) {
-      const toolNames = mockResponse.response.toolCalls.map((tc: unknown) => {
+      const toolNames = mockResponse.response.toolCalls.map((tc) => {
         const toolName = tc.function?.name || tc.name || "unknown";
         return toolName;
       });

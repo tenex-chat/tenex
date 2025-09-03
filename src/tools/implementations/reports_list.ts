@@ -84,7 +84,7 @@ async function executeReportsList(input: ReportsListInput, context: ExecutionCon
 }
 
 // AI SDK tool factory
-export function createReportsListTool(): ReturnType<typeof tool> {
+export function createReportsListTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "List NDKArticle reports from agents in the project",
     inputSchema: reportsListSchema,

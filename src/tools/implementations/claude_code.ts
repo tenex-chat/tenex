@@ -202,7 +202,7 @@ async function executeClaudeCode(
  * Create an AI SDK tool for Claude Code execution
  * This is the primary implementation
  */
-export function createClaudeCodeTool(): ReturnType<typeof tool> {
+export function createClaudeCodeTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development.",
     inputSchema: claudeCodeSchema,

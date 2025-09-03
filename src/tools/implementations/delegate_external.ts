@@ -173,7 +173,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 }
 
 // AI SDK tool factory
-export function createDelegateExternalTool(): ReturnType<typeof tool> {
+export function createDelegateExternalTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Delegate a task to an external agent or user and wait synchronously for their response, optionally as a reply or referencing a project",
     inputSchema: delegateExternalSchema,

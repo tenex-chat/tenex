@@ -26,7 +26,6 @@ describe("Example E2E Test with Mock LLM", () => {
         {
           match: /user authentication/i,
           response: {
-            type: "text",
             content: "I'll help you create a user authentication system with JWT and OAuth.",
             toolCalls: [
               {

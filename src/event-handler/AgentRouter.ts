@@ -37,6 +37,11 @@ export  class AgentRouter {
       for (const pubkey of mentionedPubkeys) {
         const agent = Array.from(projectContext.agents.values()).find((a) => a.pubkey === pubkey);
         if (agent) {
+          // Check if this is a global agent that needs project validation
+          if (agent.isGlobal && !this.validateProjectContext(event, projectContext)) {
+            logInfo(chalk.gray(`Skipping global agent ${agent.name} - event not for this project context`));
+            continue;
+          }
           targetAgents.push(agent);
         }
       }
@@ -69,7 +74,7 @@ export  class AgentRouter {
     projectContext: ProjectContext,
     projectManager: AgentInstance
   ): AgentInstance | null {
-    const agents = this.resolveTargetAgents(event, projectContext, projectManager);
+    const agents = this.resolveTargetAgents(event, projectContext);
     return agents.length > 0 ? agents[0] : null;
   }
 
@@ -132,5 +137,44 @@ export  class AgentRouter {
     }
 
     return "Unknown routing reason";
+  }
+
+  /**
+   * Validate that an event's project context matches the current project
+   * This is used to filter events for global agents to ensure they only
+   * process events from their assigned project.
+   *
+   * @param event - The event to validate
+   * @param projectContext - The current project context
+   * @returns true if the event is for this project, false otherwise
+   */
+  private static validateProjectContext(
+    event: NDKEvent,
+    projectContext: ProjectContext,
+  ): boolean {
+    const aTag = event.tags.find((tag) => tag[0] === "a");
+    if (!aTag || !aTag[1]) {
+      return true; // No project reference - allow routing (backward compatibility)
+    }
+
+    const parts = aTag[1].split(":");
+    if (parts.length !== 3 || parts[0] !== "31933") {
+      return true; // Not a valid project reference - allow routing
+    }
+
+    const eventProjectIdentifier = parts[2];
+    const currentProjectIdentifier = projectContext.project.tagValue("d");
+    
+    // Handle case where current project has no identifier
+    if (!currentProjectIdentifier) {
+      return true;
+    }
+
+    if (eventProjectIdentifier !== currentProjectIdentifier) {
+      logger.debug(`Event project mismatch: event="${eventProjectIdentifier}", current="${currentProjectIdentifier}"`);
+      return false;
+    }
+
+    return true;
   }
 }

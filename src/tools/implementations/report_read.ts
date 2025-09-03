@@ -98,7 +98,7 @@ async function executeReportRead(
 /**
  * Create an AI SDK tool for reading reports
  */
-export function createReportReadTool(): ReturnType<typeof tool> {
+export function createReportReadTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Read an NDKArticle report by slug or naddr identifier",
     

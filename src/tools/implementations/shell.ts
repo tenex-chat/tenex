@@ -99,7 +99,7 @@ async function executeShell(
 /**
  * Create an AI SDK tool for executing shell commands
  */
-export function createShellTool(): ReturnType<typeof tool> {
+export function createShellTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description:
       "Execute shell commands in the project directory (restricted to project-manager agent only)",

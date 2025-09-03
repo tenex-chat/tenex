@@ -94,7 +94,7 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
 }
 
 // AI SDK tool factory
-export function createLessonGetTool(): ReturnType<typeof tool> {
+export function createLessonGetTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Retrieve the full version of a lesson by its title, including detailed explanation if available",
     inputSchema: lessonGetSchema,

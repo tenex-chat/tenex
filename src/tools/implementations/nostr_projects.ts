@@ -273,7 +273,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createNostrProjectsTool(): ReturnType<typeof tool> {
+export function createNostrProjectsTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Fetch Nostr projects for a pubkey, including online status and spec documents",
     inputSchema: nostrProjectsSchema,

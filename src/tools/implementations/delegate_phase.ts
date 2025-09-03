@@ -1,4 +1,5 @@
 import { tool } from 'ai';
+import type { Tool } from 'ai';
 import { PHASES } from "@/conversations/phases";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
@@ -40,6 +41,7 @@ type DelegatePhaseOutput = DelegationResponses;
 // Core implementation - extracted from existing execute function
 async function executeDelegatePhase(input: DelegatePhaseInput, context: ExecutionContext): Promise<DelegatePhaseOutput> {
   const { phase, recipient, fullRequest, title } = input;
+  console.log('delegate phase tool called', input, context);
 
   // Resolve recipient to pubkey
   const pubkey = resolveRecipientToPubkey(recipient);
@@ -114,14 +116,14 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(): ReturnType<typeof tool> {
+export function createDelegatePhaseTool(context: ExecutionContext) {
   return tool({
     description: "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
-    inputSchema: delegatePhaseSchema,
+    inputSchema: delegatePhaseSchema as any,
     execute: async (input: DelegatePhaseInput) => {
       return await executeDelegatePhase(input, context);
     },
-  });
+  }) as Tool<any, any>;
 }
 
 /**

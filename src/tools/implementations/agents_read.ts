@@ -134,7 +134,7 @@ async function executeAgentsRead(
  * Create an AI SDK tool for reading agents
  * This is the primary implementation
  */
-export function createAgentsReadTool(): ReturnType<typeof tool> {
+export function createAgentsReadTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Read a local agent definition from its JSON file",
     inputSchema: agentsReadSchema,

@@ -53,7 +53,7 @@ async function executeReportDelete(
 /**
  * Create an AI SDK tool for deleting reports
  */
-export function createReportDeleteTool(): ReturnType<typeof tool> {
+export function createReportDeleteTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Mark an NDKArticle report as deleted",
     

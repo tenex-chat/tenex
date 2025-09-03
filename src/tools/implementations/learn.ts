@@ -97,7 +97,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 }
 
 // AI SDK tool factory
-export function createLessonLearnTool(): ReturnType<typeof tool> {
+export function createLessonLearnTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Record an important lesson learned during execution that should be carried forward, with optional detailed version",
     inputSchema: lessonLearnSchema,
