@@ -42,7 +42,8 @@
         "test:mock": "MOCK_MODE=true bun test tests/e2e/ios-compatibility.test.ts",
         "validate:events": "bun run src/scripts/validate-events.ts",
         "report:compatibility": "bun run scripts/test-ios-compat.sh && cat ios-compat-report.md",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "./scripts/typecheck.sh",
+        "typecheck:verbose": "tsc --noEmit",
         "lint": "eslint src --ext .ts,.tsx",
         "lint:fix": "eslint src --ext .ts,.tsx --fix",
         "clean": "rm -rf dist node_modules bun.lockb coverage"

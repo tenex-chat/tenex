@@ -2,13 +2,11 @@ import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
-// Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
-import { adaptMCPTool, type MCPTool as MCPToolInterface, type MCPPropertyDefinition } from "./MCPToolAdapter";
 
 interface MCPClient {
   client: Client;
@@ -17,23 +15,7 @@ interface MCPClient {
   config: MCPServerConfig;
 }
 
-// Define Zod schemas for MCP responses
-const MCPToolSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  inputSchema: z
-    .object({
-      properties: z.record(z.unknown()).optional(),
-      required: z.array(z.string()).optional(),
-    })
-    .optional(),
-});
-
-const MCPToolsListResponseSchema = z.object({
-  tools: z.array(MCPToolSchema),
-});
-
-
+// Zod schema for tool execution response only
 const MCPContentSchema = z.object({
   type: z.string(),
   text: z.string().optional(),
@@ -50,11 +32,19 @@ interface StdioTransportWithProcess extends StdioClientTransport {
   subprocess?: ChildProcess;
 }
 
+// AI SDK tool interface
+export interface AISdkTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
+}
+
 export class MCPService {
   private static instance: MCPService;
   private clients: Map<string, MCPClient> = new Map();
   private isInitialized = false;
-  private cachedTools: any[] = [];
+  private cachedTools: AISdkTool[] = [];
   private projectPath?: string;
 
   private constructor() {}
@@ -164,10 +154,10 @@ export class MCPService {
       throw error;
     }
 
-    // Perform health check
+    // Perform health check using schema discovery
     try {
       await Promise.race([
-        client.request({ method: "tools/list" }, MCPToolsListResponseSchema),
+        client.listTools(),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Health check timeout")), 5000)
         ),
@@ -202,47 +192,57 @@ export class MCPService {
   }
 
   // Synchronous method to get cached tools
-  getCachedTools(): any[] {
+  getCachedTools(): AISdkTool[] {
     return this.cachedTools;
   }
 
-  private async fetchAvailableTools(): Promise<any[]> {
-    const tools: any[] = [];
+  private async fetchAvailableTools(): Promise<AISdkTool[]> {
+    const tools: AISdkTool[] = [];
 
     for (const [serverName, mcpClient] of this.clients) {
       try {
-        const result = await mcpClient.client.request(
-          { method: "tools/list" },
-          MCPToolsListResponseSchema
-        );
+        // Use AI SDK's native schema discovery
+        const discoveredTools = await mcpClient.client.listTools();
 
-        if (result && "tools" in result && Array.isArray(result.tools)) {
-          for (const mcpTool of result.tools) {
-            tools.push(this.convertMCPToolToTenexTool(serverName, mcpTool));
+        if (discoveredTools && discoveredTools.tools) {
+          for (const tool of discoveredTools.tools) {
+            // Create AI SDK compatible tool with namespaced name
+            const namespacedName = `mcp__${serverName}__${tool.name}`;
+            
+            const aiTool: AISdkTool = {
+              name: namespacedName,
+              description: tool.description || `Tool from ${serverName}`,
+              parameters: tool.inputSchema || {},
+              execute: async (args: Record<string, unknown>) => {
+                try {
+                  logger.debug(`Executing MCP tool: ${namespacedName}`, {
+                    serverName,
+                    toolName: tool.name,
+                    args,
+                  });
+
+                  const result = await this.executeTool(serverName, tool.name, args);
+                  return result;
+                } catch (error) {
+                  logger.error(`MCP tool execution failed: ${namespacedName}`, {
+                    serverName,
+                    toolName: tool.name,
+                    error: formatAnyError(error),
+                  });
+                  throw error;
+                }
+              },
+            };
+            tools.push(aiTool);
           }
         }
       } catch (error) {
-        logger.error(`Failed to get tools from MCP server '${serverName}':`, error);
+        logger.error(`Failed to discover tools from MCP server '${serverName}':`, formatAnyError(error));
       }
     }
 
+    logger.info(`Discovered ${tools.length} MCP tools from ${this.clients.size} servers`);
     return tools;
-  }
-
-  private convertMCPToolToTenexTool(serverName: string, mcpTool: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }): any {
-    // Use the adapter to create a type-safe tool with Zod schemas
-    // Cast mcpTool to MCPTool interface for the adapter
-    const typedTool: MCPToolInterface = {
-      name: mcpTool.name,
-      description: mcpTool.description,
-      inputSchema: mcpTool.inputSchema ? {
-        properties: mcpTool.inputSchema.properties as Record<string, MCPPropertyDefinition>,
-        required: mcpTool.inputSchema.required
-      } : undefined
-    };
-    return adaptMCPTool(typedTool, serverName, (args) =>
-      this.executeTool(serverName, mcpTool.name, args)
-    );
   }
 
   async executeTool(
@@ -299,6 +299,7 @@ export class MCPService {
 
     await Promise.all(shutdownPromises);
     this.clients.clear();
+    this.cachedTools = [];
     this.isInitialized = false;
   }
 

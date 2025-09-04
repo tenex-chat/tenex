@@ -24,7 +24,37 @@ export const projectRunCommand = new Command("run")
       // Initialize project context (includes NDK setup)
       await ensureProjectInitialized(projectPath);
 
-      // Display project information
+      // Initialize MCP service BEFORE displaying agents so MCP tools are available
+      await mcpService.initialize(projectPath);
+
+      // Refresh agent tools now that MCP is initialized
+      // Update the agents directly in ProjectContext since AgentRegistry isn't exposed
+      const projectCtx = getProjectContext();
+      try {
+        const allMcpTools = mcpService.getCachedTools();
+        
+        if (allMcpTools.length > 0) {
+          const mcpToolNames = allMcpTools.map(t => t.name);
+          
+          for (const [_, agent] of projectCtx.agents) {
+            // Skip agents that have MCP disabled
+            if (agent.mcp === false) continue;
+            
+            // Add MCP tools that aren't already in the agent's tool list
+            const newMcpTools = mcpToolNames.filter(t => !agent.tools.includes(t));
+            if (newMcpTools.length > 0) {
+              agent.tools = [...agent.tools, ...newMcpTools];
+              logger.debug(`Added ${newMcpTools.length} MCP tools to agent "${agent.name}"`);
+            }
+          }
+          
+          logger.info(`Updated agents with ${allMcpTools.length} MCP tools`);
+        }
+      } catch (error) {
+        logger.debug("Could not refresh agent tools with MCP", error);
+      }
+
+      // Display project information (now with MCP tools available)
       const projectDisplay = new ProjectDisplay();
       await projectDisplay.displayProjectInfo(projectPath);
 
@@ -52,8 +82,7 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const llmLogger = projectCtx.llmLogger;
     const llmService = configService.createLLMService(llmLogger);
 
-    // Initialize MCP service
-    await mcpService.initialize(projectPath);
+    // MCP service already initialized before displaying agents
 
     // Initialize event handler
     const eventHandler = new EventHandler(projectPath, llmService);

@@ -7,6 +7,7 @@ import {
     type LanguageModel,
     type StepResult,
     type TextStreamPart,
+    type ProviderRegistry,
     generateText,
     stepCountIs,
     streamText,
@@ -46,7 +47,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     constructor(
         private readonly llmLogger: LLMLogger,
-        private readonly registry: any,
+        private readonly registry: ProviderRegistry,
         provider: string,
         model: string,
         temperature?: number,

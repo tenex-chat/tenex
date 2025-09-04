@@ -280,10 +280,18 @@ export class EventHandler {
         const updated = await agentRegistry.updateAgentTools(agentPubkey, newToolNames);
 
         if (updated) {
+          // CRITICAL: Also update the agent in ProjectContext so the changes take effect immediately
+          // The registry update only persists to disk and updates its own copy
+          // We need to update the ProjectContext copy that's actually used for execution
+          const { isValidToolName } = await import("@/tools/registry");
+          const validToolNames = newToolNames.filter(isValidToolName);
+          agent.tools = validToolNames;
+          
           logger.info("Updated tools configuration", {
             agent: agent.slug,
             toolCount: newToolNames.length,
-          });
+            newToolNames,
+        });
         } else {
           logger.warn("Failed to update tools configuration", {
             agent: agent.slug,

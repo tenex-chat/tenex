@@ -8,7 +8,7 @@ The `src/agents` module is the core of the TENEX application, responsible for de
 
 - **`AgentRegistry.ts`**: A singleton class that manages the registration and lifecycle of all agents. It allows for publishing, unpublishing, and republishing agents.
 
-- **Agent Definitions**: All agents are now defined via NDKAgentDefinition events (kind 4199) fetched from Nostr. There are no built-in agents - all agents are treated uniformly and fetched the same way.
+- **Agent Definitions**: All agents are defined via NDKAgentDefinition events (kind 4199) fetched from Nostr. All agents are treated uniformly and fetched the same way.
 
 - **`execution/`**: This directory contains the core logic for the agent execution loop, including:
     - **`AgentExecutor.ts`**: The main class responsible for executing an agent's reasoning loop. It takes an agent, a conversation, and a set of tools, and then orchestrates the interaction between the LLM and the tools to accomplish a task.
