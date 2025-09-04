@@ -4,7 +4,7 @@ import type { AgentInstance } from "../agents/types";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
 import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
-import { mcpService } from "../services/mcp/MCPService";
+import { mcpService } from "../services/mcp/MCPManager";
 import {
   getInstalledMCPEventIds,
   installMCPServerFromEvent,

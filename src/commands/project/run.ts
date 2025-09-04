@@ -5,7 +5,7 @@ import { EventHandler } from "@/event-handler";
 // LLMLogger will be accessed from ProjectContext
 import { shutdownNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext } from "@/services";
-import { mcpService } from "@/services/mcp/MCPService";
+import { mcpService } from "@/services/mcp/MCPManager";
 import { StatusPublisher } from "@/services/status";
 import { handleCliError } from "@/utils/cli-error";
 import { formatAnyError } from "@/utils/error-formatter";

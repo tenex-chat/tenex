@@ -7,7 +7,7 @@ import {
     buildSystemPromptMessages,
 } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
-import { mcpService } from "@/services/mcp/MCPService";
+import { mcpService } from "@/services/mcp/MCPManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logInfo, logger } from "@/utils/logger";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
@@ -376,7 +376,7 @@ Be completely transparent about your internal process. If you made a mistake or 
         }
 
         // Get tools as a keyed object for AI SDK
-        const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames as ToolName[], context) : {};
+        const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
         // Create a fresh LLMService instance for this execution
         // Use withAgent to create an LLMLogger instance with the agent name set

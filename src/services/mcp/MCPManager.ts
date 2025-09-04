@@ -1,0 +1,301 @@
+/**
+ * MCPManager - AI SDK Native MCP Integration
+ * 
+ * Uses AI SDK's experimental MCP client for cleaner, more maintainable integration
+ */
+
+import * as path from "node:path";
+import { experimental_createMCPClient, type experimental_MCPClient } from 'ai';
+import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio';
+import type { CoreTool } from 'ai';
+import { configService } from "@/services/ConfigService";
+import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
+import { formatAnyError } from "@/utils/error-formatter";
+import { logger } from "@/utils/logger";
+
+interface MCPClientEntry {
+  client: experimental_MCPClient;
+  transport: Experimental_StdioMCPTransport;
+  serverName: string;
+  config: MCPServerConfig;
+}
+
+interface MCPTool {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+  execute: (args: unknown) => Promise<unknown>;
+}
+
+export class MCPManager {
+  private static instance: MCPManager;
+  private clients: Map<string, MCPClientEntry> = new Map();
+  private isInitialized = false;
+  private projectPath?: string;
+  private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
+
+  private constructor() {}
+
+  static getInstance(): MCPManager {
+    if (!MCPManager.instance) {
+      MCPManager.instance = new MCPManager();
+    }
+    return MCPManager.instance;
+  }
+
+  async initialize(projectPath?: string): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+
+    try {
+      this.projectPath = projectPath;
+      const config = await configService.loadConfig(projectPath);
+
+      if (!config.mcp || !config.mcp.enabled) {
+        logger.info("MCP is disabled");
+        return;
+      }
+
+      await this.startServers(config.mcp);
+      await this.refreshToolCache();
+      this.isInitialized = true;
+    } catch (error) {
+      logger.error("Failed to initialize MCP manager:", error);
+      // Don't throw - allow the system to continue without MCP
+    }
+  }
+
+  private async startServers(mcpConfig: TenexMCP): Promise<void> {
+    const startPromises = Object.entries(mcpConfig.servers).map(([name, config]) =>
+      this.startServer(name, config).catch((error) => {
+        logger.error(`Failed to start MCP server '${name}':`, error);
+        // Continue with other servers
+      })
+    );
+
+    await Promise.all(startPromises);
+  }
+
+  private async startServer(name: string, config: MCPServerConfig): Promise<void> {
+    if (this.clients.has(name)) {
+      logger.warn(`MCP server '${name}' is already running`);
+      return;
+    }
+
+    // SECURITY CHECK: Enforce allowedPaths
+    if (config.allowedPaths && config.allowedPaths.length > 0 && this.projectPath) {
+      const resolvedProjectPath = path.resolve(this.projectPath);
+      const isAllowed = config.allowedPaths.some((allowedPath) => {
+        const resolvedAllowedPath = path.resolve(allowedPath);
+        return (
+          resolvedProjectPath.startsWith(resolvedAllowedPath) ||
+          resolvedAllowedPath.startsWith(resolvedProjectPath)
+        );
+      });
+
+      if (!isAllowed) {
+        logger.warn(
+          `Skipping MCP server '${name}' due to path restrictions. Project path '${this.projectPath}' is not in allowedPaths: ${config.allowedPaths.join(", ")}`
+        );
+        return;
+      }
+    }
+
+    const mergedEnv: Record<string, string> = {};
+    // Only include defined environment variables
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        mergedEnv[key] = value;
+      }
+    }
+    // Override with config env
+    if (config.env) {
+      Object.assign(mergedEnv, config.env);
+    }
+
+    logger.debug(
+      `Starting MCP server '${name}' with command: ${config.command} ${config.args.join(" ")}`
+    );
+
+    const transport = new Experimental_StdioMCPTransport({
+      command: config.command,
+      args: config.args,
+      env: mergedEnv,
+      cwd: this.projectPath,
+    });
+
+    try {
+      const client = await experimental_createMCPClient({
+        transport,
+        name: `tenex-${name}`,
+        version: "1.0.0",
+      });
+
+      // Perform health check - try to get tools
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Health check timeout")), 5000)
+      );
+
+      try {
+        await Promise.race([
+          client.tools(),
+          timeoutPromise
+        ]);
+      } catch (error) {
+        logger.error(`MCP server '${name}' failed health check:`, error);
+        await transport.close();
+        return;
+      }
+
+      this.clients.set(name, {
+        client,
+        transport,
+        serverName: name,
+        config,
+      });
+
+      logger.info(`Started MCP server '${name}'`);
+    } catch (error) {
+      logger.error(`Failed to create MCP client for '${name}':`, formatAnyError(error));
+      try {
+        await transport.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+  }
+
+  private async refreshToolCache(): Promise<void> {
+    const tools: Record<string, CoreTool<unknown, unknown>> = {};
+
+    for (const [serverName, entry] of this.clients) {
+      try {
+        const serverTools = await entry.client.tools();
+        
+        // Namespace the tools with server name
+        for (const [toolName, tool] of Object.entries(serverTools)) {
+          const namespacedName = `mcp__${serverName}__${toolName}`;
+          tools[namespacedName] = {
+            ...tool,
+            // Override the name to include namespace
+            description: tool.description || `${toolName} from ${serverName}`,
+          } as CoreTool<unknown, unknown>;
+        }
+
+        logger.debug(`Discovered ${Object.keys(serverTools).length} tools from MCP server '${serverName}'`);
+      } catch (error) {
+        logger.error(`Failed to get tools from MCP server '${serverName}':`, formatAnyError(error));
+      }
+    }
+
+    this.cachedTools = tools;
+    logger.info(`Cached ${Object.keys(tools).length} MCP tools from ${this.clients.size} servers`);
+  }
+
+  /**
+   * Get all cached MCP tools
+   */
+  getCachedTools(): MCPTool[] {
+    // Convert to array format for backward compatibility
+    return Object.entries(this.cachedTools).map(([name, tool]) => ({
+      name,
+      description: tool.description,
+      parameters: tool.parameters,
+      execute: tool.execute || (async () => Promise.reject(new Error('Tool execution not available'))),
+    }));
+  }
+
+  /**
+   * Get tools for a specific agent based on their configuration
+   * @param requestedTools - Array of tool names the agent wants
+   * @param mcpEnabled - Whether the agent has MCP access
+   */
+  async getToolsForAgent(
+    requestedTools: string[],
+    mcpEnabled = true
+  ): Promise<Record<string, CoreTool<unknown, unknown>>> {
+    const tools: Record<string, CoreTool<unknown, unknown>> = {};
+
+    if (!mcpEnabled) {
+      return tools;
+    }
+
+    // Filter requested MCP tools
+    const requestedMcpTools = requestedTools.filter(name => name.startsWith('mcp__'));
+
+    if (requestedMcpTools.length > 0) {
+      // Return only requested MCP tools
+      for (const toolName of requestedMcpTools) {
+        if (this.cachedTools[toolName]) {
+          tools[toolName] = this.cachedTools[toolName];
+        } else {
+          logger.debug(`Requested MCP tool '${toolName}' not found`);
+        }
+      }
+    } else if (mcpEnabled) {
+      // Return all MCP tools if none specifically requested but MCP is enabled
+      Object.assign(tools, this.cachedTools);
+    }
+
+    return tools;
+  }
+
+  async shutdown(): Promise<void> {
+    const shutdownPromises: Promise<void>[] = [];
+
+    for (const [name, entry] of this.clients) {
+      shutdownPromises.push(this.shutdownServer(name, entry));
+    }
+
+    await Promise.all(shutdownPromises);
+    this.clients.clear();
+    this.cachedTools = {};
+    this.isInitialized = false;
+  }
+
+  private async shutdownServer(name: string, entry: MCPClientEntry): Promise<void> {
+    try {
+      await entry.transport.close();
+      logger.info(`Shut down MCP server '${name}'`);
+    } catch (error) {
+      logger.error(`Error shutting down MCP server '${name}':`, formatAnyError(error));
+    }
+  }
+
+  /**
+   * Check if a server is running
+   */
+  isServerRunning(name: string): boolean {
+    return this.clients.has(name);
+  }
+
+  /**
+   * Get list of running servers
+   */
+  getRunningServers(): string[] {
+    return Array.from(this.clients.keys());
+  }
+
+  /**
+   * Reload MCP service configuration and restart servers
+   */
+  async reload(projectPath?: string): Promise<void> {
+    logger.info("Reloading MCP manager configuration");
+
+    // Shutdown existing servers
+    await this.shutdown();
+
+    // Re-initialize with the new configuration
+    await this.initialize(projectPath || this.projectPath);
+
+    logger.info("MCP manager reloaded successfully", {
+      runningServers: this.getRunningServers(),
+      availableTools: Object.keys(this.cachedTools).length,
+    });
+  }
+}
+
+export const mcpManager = MCPManager.getInstance();
+// Export as mcpService for compatibility with existing code
+export const mcpService = mcpManager;

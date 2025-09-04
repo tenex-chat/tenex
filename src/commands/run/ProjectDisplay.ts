@@ -118,7 +118,7 @@ export class ProjectDisplay {
       
       try {
         // Import mcpService to check available tools per server
-        const { mcpService } = await import("@/services/mcp/MCPService");
+        const { mcpService } = await import("@/services/mcp/MCPManager");
         const allMcpTools = mcpService.getCachedTools();
         
         // Count tools per server in the full set

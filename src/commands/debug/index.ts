@@ -3,7 +3,7 @@ import type { Phase } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
-import { mcpService } from "@/services/mcp/MCPService";
+import { mcpService } from "@/services/mcp/MCPManager";
 // Tool type removed - using AI SDK tools only
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";

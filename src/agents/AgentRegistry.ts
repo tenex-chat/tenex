@@ -785,7 +785,7 @@ export class AgentRegistry {
     // Handle MCP tools if agent has MCP access
     if (agent.mcp !== false && requestedMcpTools.length > 0) {
       try {
-        const { mcpService } = await import("@/services/mcp/MCPService");
+        const { mcpService } = await import("@/services/mcp/MCPManager");
         const allMcpTools = mcpService.getCachedTools();
         
         // Filter to only include requested MCP tools
@@ -811,7 +811,7 @@ export class AgentRegistry {
     } else if (agent.mcp !== false) {
       // Agent has MCP access but didn't request specific tools - give access to all
       try {
-        const { mcpService } = await import("@/services/mcp/MCPService");
+        const { mcpService } = await import("@/services/mcp/MCPManager");
         const allMcpTools = mcpService.getCachedTools();
         for (const tool of allMcpTools) {
           validToolNames.push(tool.name);

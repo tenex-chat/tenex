@@ -5,7 +5,7 @@ import { EVENT_KINDS } from "@/llm/types";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
-import { mcpService } from "@/services/mcp/MCPService";
+import { mcpService } from "@/services/mcp/MCPManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger, logWarning } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";

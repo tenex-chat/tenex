@@ -139,17 +139,54 @@ export function getAllToolNames(): ToolName[] {
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
- * @param names - Tool names to include
+ * @param names - Tool names to include (can include MCP tool names)
  * @param context - Execution context for the tools
  * @returns Object with tools keyed by name
  */
-export function getToolsObject(names: ToolName[], context: ExecutionContext): Record<string, AISdkTool> {
+export function getToolsObject(names: string[], context: ExecutionContext): Record<string, AISdkTool> {
   const tools: Record<string, AISdkTool> = {};
   
+  // Separate MCP tools from regular tools
+  const regularTools: ToolName[] = [];
+  const mcpToolNames: string[] = [];
+  
   for (const name of names) {
+    if (name.startsWith('mcp__')) {
+      mcpToolNames.push(name);
+    } else if (name in toolFactories) {
+      regularTools.push(name as ToolName);
+    }
+  }
+  
+  // Add regular tools
+  for (const name of regularTools) {
     const tool = getTool(name, context);
     if (tool) {
       tools[name] = tool;
+    }
+  }
+  
+  // Add MCP tools if any requested
+  if (mcpToolNames.length > 0) {
+    try {
+      // Import and get MCP tools dynamically
+      const { mcpService } = require("@/services/mcp/MCPManager");
+      const allMcpTools = mcpService.getCachedTools();
+      
+      for (const mcpToolName of mcpToolNames) {
+        const mcpTool = allMcpTools.find(t => t.name === mcpToolName);
+        if (mcpTool) {
+          // Convert MCP tool to AI SDK format
+          tools[mcpToolName] = {
+            description: mcpTool.description || mcpToolName,
+            parameters: mcpTool.parameters || {},
+            execute: mcpTool.execute,
+          } as AISdkTool;
+        }
+      }
+    } catch (error) {
+      // MCP not available, continue without MCP tools
+      console.debug("Could not load MCP tools:", error);
     }
   }
   
