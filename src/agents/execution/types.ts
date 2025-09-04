@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
-import type { Phase } from "@/conversations/phases";
+import type { Phase } from "@/conversations/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 

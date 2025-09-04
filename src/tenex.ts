@@ -10,7 +10,6 @@ import { inventoryCommand } from "./commands/inventory/index";
 import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
 import { setupCommand } from "./commands/setup/index";
-import { PHASES } from "./conversations/phases";
 import { initNDK } from "./nostr/ndkClient";
 
 const program = new Command();
@@ -31,11 +30,6 @@ debug
   .command("system-prompt")
   .description("Show the system prompt for an agent")
   .option("--agent <name>", "Agent name", "default")
-  .option(
-    "--phase <phase>",
-    `Phase to show prompt for (${Object.values(PHASES).join(", ")})`,
-    PHASES.CHAT
-  )
   .action((options) => runDebugSystemPrompt(options));
 
 // Initialize NDK before parsing commands

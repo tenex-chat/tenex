@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { ClaudeTaskExecutor } from "@/claude/task-executor";
-import type { Phase } from "@/conversations/phases";
+import type { Phase } from "@/conversations/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { randomUUID } from "crypto";
@@ -60,7 +60,6 @@ async function executeClaudeCode(
         conversationId: context.conversationId,
         conversationIdShort: context.conversationId.substring(0, 8),
         agent: context.agent.slug,
-        phase: context.phase,
         triggeringEventKind: context.triggeringEvent.kind,
         triggeringEventId: context.triggeringEvent.id?.substring(0, 8),
       });
@@ -89,14 +88,12 @@ async function executeClaudeCode(
         logger.info(`[claude_code] Resuming existing Claude session`, {
           sessionId: existingSessionId,
           agent: context.agent.slug,
-          phase: context.phase,
-          conversationId: context.conversationId.substring(0, 8),
+            conversationId: context.conversationId.substring(0, 8),
         });
       } else {
         logger.debug(`[claude_code] No existing session ID, will create new session`, {
           agent: context.agent.slug,
-          phase: context.phase,
-          conversationId: context.conversationId.substring(0, 8),
+            conversationId: context.conversationId.substring(0, 8),
         });
       }
 
@@ -115,7 +112,6 @@ async function executeClaudeCode(
         usingExistingSession: isResuming,
         sessionId: sessionId,
         agent: context.agent.slug,
-        phase: context.phase,
         conversationId: context.conversationId.substring(0, 8),
       });
 
@@ -135,7 +131,6 @@ async function executeClaudeCode(
         resumeSessionId: isResuming ? sessionId : undefined, // Only pass for actual resumption
         agentName: context.agent.name,
         triggeringEvent: context.triggeringEvent,
-        phase: context.phase,
       });
 
       if (!result.success) {
@@ -168,8 +163,7 @@ async function executeClaudeCode(
           logger.info(`[claude_code] Stored Claude session ID for phase ${context.phase}`, {
             sessionId: result.sessionId,
             agent: context.agent.slug,
-            phase: context.phase,
-            conversationId: context.conversationId.substring(0, 8),
+                conversationId: context.conversationId.substring(0, 8),
           });
         }
       }

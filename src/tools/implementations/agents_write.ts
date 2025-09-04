@@ -173,7 +173,7 @@ async function executeAgentsWrite(
  */
 export function createAgentsWriteTool(): ReturnType<typeof tool> {
   return tool({
-    description: "Write or update a local agent definition and immediately activate it in the current project. Creates the agent configuration, assigns tools, and starts the agent. All agents automatically receive core tools (delegate, lesson access, file reading, report access). Additional tools can be assigned based on the agent's responsibilities. The agent becomes immediately available for delegation and task execution.",
+    description: "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
     inputSchema: agentsWriteSchema,
     execute: async (input: AgentsWriteInput) => {
       try {

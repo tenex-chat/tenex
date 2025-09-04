@@ -1,8 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Phase } from "@/conversations/phases";
-import type { Conversation } from "@/conversations/types";
+import type { Phase, Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { ProjectContext } from "@/services/ProjectContext";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -27,9 +25,8 @@ export interface BuildSystemPromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  mcpTools?: any[];
   triggeringEvent?: NDKEvent;
-  projectContext?: ProjectContext; // For PM detection
+  isProjectManager?: boolean; // Indicates if this agent is the PM
 }
 
 export interface BuildStandalonePromptOptions {
@@ -41,7 +38,6 @@ export interface BuildStandalonePromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  mcpTools?: any[];
   triggeringEvent?: NDKEvent;
 }
 
@@ -58,6 +54,14 @@ export interface SystemMessage {
  * Export phase instruction building for use by other modules
  */
 export function buildPhaseInstructions(phase: Phase, conversation?: Conversation): string {
+  // If the conversation has custom phase instructions, use those
+  if (conversation?.phaseInstructions) {
+    return `=== CURRENT PHASE: ${phase.toUpperCase()} ===
+
+${conversation.phaseInstructions}`;
+  }
+  
+  // Otherwise, fall back to standard phase instructions
   return buildPhaseInstructionsFromCompositions(phase, conversation);
 }
 
@@ -89,10 +93,8 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     },
   });
 
-  // Add PROJECT.md as separate cacheable message for project manager (determined dynamically)
-  // Check if this agent is the PM by comparing pubkeys
-  const projectContext = options.projectContext;
-  if (projectContext && options.agent.pubkey === projectContext.getProjectManager().pubkey) {
+  // Add PROJECT.md as separate cacheable message for project manager
+  if (options.isProjectManager) {
     const projectMdContent = buildProjectMdContent(options);
     if (projectMdContent) {
       messages.push({
@@ -133,7 +135,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     availableAgents = [],
     conversation,
     agentLessons,
-    mcpTools = [],
     triggeringEvent,
   } = options;
 
@@ -163,8 +164,7 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   addSpecialistFragments(
     systemPromptBuilder,
     agent,
-    availableAgents,
-    mcpTools
+    availableAgents
   );
 
   return systemPromptBuilder.build();
@@ -226,7 +226,6 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     availableAgents = [],
     conversation,
     agentLessons,
-    mcpTools = [],
     triggeringEvent,
   } = options;
 
@@ -257,16 +256,8 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     addSpecialistFragments(
       systemPromptBuilder,
       agent,
-      availableAgents,
-      mcpTools
+      availableAgents
     );
-  } else {
-    // Just add tools for single agent mode
-    systemPromptBuilder.add("specialist-tools", {
-      agent,
-      mcpTools,
-    });
-    systemPromptBuilder.add("specialist-completion-guidance", {});
   }
 
   return systemPromptBuilder.build();

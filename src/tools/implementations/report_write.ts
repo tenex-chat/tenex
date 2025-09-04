@@ -85,7 +85,7 @@ async function executeReportWrite(input: ReportWriteInput, context: ExecutionCon
 // AI SDK tool factory
 export function createReportWriteTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: "Generate or update an NDKArticle report for the current project",
+    description: "Write reports and documentation as NDKArticle events. Use for creating persistent documentation like architecture docs, implementation plans, or project summaries. Reports are stored on Nostr network and accessible via slug. Updates existing reports with same slug. Supports markdown format and hashtags for categorization. Reports can be read back with report_read or listed with reports_list.",
     inputSchema: reportWriteSchema,
     execute: async (input: ReportWriteInput) => {
       return await executeReportWrite(input, context);

@@ -1,5 +1,4 @@
-import type { Phase } from "@/conversations/phases";
-import type { Conversation } from "@/conversations/types";
+import type { Phase, Conversation } from "@/conversations/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -19,12 +18,12 @@ export const phaseContextFragment: PromptFragment<PhaseContextArgs> = {
   template: ({ phase, phaseMetadata, conversation }) => {
     const parts: string[] = [];
 
-    // Add conversation title if available
-    if (conversation?.title) {
-      parts.push(`## Conversation: ${conversation.title}`);
-    }
-
     parts.push(`## Current Phase: ${phase.toUpperCase()}`);
+
+    // Add custom phase instructions if available
+    if (conversation?.phaseInstructions) {
+      parts.push(`### Phase Instructions\n${conversation.phaseInstructions}`);
+    }
 
     // Get phase context from phase transitions if available
     const phaseContext = getPhaseContext(phase, conversation);
@@ -54,8 +53,18 @@ function getPhaseContext(targetPhase: Phase, conversation?: Conversation): strin
     .reverse()
     .find((t) => t.to === targetPhase);
 
-  if (relevantTransition?.message) {
-    return relevantTransition.message;
+  if (relevantTransition) {
+    // Build context from both message and instructions
+    const contextParts: string[] = [];
+    
+    if (relevantTransition.message) {
+      contextParts.push(relevantTransition.message);
+    }
+    
+    // Return combined context if we have anything
+    if (contextParts.length > 0) {
+      return contextParts.join("\n\n");
+    }
   }
 
   return null;

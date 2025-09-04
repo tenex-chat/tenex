@@ -166,9 +166,8 @@ The system organizes fragments into logical categories:
 
 3. **Capability Fragments** (Priority: 20-30)
    - `available-agents`: Other agents available for handoff
-   - `agent-tools`: Agent-specific tools
-   - `mcp-tools`: MCP server tools
    - `project-inventory-context`: Project structure understanding
+   - Tools: Tool descriptions and schemas are provided directly by the AI SDK tool implementations
 
 4. **Behavioral Fragments** (Priority: 80-90)
    - `agent-reasoning`: Chain-of-thought instructions

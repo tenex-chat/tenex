@@ -20,19 +20,14 @@ export interface DelegationResponses {
  * Orchestrates the complete delegation workflow: publishing events and waiting for responses.
  */
 export class DelegationService {
-  private publisher: AgentPublisher;
-
   constructor(
     private agent: AgentInstance,
     private conversationId: string,
     private conversationCoordinator: ConversationCoordinator,
     private triggeringEvent: NDKEvent,
-    private phase?: string,
-    agentPublisher?: AgentPublisher
-  ) {
-    // Use provided publisher or create a new one
-    this.publisher = agentPublisher || new AgentPublisher(agent, conversationCoordinator);
-  }
+    private publisher: AgentPublisher,
+    private phase?: string
+  ) {}
 
   /**
    * Execute a delegation and wait for all responses.

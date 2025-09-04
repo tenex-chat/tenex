@@ -1,6 +1,5 @@
 import { tool } from 'ai';
 import type { Tool } from 'ai';
-import { PHASES } from "@/conversations/phases";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -9,16 +8,13 @@ import type { ExecutionContext } from "@/agents/execution/types";
 
 const delegatePhaseSchema = z.object({
   phase: z
-    .enum([
-      PHASES.CHAT,
-      PHASES.BRAINSTORM,
-      PHASES.PLAN,
-      PHASES.EXECUTE,
-      PHASES.VERIFICATION,
-      PHASES.CHORES,
-      PHASES.REFLECTION,
-    ] as const)
-    .describe("The phase to switch to"),
+    .string()
+    .describe("The phase to switch to (can be any string, including custom phases)"),
+  phase_instructions: z
+    .string()
+    .describe(
+      "Detailed instructions and goals for this phase - what should be accomplished and how. Other agents are not aware of what phases mean; so you must provide clear and complete instructions of the goal, what to do, what not to do and phase constrains."
+    ),
   recipient: z
     .string()
     .describe(
@@ -40,8 +36,7 @@ type DelegatePhaseOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
 async function executeDelegatePhase(input: DelegatePhaseInput, context: ExecutionContext): Promise<DelegatePhaseOutput> {
-  const { phase, recipient, fullRequest, title } = input;
-  console.log('delegate phase tool called', input, context);
+  const { phase, phase_instructions, recipient, fullRequest, title } = input;
 
   // Resolve recipient to pubkey
   const pubkey = resolveRecipientToPubkey(recipient);
@@ -79,7 +74,8 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     phase,
     fullRequest, // Use the fullRequest as the phase transition message
     context.agent.pubkey,
-    context.agent.name
+    context.agent.name,
+    phase_instructions // Pass the custom phase instructions
   );
 
   logger.info("[delegate_phase() tool] 🔄 Phase updated, initiating synchronous delegation", {
@@ -94,8 +90,8 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     context.conversationId,
     context.conversationCoordinator,
     context.triggeringEvent,
-    phase, // Pass the new phase as context
-    context.agentPublisher // Pass the shared AgentPublisher
+    context.agentPublisher, // Pass the required AgentPublisher
+    phase // Pass the new phase as context
   );
   
   const responses = await delegationService.execute({
@@ -116,14 +112,15 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(context: ExecutionContext) {
-  return tool({
-    description: "Switch conversation phase and delegate a task to a specific agent (Project Manager only)",
-    inputSchema: delegatePhaseSchema as any,
-    execute: async (input: DelegatePhaseInput) => {
-      return await executeDelegatePhase(input, context);
-    },
-  }) as Tool<any, any>;
+export function createDelegatePhaseTool(context: ExecutionContext): Tool<any, any> {
+    return tool({
+        description:
+            "Switch conversation phase and delegate to a specific agent",
+        inputSchema: delegatePhaseSchema,
+        execute: async (input: DelegatePhaseInput) => {
+            return await executeDelegatePhase(input, context);
+        },
+    });
 }
 
 /**
@@ -131,8 +128,18 @@ export function createDelegatePhaseTool(context: ExecutionContext) {
  *
  * This tool combines phase switching with task delegation, ensuring the PM always:
  * 1. Switches to the appropriate phase for the work being done
- * 2. Delegates the task to the appropriate specialist agent(s)
- * 3. Sets up proper event-driven callbacks for task completion
+ * 2. Provides custom phase instructions to guide agent behavior
+ * 3. Delegates the task to the appropriate specialist agent(s)
+ * 4. Sets up proper event-driven callbacks for task completion
+ *
+ * Phase can be:
+ * - Standard phases: CHAT, BRAINSTORM, PLAN, EXECUTE, VERIFICATION, CHORES, REFLECTION
+ * - Custom phases: Any string that represents a project-specific phase
+ *
+ * Phase Instructions:
+ * - Detailed instructions that define what should be accomplished in this phase
+ * - These instructions override standard phase definitions for custom phases
+ * - Agents receive these instructions as part of their execution context
  *
  * The fullRequest serves dual purpose:
  * - Becomes the phase transition reason (context for all agents)

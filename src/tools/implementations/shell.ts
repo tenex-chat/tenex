@@ -102,7 +102,7 @@ async function executeShell(
 export function createShellTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description:
-      "Execute shell commands in the project directory (restricted to project-manager agent only)",
+      "Execute shell commands in the project directory. Use for system operations like git, npm, build tools, etc. NEVER use for file operations - use read_path/write_path instead. NEVER use for code modifications - edit files directly. Restricted to project-manager agent only. Commands run with timeout (default 2 minutes). Always prefer specialized tools over shell commands when available.",
     
     inputSchema: shellSchema,
     

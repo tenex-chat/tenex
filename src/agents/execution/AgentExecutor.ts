@@ -231,6 +231,9 @@ export class AgentExecutor {
                 agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
             }
 
+            // Check if this agent is the project manager
+            const isProjectManager = context.agent.pubkey === projectCtx.getProjectManager().pubkey;
+
             // Build system prompt messages for all agents (including orchestrator)
             const systemMessages = buildSystemPromptMessages({
                 agent: context.agent,
@@ -241,6 +244,7 @@ export class AgentExecutor {
                 agentLessons: agentLessonsMap,
                 mcpTools,
                 triggeringEvent: context.triggeringEvent,
+                isProjectManager,
             });
 
             // Add all system messages

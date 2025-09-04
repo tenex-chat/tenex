@@ -1,5 +1,5 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import { ALL_PHASES, type Phase } from "@/conversations/phases";
+import type { Phase } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
@@ -74,7 +74,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       const availableAgents = Array.from(projectCtx.agents.values());
 
       // Validate phase
-      const phase = (ALL_PHASES.includes(options.phase as Phase) ? options.phase : "chat") as Phase;
+      const phase = (options.phase || "CHAT") as Phase;
 
       // Initialize MCP service to get tools
       let mcpTools: Record<string, unknown>[] = [];
@@ -95,6 +95,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         agentLessonsMap.set(agent.pubkey, currentAgentLessons);
       }
 
+      // Check if this agent is the project manager
+      const isProjectManager = agent.pubkey === projectCtx.getProjectManager().pubkey;
+
       const systemMessages = buildSystemPromptMessages({
         agent,
         phase,
@@ -103,6 +106,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         conversation: undefined, // No conversation in debug mode
         agentLessons: agentLessonsMap,
         mcpTools,
+        isProjectManager,
       });
 
       // Display each system message separately with metadata

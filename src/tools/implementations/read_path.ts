@@ -78,7 +78,7 @@ async function executeReadPath(
 export function createReadPathTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description:
-      "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories.",
+      "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Automatically tracks context file reads for conversation metadata. Safe and sandboxed to project directory.",
     
     inputSchema: readPathSchema,
     

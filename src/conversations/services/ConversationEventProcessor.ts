@@ -4,7 +4,6 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { ensureExecutionTimeInitialized } from "../executionTime";
-import { PHASES } from "../phases";
 import type { Conversation, ConversationMetadata } from "../types";
 
 /**
@@ -27,7 +26,7 @@ export class ConversationEventProcessor {
     const conversation: Conversation = {
       id,
       title,
-      phase: PHASES.CHAT,
+      phase: "CHAT", // Default initial phase - can be changed dynamically
       history: [event],
       agentStates: new Map(),
       phaseStartedAt: Date.now(),
@@ -44,11 +43,6 @@ export class ConversationEventProcessor {
     };
 
     ensureExecutionTimeInitialized(conversation);
-
-    logger.info(`[ConversationEventProcessor] Created conversation ${id}`, {
-      title,
-      hasArticle: !!referencedArticle,
-    });
 
     return conversation;
   }

@@ -1,5 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Phase } from "./phases";
+
+// Phase is now just a string - fully dynamic
+export type Phase = string;
 
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
@@ -12,6 +14,7 @@ export interface Conversation {
   id: string;
   title?: string;
   phase: Phase;
+  phaseInstructions?: string; // Custom instructions for the current phase
   history: NDKEvent[]; // The SINGLE source of truth for all events/messages
   agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
   phaseStartedAt?: number;
@@ -46,6 +49,7 @@ export interface PhaseTransition {
   from: Phase;
   to: Phase;
   message: string; // Comprehensive context from the transition
+  instructions?: string; // Custom phase instructions (for dynamic phases)
   timestamp: number;
   agentPubkey: string; // Track which agent initiated
   agentName: string; // Human-readable agent name

@@ -1,7 +1,5 @@
 import type { ConversationCoordinator } from "@/conversations";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { PHASES } from "@/conversations/phases";
-import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
@@ -26,7 +24,6 @@ export interface ClaudeTaskOptions {
   resumeSessionId?: string; // Only set when actually resuming an existing session
   agentName: string;
   triggeringEvent: NDKEvent;
-  phase?: Phase;
 }
 
 export interface ClaudeTaskResult {
@@ -57,7 +54,6 @@ export class ClaudeTaskExecutor {
       triggeringEvent: options.triggeringEvent,
       rootEvent: rootEvent,
       conversationId: options.conversationRootEventId,
-      phase: options.phase || PHASES.EXECUTE,
     };
 
     // Create task through AgentPublisher with full context

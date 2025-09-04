@@ -96,7 +96,7 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
 // AI SDK tool factory
 export function createLessonGetTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: "Retrieve the full version of a lesson by its title, including detailed explanation if available",
+    description: "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",
     inputSchema: lessonGetSchema,
     execute: async (input: LessonGetInput) => {
       return await executeLessonGet(input, context);

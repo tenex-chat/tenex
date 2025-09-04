@@ -220,7 +220,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleStepFinish(step: StreamTextOnStepFinishCallback<Record<string, AISdkTool>>): void {
-        console.log("onStepFinish");
+        console.log("onStepFinish", step);
     }
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
@@ -314,6 +314,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
+        console.log("LLM Service: tool did execute", toolName, result);
         this.emit("tool-did-execute", {
             toolName,
             toolCallId,

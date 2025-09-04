@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Phase } from "@/conversations/phases";
-import type { Conversation } from "@/conversations/types";
+import type { Phase, Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
@@ -21,9 +20,6 @@ export function addCoreAgentFragments(
     agentLessons?: Map<string, NDKAgentLesson[]>,
     triggeringEvent?: NDKEvent
 ): void {
-    // Add phase definitions - foundational knowledge for all agents
-    builder.add("phase-definitions", {});
-
     // Add voice mode instructions if applicable
     if (isVoiceMode(triggeringEvent)) {
         builder.add("voice-mode", {
@@ -51,23 +47,13 @@ export function addCoreAgentFragments(
 export function addSpecialistFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    availableAgents: AgentInstance[],
-    mcpTools: any[]
+    availableAgents: AgentInstance[]
 ): void {
     // Add available agents for delegations
     builder.add("specialist-available-agents", {
         agents: availableAgents,
         currentAgent: agent,
     });
-
-    // Add tools for specialists
-    builder.add("specialist-tools", {
-        agent,
-        mcpTools,
-    });
-
-    // Add completion guidance
-    builder.add("specialist-completion-guidance", {});
 }
 
 /**
@@ -95,12 +81,6 @@ export function buildPhaseInstructions(phase: Phase, conversation?: Conversation
             phase,
             phaseMetadata: conversation?.metadata,
             conversation,
-        })
-        .add("phase-constraints", {
-            phase,
-        })
-        .add("specialist-completion-guidance", {
-            phase,
         });
 
     return builder.build();
