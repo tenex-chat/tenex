@@ -43,6 +43,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly model: string;
     private readonly temperature?: number;
     private readonly maxTokens?: number;
+    private previousChunkType?: string;
 
     constructor(
         private readonly llmLogger: LLMLogger,
@@ -289,8 +290,23 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         if (!chunk.type.match(/delta/)) console.log("LLMService chunk", chunk);
         console.log('new chunk', chunk.type);
 
+        // Check if we're transitioning out of reasoning-delta
+        if (this.previousChunkType === "reasoning-delta" && chunk.type !== "reasoning-delta") {
+            this.handleTextDelta("</thinking>");
+        }
+
         switch (chunk.type) {
             case "text-delta":
+                if (chunk.text) {
+                    this.handleTextDelta(chunk.text);
+                }
+                break;
+            case "reasoning-delta":
+                // Check if we're transitioning into reasoning-delta
+                if (this.previousChunkType !== "reasoning-delta") {
+                    this.handleTextDelta("<thinking>");
+                }
+                // Handle reasoning-delta like text-delta
                 if (chunk.text) {
                     this.handleTextDelta(chunk.text);
                 }
@@ -302,6 +318,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 this.handleToolResult(chunk.toolCallId, chunk.toolName, chunk.output);
                 break;
         }
+
+        // Update previous chunk type
+        this.previousChunkType = chunk.type;
     }
 
     private createFinishHandler(startTime: number) {

@@ -227,15 +227,16 @@ export class StatusPublisher {
       const projectCtx = getProjectContext();
       const toolAgentMap = new Map<string, Set<string>>();
 
-      // Import the delegate tools list from the single source of truth
-      const { DELEGATE_TOOLS } = await import("@/agents/constants");
+      // Import the delegate tools and core tools lists from the single source of truth
+      const { DELEGATE_TOOLS, CORE_AGENT_TOOLS } = await import("@/agents/constants");
 
-      // First, add ALL tool names from the registry (except delegate tools)
+      // First, add ALL tool names from the registry (except delegate tools and core tools)
       const { getAllToolNames } = await import("@/tools/registry");
       const allToolNames = getAllToolNames();
       for (const toolName of allToolNames) {
-        // Skip delegate tools from kind 24010 events
-        if (!DELEGATE_TOOLS.includes(toolName)) {
+        // Skip delegate tools and core tools from kind 24010 events
+        // These are handled automatically by the system
+        if (!DELEGATE_TOOLS.includes(toolName) && !CORE_AGENT_TOOLS.includes(toolName)) {
           toolAgentMap.set(toolName, new Set());
         }
       }
@@ -251,8 +252,9 @@ export class StatusPublisher {
             logger.warn(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
             continue;
           }
-          // Skip delegate tools - they're not included in kind 24010 events
-          if (DELEGATE_TOOLS.includes(toolName)) {
+          // Skip delegate tools and core tools - they're not included in kind 24010 events
+          // These are handled automatically by the system
+          if (DELEGATE_TOOLS.includes(toolName) || CORE_AGENT_TOOLS.includes(toolName)) {
             continue;
           }
           const toolAgents = toolAgentMap.get(toolName);
