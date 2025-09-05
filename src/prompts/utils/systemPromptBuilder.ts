@@ -4,13 +4,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { 
-    addCoreAgentFragments, 
-    addSpecialistFragments, 
-    addDelegatedTaskContext,
-    buildPhaseInstructions as buildPhaseInstructionsFromCompositions,
-    formatPhaseTransitionMessage as formatPhaseTransitionFromCompositions
-} from "./fragmentCompositions";
+import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -44,10 +38,67 @@ export interface BuildStandalonePromptOptions {
 export interface SystemMessage {
   message: ModelMessage;
   metadata?: {
-    cacheable?: boolean;
-    cacheKey?: string;
     description?: string;
   };
+}
+
+/**
+ * Add core agent fragments that are common to both project and standalone modes
+ */
+function addCoreAgentFragments(
+    builder: PromptBuilder,
+    agent: AgentInstance,
+    phase: Phase,
+    conversation?: Conversation,
+    agentLessons?: Map<string, NDKAgentLesson[]>,
+    triggeringEvent?: NDKEvent
+): void {
+    // Add voice mode instructions if applicable
+    builder.add("voice-mode", { isVoiceMode: isVoiceMode(triggeringEvent) });
+
+    // Add referenced article context if present
+    if (conversation?.metadata?.referencedArticle) {
+        builder.add("referenced-article", conversation.metadata.referencedArticle);
+    }
+
+    // Add retrieved lessons
+    builder.add("retrieved-lessons", {
+        agent,
+        phase,
+        conversation,
+        agentLessons: agentLessons || new Map(),
+    });
+}
+
+/**
+ * Add agent-specific fragments
+ */
+function addAgentFragments(
+    builder: PromptBuilder,
+    agent: AgentInstance,
+    availableAgents: AgentInstance[]
+): void {
+    // Add available agents for delegations
+    builder.add("available-agents", {
+        agents: availableAgents,
+        currentAgent: agent,
+    });
+}
+
+/**
+ * Add delegated task context if applicable
+ */
+function addDelegatedTaskContext(
+    builder: PromptBuilder,
+    triggeringEvent?: NDKEvent
+): void {
+    // Check if this is a delegated task (NDKTask kind 1934)
+    const isDelegatedTask = triggeringEvent?.kind === 1934;
+    if (isDelegatedTask) {
+        builder.add("delegated-task-context", {
+            taskDescription: triggeringEvent?.content || "Complete the assigned task",
+        });
+    }
 }
 
 /**
@@ -62,7 +113,14 @@ ${conversation.phaseInstructions}`;
   }
   
   // Otherwise, fall back to standard phase instructions
-  return buildPhaseInstructionsFromCompositions(phase, conversation);
+  const builder = new PromptBuilder()
+      .add("phase-context", {
+          phase,
+          phaseMetadata: conversation?.metadata,
+          conversation,
+      });
+
+  return builder.build();
 }
 
 /**
@@ -73,7 +131,14 @@ export function formatPhaseTransitionMessage(
   currentPhase: Phase,
   phaseInstructions: string
 ): string {
-  return formatPhaseTransitionFromCompositions(lastSeenPhase, currentPhase, phaseInstructions);
+  return `=== PHASE TRANSITION ===
+
+You were last active in the ${lastSeenPhase.toUpperCase()} phase.
+The conversation has now moved to the ${currentPhase.toUpperCase()} phase.
+
+${phaseInstructions}
+
+Please adjust your behavior according to the new phase requirements.`;
 }
 
 /**
@@ -100,8 +165,6 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
       messages.push({
         message: { role: "system", content: projectMdContent },
         metadata: {
-          cacheable: true,
-          cacheKey: `project-md-${options.project.id}`,
           description: "PROJECT.md content",
         },
       });
@@ -114,8 +177,6 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     messages.push({
       message: { role: "system", content: inventoryContent },
       metadata: {
-        cacheable: true,
-        cacheKey: `project-inventory-${options.project.id}-${options.phase}`,
         description: "Project inventory",
       },
     });
@@ -140,8 +201,8 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
 
   const systemPromptBuilder = new PromptBuilder();
 
-  // Add specialist identity
-  systemPromptBuilder.add("specialist-identity", {
+  // Add agent identity
+  systemPromptBuilder.add("agent-identity", {
     agent,
     projectTitle: project.tagValue("title") || "Unknown Project",
     projectOwnerPubkey: project.pubkey,
@@ -160,8 +221,8 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     triggeringEvent
   );
 
-  // Add specialist-specific fragments
-  addSpecialistFragments(
+  // Add agent-specific fragments
+  addAgentFragments(
     systemPromptBuilder,
     agent,
     availableAgents
@@ -188,9 +249,7 @@ function buildProjectMdContent(options: BuildSystemPromptOptions): string | null
  */
 function buildProjectInventoryContent(options: BuildSystemPromptOptions): string | null {
   const builder = new PromptBuilder();
-  builder.add("project-inventory-context", {
-    phase: options.phase,
-  });
+  builder.add("project-inventory-context", {});
   const content = builder.build();
   return content.trim() ? content : null;
 }
@@ -232,7 +291,7 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
   const systemPromptBuilder = new PromptBuilder();
 
   // For standalone agents, use a simplified identity without project references
-  systemPromptBuilder.add("specialist-identity", {
+  systemPromptBuilder.add("agent-identity", {
     agent,
     projectTitle: "Standalone Mode",
     projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
@@ -251,9 +310,9 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     triggeringEvent
   );
 
-  // Add specialist-specific fragments only if multiple agents available
+  // Add agent-specific fragments only if multiple agents available
   if (availableAgents.length > 1) {
-    addSpecialistFragments(
+    addAgentFragments(
       systemPromptBuilder,
       agent,
       availableAgents

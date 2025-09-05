@@ -4,7 +4,7 @@ import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logError } from "@/utils/logger";
+import { logger } from "@/utils/logger";
 
 /**
  * Unified file system utilities combining patterns from CLI and shared packages
@@ -130,7 +130,7 @@ export async function readJsonFile<T>(filePath: string): Promise<T | null> {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       return null;
     }
-    logError(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
+    logger.error(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
     throw err;
   }
 }
@@ -143,7 +143,7 @@ export function readJsonFileSync<T>(filePath: string): T | null {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       return null;
     }
-    logError(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
+    logger.error(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
     throw err;
   }
 }
@@ -178,7 +178,7 @@ export async function readTextFile(filePath: string): Promise<string | null> {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       return null;
     }
-    logError(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
+    logger.error(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
     throw err;
   }
 }
@@ -190,7 +190,7 @@ export function readTextFileSync(filePath: string): string | null {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       return null;
     }
-    logError(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
+    logger.error(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
     throw err;
   }
 }

@@ -20,6 +20,7 @@ import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegatePhaseTool } from "./implementations/delegate_phase";
+import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createNostrProjectsTool } from "./implementations/nostr_projects";
 import { createClaudeCodeTool } from "./implementations/claude_code";
 import { createCreateProjectTool } from "./implementations/create_project";
@@ -47,6 +48,7 @@ export type ToolName =
   | "discover_capabilities"
   | "delegate"
   | "delegate_phase"
+  | "delegate_followup"
   | "nostr_projects"
   | "claude_code"
   | "create_project"
@@ -85,6 +87,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   discover_capabilities: createMcpDiscoverTool,
   delegate: createDelegateTool,
   delegate_phase: createDelegatePhaseTool,
+  delegate_followup: createDelegateFollowupTool,
   nostr_projects: createNostrProjectsTool,
   claude_code: createClaudeCodeTool,
   create_project: createCreateProjectTool,
@@ -176,12 +179,51 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
       for (const mcpToolName of mcpToolNames) {
         const mcpTool = allMcpTools.find(t => t.name === mcpToolName);
         if (mcpTool) {
-          // Convert MCP tool to AI SDK format
-          tools[mcpToolName] = {
-            description: mcpTool.description || mcpToolName,
-            parameters: mcpTool.parameters || {},
-            execute: mcpTool.execute,
-          } as AISdkTool;
+          // Create a proper AI SDK tool using the tool function
+          const { tool } = require("ai");
+          const { z } = require("zod");
+          
+          // Create a dynamic Zod schema based on MCP parameters
+          let zodSchema: any;
+          const mcpParams = mcpTool.parameters as any;
+          
+          if (mcpParams && typeof mcpParams === 'object' && mcpParams.type === 'object' && mcpParams.properties) {
+            // Convert JSON Schema to basic Zod schema
+            const zodProperties: Record<string, any> = {};
+            for (const [key, value] of Object.entries(mcpParams.properties as any)) {
+              // Simple type mapping - can be extended as needed
+              const prop = value as any;
+              if (prop.type === 'string') {
+                zodProperties[key] = z.string().describe(prop.description || key);
+              } else if (prop.type === 'number') {
+                zodProperties[key] = z.number().describe(prop.description || key);
+              } else if (prop.type === 'boolean') {
+                zodProperties[key] = z.boolean().describe(prop.description || key);
+              } else if (prop.type === 'array') {
+                zodProperties[key] = z.array(z.any()).describe(prop.description || key);
+              } else {
+                zodProperties[key] = z.any().describe(prop.description || key);
+              }
+              
+              // Make optional if not required
+              if (!mcpParams.required?.includes(key)) {
+                zodProperties[key] = zodProperties[key].optional();
+              }
+            }
+            zodSchema = z.object(zodProperties);
+          } else {
+            // Default to accepting any object if no schema provided
+            zodSchema = z.object({}).passthrough();
+          }
+          
+          // Create the tool with proper AI SDK format
+          tools[mcpToolName] = tool({
+            description: mcpTool.description || `MCP tool: ${mcpToolName}`,
+            inputSchema: zodSchema,
+            execute: async (input: any) => {
+              return await mcpTool.execute(input);
+            },
+          });
         }
       }
     } catch (error) {

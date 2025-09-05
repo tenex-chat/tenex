@@ -70,7 +70,7 @@ describe("Multi-Recipient Delegation", () => {
   describe("Event Creation", () => {
     it("should create a single event with multiple p-tags", () => {
       const intent = {
-        type: "delegation" as const,
+        
         recipients: ["recipient1-pubkey", "recipient2-pubkey", "recipient3-pubkey"],
         request: "Analyze this code and provide feedback",
         phase: "execute",
@@ -121,7 +121,7 @@ describe("Multi-Recipient Delegation", () => {
 
     it("should handle single recipient delegation", () => {
       const intent = {
-        type: "delegation" as const,
+        
         recipients: ["single-recipient-pubkey"],
         request: "Do this one thing",
         phase: "execute",
@@ -163,7 +163,7 @@ describe("Multi-Recipient Delegation", () => {
   describe("Registry Tracking", () => {
     it("should track each recipient with the same delegation event ID", async () => {
       const intent = {
-        type: "delegation" as const,
+        
         recipients: ["recipient1-pubkey", "recipient2-pubkey"],
         request: "Multi-recipient task",
       };

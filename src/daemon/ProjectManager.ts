@@ -100,20 +100,14 @@ export class ProjectManager implements IProjectManager {
       }
 
       // Now load from local files (which were just created/updated)
-      await agentRegistry.loadFromProject(project);
-      const agentMap = agentRegistry.getAllAgentsMap();
-      const loadedAgents = new Map();
-      for (const [slug, agent] of agentMap.entries()) {
-        agent.slug = slug;
-        loadedAgents.set(slug, agent);
-      }
+      await agentRegistry.loadFromProject();
 
       // Create and initialize LLM logger
       const llmLogger = new LLMLogger();
       llmLogger.initialize(projectPath);
 
-      // Now set the project context once with all agents loaded
-      await setProjectContext(project, loadedAgents, llmLogger);
+      // Now set the project context with the agent registry
+      await setProjectContext(project, agentRegistry, llmLogger);
 
       // Republish kind:0 events for all agents
       await agentRegistry.republishAllAgentProfiles(project);
@@ -211,34 +205,14 @@ export class ProjectManager implements IProjectManager {
       }
       
       // Now load from local files (which were just created/updated)
-      await agentRegistry.loadFromProject(project);
-
-      // Get all agents from registry
-      const agentMap = agentRegistry.getAllAgentsMap();
-      const loadedAgents = new Map();
-
-      logger.debug("Agent registry loaded", {
-        agentMapSize: agentMap.size,
-        agentMapKeys: Array.from(agentMap.keys()),
-      });
-
-      // Set slug on each agent
-      for (const [slug, agent] of agentMap.entries()) {
-        agent.slug = slug;
-        loadedAgents.set(slug, agent);
-      }
-
-      logger.debug("Agents prepared for ProjectContext", {
-        loadedAgentsSize: loadedAgents.size,
-        loadedAgentsSlugs: Array.from(loadedAgents.keys()),
-      });
+      await agentRegistry.loadFromProject();
 
       // Create and initialize LLM logger
       const llmLogger = new LLMLogger();
       llmLogger.initialize(projectPath);
 
-      // Initialize ProjectContext
-      await setProjectContext(project, loadedAgents, llmLogger);
+      // Initialize ProjectContext with the agent registry
+      await setProjectContext(project, agentRegistry, llmLogger);
 
       // Initialize ConversationCoordinator for CLI commands
       const projectCtx = (await import("@/services")).getProjectContext();

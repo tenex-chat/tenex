@@ -91,7 +91,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
       // Format the pubkey as npub for the status message
       const user = new NDKUser({ pubkey: targetPubkey });
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `🔍 Getting nostr:${user.npub}'s projects` },
+        { content: `🔍 Getting nostr:${user.npub}'s projects` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

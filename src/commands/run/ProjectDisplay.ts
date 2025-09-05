@@ -1,6 +1,5 @@
 import { logger } from "@/utils/logger";
 
-const logInfo = logger.info.bind(logger);
 
 import type { AgentInstance } from "@/agents/types";
 import { getProjectContext, configService } from "@/services";
@@ -11,7 +10,7 @@ export class ProjectDisplay {
     this.displayBasicInfo(projectPath);
     await this.displayAgentConfigurations();
     // Note: Documentation display moved to after subscription EOSE
-    logInfo(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+    logger.info(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
   }
 
   private displayBasicInfo(projectPath: string): void {
@@ -20,14 +19,14 @@ export class ProjectDisplay {
     const titleTag = project.tagValue("title") || "Untitled Project";
     const repoTag = project.tagValue("repo") || "No repository";
 
-    logInfo(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-    logInfo(chalk.cyan("📦 Project Information"));
-    logInfo(chalk.blue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-    logInfo(chalk.gray("Title:      ") + chalk.white(titleTag));
-    logInfo(chalk.gray("Repository: ") + chalk.white(repoTag));
-    logInfo(chalk.gray("Path:       ") + chalk.white(projectPath));
+    logger.info(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+    logger.info(chalk.cyan("📦 Project Information"));
+    logger.info(chalk.blue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+    logger.info(chalk.gray("Title:      ") + chalk.white(titleTag));
+    logger.info(chalk.gray("Repository: ") + chalk.white(repoTag));
+    logger.info(chalk.gray("Path:       ") + chalk.white(projectPath));
     if (project.id) {
-      logInfo(chalk.gray("Event ID:   ") + chalk.gray(project.id));
+      logger.info(chalk.gray("Event ID:   ") + chalk.gray(project.id));
     }
   }
 
@@ -41,12 +40,12 @@ export class ProjectDisplay {
       agentKeys: Array.from(agents.keys()),
     });
 
-    logInfo(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-    logInfo(chalk.cyan("🤖 Agent Configurations"));
-    logInfo(chalk.blue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+    logger.info(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+    logger.info(chalk.cyan("🤖 Agent Configurations"));
+    logger.info(chalk.blue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 
     if (agents.size === 0) {
-      logInfo(chalk.yellow("No agent configurations found for this project."));
+      logger.info(chalk.yellow("No agent configurations found for this project."));
       return;
     }
 
@@ -63,9 +62,9 @@ export class ProjectDisplay {
 
   private async displayAgentBySlug(slug: string, agent: AgentInstance): Promise<void> {
     // Display agent information
-    logInfo(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
-    logInfo(chalk.gray("Slug:        ") + chalk.white(slug));
-    logInfo(chalk.gray("Role:        ") + chalk.white(agent.role));
+    logger.info(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
+    logger.info(chalk.gray("Slug:        ") + chalk.white(slug));
+    logger.info(chalk.gray("Role:        ") + chalk.white(agent.role));
     
     // Resolve and display the actual model that will be used
     const modelString = agent.llmConfig || "default";
@@ -77,12 +76,12 @@ export class ProjectDisplay {
                        (modelString === "default" && config.llms.default ? config.llms.configurations?.[config.llms.default] : null);
       
       if (llmConfig) {
-        logInfo(chalk.gray("Model:       ") + chalk.magenta(`${llmConfig.provider}:${llmConfig.model}`));
+        logger.info(chalk.gray("Model:       ") + chalk.magenta(`${llmConfig.provider}:${llmConfig.model}`));
       } else {
-        logInfo(chalk.gray("Model:       ") + chalk.red(`Configuration not found: ${modelString}`));
+        logger.info(chalk.gray("Model:       ") + chalk.red(`Configuration not found: ${modelString}`));
       }
     } catch {
-      logInfo(chalk.gray("Model:       ") + chalk.red(`Error resolving model: ${modelString}`));
+      logger.info(chalk.gray("Model:       ") + chalk.red(`Error resolving model: ${modelString}`));
     }
 
     // Separate regular tools from MCP tools
@@ -92,7 +91,7 @@ export class ProjectDisplay {
     // Display regular tools
     const regularToolNames = regularTools.join(", ");
     const regularToolCount = regularTools.length;
-    logInfo(chalk.gray("Tools:       ") + chalk.cyan(`[${regularToolCount}] ${regularToolNames || "none"}`));
+    logger.info(chalk.gray("Tools:       ") + chalk.cyan(`[${regularToolCount}] ${regularToolNames || "none"}`));
     
     // Display MCP tools grouped by server
     if (mcpTools.length > 0) {
@@ -150,12 +149,12 @@ export class ProjectDisplay {
         }
       }
       
-      logInfo(chalk.gray("MCP Tools:   ") + chalk.cyan(`[${mcpTools.length}] ${serverSummaries.join(", ")}`));
+      logger.info(chalk.gray("MCP Tools:   ") + chalk.cyan(`[${mcpTools.length}] ${serverSummaries.join(", ")}`));
     }
 
-    logInfo(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
+    logger.info(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
     if (agent.eventId) {
-      logInfo(chalk.gray("Event ID:    ") + chalk.gray(agent.eventId));
+      logger.info(chalk.gray("Event ID:    ") + chalk.gray(agent.eventId));
     }
   }
 }

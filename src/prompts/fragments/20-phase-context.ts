@@ -3,8 +3,8 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Phase context fragment for specialists.
- * Provides context about the current phase and any transition information.
+ * Phase context fragment.
+ * Provides context about the current phase and any transition information.  
  */
 interface PhaseContextArgs {
   phase: Phase;

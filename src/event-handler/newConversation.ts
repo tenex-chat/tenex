@@ -6,7 +6,6 @@ import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 
-const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
   conversationCoordinator: ConversationCoordinator;
@@ -45,7 +44,7 @@ export const handleNewConversation = async (
 
     // If no p-tags or no matching agent, just log and return
     if (!targetAgent) {
-      logInfo(chalk.gray(`New conversation without p-tags or matching agents - not routing to any agent`));
+      logger.info(chalk.gray(`New conversation without p-tags or matching agents - not routing to any agent`));
       return;
     }
 
@@ -59,8 +58,8 @@ export const handleNewConversation = async (
       conversationCoordinator: context.conversationCoordinator,
     });
 
-    logInfo(chalk.green("✅ Conversation routed successfully"));
+    logger.info(chalk.green("✅ Conversation routed successfully"));
   } catch (error) {
-    logInfo(chalk.red(`❌ Failed to route conversation: ${formatAnyError(error)}`));
+    logger.info(chalk.red(`❌ Failed to route conversation: ${formatAnyError(error)}`));
   }
 };

@@ -12,7 +12,6 @@ import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 
-const logInfo = logger.info.bind(logger);
 
 const IGNORED_EVENT_KINDS = [
   NDKKind.Metadata,
@@ -213,22 +212,18 @@ export class EventHandler {
 
       // Get the agent from the project context
       const projectContext = getProjectContext();
-      const agent = Array.from(projectContext.agents.values()).find(
-        (a) => a.pubkey === agentPubkey
-      );
+      const agent = projectContext.getAgentByPubkey(agentPubkey);
 
       if (!agent) {
         logger.warn("Agent not found for config change", {
           agentPubkey,
-          availableAgents: Array.from(projectContext.agents.keys()),
+          availableAgents: projectContext.getAgentSlugs(),
         });
         return;
       }
 
-      // Load the agent registry for persistent updates
-      const { AgentRegistry } = await import("@/agents/AgentRegistry");
-      const agentRegistry = new AgentRegistry(this.projectPath, false);
-      await agentRegistry.loadFromProject();
+      // Get the agent registry from ProjectContext (single source of truth)
+      const agentRegistry = projectContext.agentRegistry;
 
       // Check for model configuration change
       const newModel = event.tagValue("model");
@@ -241,20 +236,18 @@ export class EventHandler {
         });
 
         // Update the agent's model configuration persistently
+        // Since AgentRegistry is the single source of truth, this will update both
+        // the in-memory instance and persist to disk
         const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
 
         if (updated) {
-          // Also update in memory for immediate effect
-          agent.llmConfig = newModel;
           logger.info("Updated and persisted model configuration for agent", {
             agentName: agent.name,
             agentPubkey: agent.pubkey,
             newModel,
           });
         } else {
-          // Fallback: at least update in memory for this session
-          agent.llmConfig = newModel;
-          logger.warn("Updated model configuration in memory only (persistence failed)", {
+          logger.warn("Failed to update model configuration", {
             agentName: agent.name,
             agentPubkey: agent.pubkey,
             newModel,
@@ -277,16 +270,11 @@ export class EventHandler {
         });
 
         // Update the agent's tools persistently
+        // Since ProjectContext now uses AgentRegistry directly, this update
+        // will immediately be reflected in all agent accesses
         const updated = await agentRegistry.updateAgentTools(agentPubkey, newToolNames);
 
         if (updated) {
-          // CRITICAL: Also update the agent in ProjectContext so the changes take effect immediately
-          // The registry update only persists to disk and updates its own copy
-          // We need to update the ProjectContext copy that's actually used for execution
-          const { isValidToolName } = await import("@/tools/registry");
-          const validToolNames = newToolNames.filter(isValidToolName);
-          agent.tools = validToolNames;
-          
           logger.info("Updated tools configuration", {
             agent: agent.slug,
             toolCount: newToolNames.length,
@@ -317,7 +305,7 @@ export class EventHandler {
 
   private handleDefaultEvent(event: NDKEvent): void {
     if (event.content) {
-      logInfo(
+      logger.info(
         chalk.white(
           `[handleDefaultEvent ${event.id.substring(0, 6)}] Receivend unhandled event kind ${event.kind}`
         ) +
@@ -330,6 +318,6 @@ export class EventHandler {
   async cleanup(): Promise<void> {
     // Save all conversations before shutting down
     await this.conversationCoordinator.cleanup();
-    logInfo("EventHandler cleanup completed");
+    logger.info("EventHandler cleanup completed");
   }
 }

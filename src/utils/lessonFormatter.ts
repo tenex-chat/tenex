@@ -14,35 +14,28 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
     lessonsCount: lessons.length,
   });
 
-  // Sort by creation time (newest first)
-  const sortedLessons = lessons.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
-
-  // Take up to 50 lessons (should already be limited by ProjectContext)
-  const limitedLessons = sortedLessons.slice(0, 50);
-
-  // Format each lesson concisely
-  const formattedLessons = limitedLessons
+  // Format each lesson concisely - ALL OF THEM!
+const formattedLessons = lessons
     .map((lesson, index) => {
-      const title = lesson.title || "Untitled Lesson";
-      const content = lesson.lesson || lesson.content || "";
-      const phase = lesson.tags.find((tag) => tag[0] === "phase")?.[1];
-      const category = lesson.category;
-      const hashtags = lesson.hashtags;
-      const hasDetailed = !!lesson.detailed;
+        const title = lesson.title || "Untitled Lesson";
+        const content = lesson.lesson;
+        const category = lesson.category;
+        const hashtags = lesson.hashtags;
+        const hasDetailed = !!lesson.detailed;
 
-      // Build metadata line
-      let metadata = "";
-      if (category) metadata += ` [${category}]`;
-      if (hasDetailed) metadata += " [detailed available]";
-      if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(" #")}`;
+        // Build metadata line
+        let metadata = "";
+        if (category) metadata += ` [${category}]`;
+        if (hasDetailed) metadata += " [detailed available]";
+        if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(" #")}`;
 
-      // Create a concise format for each lesson
-      return `#${index + 1}: ${title}${phase ? ` (${phase})` : ""} ${metadata}\n${content}${hasDetailed ? `\n↳ Use lesson_get("${title}") for detailed version` : ""}`;
+        // Create a concise format for each lesson
+        return `#${index + 1}: ${title} ${metadata}\n${content}${hasDetailed ? `\n↳ Use lesson_get("${title}") for detailed version` : ""}`;
     })
     .join("\n\n");
 
   // Add header for context
-  const header = `## Lessons Learned (${limitedLessons.length} most recent)\n\n`;
+  const header = `## Lessons Learned (${lessons.length} total)\n\n`;
 
   return header + formattedLessons;
 }

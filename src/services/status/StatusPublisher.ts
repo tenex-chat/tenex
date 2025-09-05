@@ -7,7 +7,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logger, logWarning } from "@/utils/logger";
+import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
@@ -69,9 +69,15 @@ export class StatusPublisher {
     // Add p-tag for the project owner's pubkey
     event.tag(["p", projectCtx.project.pubkey]);
 
-    // Add agent pubkeys
+    // Add agent pubkeys with PM flag for project manager
+    const pmPubkey = projectCtx.projectManager.pubkey;
     for (const agent of intent.agents) {
-      event.tag(["agent", agent.pubkey, agent.slug]);
+      const tags = ["agent", agent.pubkey, agent.slug];
+      // Add "pm" flag if this is the project manager
+      if (agent.pubkey === pmPubkey) {
+        tags.push("pm");
+      }
+      event.tag(tags);
     }
 
     // Add model access tags
@@ -115,7 +121,7 @@ export class StatusPublisher {
           const eventId = agentTag[1];
           
           // Find agent with matching eventId
-          for (const [agentSlug, agent] of projectCtx.agents) {
+          for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
             if (agent.eventId === eventId) {
               intent.agents.push({
                 pubkey: agent.pubkey,
@@ -128,7 +134,7 @@ export class StatusPublisher {
         }
         
         // Then add any remaining agents (global or inline agents without eventIds)
-        for (const [agentSlug, agent] of projectCtx.agents) {
+        for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
           if (!addedAgentSlugs.has(agentSlug)) {
             intent.agents.push({
               pubkey: agent.pubkey,
@@ -155,7 +161,7 @@ export class StatusPublisher {
       await event.publish();
     } catch (err) {
       const errorMessage = formatAnyError(err);
-      logWarning(`Failed to publish status event: ${errorMessage}`);
+      logger.warn(`Failed to publish status event: ${errorMessage}`);
     }
   }
 
@@ -181,7 +187,7 @@ export class StatusPublisher {
         const globalDefault = llms.defaults?.agents || llms.defaults?.routing;
 
         // Map each agent to its configuration
-        for (const [agentSlug] of projectCtx.agents) {
+        for (const [agentSlug] of projectCtx.agentRegistry.getAllAgentsMap()) {
           // Check if this agent has a specific configuration
           const specificConfig = llms.defaults[agentSlug];
 
@@ -205,7 +211,7 @@ export class StatusPublisher {
         });
       }
     } catch (err) {
-      logWarning(
+      logger.warn(
         `Could not load LLM information for status event model tags: ${formatAnyError(err)}`
       );
     }
@@ -214,29 +220,39 @@ export class StatusPublisher {
   private async gatherToolInfo(intent: StatusIntent): Promise<void> {
     try {
       if (!isProjectContextInitialized()) {
-        logWarning("ProjectContext not initialized for tool tags");
+        logger.warn("ProjectContext not initialized for tool tags");
         return;
       }
 
       const projectCtx = getProjectContext();
       const toolAgentMap = new Map<string, Set<string>>();
 
-      // First, add ALL tool names from the registry (even if unassigned)
+      // Import the delegate tools list from the single source of truth
+      const { DELEGATE_TOOLS } = await import("@/agents/constants");
+
+      // First, add ALL tool names from the registry (except delegate tools)
       const { getAllToolNames } = await import("@/tools/registry");
       const allToolNames = getAllToolNames();
       for (const toolName of allToolNames) {
-        toolAgentMap.set(toolName, new Set());
+        // Skip delegate tools from kind 24010 events
+        if (!DELEGATE_TOOLS.includes(toolName)) {
+          toolAgentMap.set(toolName, new Set());
+        }
       }
 
       // Then build a map of tool name -> set of agent slugs that have access
-      for (const [agentSlug, agent] of projectCtx.agents) {
+      for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
         // Get the agent's configured tools
         const agentTools = agent.tools || [];
 
         for (const toolName of agentTools) {
           // Skip invalid tool names
           if (!toolName) {
-            logWarning(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
+            logger.warn(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
+            continue;
+          }
+          // Skip delegate tools - they're not included in kind 24010 events
+          if (DELEGATE_TOOLS.includes(toolName)) {
             continue;
           }
           const toolAgents = toolAgentMap.get(toolName);
@@ -266,7 +282,7 @@ export class StatusPublisher {
               
               // Still skip if we couldn't generate a name
               if (!toolName) {
-                logWarning(`Skipping MCP tool without name or description: ${JSON.stringify(mcpTool)}`);
+                logger.warn(`Skipping MCP tool without name or description: ${JSON.stringify(mcpTool)}`);
                 continue;
               }
               
@@ -280,7 +296,7 @@ export class StatusPublisher {
             }
           } catch (err) {
             // MCP tools might not be available yet, that's okay
-            logWarning(`Could not get MCP tools for status event: ${formatAnyError(err)}`);
+            logger.warn(`Could not get MCP tools for status event: ${formatAnyError(err)}`);
           }
         }
       }
@@ -297,7 +313,7 @@ export class StatusPublisher {
         }
       }
     } catch (err) {
-      logWarning(`Could not add tool tags to status event: ${formatAnyError(err)}`);
+      logger.warn(`Could not add tool tags to status event: ${formatAnyError(err)}`);
     }
   }
 

@@ -81,7 +81,7 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         // Create completion intent
         const intent: CompletionIntent = {
-          type: "completion",
+          
           content: "Analysis complete. Found 3 anomalies in the dataset.",
           summary: "3 anomalies detected",
           executionMetadata: {
@@ -154,7 +154,7 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         // Coordinator delegates to workers
         const delegationIntent: DelegationIntent = {
-          type: "delegation",
+          
           tasks: [
             {
               content: "Extract key points from document",

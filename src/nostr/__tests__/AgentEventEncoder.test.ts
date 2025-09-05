@@ -90,7 +90,7 @@ describe("AgentEventEncoder", () => {
   describe("encodeCompletion", () => {
     it("should encode a basic completion intent", () => {
       const intent: CompletionIntent = {
-        type: "completion",
+        
         content: "Task completed successfully",
       };
 
@@ -107,7 +107,7 @@ describe("AgentEventEncoder", () => {
 
     it("should include optional completion metadata", () => {
       const intent: CompletionIntent = {
-        type: "completion",
+        
         content: "Analysis complete",
         summary: "Found 3 issues",
       };
@@ -131,7 +131,7 @@ describe("AgentEventEncoder", () => {
       };
 
       const intent: CompletionIntent = {
-        type: "completion",
+        
         content: "Done",
       };
 
@@ -157,7 +157,7 @@ describe("AgentEventEncoder", () => {
       };
 
       const intent: CompletionIntent = {
-        type: "completion",
+        
         content: "Implementation completed",
       };
 
@@ -170,7 +170,7 @@ describe("AgentEventEncoder", () => {
   describe("encodeDelegation", () => {
     it("should create task events for each recipient", () => {
       const intent: DelegationIntent = {
-        type: "delegation",
+        
         recipients: ["recipient1", "recipient2"],
         title: "Review code",
         request: "Please review the authentication module",
@@ -200,7 +200,7 @@ describe("AgentEventEncoder", () => {
       };
 
       const intent: DelegationIntent = {
-        type: "delegation",
+        
         recipients: ["reviewer"],
         title: "Phase 2 Review",
         request: "Review implementation",
@@ -213,7 +213,7 @@ describe("AgentEventEncoder", () => {
 
     it("should link to triggering event", () => {
       const intent: DelegationIntent = {
-        type: "delegation",
+        
         recipients: ["agent456"],
         title: "Task",
         request: "Do something",
@@ -307,7 +307,7 @@ describe("AgentEventEncoder", () => {
   describe("encodeConversation", () => {
     it("should create a simple response without completion semantics", () => {
       const intent: ConversationIntent = {
-        type: "conversation",
+        
         content: "I'm still working on this...",
       };
 

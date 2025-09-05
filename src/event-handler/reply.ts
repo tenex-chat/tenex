@@ -12,7 +12,6 @@ import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 
-const logInfo = logger.info.bind(logger);
 
 interface EventHandlerContext {
   conversationCoordinator: ConversationCoordinator;
@@ -26,7 +25,7 @@ export const handleChatMessage = async (
   event: NDKEvent,
   context: EventHandlerContext
 ): Promise<void> => {
-  logInfo(
+  logger.info(
     chalk.gray("Message: ") +
       chalk.white(event.content.substring(0, 100) + (event.content.length > 100 ? "..." : ""))
   );
@@ -59,7 +58,7 @@ export const handleChatMessage = async (
   try {
     await handleReplyLogic(event, context);
   } catch (error) {
-    logInfo(chalk.red(`❌ Failed to route reply: ${formatAnyError(error)}`));
+    logger.info(chalk.red(`❌ Failed to route reply: ${formatAnyError(error)}`));
   }
 };
 
@@ -93,7 +92,6 @@ async function executeAgent(
 
     await agentPublisher.error(
       {
-        type: "error",
         message: displayMessage,
         errorType: isCreditsError ? "insufficient_credits" : "execution_error",
       },
@@ -162,7 +160,7 @@ async function handleReplyLogic(
   const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
   if (nonSelfReplyAgents.length === 0) {
     const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents);
-    logInfo(
+    logger.info(
       chalk.gray(
         `Skipping self-reply: all target agents would process their own message (${routingReasons})`
       )
@@ -173,7 +171,7 @@ async function handleReplyLogic(
   // Log if some agents were filtered out due to self-reply
   if (nonSelfReplyAgents.length < targetAgents.length) {
     const filteredAgents = targetAgents.filter(a => !nonSelfReplyAgents.includes(a));
-    logInfo(
+    logger.info(
       chalk.gray(
         `Filtered out self-reply for: ${filteredAgents.map(a => a.name).join(", ")}`
       )
@@ -186,7 +184,7 @@ async function handleReplyLogic(
   const effectiveEvent = event;
   const claudeSessionId = mappedClaudeSessionId || AgentEventDecoder.getClaudeSessionId(effectiveEvent);
   if (claudeSessionId) {
-    logInfo(
+    logger.info(
       chalk.gray("Passing claude-session to execution context: ") +
         chalk.cyan(claudeSessionId) +
         (mappedClaudeSessionId ? chalk.gray(" (from task mapping)") : "")

@@ -7,7 +7,7 @@ import { mcpService } from "@/services/mcp/MCPManager";
 // Tool type removed - using AI SDK tools only
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
-import { logError, logInfo, logWarning } from "@/utils/logger";
+import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
 
@@ -53,19 +53,19 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     await agentRegistry.loadFromProject();
     const agent = agentRegistry.getAgent(options.agent);
 
-    logInfo(chalk.cyan("\n=== Agent Information ==="));
+    logger.info(chalk.cyan("\n=== Agent Information ==="));
     if (agent) {
-      logInfo(`${chalk.white("Name:")} ${agent.name}`);
-      logInfo(`${chalk.white("Role:")} ${agent.role}`);
-      logInfo(`${chalk.white("Phase:")} ${options.phase}`);
+      logger.info(`${chalk.white("Name:")} ${agent.name}`);
+      logger.info(`${chalk.white("Role:")} ${agent.role}`);
+      logger.info(`${chalk.white("Phase:")} ${options.phase}`);
       if (agent.tools && agent.tools.length > 0) {
-        logInfo(`${chalk.white("Tools:")} ${agent.tools.join(", ")}`);
+        logger.info(`${chalk.white("Tools:")} ${agent.tools.join(", ")}`);
       }
     } else {
-      logWarning(`Note: Agent '${options.agent}' not found in registry`);
+      logger.warn(`Note: Agent '${options.agent}' not found in registry`);
     }
 
-    logInfo(chalk.cyan("\n=== System Prompt ==="));
+    logger.info(chalk.cyan("\n=== System Prompt ==="));
 
     if (agent) {
       const projectCtx = getProjectContext();
@@ -81,9 +81,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       try {
         await mcpService.initialize(projectPath);
         mcpTools = mcpService.getCachedTools();
-        logInfo(`Loaded ${mcpTools.length} MCP tools`);
+        logger.info(`Loaded ${mcpTools.length} MCP tools`);
       } catch (error) {
-        logError(`Failed to initialize MCP service: ${error}`);
+        logger.error(`Failed to initialize MCP service: ${error}`);
         // Continue without MCP tools - don't fail the whole debug command
       }
 
@@ -110,9 +110,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       });
 
       // Display each system message separately with metadata
-      logInfo(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-      logInfo(chalk.bold.cyan("                    SYSTEM PROMPT MESSAGES"));
-      logInfo(chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+      logger.info(chalk.bold.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+      logger.info(chalk.bold.cyan("                    SYSTEM PROMPT MESSAGES"));
+      logger.info(chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
 
       for (let i = 0; i < systemMessages.length; i++) {
         const msg = systemMessages[i];
@@ -145,7 +145,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
 
     console.log(chalk.cyan("===================\n"));
 
-    logInfo("System prompt displayed successfully");
+    logger.info("System prompt displayed successfully");
     process.exit(0);
   } catch (err) {
     handleCliError(err, "Failed to generate system prompt");

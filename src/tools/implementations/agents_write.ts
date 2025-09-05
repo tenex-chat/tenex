@@ -15,7 +15,7 @@ const agentsWriteSchema = z.object({
   instructions: z.string().nullable().describe("System instructions that guide agent behavior"),
   useCriteria: z.string().nullable().describe("Criteria for when this agent should be selected"),
   llmConfig: z.string().nullable().describe("LLM configuration identifier"),
-  tools: z.array(z.string()).nullable().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, delegate_external, delegate_phase, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
+  tools: z.array(z.string()).nullable().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
   mcp: z.boolean().nullable().describe("Whether this agent has access to MCP tools (defaults to true)"),
 });
 
@@ -173,7 +173,7 @@ async function executeAgentsWrite(
  */
 export function createAgentsWriteTool(): ReturnType<typeof tool> {
   return tool({
-    description: "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, delegate, read_path, reports_list, report_read. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
+    description: "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
     inputSchema: agentsWriteSchema,
     execute: async (input: AgentsWriteInput) => {
       try {

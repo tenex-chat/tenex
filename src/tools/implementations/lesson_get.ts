@@ -61,7 +61,7 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
       const lessonTitle = lesson.title || title;
       const lessonNaddr = lesson.encode();
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `Reading [${lessonTitle}](nostr:${lessonNaddr})` },
+        { content: `Reading [${lessonTitle}](nostr:${lessonNaddr})` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

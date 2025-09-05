@@ -26,7 +26,7 @@ async function executeReadPath(
     
     if (conversation?.history?.[0]) {
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `📖 Reading ${path}` },
+        { content: `📖 Reading ${path}` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

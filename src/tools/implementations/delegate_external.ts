@@ -97,13 +97,6 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   await chatEvent.sign(context.agent.signer);
   chatEvent.publish();
 
-  logger.info("✅ External delegation published, waiting synchronously for response", {
-    eventId: chatEvent.id,
-    kind: chatEvent.kind,
-    agent: context.agent.name,
-    mode: "synchronous",
-  });
-
   const registry = DelegationRegistry.getInstance();
   const batchId = await registry.registerDelegation({
     delegationEventId: chatEvent.id,
@@ -124,7 +117,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 
     if (conversation?.history?.[0]) {
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `🚀 External delegation sent: nostr:${chatEvent.encode()}` },
+        { content: `🚀 External delegation sent: nostr:${chatEvent.encode()}` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],
@@ -145,7 +138,6 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
       eventId: chatEvent.id,
       batchId,
       completionCount: completions.length,
-      mode: "synchronous",
     });
 
     // Convert to DelegationResponses format
@@ -164,7 +156,6 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
     logger.error("❌ Synchronous wait failed for external response", {
       eventId: chatEvent.id,
       batchId,
-      mode: "synchronous",
       error,
     });
 
@@ -175,7 +166,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 // AI SDK tool factory
 export function createDelegateExternalTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: "Delegate a task to an external agent or user and wait synchronously for their response, optionally as a reply or referencing a project",
+    description: "Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects.",
     inputSchema: delegateExternalSchema,
     execute: async (input: DelegateExternalInput) => {
       return await executeDelegateExternal(input, context);

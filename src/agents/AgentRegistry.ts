@@ -9,14 +9,14 @@ import type {
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
+import { configService } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 // Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { type NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { CORE_AGENT_TOOLS, getDefaultToolsForAgent } from "./constants";
+import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -48,13 +48,16 @@ export class AgentRegistry {
     }
   }
 
-  async loadFromProject(): Promise<void> {
+  async loadFromProject(ndkProject?: NDKProject): Promise<void> {
     // Ensure .tenex directory exists
     const tenexDir = this.basePath.endsWith(".tenex")
       ? this.basePath
       : path.join(this.basePath, ".tenex");
     await ensureDirectory(tenexDir);
     await ensureDirectory(this.agentsDir);
+
+    // Store the NDKProject for PM determination
+    this.ndkProject = ndkProject;
 
     // Load agents using ConfigService
     try {
@@ -77,7 +80,7 @@ export class AgentRegistry {
       if (!this.isGlobal) {
         for (const [slug, registryEntry] of Object.entries(this.globalRegistry)) {
           logger.debug(`Loading global agent: ${slug}`, { registryEntry });
-          await this.loadAgentBySlug(slug, true);
+          await this.loadAgentBySlugInternal(slug, true);
           // Track global agent event IDs and slugs
           if (registryEntry.eventId) {
             loadedGlobalEventIds.add(registryEntry.eventId);
@@ -100,7 +103,7 @@ export class AgentRegistry {
           continue;
         }
         logger.debug(`Loading agent from registry: ${slug}`, { registryEntry });
-        await this.loadAgentBySlug(slug, false);
+        await this.loadAgentBySlugInternal(slug, false);
       }
     } catch (error) {
       logger.error("Failed to load agent registry", { error });
@@ -288,14 +291,74 @@ export class AgentRegistry {
   getAllAgentsMap(): Map<string, AgentInstance> {
     return new Map(this.agents);
   }
-
-  getAgentByName(name: string): AgentInstance | undefined {
-    return Array.from(this.agents.values()).find((agent) => agent.name === name);
+  
+  /**
+   * Set the PM for this project - updates registry and reassigns delegate tools
+   * Note: This is synchronous. Call persistPMStatus() to save to disk.
+   */
+  setPMPubkey(pubkey: string): void {
+    // Clear any existing PM flags in both registries
+    for (const entry of Object.values(this.registry)) {
+      delete entry.isPM;
+    }
+    for (const entry of Object.values(this.globalRegistry)) {
+      delete entry.isPM;
+    }
+    
+    // Find the agent with this pubkey
+    const agentToSetAsPM = this.agentsByPubkey.get(pubkey);
+    if (!agentToSetAsPM) {
+      logger.error(`Failed to set PM - no agent found with pubkey ${pubkey}`);
+      return;
+    }
+    
+    // Find which registry contains this agent and set the flag
+    let foundPM = false;
+    for (const [slug, agent] of this.agents) {
+      if (agent.pubkey === pubkey) {
+        // Check both registries
+        const registry = agent.isGlobal ? this.globalRegistry : this.registry;
+        const registryEntry = registry[slug];
+        if (registryEntry) {
+          registryEntry.isPM = true;
+          foundPM = true;
+          break;
+        }
+      }
+    }
+    
+    if (!foundPM) {
+      logger.error(`Failed to set PM - agent not found in registry`);
+      return;
+    }
+    
+    // Reassign delegate tools for all loaded agents
+    for (const agent of this.agents.values()) {
+      agent.tools = agent.tools.filter(t => !DELEGATE_TOOLS.includes(t));
+      const isPM = agent.pubkey === pubkey;
+      const delegateTools = getDelegateToolsForAgent(isPM);
+      agent.tools.push(...delegateTools);
+    }
+    
+    logger.info(`Set PM to ${pubkey} and reassigned delegate tools`);
+  }
+  
+  /**
+   * Persist PM status to disk
+   */
+  async persistPMStatus(): Promise<void> {
+    await this.saveRegistry();
+    if (!this.isGlobal) {
+      // Only save global registry if we modified it
+      for (const entry of Object.values(this.globalRegistry)) {
+        if (entry.isPM) {
+          await this.saveGlobalRegistry();
+          break;
+        }
+      }
+    }
   }
 
-  getRegistryData(): TenexAgents {
-    return this.registry;
-  }
 
   private async saveRegistry(): Promise<void> {
     if (this.isGlobal) {
@@ -304,7 +367,7 @@ export class AgentRegistry {
       await configService.saveProjectAgents(this.basePath, this.registry);
     }
   }
-
+  
   private async saveGlobalRegistry(): Promise<void> {
     await configService.saveGlobalAgents(this.globalRegistry);
   }
@@ -372,54 +435,6 @@ export class AgentRegistry {
     return true;
   }
 
-  /**
-   * Remove an agent by its slug
-   * This removes the agent from memory and deletes its definition file
-   */
-  async removeAgentBySlug(slug: string): Promise<boolean> {
-    const agent = this.agents.get(slug);
-    if (!agent) {
-      logger.warn(`Agent with slug ${slug} not found for removal`);
-      return false;
-    }
-
-
-    // Don't allow removing global agents from a project context
-    if (agent.isGlobal && !this.isGlobal) {
-      logger.warn(`Cannot remove global agent ${slug} from project context. Remove it globally instead.`);
-      return false;
-    }
-
-    // Remove from memory
-    this.agents.delete(slug);
-    this.agentsByPubkey.delete(agent.pubkey);
-
-    // Find registry info using pubkey to ensure we get the right registry
-    const registryInfo = this.findRegistryEntryByPubkey(agent.pubkey);
-    if (registryInfo) {
-      // Delete the agent definition file
-      try {
-        const filePath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
-        await fs.unlink(filePath);
-        logger.info(`Deleted agent definition file: ${filePath}`);
-      } catch (error) {
-        logger.warn("Failed to delete agent definition file", { error, slug });
-      }
-
-      // Remove from the appropriate registry and save
-      delete registryInfo.registry[slug];
-      
-      // Save the appropriate registry
-      if (registryInfo.registry === this.globalRegistry) {
-        await this.saveGlobalRegistry();
-      } else {
-        await this.saveRegistry();
-      }
-    }
-
-    logger.info(`Removed agent ${slug}`);
-    return true;
-  }
 
   /**
    * Find registry entry and path for an agent by its public key
@@ -540,6 +555,33 @@ export class AgentRegistry {
   }
 
   /**
+   * Normalize agent tools by applying business rules:
+   * - Remove delegation tools from requested tools (they're added based on PM status)
+   * - Add appropriate delegation tools based on PM status
+   * - Ensure core tools are always present
+   * @param requestedTools - Tools requested/configured for the agent
+   * @param isPM - Whether the agent is the Project Manager
+   * @returns Normalized array of tool names
+   */
+  private normalizeAgentTools(requestedTools: string[], isPM: boolean): string[] {
+    // Filter out delegation tools - they should never be in configuration
+    let toolNames = requestedTools.filter(tool => !DELEGATE_TOOLS.includes(tool));
+    
+    // Add the correct delegation tools based on PM status
+    const delegateTools = getDelegateToolsForAgent(isPM);
+    toolNames.push(...delegateTools);
+    
+    // Ensure core tools are always included for ALL agents
+    for (const coreTool of CORE_AGENT_TOOLS) {
+      if (!toolNames.includes(coreTool)) {
+        toolNames.push(coreTool);
+      }
+    }
+    
+    return toolNames;
+  }
+
+  /**
    * Update an agent's tools configuration persistently
    * @param agentPubkey - The public key of the agent to update
    * @param newToolNames - Array of tool names the agent should have access to
@@ -553,18 +595,23 @@ export class AgentRegistry {
       return false;
     }
 
-    // Update the agent tools in memory
-    // Filter to only valid tool names
-    const { isValidToolName } = await import("@/tools/registry");
-    const validToolNames = newToolNames.filter(isValidToolName);
-    agent.tools = validToolNames;
-
-    // Find the registry entry by pubkey
+    // Find the registry entry by pubkey to get PM status
     const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
     if (!registryInfo) {
       logger.warn(`Registry entry not found for agent with pubkey ${agentPubkey}`);
       return false;
     }
+
+    // Normalize tools according to business rules (delegation tools, core tools, etc.)
+    const isPM = registryInfo.entry.isPM === true;
+    const normalizedTools = this.normalizeAgentTools(newToolNames, isPM);
+
+    // Validate the normalized tool names
+    const { isValidToolName } = await import("@/tools/registry");
+    const validToolNames = normalizedTools.filter(isValidToolName);
+    
+    // Update the agent tools in memory
+    agent.tools = validToolNames;
 
     // Update the agent definition file
     try {
@@ -623,24 +670,16 @@ export class AgentRegistry {
       let projectTitle: string;
       let projectEvent: NDKProject;
 
-      // Use passed NDKProject if available, otherwise fall back to ProjectContext
-      if (ndkProject) {
-        projectTitle = ndkProject.tagValue("title") || "Unknown Project";
-        projectEvent = ndkProject;
-      } else {
-        // Check if project context is initialized
-        if (!isProjectContextInitialized()) {
-          logger.warn(
-            "ProjectContext not initialized and no NDKProject provided, skipping agent event publishing"
-          );
-          return;
-        }
-
-        // Get project context for project event and name
-        const projectCtx = getProjectContext();
-        projectTitle = projectCtx.project.tagValue("title") || "Unknown Project";
-        projectEvent = projectCtx.project;
+      // Require NDKProject to be passed
+      if (!ndkProject) {
+        logger.warn(
+          "No NDKProject provided, skipping agent event publishing"
+        );
+        return;
       }
+      
+      projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+      projectEvent = ndkProject;
 
       // Publish agent profile (kind:0) and request event using static method
       await AgentPublisher.publishAgentCreation(
@@ -654,10 +693,6 @@ export class AgentRegistry {
       logger.error("Failed to publish agent events", { error });
       // Don't throw - agent creation should succeed even if publishing fails
     }
-  }
-
-  async loadAgentBySlug(slug: string, fromGlobal = false): Promise<AgentInstance | null> {
-    return this.loadAgentBySlugInternal(slug, fromGlobal);
   }
 
   private async loadAgentBySlugInternal(
@@ -720,6 +755,32 @@ export class AgentRegistry {
   }
 
   /**
+   * Get the PM pubkey for this project
+   */
+  private getPMPubkey(): string | undefined {
+    // Try ProjectContext first (most reliable when available)
+    const { isProjectContextInitialized, getProjectContext } = require("@/services");
+    if (isProjectContextInitialized()) {
+      return getProjectContext().projectManager?.pubkey;
+    }
+    
+    // Fall back to NDKProject if we have it
+    if (this.ndkProject) {
+      const pmEventId = this.ndkProject.tagValue("agent");
+      // Find agent with this event ID
+      for (const [_, agent] of this.agents) {
+        if (agent.eventId === pmEventId) {
+          return agent.pubkey;
+        }
+      }
+    }
+    
+    // Last resort: first agent in registry
+    const firstAgent = this.agents.values().next().value;
+    return firstAgent?.pubkey;
+  }
+
+  /**
    * Helper method to build an AgentInstance from configuration and registry data
    * Centralizes the logic for creating agent instances to avoid duplication
    */
@@ -750,16 +811,12 @@ export class AgentRegistry {
     };
 
     // Set tools - use explicit tools if configured, otherwise use defaults
-    const toolNames =
+    const requestedTools =
       agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
-
-    // CRITICAL: Ensure core tools are always included for ALL agents
-    // These are fundamental tools that every agent needs access to
-    for (const coreTool of CORE_AGENT_TOOLS) {
-      if (!toolNames.includes(coreTool)) {
-        toolNames.push(coreTool);
-      }
-    }
+    
+    // Normalize tools according to business rules (delegation tools, core tools, etc.)
+    const isPM = registryEntry.isPM === true;
+    let toolNames = this.normalizeAgentTools(requestedTools, isPM);
 
     // Validate tool names - we now store tool names as strings, not instances
     const { isValidToolName } = await import("@/tools/registry");
@@ -944,24 +1001,9 @@ export class AgentRegistry {
     let projectTitle: string;
     let projectEvent: NDKProject;
 
-    // Use passed NDKProject if available, otherwise fall back to ProjectContext
-    if (ndkProject) {
-      projectTitle = ndkProject.title || "";
-      projectEvent = ndkProject;
-    } else {
-      // Check if project context is initialized
-      if (!isProjectContextInitialized()) {
-        logger.warn(
-          "ProjectContext not initialized and no NDKProject provided, skipping agent profile republishing"
-        );
-        return;
-      }
-
-      // Get project context for project event and name
-      const projectCtx = getProjectContext();
-      projectTitle = projectCtx.project.tagValue("title") || "Unknown Project";
-      projectEvent = projectCtx.project;
-    }
+    // NDKProject is required
+    projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+    projectEvent = ndkProject;
 
     // Republish kind:0 for each agent
     for (const [slug, agent] of Array.from(this.agents.entries())) {

@@ -5,7 +5,6 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 
-const logInfo = logger.info.bind(logger);
 
 /**
  * AgentRouter is a static utility class that determines which agent
@@ -35,11 +34,11 @@ export  class AgentRouter {
       // Find ALL p-tagged system agents
       const targetAgents: AgentInstance[] = [];
       for (const pubkey of mentionedPubkeys) {
-        const agent = Array.from(projectContext.agents.values()).find((a) => a.pubkey === pubkey);
+        const agent = projectContext.getAgentByPubkey(pubkey);
         if (agent) {
           // Check if this is a global agent that needs project validation
           if (agent.isGlobal && !this.validateProjectContext(event, projectContext)) {
-            logInfo(chalk.gray(`Skipping global agent ${agent.name} - event not for this project context`));
+            logger.info(chalk.gray(`Skipping global agent ${agent.name} - event not for this project context`));
             continue;
           }
           targetAgents.push(agent);
@@ -48,7 +47,7 @@ export  class AgentRouter {
       
       if (targetAgents.length > 0) {
         const agentNames = targetAgents.map(a => a.name).join(", ");
-        logInfo(chalk.gray(`Routing to ${targetAgents.length} p-tagged agent(s): ${agentNames}`));
+        logger.info(chalk.gray(`Routing to ${targetAgents.length} p-tagged agent(s): ${agentNames}`));
         return targetAgents;
       }
     }
@@ -56,7 +55,7 @@ export  class AgentRouter {
     // If no p-tags, don't route to anyone - just log it
     if (mentionedPubkeys.length === 0) {
       const senderType = isAuthorAnAgent ? "agent" : "user";
-      logInfo(
+      logger.info(
         chalk.gray(`Event from ${senderType} ${event.pubkey.substring(0, 8)} without p-tags - not routing to any agent`)
       );
       return [];

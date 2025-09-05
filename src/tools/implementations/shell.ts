@@ -1,7 +1,6 @@
 import { tool } from 'ai';
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { getProjectContext } from "@/services";
 import { ExecutionConfig } from "@/agents/execution/constants";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -36,17 +35,6 @@ async function executeShell(
 ): Promise<ShellOutput> {
   const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input;
 
-  // Safety check - only the current PM can use this tool
-  try {
-    const projectContext = getProjectContext();
-    const pmAgent = projectContext.getProjectManager();
-    if (context.agent.pubkey !== pmAgent.pubkey) {
-      throw new Error("Shell tool is restricted to the project manager agent only");
-    }
-  } catch {
-    throw new Error("Unable to verify project manager status");
-  }
-
   const workingDir = cwd || context.projectPath;
 
   logger.info("Executing shell command", {
@@ -63,7 +51,7 @@ async function executeShell(
     
     if (conversation?.history?.[0]) {
       await agentPublisher.conversation(
-        { type: "conversation", content: `⚡ Executing: ${command}` },
+        { content: `⚡ Executing: ${command}` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

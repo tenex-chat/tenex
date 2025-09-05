@@ -7,7 +7,6 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 
-const logInfo = logger.info.bind(logger);
 
 export interface DelegationCompletionResult {
   shouldReactivate: boolean;
@@ -201,7 +200,7 @@ export class DelegationCompletionHandler {
           replyTarget: originalUserEvent,
         };
       }
-      logInfo(
+      logger.info(
         chalk.gray(
           `Delegation completed. Waiting for ${result.remainingDelegations} more delegations.`
         )

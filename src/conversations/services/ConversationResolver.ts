@@ -5,7 +5,6 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 
-const logInfo = logger.info.bind(logger);
 
 export interface ConversationResolutionResult {
   conversation: Conversation | undefined;
@@ -83,7 +82,7 @@ export class ConversationResolver {
     }
 
     const convRoot = AgentEventDecoder.getConversationRoot(event);
-    logInfo(
+    logger.info(
       chalk.yellow(
         `Creating new conversation for orphaned kTag 11 reply to conversation root: ${convRoot}`
       )

@@ -129,6 +129,10 @@ export class ProjectContext {
     this.pubkey = projectManagerAgent.pubkey;
     this.projectManager = projectManagerAgent;
     this.agentLessons = new Map();
+    
+    // Tell AgentRegistry who the PM is so it can assign delegate tools correctly
+    // Note: This is synchronous now, file saving happens later
+    this.agentRegistry.setPMPubkey(projectManagerAgent.pubkey);
   }
 
   // =====================================================================================
@@ -230,6 +234,12 @@ export class ProjectContext {
         break;
       }
     }
+    
+    // Tell AgentRegistry who the PM is after reload
+    if (this.projectManager) {
+      this.agentRegistry.setPMPubkey(this.projectManager.pubkey);
+      await this.agentRegistry.persistPMStatus();
+    }
 
     logger.info("ProjectContext updated with new data", {
       projectId: newProject.id,
@@ -248,6 +258,8 @@ let projectContext: ProjectContext | undefined;
  */
 export async function setProjectContext(project: NDKProject, agentRegistry: AgentRegistry, llmLogger: LLMLogger): Promise<void> {
   projectContext = new ProjectContext(project, agentRegistry, llmLogger);
+  // Persist the PM status to disk
+  await agentRegistry.persistPMStatus();
   // Note: publishProjectStatus() should be called explicitly after context is set
   // to avoid duplicate events during initialization
 }

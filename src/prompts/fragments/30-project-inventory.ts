@@ -1,14 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Phase } from "@/conversations/phases";
 import { logger } from "@/utils/logger";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 // Project inventory context fragment
-interface InventoryContextArgs {
-  phase: Phase;
-}
+interface InventoryContextArgs {}
 
 // Helper function to count total files recursively
 function countTotalFiles(dir: string): number {
@@ -268,13 +265,6 @@ ${contextFiles.map((f) => `- context/${f}`).join("\n")}`);
     parts.push("</project_inventory>\n");
 
     return parts.join("\n\n");
-  },
-  validateArgs: (args): args is InventoryContextArgs => {
-    return (
-      typeof args === "object" &&
-      args !== null &&
-      typeof (args as InventoryContextArgs).phase === "string"
-    );
   },
 };
 

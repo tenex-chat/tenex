@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import { logger, logInfo } from "@/utils/logger";
+import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { AgentConversationContext } from "../AgentConversationContext";
@@ -49,15 +49,8 @@ export class ConversationCoordinator {
     const conversation = await this.eventProcessor.createConversationFromEvent(event);
 
     // Log conversation start
-    logInfo(
-      `Starting conversation ${conversation.id.substring(0, 8)}`,
-      "conversation",
-      "normal",
-      {
-        conversationId: conversation.id,
-        userMessage: event.content?.substring(0, 100),
-        eventId: event.id,
-      }
+    logger.info(
+      `Starting conversation ${conversation.id.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`
     );
 
     // Store and persist
@@ -191,15 +184,8 @@ export class ConversationCoordinator {
 
     conversation.phaseTransitions.push(transition);
 
-    logInfo(
-      `Phase transition: ${from} → ${phase}`,
-      "conversation",
-      "verbose",
-      {
-        conversationId: id,
-        from,
-        to: phase,
-      }
+    logger.info(
+      `Phase transition: ${from} → ${phase} for conversation ${id.substring(0, 8)}`
     );
 
     await this.persistence.save(conversation);

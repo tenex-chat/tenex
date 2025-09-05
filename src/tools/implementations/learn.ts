@@ -46,7 +46,6 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 
   // Create lesson intent
   const intent: LessonIntent = {
-    type: "lesson",
     title,
     lesson,
     detailed,
@@ -73,7 +72,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
     if (conversation?.history?.[0]) {
       const nostrReference = `nostr:${lessonEvent.encode()}`;
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `📚 Learning lesson: ${nostrReference}` },
+        { content: `📚 Learning lesson: ${nostrReference}` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

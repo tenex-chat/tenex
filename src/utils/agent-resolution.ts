@@ -23,7 +23,8 @@ export function resolveRecipientToPubkey(recipient: string): string | null {
 
     // Check project agents with case-insensitive matching for both slug and name
     const recipientLower = recipient.toLowerCase();
-    for (const [slug, agent] of projectContext.agents.entries()) {
+    const agents = projectContext.agentRegistry.getAllAgentsMap();
+    for (const [slug, agent] of agents.entries()) {
       if (slug.toLowerCase() === recipientLower || agent.name.toLowerCase() === recipientLower) {
         return agent.pubkey;
       }

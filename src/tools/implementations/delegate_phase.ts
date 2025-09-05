@@ -9,16 +9,16 @@ import type { ExecutionContext } from "@/agents/execution/types";
 const delegatePhaseSchema = z.object({
   phase: z
     .string()
-    .describe("The phase to switch to (can be any string, including custom phases)"),
+    .describe("The phase to switch to"),
   phase_instructions: z
     .string()
     .describe(
-      "Detailed instructions and goals for this phase - what should be accomplished and how. Other agents are not aware of what phases mean; so you must provide clear and complete instructions of the goal, what to do, what not to do and phase constrains."
+      "Detailed instructions and goals for this phase - what should be accomplished and how. Other agents are not aware of how YOU define phases; so you must provide clear and complete instructions of the goal, what to do, what not to do and phase constrains."
     ),
   recipient: z
     .string()
     .describe(
-      "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey to delegate to in this phase"
+      "Agent slug (e.g., 'architect'), npub, or hex pubkey to delegate to in this phase."
     ),
   fullRequest: z
     .string()
@@ -28,7 +28,7 @@ const delegatePhaseSchema = z.object({
   title: z
     .string()
     .nullable()
-    .describe("Title for this conversation (if not already set)"),
+    .describe("Title for this conversation (if not already set)."),
 });
 
 type DelegatePhaseInput = z.infer<typeof delegatePhaseSchema>;
@@ -78,12 +78,6 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     phase_instructions // Pass the custom phase instructions
   );
 
-  logger.info("[delegate_phase() tool] 🔄 Phase updated, initiating synchronous delegation", {
-    newPhase: phase,
-    recipient: recipient,
-    mode: "synchronous-wait",
-  });
-
   // Use DelegationService to execute the delegation
   const delegationService = new DelegationService(
     context.agent,
@@ -95,7 +89,6 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   );
   
   const responses = await delegationService.execute({
-    type: "delegation",
     recipients: [pubkey],
     request: fullRequest,
     phase: phase, // Include phase in the delegation intent
@@ -115,7 +108,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 export function createDelegatePhaseTool(context: ExecutionContext): Tool<any, any> {
     return tool({
         description:
-            "Switch conversation phase and delegate to a specific agent",
+            "Switch conversation phase and delegate a question or task to a specific agent.  Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation.",
         inputSchema: delegatePhaseSchema,
         execute: async (input: DelegatePhaseInput) => {
             return await executeDelegatePhase(input, context);

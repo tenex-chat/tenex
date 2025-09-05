@@ -176,8 +176,21 @@ export class MCPManager {
         // Namespace the tools with server name
         for (const [toolName, tool] of Object.entries(serverTools)) {
           const namespacedName = `mcp__${serverName}__${toolName}`;
+          
+          // Ensure parameters have valid JSON Schema structure
+          let parameters = tool.parameters;
+          if (!parameters || typeof parameters !== 'object' || !('type' in parameters)) {
+            // Default to empty object schema if parameters are missing or invalid
+            parameters = {
+              type: 'object',
+              properties: {},
+              required: [],
+            };
+          }
+          
           tools[namespacedName] = {
             ...tool,
+            parameters,
             // Override the name to include namespace
             description: tool.description || `${toolName} from ${serverName}`,
           } as CoreTool<unknown, unknown>;

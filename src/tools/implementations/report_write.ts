@@ -61,7 +61,7 @@ async function executeReportWrite(input: ReportWriteInput, context: ExecutionCon
     if (conversation?.history?.[0]) {
       const nostrReference = `nostr:${articleId}`;
       await context.agentPublisher.conversation(
-        { type: "conversation", content: `📄 Writing report: ${nostrReference}` },
+        { content: `📄 Writing report: ${nostrReference}` },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],

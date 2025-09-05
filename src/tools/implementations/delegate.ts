@@ -52,12 +52,6 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
     throw new Error("No valid recipients provided.");
   }
 
-  logger.info("[delegate() tool] 🎯 Starting synchronous delegation", {
-    fromAgent: context.agent.slug,
-    recipientCount: resolvedPubkeys.length,
-    mode: "synchronous",
-  });
-
   // Use DelegationService to execute the delegation
   const delegationService = new DelegationService(
     context.agent,
@@ -69,7 +63,6 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
   );
   
   return await delegationService.execute({
-    type: "delegation",
     recipients: resolvedPubkeys,
     request: fullRequest,
   });

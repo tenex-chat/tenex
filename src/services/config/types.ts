@@ -43,6 +43,7 @@ export interface TenexAgents {
     nsec: string;
     file: string;
     eventId?: string;
+    isPM?: boolean;  // True if this agent is the project manager
   };
 }
 
@@ -51,6 +52,7 @@ export const TenexAgentsSchema = z.record(
     nsec: z.string(),
     file: z.string(),
     eventId: z.string().optional(),
+    isPM: z.boolean().optional(),
   })
 );
 

@@ -103,7 +103,7 @@ async function executeWriteContextFile(
       if (conversation?.history?.[0]) {
         const nostrReference = `nostr:${article.encode()}`;
         await context.agentPublisher.conversation(
-          { type: "conversation", content: `📝 Writing context file: ${nostrReference}` },
+          { content: `📝 Writing context file: ${nostrReference}` },
           {
             triggeringEvent: context.triggeringEvent,
             rootEvent: conversation.history[0],

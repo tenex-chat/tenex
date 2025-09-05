@@ -14,43 +14,36 @@ import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
 
 // Intent types that agents can express
 export interface CompletionIntent {
-  type: "completion";
   content: string;
   summary?: string;
 }
 
 export interface DelegationIntent {
-  type: "delegation";
   recipients: string[];
   request: string;
   phase?: string;
 }
 
 export interface ConversationIntent {
-  type: "conversation";
   content: string;
 }
 
 export interface ErrorIntent {
-  type: "error";
   message: string;
   errorType?: string;
 }
 
 export interface TypingIntent {
-  type: "typing";
   state: "start" | "stop";
   message?: string;
 }
 
 export interface StreamingIntent {
-  type: "streaming";
   content: string;
   sequence: number;
 }
 
 export interface LessonIntent {
-  type: "lesson";
   title: string;
   lesson: string;
   detailed?: string;
@@ -419,5 +412,38 @@ export class AgentEventEncoder {
     this.addStandardTags(lessonEvent, context);
 
     return lessonEvent;
+  }
+
+  /**
+   * Encode a follow-up event to a previous delegation response.
+   * Creates a threaded reply that maintains conversation context.
+   * 
+   * @param responseEvent The event being responded to
+   * @param message The follow-up message content
+   * @returns The encoded follow-up event
+   */
+  encodeFollowUp(
+    responseEvent: NDKEvent,
+    message: string,
+  ): NDKEvent {
+    // Create a reply to the response event to maintain thread
+    const followUpEvent = responseEvent.reply();
+    
+    // Handle e-tag to avoid deep nesting
+    const eTagVal = responseEvent.tagValue("e");
+    if (eTagVal) {
+      followUpEvent.removeTag("e");
+      followUpEvent.tags.push(["e", eTagVal]); // Root thread tag
+    }
+    
+    followUpEvent.content = message;
+
+    // Clean out p-tags and add recipient
+    followUpEvent.tags = followUpEvent.tags.filter(t => t[0] !== 'p');
+    followUpEvent.tag(responseEvent.author);
+
+    followUpEvent.tag([ "tool", "delegate_followup" ]);
+    
+    return followUpEvent;
   }
 }

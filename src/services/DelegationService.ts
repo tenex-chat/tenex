@@ -12,6 +12,7 @@ export interface DelegationResponses {
     response: string;
     summary?: string;
     from: string;
+    event?: NDKEvent; // The actual response event for threading
   }>;
 }
 
@@ -57,8 +58,10 @@ export class DelegationService {
       phase: this.phase,
     };
 
-    // Publish delegation events
-    const result = await this.publisher.delegate(intent, eventContext);
+    // Publish based on intent type
+    const result = intent.type === "delegation_followup"
+      ? await this.publisher.delegateFollowUp(intent, eventContext)
+      : await this.publisher.delegate(intent, eventContext);
 
     // Wait for all responses
     const registry = DelegationRegistry.getInstance();
@@ -66,13 +69,14 @@ export class DelegationService {
     // Wait for all responses - no timeout as delegations are long-running
     const completions = await registry.waitForBatchCompletion(result.batchId);
     
-    // Return formatted responses
+    // Return formatted responses with event details
     return {
       type: "delegation_responses",
       responses: completions.map(c => ({
         response: c.response,
         summary: c.summary,
         from: c.assignedTo,
+        event: c.event,
       })),
     };
   }

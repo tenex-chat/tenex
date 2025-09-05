@@ -9,7 +9,7 @@ import {
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { formatAnyError } from "@/utils/error-formatter";
-import { logInfo, logger } from "@/utils/logger";
+import { logger } from "@/utils/logger";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { getToolsObject } from "@/tools/registry";
@@ -88,15 +88,8 @@ export class AgentExecutor {
             startExecutionTime(conversation);
 
             // Log execution flow start
-            logInfo(
-                `Agent ${context.agent.name} starting execution in ${context.phase} phase`,
-                "agent",
-                "verbose",
-                {
-                    conversationId: context.conversationId,
-                    agent: context.agent.name,
-                    phase: context.phase,
-                }
+            logger.info(
+                `Agent ${context.agent.name} starting execution in ${context.phase} phase`
             );
 
             // Publish typing indicator start using AgentPublisher
@@ -105,24 +98,17 @@ export class AgentExecutor {
                 rootEvent: conversation.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
                 conversationId: context.conversationId,
             };
-            await agentPublisher.typing({ type: "typing", state: "start" }, eventContext);
+            await agentPublisher.typing({ state: "start" }, eventContext);
 
             await this.executeWithStreaming(fullContext, messages);
 
             // Log execution flow complete
-            logInfo(
-                `Agent ${context.agent.name} completed execution successfully`,
-                "agent",
-                "verbose",
-                {
-                    conversationId: context.conversationId,
-                    agent: context.agent.name,
-                    success: true,
-                }
+            logger.info(
+                `Agent ${context.agent.name} completed execution successfully`
             );
 
             // Stop typing indicator after successful execution
-            await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
+            await agentPublisher.typing({ state: "stop" }, eventContext);
         } catch (error) {
             // Log execution flow failure
             logger.error(`Agent ${context.agent.name} execution failed`, {
@@ -146,7 +132,7 @@ export class AgentExecutor {
                     rootEvent: conversation?.history[0] ?? context.triggeringEvent,
                     conversationId: context.conversationId,
                 };
-                await agentPublisher.typing({ type: "typing", state: "stop" }, eventContext);
+                await agentPublisher.typing({ state: "stop" }, eventContext);
             } catch (typingError) {
                 logger.warn("Failed to stop typing indicator", {
                     error: formatAnyError(typingError),
@@ -352,28 +338,8 @@ Be completely transparent about your internal process. If you made a mistake or 
         messages: ModelMessage[]
     ): Promise<void> {
         // Get tools for response processing
-        let toolNames = context.agent.tools || [];
-
-        // Enforce proper delegation tool access based on PM status
-        if (isProjectContextInitialized()) {
-            const projectCtx = getProjectContext();
-            const isPM = context.agent.pubkey === projectCtx.projectManager.pubkey;
-
-            // Remove inappropriate delegation tool and ensure correct one is present
-            if (isPM) {
-                // PM agents must have delegate_phase, not delegate
-                toolNames = toolNames.filter((name) => name !== "delegate");
-                if (!toolNames.includes("delegate_phase")) {
-                    toolNames.push("delegate_phase");
-                }
-            } else {
-                // Non-PM agents must have delegate, not delegate_phase
-                toolNames = toolNames.filter((name) => name !== "delegate_phase");
-                if (!toolNames.includes("delegate")) {
-                    toolNames.push("delegate");
-                }
-            }
-        }
+        // Tools are already properly configured in AgentRegistry.buildAgentInstance
+        const toolNames = context.agent.tools || [];
 
         // Get tools as a keyed object for AI SDK
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
@@ -392,27 +358,46 @@ Be completely transparent about your internal process. If you made a mistake or 
             phase: context.phase,
         };
 
+        // Buffer to accumulate streaming content
+        let contentBuffer = '';
+
+        // Helper to flush accumulated content
+        const flushContentBuffer = async () => {
+            if (contentBuffer.trim()) {
+                await agentPublisher.conversation({
+                    content: contentBuffer
+                }, eventContext);
+                
+                logger.debug(`[AgentExecutor] Flushed content buffer (${contentBuffer.length} chars)`);
+                contentBuffer = '';
+            }
+        };
+
         // Wire up event handlers
         llmService.on('content', async (event) => {
+            // Accumulate content instead of streaming immediately
+            contentBuffer += event.delta;
+            // Still stream deltas for real-time display
             await agentPublisher.handleContent(event, eventContext);
         });
         
         llmService.on('tool-will-execute', async (event) => {
+            // Flush buffer before tool execution
+            await flushContentBuffer();
             await agentPublisher.handleToolWillExecute(event, eventContext);
         });
         
         llmService.on('complete', async (event) => {
-            // Publish the complete message as a conversation event
+            // Clear the buffer without publishing (content is already in event.message)
+            contentBuffer = '';
+            
+            // Publish the complete message as a completion event
             if (event.message.trim()) {
                 await agentPublisher.complete({
-                    type: "completion",
                     content: event.message
                 }, eventContext);
                 
-                logInfo("[AgentExecutor] Agent completed", "agent", "normal", {
-                    agent: context.agent.name,
-                    contentLength: event.message.length,
-                });
+                logger.info(`[AgentExecutor] Agent ${context.agent.name} completed (${event.message.length} chars)`);
             }
         });
         

@@ -103,7 +103,7 @@ async function executeAgentsDiscover(
  */
 export function createAgentsDiscoverTool(): ReturnType<typeof tool> {
   return tool({
-    description: "Discover agent definition events; these are agent definitions (system-prompt, use criteria, etc) that can be useful as experts",
+    description: "Discover agent definition events; these are agent definitions that can be useful to be installed in the project. Use this when trying to discover NEW possible agents to add to the project NOT to see the list of current agents in the project.",
     inputSchema: agentsDiscoverSchema,
     execute: async (input: AgentsDiscoverInput) => {
       try {

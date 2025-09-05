@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 
 export interface DelegationRecord {
@@ -35,11 +35,11 @@ export interface DelegationRecord {
 
   // Completion details (when status !== 'pending')
   completion?: {
-    eventId: string; // Completion event ID
     response: string;
     summary?: string;
     completedAt: number;
     completedBy: string; // Pubkey of completing agent
+    event?: NDKEvent; // The actual completion event for threading
   };
 
   // Metadata
@@ -80,11 +80,11 @@ const DelegationRecordSchema = z.object({
   status: z.enum(["pending", "in_progress", "completed", "failed"]),
   completion: z
     .object({
-      eventId: z.string(),
       response: z.string(),
       summary: z.string().optional(),
       completedAt: z.number(),
       completedBy: z.string(),
+      event: z.string().optional(), // Serialized NDKEvent
     })
     .optional(),
   createdAt: z.number(),
@@ -132,16 +132,13 @@ export class DelegationRegistry extends EventEmitter {
 
   // Persistence
   private persistencePath: string;
-  private backupPath: string;
   private persistenceTimer?: NodeJS.Timeout;
   private cleanupTimer?: NodeJS.Timeout;
   private isDirty = false;
-  private isShuttingDown = false;
 
   private constructor() {
     super();
     this.persistencePath = path.join(process.cwd(), ".tenex", "delegations.json");
-    this.backupPath = path.join(process.cwd(), ".tenex", "delegations.backup.json");
   }
 
   /**
@@ -173,7 +170,6 @@ export class DelegationRegistry extends EventEmitter {
     );
 
     // Set up graceful shutdown
-    DelegationRegistry.instance.setupGracefulShutdown();
 
     DelegationRegistry.isInitialized = true;
     logger.debug("DelegationRegistry singleton initialized successfully");
@@ -347,6 +343,7 @@ export class DelegationRegistry extends EventEmitter {
           completionEventId: event.id,
           response: event.content,
           summary: event.tagValue?.("summary"),
+          completionEvent: event, // Pass the actual event
         });
         break;
       }
@@ -364,6 +361,7 @@ export class DelegationRegistry extends EventEmitter {
     completionEventId: string;
     response: string;
     summary?: string;
+    completionEvent?: NDKEvent; // The actual completion event
   }): Promise<{
     batchComplete: boolean;
     batchId: string;
@@ -380,7 +378,7 @@ export class DelegationRegistry extends EventEmitter {
     
     // Prevent duplicate completions
     if (record.status === "completed") {
-      throw new Error(`Delegation already completed for ${convKey}. Original completion: ${record.completion?.eventId}`);
+      throw new Error(`Delegation already completed for ${convKey}. Original completion: ${record.completion?.event?.id}`);
     }
 
     // Log which event is being used to mark delegation as complete
@@ -395,11 +393,11 @@ export class DelegationRegistry extends EventEmitter {
     // Update record
     record.status = "completed";
     record.completion = {
-      eventId: params.completionEventId,
       response: params.response,
       summary: params.summary,
       completedAt: Date.now(),
       completedBy: params.toPubkey,
+      event: params.completionEvent,
     };
     record.updatedAt = Date.now();
 
@@ -533,6 +531,7 @@ export class DelegationRegistry extends EventEmitter {
     response: string;
     summary?: string;
     assignedTo: string;
+    event?: NDKEvent;
   }> {
     const batch = this.batches.get(batchId);
     if (!batch) return [];
@@ -551,6 +550,7 @@ export class DelegationRegistry extends EventEmitter {
         response: record.completion.response,
         summary: record.completion.summary,
         assignedTo: record.assignedTo.pubkey,
+        event: record.completion.event,
       }));
   }
 
@@ -569,6 +569,7 @@ export class DelegationRegistry extends EventEmitter {
     response: string;
     summary?: string;
     assignedTo: string;
+    event?: NDKEvent;
   }>> {
     // Check if already complete
     const batch = this.batches.get(batchId);
@@ -579,7 +580,7 @@ export class DelegationRegistry extends EventEmitter {
 
     // Wait for completion event - no timeout as delegations are long-running
     return new Promise((resolve) => {
-      const handler = (data: { completions: Array<{ taskId: string; response: string; summary?: string; assignedTo: string; }> }): void => {
+      const handler = (data: { completions: Array<{ taskId: string; response: string; summary?: string; assignedTo: string; event?: NDKEvent; }> }): void => {
         logger.debug("Batch completion event received", { 
           batchId, 
           completionCount: data.completions.length 
@@ -588,16 +589,12 @@ export class DelegationRegistry extends EventEmitter {
           delegationId: c.taskId,
           response: c.response,
           summary: c.summary,
-          assignedTo: c.assignedTo
+          assignedTo: c.assignedTo,
+          event: c.event
         })));
       };
 
       this.once(`${batchId}:completion`, handler);
-      logger.debug("🕑 Setting up synchronous wait listener for long-running delegation", { 
-        batchId, 
-        mode: "synchronous",
-        timeout: "none - long-running job"
-      });
     });
   }
 
@@ -653,10 +650,22 @@ export class DelegationRegistry extends EventEmitter {
   }
 
   private async persist(): Promise<void> {
-    if (!this.isDirty || this.isShuttingDown) return;
+    if (!this.isDirty) return;
+
+    // Serialize NDKEvent objects properly before JSON.stringify
+    const serializableDelegations = Array.from(this.delegations.entries()).map(([key, record]) => {
+      const serializedRecord = { ...record };
+      if (record.completion?.event) {
+        serializedRecord.completion = {
+          ...record.completion,
+          event: record.completion.event.serialize() as any, // Serialize NDKEvent to string
+        };
+      }
+      return [key, serializedRecord];
+    });
 
     const data = {
-      delegations: Array.from(this.delegations.entries()),
+      delegations: serializableDelegations,
       batches: Array.from(this.batches.entries()),
       agentTasks: Array.from(this.agentDelegations.entries()).map(([k, v]) => [k, Array.from(v)]),
       conversationTasks: Array.from(this.conversationDelegations.entries()).map(([k, v]) => [
@@ -667,20 +676,9 @@ export class DelegationRegistry extends EventEmitter {
     };
 
     try {
-      // Validate data before persisting
-      PersistedDataSchema.parse(data);
-
       // Ensure directory exists
       const dir = path.dirname(this.persistencePath);
       await fs.mkdir(dir, { recursive: true });
-
-      // Create backup of existing file if it exists
-      try {
-        await fs.access(this.persistencePath);
-        await fs.copyFile(this.persistencePath, this.backupPath);
-      } catch {
-        // File doesn't exist yet, that's ok
-      }
 
       // Write atomically with temp file
       const tempPath = `${this.persistencePath}.tmp`;
@@ -718,19 +716,6 @@ export class DelegationRegistry extends EventEmitter {
       }
     }
 
-    // If main file failed, try backup
-    if (!dataLoaded) {
-      try {
-        const rawData = await fs.readFile(this.backupPath, "utf-8");
-        data = JSON.parse(rawData);
-        dataLoaded = true;
-        logger.info("Loaded delegation registry from backup file");
-      } catch (error) {
-        if (error && typeof error === "object" && "code" in error && error.code !== "ENOENT") {
-          logger.warn("Failed to load backup delegation registry file", { error });
-        }
-      }
-    }
 
     // If no data loaded, start fresh
     if (!dataLoaded) {
@@ -741,32 +726,22 @@ export class DelegationRegistry extends EventEmitter {
     // Validate and load data
     try {
       const validatedData = PersistedDataSchema.parse(data);
-
-      // Migrate old synthetic IDs if found
-      const migratedDelegations = new Map();
-      let migrationCount = 0;
       
-      for (const [key, record] of validatedData.delegations) {
-        // Check if delegationEventId contains synthetic ID (format: eventId:pubkey)
-        if (record.delegationEventId && record.delegationEventId.includes(':')) {
-          // Extract the actual event ID from synthetic ID
-          const [actualEventId] = record.delegationEventId.split(':');
-          record.delegationEventId = actualEventId;
-          migrationCount++;
-          logger.info("🔄 Migrated synthetic ID to actual event ID", {
-            old: record.delegationEventId.substring(0, 16) + "...",
-            new: actualEventId.substring(0, 8),
-          });
+      // Deserialize NDKEvent objects when loading delegations
+      const deserializedDelegations = validatedData.delegations.map(([key, record]) => {
+        if (record.completion?.event) {
+          // Deserialize the NDKEvent from string
+          const deserializedRecord = { ...record };
+          deserializedRecord.completion = {
+            ...record.completion,
+            event: NDKEvent.deserialize(undefined, record.completion.event as string) as any,
+          };
+          return [key, deserializedRecord] as [string, DelegationRecord];
         }
-        migratedDelegations.set(key, record);
-      }
+        return [key, record] as [string, DelegationRecord];
+      });
       
-      if (migrationCount > 0) {
-        logger.info("✅ Migrated delegations from synthetic IDs", { count: migrationCount });
-        this.isDirty = true; // Mark as dirty to persist migrated data
-      }
-      
-      this.delegations = migratedDelegations;
+      this.delegations = new Map(deserializedDelegations);
       this.batches = new Map(validatedData.batches);
       this.agentDelegations = new Map(validatedData.agentTasks.map(([k, v]) => [k, new Set(v)]));
       this.conversationDelegations = new Map(
@@ -835,67 +810,6 @@ export class DelegationRegistry extends EventEmitter {
     }
   }
 
-  /**
-   * Clear all delegation data (useful for testing)
-   */
-  async clear(): Promise<void> {
-    this.delegations.clear();
-    this.batches.clear();
-    this.agentDelegations.clear();
-    this.conversationDelegations.clear();
-    this.isDirty = true;
-    await this.persist();
-  }
-
-  /**
-   * Set up graceful shutdown handlers
-   */
-  private setupGracefulShutdown(): void {
-    const shutdown = async (signal: string): Promise<void> => {
-      if (this.isShuttingDown) return;
-      this.isShuttingDown = true;
-
-      logger.info(`DelegationRegistry: Received ${signal}, saving state...`);
-
-      // Cancel any pending persistence timer
-      if (this.persistenceTimer) {
-        clearTimeout(this.persistenceTimer);
-      }
-
-      // Cancel cleanup timer
-      if (this.cleanupTimer) {
-        clearInterval(this.cleanupTimer);
-      }
-
-      // Force final persistence
-      if (this.isDirty) {
-        try {
-          await this.persist();
-          logger.info("DelegationRegistry: State saved successfully");
-        } catch (error) {
-          logger.error("DelegationRegistry: Failed to save state during shutdown", { error });
-        }
-      }
-    };
-
-    // Handle various shutdown signals
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
-    process.once("SIGUSR2", () => shutdown("SIGUSR2")); // Nodemon restart
-
-    // Handle uncaught errors
-    process.once("uncaughtException", async (error) => {
-      logger.error("DelegationRegistry: Uncaught exception, saving state", { error });
-      await shutdown("uncaughtException");
-      process.exit(1);
-    });
-
-    process.once("unhandledRejection", async (reason) => {
-      logger.error("DelegationRegistry: Unhandled rejection, saving state", { reason });
-      await shutdown("unhandledRejection");
-      process.exit(1);
-    });
-  }
 
   /**
    * Find delegation records by event ID and responder pubkey
@@ -933,33 +847,4 @@ export class DelegationRegistry extends EventEmitter {
     return undefined;
   }
 
-  /**
-   * Get registry statistics
-   */
-  getStats(): {
-    totalDelegations: number;
-    pendingDelegations: number;
-    completedDelegations: number;
-    failedDelegations: number;
-    totalBatches: number;
-    completedBatches: number;
-    activeAgents: number;
-    activeConversations: number;
-  } {
-    const delegationArray = Array.from(this.delegations.values());
-
-    return {
-      totalDelegations: delegationArray.length,
-      pendingDelegations: delegationArray.filter((d) => d.status === "pending").length,
-      completedDelegations: delegationArray.filter((d) => d.status === "completed").length,
-      failedDelegations: delegationArray.filter((d) => d.status === "failed").length,
-      totalBatches: this.batches.size,
-      completedBatches: Array.from(this.batches.values()).filter((b) => b.allCompleted).length,
-      activeAgents: Array.from(this.agentDelegations.entries()).filter(([_, delegations]) => delegations.size > 0)
-        .length,
-      activeConversations: Array.from(this.conversationDelegations.entries()).filter(
-        ([_, delegations]) => delegations.size > 0
-      ).length,
-    };
-  }
 }

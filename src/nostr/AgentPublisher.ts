@@ -39,22 +39,10 @@ export class AgentPublisher {
 
 
   /**
-   * Flush any buffered streaming content before publishing other events.
-   * This ensures correct event ordering - buffered content is always published first.
-   */
-  private async flushStreamIfNeeded(): Promise<void> {
-    if (this.streamingBuffer && this.streamingBuffer.content.trim()) {
-      await this.publishStreamContent();
-    }
-  }
-
-  /**
    * Publish a completion event.
    * Creates and publishes a properly tagged completion event.
    */
   async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     logger.debug("Dispatching completion", {
       agent: this.agent.name,
       contentLength: intent.content.length,
@@ -86,8 +74,6 @@ export class AgentPublisher {
     events: NDKEvent[];
     batchId: string;
   }> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     const events = this.encoder.encodeDelegation(intent, context);
 
     // Sign the event (should be single event now)
@@ -134,12 +120,63 @@ export class AgentPublisher {
   }
 
   /**
+   * Publish delegation follow-up request event.
+   * Creates and publishes a follow-up event as a reply to a previous delegation response.
+   */
+  async delegateFollowUp(
+    intent: DelegationIntent,
+    context: EventContext
+  ): Promise<{
+    events: NDKEvent[];
+    batchId: string;
+  }> {
+    // For follow-ups, triggeringEvent should be the response event we're replying to
+    const responseEvent = context.triggeringEvent;
+    const recipientPubkey = intent.recipients[0]; // Follow-ups are always to single recipient
+    
+    logger.debug("[AgentPublisher] Creating follow-up event", {
+      agent: this.agent.name,
+      recipientPubkey: recipientPubkey.substring(0, 8),
+      responseEventId: responseEvent.id?.substring(0, 8),
+    });
+    
+    // Use encoder to create the follow-up event
+    const followUpEvent = this.encoder.encodeFollowUp(responseEvent, intent.request);
+    
+    // Sign the event
+    await followUpEvent.sign(this.agent.signer);
+    
+    // Register with DelegationRegistry for tracking
+    const registry = DelegationRegistry.getInstance();
+    const batchId = await registry.registerDelegation({
+      delegationEventId: followUpEvent.id,
+      recipients: [{
+        pubkey: recipientPubkey,
+        request: intent.request,
+        phase: intent.phase,
+      }],
+      delegatingAgent: this.agent,
+      rootConversationId: context.rootEvent.id,
+      originalRequest: intent.request,
+    });
+    
+    // Publish the follow-up event
+    await followUpEvent.publish();
+    
+    logger.debug("Follow-up event published", {
+      eventId: followUpEvent.id?.substring(0, 8),
+      replyingTo: responseEvent.id?.substring(0, 8),
+      batchId,
+    });
+    
+    return { events: [followUpEvent], batchId };
+  }
+
+  /**
    * Publish a conversation response.
    * Creates and publishes a standard response event.
    */
   async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     logger.debug("Dispatching conversation response", {
       agent: this.agent.name,
       contentLength: intent.content.length,
@@ -159,8 +196,6 @@ export class AgentPublisher {
    * Creates and publishes an error notification event.
    */
   async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     logger.debug("Dispatching error", {
       agent: this.agent.name,
       error: intent.message,
@@ -218,8 +253,6 @@ export class AgentPublisher {
    * Publish a lesson learned event.
    */
   async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     logger.debug("Dispatching lesson", {
       agent: this.agent.name,
     });
@@ -248,7 +281,6 @@ export class AgentPublisher {
   ): Promise<void> {
     // Stream the delta directly
     const streamingIntent: StreamingIntent = {
-      type: "streaming",
       content: event.delta,
       sequence: ++this.streamSequence,
     };
@@ -282,8 +314,6 @@ export class AgentPublisher {
     claudeSessionId: string,
     branch?: string
   ): Promise<NDKTask> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     // Use encoder to create task with proper tagging
     const task = this.encoder.encodeTask(
       title,
@@ -316,8 +346,6 @@ export class AgentPublisher {
     content: string,
     context: EventContext
   ): Promise<NDKEvent> {
-    // Ensure any buffered stream content is published first
-    await this.flushStreamIfNeeded();
     const update = task.reply();
     update.content = content;
 

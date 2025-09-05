@@ -2,7 +2,6 @@ import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import {
-    type StreamTextOnStepFinishCallback,
     type LanguageModelUsage,
     type LanguageModel,
     type StepResult,
@@ -76,6 +75,32 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         return this.registry.languageModel(`${this.provider}:${this.model}`);
     }
 
+    /**
+     * Add provider-specific cache control to messages.
+     * Only Anthropic requires explicit cache control; OpenAI and Gemini cache automatically.
+     */
+    private addCacheControl(messages: ModelMessage[]): ModelMessage[] {
+        // Only add cache control for Anthropic
+        if (this.provider !== 'anthropic') {
+            return messages;
+        }
+
+        return messages.map((msg, index) => {
+            // Only cache system messages and only if they're large enough (>1024 tokens estimate)
+            if (msg.role === 'system' && msg.content.length > 4000) { // ~1000 tokens
+                return {
+                    ...msg,
+                    providerOptions: {
+                        anthropic: {
+                            cacheControl: { type: 'ephemeral' }
+                        }
+                    }
+                };
+            }
+            return msg;
+        });
+    }
+
     async complete(
         messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
@@ -86,6 +111,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     ): Promise<unknown> {
         const model = this.getLanguageModel();
         const startTime = Date.now();
+        
+        // Add provider-specific cache control
+        const processedMessages = this.addCacheControl(messages);
 
         // Log the request
         this.llmLogger
@@ -103,7 +131,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         try {
             const result = await generateText({
                 model,
-                messages,
+                messages: processedMessages,
                 tools,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
@@ -158,6 +186,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     async stream(messages: ModelMessage[], tools: Record<string, AISdkTool>): Promise<void> {
         const model = this.getLanguageModel();
+        
+        // Add provider-specific cache control
+        const processedMessages = this.addCacheControl(messages);
 
         // Create message preview for logging
         const messagesPreview = messages.map((msg) => {
@@ -179,26 +210,50 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.error("[LLMService] Failed to log request", { error: err });
             });
 
-        logger.info("[LLMService] Calling stream", {
-            model: `${this.provider}:${this.model}`,
-            messageCount: messages.length,
-            toolCount: Object.keys(tools).length,
-            toolNames: Object.keys(tools).join(", "),
-            temperature: this.temperature,
-            maxTokens: this.maxTokens,
-            messagesPreview,
-        });
+        // logger.info("[LLMService] Calling stream", {
+        //     model: `${this.provider}:${this.model}`,
+        //     messageCount: messages.length,
+        //     toolCount: Object.keys(tools).length,
+        //     toolNames: Object.keys(tools).join(", "),
+        //     temperature: this.temperature,
+        //     maxTokens: this.maxTokens,
+        //     messagesPreview,
+        // });
 
         const startTime = Date.now();
 
         // Create the stream outside the promise
         const { textStream } = streamText({
             model,
-            messages,
+            messages: processedMessages,
             tools: tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen: stepCountIs(20),
+            
+            // Check for delegation completion and inject follow-up hint
+            prepareStep: async (options) => {
+                const lastStep = options.steps[options.steps.length - 1];
+                const lastToolCall = lastStep?.toolCalls?.[0];
+                
+                // Check if last tool was a delegation
+                const delegationTools = ['delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'];
+                if (lastToolCall && delegationTools.includes(lastToolCall.toolName)) {
+                    const lastResult = lastStep?.toolResults?.[0];
+                    
+                    // Check if we got responses
+                    if (lastResult?.responses?.length > 0) {
+                        // Add assistant message about follow-up capability
+                        return {
+                            messages: [{
+                                role: 'assistant',
+                                content: `I've received the delegation response. If I need any clarification or have follow-up questions, I can use delegate_followup to continue the conversation with the responding agent.`
+                            }],
+                        };
+                    }
+                }
+            },
+            
             onStepFinish: this.handleStepFinish.bind(this),
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(startTime),
@@ -220,13 +275,19 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     }
 
-    private handleStepFinish(step: StreamTextOnStepFinishCallback<Record<string, AISdkTool>>): void {
-        console.log("onStepFinish", step);
+    private handleStepFinish(step: StepResult<TOOLS>): void {
+        console.log("onStepFinish", {
+            text: step.text,
+            finishReason: step.finishReason,
+            usage: step.usage,
+            providerMetadata: step.providerMetadata,
+        });
     }
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
-        if (chunk.type !== 'text-delta') console.log("LLMService chunk", chunk);
+        if (!chunk.type.match(/delta/)) console.log("LLMService chunk", chunk);
+        console.log('new chunk', chunk.type);
 
         switch (chunk.type) {
             case "text-delta":

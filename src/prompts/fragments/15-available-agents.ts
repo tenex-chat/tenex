@@ -3,16 +3,16 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Available agents fragment for specialists.
+ * Available agents fragment.
  * Shows coworkers they can hand off to.
  */
-interface SpecialistAvailableAgentsArgs {
+interface AvailableAgentsArgs {
   agents: AgentInstance[];
   currentAgent: AgentInstance;
 }
 
-export const specialistAvailableAgentsFragment: PromptFragment<SpecialistAvailableAgentsArgs> = {
-  id: "specialist-available-agents",
+export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
+  id: "available-agents",
   priority: 15,
   template: ({ agents, currentAgent }) => {
     // Filter out current agent
@@ -24,7 +24,7 @@ export const specialistAvailableAgentsFragment: PromptFragment<SpecialistAvailab
 
     const agentList = coworkers
       .map((agent) => {
-        const parts = [`- **${agent.name}** (${agent.slug})`, `  Role: ${agent.role}`];
+        const parts = [ `(${agent.slug})`, `  Role: ${agent.role}` ];
 
         if (agent.useCriteria) {
           parts.push(`  Use Criteria: ${agent.useCriteria}`);
@@ -44,4 +44,4 @@ ${agentList}`;
 };
 
 // Register the fragment
-fragmentRegistry.register(specialistAvailableAgentsFragment);
+fragmentRegistry.register(availableAgentsFragment);
