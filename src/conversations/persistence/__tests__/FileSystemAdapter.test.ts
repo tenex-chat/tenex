@@ -230,21 +230,19 @@ describe("FileSystemAdapter", () => {
         title: "Large Conversation",
       });
 
-      // Add lots of phase transitions
+      // Add lots of history events instead
       for (let i = 0; i < 1000; i++) {
-        largeConv.phaseTransitions.push({
-          from: "CHAT",
-          to: "PLAN",
-          timestamp: new Date(),
-          reason: `Transition ${i}`,
-        });
+        largeConv.history.push(createMockNDKEvent({
+          id: `event-${i}`,
+          content: `Event ${i}`,
+        }));
       }
 
       await adapter.save(largeConv);
       const loaded = await adapter.load("large");
 
       expect(loaded).toBeTruthy();
-      expect(loaded?.phaseTransitions).toHaveLength(1000);
+      expect(loaded?.history).toHaveLength(1001); // 1 initial + 1000 added
     });
 
     it("should handle concurrent operations", async () => {

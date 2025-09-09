@@ -1,4 +1,3 @@
-import { PHASES } from "@/conversations/phases";
 import type { MockLLMScenario } from "../types";
 
 /**
@@ -18,7 +17,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
     {
       trigger: {
         agentName: "Orchestrator",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         userMessage: /generate.*inventory|analyze.*codebase|understand.*project/i,
       },
       response: {
@@ -31,7 +30,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
             function: "continue",
             args: JSON.stringify({
               summary: "User wants to generate project inventory",
-              suggestedPhase: PHASES.EXECUTE,
+              suggestedPhase: "EXECUTE",
               confidence: 95,
               reasoning: "This is a straightforward task that can be executed immediately",
             }),
@@ -45,7 +44,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.EXECUTE,
+        phase: "EXECUTE",
         systemPrompt: /inventory|analyze.*codebase/i,
       },
       response: {
@@ -67,7 +66,7 @@ export const inventoryGenerationScenario: MockLLMScenario = {
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.EXECUTE,
+        phase: "EXECUTE",
         previousToolCalls: ["generate_inventory"],
       },
       response: {
@@ -93,7 +92,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
             args: JSON.stringify({
               phaseComplete: true,
               readyForNext: true,
-              suggestedNextPhase: PHASES.VERIFICATION,
+              suggestedNextPhase: "VERIFICATION",
               summary: "Project inventory generated successfully",
             }),
           },
@@ -106,7 +105,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
     {
       trigger: {
         agentName: "Orchestrator",
-        phase: PHASES.EXECUTE,
+        phase: "EXECUTE",
         previousToolCalls: ["complete"],
       },
       response: {
@@ -117,7 +116,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
             function: "continue",
             args: JSON.stringify({
               summary: "Inventory generation completed successfully",
-              suggestedPhase: PHASES.VERIFICATION,
+              suggestedPhase: "VERIFICATION",
               confidence: 100,
               reasoning: "Task completed, moving to verification",
             }),
@@ -131,7 +130,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.VERIFICATION,
+        phase: "VERIFICATION",
         systemPrompt: /inventory.*generated/i,
       },
       response: {
@@ -154,7 +153,7 @@ The inventory provides a thorough understanding of your codebase architecture, m
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.VERIFICATION,
+        phase: "VERIFICATION",
         previousToolCalls: ["readPath"],
       },
       response: {
@@ -187,7 +186,7 @@ The inventory is ready to use for understanding and navigating your codebase.`,
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.EXECUTE,
+        phase: "EXECUTE",
         messageContains: /inventory.*regenerated/i,
       },
       response: {
@@ -207,7 +206,7 @@ The regenerated inventory reflects the current state of your codebase.`,
             args: JSON.stringify({
               phaseComplete: true,
               readyForNext: true,
-              suggestedNextPhase: PHASES.VERIFICATION,
+              suggestedNextPhase: "VERIFICATION",
               summary: "Project inventory regenerated with latest changes",
             }),
           },
@@ -220,7 +219,7 @@ The regenerated inventory reflects the current state of your codebase.`,
     {
       trigger: {
         agentName: "Executor",
-        phase: PHASES.EXECUTE,
+        phase: "EXECUTE",
         messageContains: /error.*inventory|failed.*generate/i,
       },
       response: {

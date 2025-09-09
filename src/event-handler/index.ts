@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
+import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 
 
 const IGNORED_EVENT_KINDS = [
@@ -19,7 +20,10 @@ const IGNORED_EVENT_KINDS = [
   EVENT_KINDS.STREAMING_RESPONSE as NDKKind,
   EVENT_KINDS.TYPING_INDICATOR as NDKKind,
   EVENT_KINDS.TYPING_INDICATOR_STOP as NDKKind,
+  EVENT_KINDS.OPERATIONS_STATUS as NDKKind,
 ];
+
+const STOP_EVENT_KIND = 24134; // Ephemeral stop command for LLM operations
 
 export class EventHandler {
   private conversationCoordinator!: ConversationCoordinator;
@@ -174,6 +178,10 @@ export class EventHandler {
       case 513: // NDKEventMetadata
         await this.handleMetadataEvent(event);
         break;
+      
+      case STOP_EVENT_KIND: // kind 24134 - Stop LLM operations
+        await this.handleStopEvent(event);
+        break;
 
       default:
         this.handleDefaultEvent(event);
@@ -299,6 +307,35 @@ export class EventHandler {
       logger.error("Failed to handle config change", {
         eventId: event.id,
         error: formatAnyError(error),
+      });
+    }
+  }
+
+  private async handleStopEvent(event: NDKEvent): Promise<void> {
+    const eTags = event.getMatchingTags("e");
+    
+    if (eTags.length === 0) {
+      logger.warn("[EventHandler] Stop event received with no e-tags", {
+        eventId: event.id?.substring(0, 8)
+      });
+      return;
+    }
+    
+    let totalStopped = 0;
+    
+    for (const [_, eventId] of eTags) {
+      const stopped = llmOpsRegistry.stopByEventId(eventId);
+      if (stopped > 0) {
+        logger.info(`[EventHandler] Stopped ${stopped} operations for event ${eventId.substring(0, 8)}`);
+        totalStopped += stopped;
+      }
+    }
+    
+    if (totalStopped === 0) {
+      logger.info("[EventHandler] No active operations to stop");
+    } else {
+      logger.info(`[EventHandler] Total operations stopped: ${totalStopped}`, {
+        activeRemaining: llmOpsRegistry.getActiveOperationsCount()
       });
     }
   }

@@ -13,7 +13,10 @@ export function assertAgentSequence(trace: ExecutionTrace, ...expectedAgents: st
  * Assert that phase transitions occur in the expected order
  */
 export function assertPhaseTransitions(trace: ExecutionTrace, ...expectedPhases: string[]) {
-    const phases = trace.phaseTransitions.map(pt => pt.to);
+    // Extract phases from executions where phase changed
+    const phases = trace.executions
+        .filter(e => e.message?.includes("Phase changed"))
+        .map(e => e.phase);
     expect(phases).toEqual(expectedPhases);
 }
 

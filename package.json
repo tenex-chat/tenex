@@ -63,6 +63,7 @@
         "@nostr-dev-kit/ndk": "^2.14.33",
         "@openrouter/ai-sdk-provider": "^1.1.2",
         "ai": "^5.0.28",
+        "ai-sdk-provider-claude-code": "^1.1.3",
         "chalk": "^5.4.1",
         "cli-table3": "^0.6.5",
         "commander": "^13.1.0",

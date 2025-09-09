@@ -7,7 +7,7 @@ import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
-import type { Phase, AgentState, Conversation, ConversationMetadata, PhaseTransition } from "../types";
+import type { Phase, AgentState, Conversation, ConversationMetadata } from "../types";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
 import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
@@ -164,25 +164,12 @@ export class ConversationCoordinator {
 
     // No execution queue logic needed
 
-    // Create transition record
-    const transition: PhaseTransition = {
-      from,
-      to: phase,
-      message,
-      instructions: phaseInstructions,
-      timestamp: Date.now(),
-      agentPubkey,
-      agentName,
-    };
-
     // Update conversation
     if (from !== phase) {
       conversation.phase = phase;
       conversation.phaseInstructions = phaseInstructions;
       conversation.phaseStartedAt = Date.now();
     }
-
-    conversation.phaseTransitions.push(transition);
 
     logger.info(
       `Phase transition: ${from} → ${phase} for conversation ${id.substring(0, 8)}`

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Conversation, AgentState } from "../types";
-import { PHASES } from "../phases";
 
 // Mock the modules before importing them
 mock.module("@/services", () => ({
@@ -83,12 +82,11 @@ describe("AgentConversationContext", () => {
     mockConversation = {
       id: "test-conversation",
       title: "Test Conversation",
-      phase: PHASES.CHAT,
+      phase: "CHAT",
       history: [],
       agentStates: new Map(),
       phaseStartedAt: Date.now(),
       metadata: {},
-      phaseTransitions: [],
       executionTime: {
         totalSeconds: 0,
         isActive: false,
@@ -170,8 +168,8 @@ describe("AgentConversationContext", () => {
       event1.pubkey = "user-pubkey";
 
       mockConversation.history = [event1];
-      mockConversation.phase = PHASES.REFLECTION;
-      mockAgentState.lastSeenPhase = PHASES.CHAT;
+      mockConversation.phase = "REFLECTION";
+      mockAgentState.lastSeenPhase = "CHAT";
 
       const phaseInstructions = "You are now in reflection phase";
 

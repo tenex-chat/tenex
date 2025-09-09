@@ -49,7 +49,6 @@ describe("handleNewConversation", () => {
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,

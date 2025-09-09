@@ -67,16 +67,6 @@ describe(
             CHAT: 1,
           },
         },
-        phaseTransitions: [
-          {
-            from: "CHAT",
-            to: "PLAN",
-            timestamp: Date.now(),
-            message: "Transitioning to planning phase",
-            agentPubkey: "mock-agent-pubkey",
-            agentName: "Orchestrator",
-          },
-        ],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -123,7 +113,6 @@ describe(
           agentContexts: new Map(),
           phaseStartedAt: Date.now(),
           metadata: {},
-          phaseTransitions: [],
           executionTime: {
             totalSeconds: 0,
             isActive: false,
@@ -154,7 +143,6 @@ describe(
         agentContexts: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -170,7 +158,6 @@ describe(
         agentContexts: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -198,7 +185,6 @@ describe(
         agentContexts: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -248,7 +234,6 @@ describe(
             CHAT: 0,
           },
         },
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,

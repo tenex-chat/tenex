@@ -1,6 +1,6 @@
 import { mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Conversation, AgentState, PhaseTransition } from "@/conversations/types";
+import type { Conversation, AgentState } from "@/conversations/types";
 import type { AgentInstance } from "@/agents/types";
 
 /**
@@ -84,7 +84,6 @@ export function createMockConversation(overrides: Partial<Conversation> = {}): C
     history: [],
     agentStates: new Map<string, AgentState>(),
     metadata: {},
-    phaseTransitions: [] as PhaseTransition[],
     executionTime: {
       totalSeconds: 0,
       isActive: false,

@@ -21,9 +21,9 @@ export interface E2ETestContext {
 export interface ExecutionTrace {
     conversationId: string;
     executions: AgentExecutionRecord[];
-    phaseTransitions: PhaseTransitionRecord[];
     toolCalls: ToolCallRecord[];
     routingDecisions: any[];
+    agentInteractions: AgentExecutionRecord[];
 }
 
 export interface AgentExecutionRecord {
@@ -34,13 +34,6 @@ export interface AgentExecutionRecord {
     toolCalls?: any[];
 }
 
-export interface PhaseTransitionRecord {
-    from: string;
-    to: string;
-    agent: string;
-    reason: string;
-    timestamp: Date;
-}
 
 export interface ToolCallRecord {
     agent: string;

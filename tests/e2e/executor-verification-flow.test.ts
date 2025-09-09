@@ -343,12 +343,7 @@ describe("E2E: Executor-Verification Flow", () => {
         expect(phaseChanges).toContain("execute->verification");
         expect(phaseChanges).toContain("verification->execute");
         
-        // Verify phase transitions are recorded in trace
-        expect(trace.phaseTransitions.length).toBeGreaterThan(0);
-        
-        // Each transition should have an agent
-        for (const transition of trace.phaseTransitions) {
-            expect(transition.agent).toBeTruthy();
-        }
+        // Verify execution metrics are recorded in trace
+        expect(trace.agentInteractions.length).toBeGreaterThan(0);
     });
 });

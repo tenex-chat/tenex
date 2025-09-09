@@ -239,11 +239,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
     expect(loaded?.history[0].content).toBe("Create an authentication system");
 
     // Verify phase transitions are preserved
-    expect(loaded?.phaseTransitions).toHaveLength(2);
-    expect(loaded?.phaseTransitions[0].from).toBe("chat");
-    expect(loaded?.phaseTransitions[0].to).toBe("plan");
-    expect(loaded?.phaseTransitions[1].from).toBe("plan");
-    expect(loaded?.phaseTransitions[1].to).toBe("execute");
 
     // Verify execution time is preserved
     expect(loaded?.executionTime.totalSeconds).toBe(45);
@@ -375,14 +370,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
       tokenCount: 50,
       lastUpdate: new Date(),
     });
-    conversation.phaseTransitions.push({
-      from: "chat",
-      to: "plan",
-      timestamp: Date.now(),
-      message: "Moving to planning",
-      agentPubkey: "orchestrator-pubkey",
-      agentName: "Orchestrator",
-    });
     conversation.executionTime.totalSeconds = 15;
 
     // Save updated state
@@ -394,7 +381,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
     expect(loaded?.phase).toBe("plan");
     expect(loaded?.history).toHaveLength(1);
     expect(loaded?.agentContexts.size).toBe(1);
-    expect(loaded?.phaseTransitions).toHaveLength(1);
     expect(loaded?.executionTime.totalSeconds).toBe(15);
   });
 

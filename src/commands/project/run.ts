@@ -96,13 +96,20 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const statusPublisher = new StatusPublisher();
     await statusPublisher.startPublishing(projectPath);
 
+    // Start operations status publisher
+    const { OperationsStatusPublisher } = await import("@/services");
+    const { llmOpsRegistry } = await import("@/services/LLMOperationsRegistry");
+    const operationsStatusPublisher = new OperationsStatusPublisher(llmOpsRegistry);
+    operationsStatusPublisher.start();
+
     // Set up graceful shutdown
     setupGracefulShutdown(async () => {
       // Stop subscriptions first
       await subscriptionManager.stop();
 
-      // Stop status publisher
+      // Stop status publishers
       statusPublisher.stopPublishing();
+      operationsStatusPublisher.stop();
 
       // Clean up event handler subscriptions
       await eventHandler.cleanup();

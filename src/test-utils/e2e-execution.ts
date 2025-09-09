@@ -284,12 +284,12 @@ export async function executeConversationFlow(
             // Check for phase transitions
             const newState = await getConversationState(context, conversationId);
             if (newState.phase !== currentPhase) {
-                trace.phaseTransitions.push({
-                    from: currentPhase,
-                    to: newState.phase,
+                // Phase change detected - record in execution trace
+                trace.executions.push({
                     agent: targetAgent,
-                    reason: routingDecision.reason,
-                    timestamp: new Date()
+                    phase: newState.phase,
+                    timestamp: new Date(),
+                    message: `Phase changed from ${currentPhase} to ${newState.phase}: ${routingDecision.reason}`
                 });
                 
                 if (options?.onPhaseTransition) {

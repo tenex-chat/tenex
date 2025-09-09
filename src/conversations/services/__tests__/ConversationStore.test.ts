@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockNDKEvent } from "@/test-utils/bun-mocks";
-import { PHASES } from "../../phases";
 import type { Conversation } from "../../types";
 import { ConversationStore } from "../ConversationStore";
 
@@ -20,14 +19,13 @@ describe("ConversationStore", () => {
     mockConversation = {
       id: "conv1",
       title: "Test Conversation",
-      phase: PHASES.CHAT,
+      phase: "CHAT",
       history: [mockEvent],
       agentStates: new Map(),
       phaseStartedAt: Date.now(),
       metadata: {
         summary: "Test summary",
       },
-      phaseTransitions: [],
       executionTime: {
         totalSeconds: 0,
         isActive: false,

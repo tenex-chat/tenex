@@ -1,5 +1,4 @@
 import { tool } from 'ai';
-import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
@@ -127,10 +126,8 @@ async function executeAgentsWrite(
 
   await writeJsonFile(registryPath, registry);
 
-  // Load the agent using AgentRegistry to ensure it's properly initialized
+  // Use the existing agent registry from project context
   const projectContext = getProjectContext();
-  const agentRegistry = new AgentRegistry(projectPath, false);
-  await agentRegistry.loadFromProject();
   
   // Ensure the agent is registered with all proper initialization
   const agentConfig = {
@@ -144,9 +141,11 @@ async function executeAgentsWrite(
     mcp,
   };
   
-  const agent = await agentRegistry.ensureAgent(slug, agentConfig, projectContext.project);
+  // Use the existing agent registry to ensure the agent
+  const agent = await projectContext.agentRegistry.ensureAgent(slug, agentConfig, projectContext.project);
   
-  // Update the ProjectContext with the new/updated agent to trigger 24010 event
+  // The agentRegistry.ensureAgent already updates the registry internally,
+  // but we need to update the ProjectContext's agents map as well
   const updatedAgents = new Map(projectContext.agents);
   updatedAgents.set(slug, agent);
   await projectContext.updateProjectData(projectContext.project, updatedAgents);

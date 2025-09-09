@@ -125,13 +125,6 @@ describe("State Recovery E2E Tests", () => {
         
         // Manually update conversation state to simulate agent execution
         conversation.phase = "plan";
-        conversation.phaseTransitions.push({
-            from: "chat",
-            to: "plan",
-            timestamp: new Date(),
-            reason: "Moving to planning phase",
-            transitionMessage: "Starting to plan the authentication system"
-        });
         conversation.history.push({
             role: "assistant",
             content: "I'll help you create an authentication system. Let me plan this out.",
@@ -146,11 +139,7 @@ describe("State Recovery E2E Tests", () => {
         expect(savedConv2).toBeDefined();
         expect(savedConv2?.phase).toBe("plan");
         expect(savedConv2?.history.length).toBeGreaterThan(1);
-        expect(savedConv2?.phaseTransitions).toHaveLength(1);
-        expect(savedConv2?.phaseTransitions[0]).toMatchObject({
-            from: "chat",
-            to: "plan"
-        });
+        expect(savedConv2?.phase).toBe("plan");
     });
     
     it("should recover conversation state from persistence", async () => {
@@ -209,7 +198,7 @@ describe("State Recovery E2E Tests", () => {
             summary: "Planning REST API implementation",
             toolCalls: ["continue"]
         });
-        expect(recoveredConversation?.phaseTransitions).toHaveLength(1);
+        expect(recoveredConversation?.phase).toBeDefined();
         expect(recoveredConversation?.executionTime.totalSeconds).toBe(120);
     });
     

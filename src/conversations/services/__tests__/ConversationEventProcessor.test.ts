@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { PHASES } from "../../phases";
 import type { Conversation } from "../../types";
 import { ConversationEventProcessor } from "../ConversationEventProcessor";
 
@@ -115,12 +114,11 @@ describe("ConversationEventProcessor", () => {
       const conversation: Conversation = {
         id: "conv-1",
         title: "Test Conversation",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [],
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -152,12 +150,11 @@ describe("ConversationEventProcessor", () => {
       const conversation: Conversation = {
         id: "conv-1",
         title: "Test Conversation",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [existingEvent],
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -185,12 +182,11 @@ describe("ConversationEventProcessor", () => {
       const conversation: Conversation = {
         id: "conv-1",
         title: "Test Conversation",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [],
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,
@@ -233,12 +229,11 @@ describe("ConversationEventProcessor", () => {
       const conversation: Conversation = {
         id: "conv-1",
         title: "Test Conversation",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [],
         agentStates: new Map(),
         phaseStartedAt: Date.now(),
         metadata: {},
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: 0,
           isActive: false,

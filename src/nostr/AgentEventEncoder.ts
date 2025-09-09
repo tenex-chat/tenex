@@ -354,7 +354,7 @@ export class AgentEventEncoder {
     title: string,
     content: string,
     context: EventContext,
-    claudeSessionId: string,
+    claudeSessionId?: string,
     branch?: string
   ): NDKTask {
     const task = new NDKTask(getNDK());
@@ -364,8 +364,10 @@ export class AgentEventEncoder {
     // Add conversation tags (E, K, P for root, e for triggering)
     this.addConversationTags(task, context);
 
-    // Add session ID
-    task.tags.push(["claude-session", claudeSessionId]);
+    // Add session ID if provided
+    if (claudeSessionId) {
+      task.tags.push(["claude-session", claudeSessionId]);
+    }
 
     // Add branch tag if provided
     if (branch) {

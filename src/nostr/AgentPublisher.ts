@@ -6,7 +6,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { logger } from "@/utils/logger";
 import {
   NDKEvent,
-  NDKTask,
+  type NDKTask,
   type NDKPrivateKeySigner,
   type NDKProject,
 } from "@nostr-dev-kit/ndk";
@@ -289,21 +289,6 @@ export class AgentPublisher {
   }
 
   /**
-   * Handle tool about to execute.
-   * Flushes buffer and publishes accumulated content.
-   */
-  async handleToolWillExecute(
-    event: { toolName: string; toolCallId: string; args: unknown }
-  ): Promise<void> {
-    // Just log for now - tools handle their own events
-    logger.debug('[AgentPublisher] Tool will execute', {
-      toolName: event.toolName,
-      toolCallId: event.toolCallId
-    });
-  }
-
-
-  /**
    * Create a task event that references the triggering event.
    * Used for Claude Code and other task-based executions.
    */
@@ -311,7 +296,7 @@ export class AgentPublisher {
     title: string,
     content: string,
     context: EventContext,
-    claudeSessionId: string,
+    claudeSessionId?: string,
     branch?: string
   ): Promise<NDKTask> {
     // Use encoder to create task with proper tagging
@@ -344,7 +329,8 @@ export class AgentPublisher {
   async publishTaskUpdate(
     task: NDKTask,
     content: string,
-    context: EventContext
+    context: EventContext,
+    status = "in-progress"
   ): Promise<NDKEvent> {
     const update = task.reply();
     update.content = content;
@@ -355,6 +341,7 @@ export class AgentPublisher {
     // Add standard tags using existing encoder methods
     this.encoder.addStandardTags(update, context);
 
+    update.tag(["status", status]);
     await update.sign(this.agent.signer);
     await update.publish();
 

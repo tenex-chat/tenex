@@ -12,3 +12,4 @@ export {
 } from "./ProjectContext";
 export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyNameRepository";
 export { StatusPublisher } from "./status";
+export { OperationsStatusPublisher } from "./OperationsStatusPublisher";

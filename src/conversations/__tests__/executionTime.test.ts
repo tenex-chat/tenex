@@ -7,7 +7,6 @@ import {
   startExecutionTime,
   stopExecutionTime,
 } from "../executionTime";
-import { PHASES } from "../phases";
 import type { Conversation } from "../types";
 
 // Mock Date.now for controlled time testing
@@ -19,10 +18,9 @@ function createTestConversation(id: string): Conversation {
   const conversation: Conversation = {
     id,
     title: "Test Conversation",
-    phase: PHASES.CHAT,
+    phase: "CHAT",
     history: [],
     metadata: {},
-    phaseTransitions: [],
     executionTime: {
       totalSeconds: 0,
       currentSessionStart: undefined,
@@ -186,11 +184,10 @@ describe("Execution Time Tracking", () => {
       const conversation: Conversation = {
         id: "loaded-conv-1",
         title: "Loaded",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [],
         metadata: {},
-        phaseTransitions: [],
-        executionTime: undefined as any, // Simulate missing executionTime
+            executionTime: undefined as any, // Simulate missing executionTime
       };
 
       ensureExecutionTimeInitialized(conversation);
@@ -229,11 +226,10 @@ describe("Execution Time Tracking", () => {
       const conversation: Conversation = {
         id: "partial-conv-1",
         title: "Partial",
-        phase: PHASES.CHAT,
+        phase: "CHAT",
         history: [],
         metadata: {},
-        phaseTransitions: [],
-        executionTime: {
+            executionTime: {
           totalSeconds: 100,
           isActive: false,
         } as any, // Missing fields

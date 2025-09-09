@@ -41,5 +41,6 @@ export const EVENT_KINDS = {
   STREAMING_RESPONSE: 21111,
   FORCE_RELEASE: 24019,
   AGENT_CONFIG_UPDATE: 24020,
+  OPERATIONS_STATUS: 24133, // LLM operations status (one per event being processed)
 } as const;
 

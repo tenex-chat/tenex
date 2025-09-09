@@ -137,7 +137,6 @@ describe("Agent Event Routing", () => {
       id: "conv-root",
       history: [],
       phase: "chat",
-      phaseTransitions: [],
       agentStates: new Map(),
     };
 
@@ -293,7 +292,6 @@ describe("Agent Event Routing", () => {
       id: "conv-root",
       history: [],
       phase: "chat",
-      phaseTransitions: [],
       agentStates: new Map(),
     };
 

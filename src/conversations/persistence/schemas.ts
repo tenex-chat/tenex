@@ -2,15 +2,6 @@ import { z } from "zod";
 
 const PhaseSchema = z.string(); // Any string is a valid phase now
 
-export const PhaseTransitionSchema = z.object({
-  from: PhaseSchema,
-  to: PhaseSchema,
-  message: z.string(),
-  timestamp: z.number(),
-  agentPubkey: z.string(),
-  agentName: z.string(),
-});
-
 export const ConversationMetadataSchema = z.record(z.string(), z.unknown());
 
 const ExecutionTimeSchema = z.object({
@@ -35,7 +26,6 @@ export const SerializedConversationSchema = z.object({
   agentStates: z.record(z.string(), AgentStateSchema).optional(), // Map serialized as object
   phaseStartedAt: z.number().optional(),
   metadata: ConversationMetadataSchema,
-  phaseTransitions: z.array(PhaseTransitionSchema).default([]),
   executionTime: ExecutionTimeSchema.optional(),
 });
 

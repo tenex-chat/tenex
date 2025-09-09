@@ -10,13 +10,16 @@ import {
     generateText,
     stepCountIs,
     streamText,
+    smoothStream,
 } from "ai";
 import type { ModelMessage } from "ai";
+import chalk from "chalk";
 import { EventEmitter } from "tseep";
 
 // Define the event types for LLMService
 interface LLMServiceEvents {
     content: (data: { delta: string }) => void;
+    "chunk-type-change": (data: { from: string | undefined; to: string }) => void;
     "tool-will-execute": (data: { toolName: string; toolCallId: string; args: unknown }) => void;
     "tool-did-execute": (data: {
         toolName: string;
@@ -27,6 +30,7 @@ interface LLMServiceEvents {
     complete: (data: {
         message: string;
         steps: StepResult<Record<string, AISdkTool>>[];
+        usage: LanguageModelUsage;
     }) => void;
     "stream-error": (data: { error: unknown }) => void;
     // Add index signatures for EventEmitter compatibility
@@ -185,18 +189,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     }
 
-    async stream(messages: ModelMessage[], tools: Record<string, AISdkTool>): Promise<void> {
+    async stream(
+        messages: ModelMessage[], 
+        tools: Record<string, AISdkTool>,
+        options?: {
+            abortSignal?: AbortSignal;
+        }
+    ): Promise<void> {
         const model = this.getLanguageModel();
         
         // Add provider-specific cache control
         const processedMessages = this.addCacheControl(messages);
-
-        // Create message preview for logging
-        const messagesPreview = messages.map((msg) => {
-            const content = typeof msg.content === "string" ? msg.content : "[complex content]";
-            const preview = content.length > 500 ? `${content.substring(0, 500)}...` : content;
-            return preview;
-        });
 
         // Log the request
         this.llmLogger
@@ -211,16 +214,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.error("[LLMService] Failed to log request", { error: err });
             });
 
-        // logger.info("[LLMService] Calling stream", {
-        //     model: `${this.provider}:${this.model}`,
-        //     messageCount: messages.length,
-        //     toolCount: Object.keys(tools).length,
-        //     toolNames: Object.keys(tools).join(", "),
-        //     temperature: this.temperature,
-        //     maxTokens: this.maxTokens,
-        //     messagesPreview,
-        // });
-
         const startTime = Date.now();
 
         // Create the stream outside the promise
@@ -231,6 +224,10 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen: stepCountIs(20),
+            abortSignal: options?.abortSignal,
+            experimental_transform: smoothStream({
+                chunking: 'line'
+            }),
             
             // Check for delegation completion and inject follow-up hint
             prepareStep: async (options) => {
@@ -287,8 +284,15 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
-        if (!chunk.type.match(/delta/)) console.log("LLMService chunk", chunk);
-        console.log('new chunk', chunk.type);
+        console.log("LLMService chunk", chunk.type, chalk.gray(chunk.text));
+
+        // Emit chunk-type-change event if the type changed
+        if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
+            this.emit("chunk-type-change", {
+                from: this.previousChunkType,
+                to: chunk.type
+            });
+        }
 
         // Check if we're transitioning out of reasoning-delta
         if (this.previousChunkType === "reasoning-delta" && chunk.type !== "reasoning-delta") {
@@ -351,6 +355,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 this.emit("complete", {
                     message: e.text || "",
                     steps: e.steps,
+                    usage: e.totalUsage,
                 });
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {

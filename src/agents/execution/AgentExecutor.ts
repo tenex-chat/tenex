@@ -20,6 +20,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 // LLMLogger will be accessed from ProjectContext
 import type { ToolName } from "@/tools/registry";
 import { configService } from "@/services";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 
 /**
  * Minimal context for standalone agent execution
@@ -364,6 +365,7 @@ Be completely transparent about your internal process. If you made a mistake or 
         // Helper to flush accumulated content
         const flushContentBuffer = async () => {
             if (contentBuffer.trim()) {
+                console.log('publihsing conversation event', contentBuffer.substring(0, 50));
                 await agentPublisher.conversation({
                     content: contentBuffer
                 }, eventContext);
@@ -381,10 +383,9 @@ Be completely transparent about your internal process. If you made a mistake or 
             await agentPublisher.handleContent(event, eventContext);
         });
         
-        llmService.on('tool-will-execute', async (event) => {
-            // Flush buffer before tool execution
+        llmService.on('chunk-type-change', async (event) => {
+            logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`);
             await flushContentBuffer();
-            await agentPublisher.handleToolWillExecute(event, eventContext);
         });
         
         llmService.on('complete', async (event) => {
@@ -406,9 +407,15 @@ Be completely transparent about your internal process. If you made a mistake or 
         });
 
         try {
+            // Register operation with the LLM Operations Registry
+            const abortSignal = llmOpsRegistry.registerOperation(context);
+            
             // Single LLM call - let it run up to 20 steps
-            await llmService.stream(messages, toolsObject);
+            await llmService.stream(messages, toolsObject, { abortSignal });
         } finally {
+            // Complete the operation (handles both success and abort cases)
+            llmOpsRegistry.completeOperation(context);
+            
             // Clean up event listeners
             llmService.removeAllListeners();
         }
