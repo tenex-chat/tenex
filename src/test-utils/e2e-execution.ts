@@ -149,7 +149,6 @@ export async function executeConversationFlow(
     const trace: ExecutionTrace = {
         conversationId,
         executions: [],
-        phaseTransitions: [],
         toolCalls: [],
         routingDecisions: []
     };

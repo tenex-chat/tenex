@@ -25,11 +25,6 @@ export const phaseContextFragment: PromptFragment<PhaseContextArgs> = {
       parts.push(`### Phase Instructions\n${conversation.phaseInstructions}`);
     }
 
-    // Get phase context from phase transitions if available
-    const phaseContext = getPhaseContext(phase, conversation);
-    if (phaseContext) {
-      parts.push(`### Phase Context\n${phaseContext}`);
-    }
 
     // Add any phase metadata
     if (phaseMetadata?.goal) {
@@ -39,36 +34,6 @@ export const phaseContextFragment: PromptFragment<PhaseContextArgs> = {
     return parts.join("\n\n");
   },
 };
-
-/**
- * Helper to extract phase context from phase transitions
- */
-function getPhaseContext(targetPhase: Phase, conversation?: Conversation): string | null {
-  if (!conversation?.phaseTransitions?.length) {
-    return null;
-  }
-
-  // Find the most recent transition to the target phase
-  const relevantTransition = [...conversation.phaseTransitions]
-    .reverse()
-    .find((t) => t.to === targetPhase);
-
-  if (relevantTransition) {
-    // Build context from both message and instructions
-    const contextParts: string[] = [];
-    
-    if (relevantTransition.message) {
-      contextParts.push(relevantTransition.message);
-    }
-    
-    // Return combined context if we have anything
-    if (contextParts.length > 0) {
-      return contextParts.join("\n\n");
-    }
-  }
-
-  return null;
-}
 
 // Register the fragment
 fragmentRegistry.register(phaseContextFragment);

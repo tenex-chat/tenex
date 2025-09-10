@@ -156,24 +156,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
           execute: 1,
         },
       },
-      phaseTransitions: [
-        {
-          from: "CHAT",
-          to: "PLAN",
-          timestamp: Date.now() - 50000,
-          message: "Transitioning to planning phase",
-          agentPubkey: "orchestrator-pubkey",
-          agentName: "Orchestrator",
-        },
-        {
-          from: "PLAN",
-          to: "execute",
-          timestamp: Date.now() - 30000,
-          message: "Starting implementation",
-          agentPubkey: "executor-pubkey",
-          agentName: "Executor",
-        },
-      ],
       executionTime: {
         totalSeconds: 45,
         isActive: true,
@@ -238,7 +220,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
     // Verify the history events are preserved
     expect(loaded?.history[0].content).toBe("Create an authentication system");
 
-    // Verify phase transitions are preserved
 
     // Verify execution time is preserved
     expect(loaded?.executionTime.totalSeconds).toBe(45);
@@ -286,7 +267,6 @@ describe("FileSystemAdapter State Persistence Tests", () => {
           requirements: `Requirements for task ${i}`,
           continueCallCounts: {},
         },
-        phaseTransitions: [],
         executionTime: {
           totalSeconds: i * 10,
           isActive: false,
