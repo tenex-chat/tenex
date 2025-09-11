@@ -8,7 +8,6 @@ import chalk from "chalk";
 
 export interface ConversationResolutionResult {
   conversation: Conversation | undefined;
-  claudeSessionId?: string;
   isNew?: boolean;
 }
 
@@ -55,10 +54,8 @@ export class ConversationResolver {
     const conversation = convRoot
       ? this.conversationCoordinator.getConversationByEvent(convRoot)
       : undefined;
-    let mappedClaudeSessionId: string | undefined;
 
-
-    return { conversation, claudeSessionId: mappedClaudeSessionId };
+    return { conversation };
   }
 
   /**

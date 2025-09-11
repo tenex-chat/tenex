@@ -17,8 +17,6 @@ import type { ExecutionContext } from "./types";
 import "@/prompts/fragments"; // Import fragment registration manifest
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-// LLMLogger will be accessed from ProjectContext
-import type { ToolName } from "@/tools/registry";
 import { configService } from "@/services";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 
@@ -43,37 +41,19 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<void> {
-        // Build messages first to get the Claude session ID
+        // Build messages first
         const messages = await this.buildMessages(context, context.triggeringEvent);
-
-        // Get the Claude session ID from the conversation state
-        const conversation = this.conversationCoordinator.getConversation(context.conversationId);
-        const agentState = conversation?.agentStates.get(context.agent.slug);
-        const claudeSessionId =
-            context.claudeSessionId || agentState?.claudeSessionsByPhase?.[context.phase];
-
-        if (claudeSessionId) {
-            logger.info(`[AgentExecutor] Found Claude session ID for agent ${context.agent.slug}`, {
-                conversationId: context.conversationId,
-                agentSlug: context.agent.slug,
-                sessionId: claudeSessionId,
-                source: context.claudeSessionId ? "triggering-event" : "agent-context",
-            });
-        }
 
         // Create AgentPublisher first so we can include it in context
         const agentPublisher = new AgentPublisher(
-            context.agent,
-            context.conversationCoordinator || this.conversationCoordinator
+            context.agent
         );
 
         // Build full context with additional properties
         const fullContext: ExecutionContext = {
             ...context,
-            conversationCoordinator:
-                context.conversationCoordinator || this.conversationCoordinator,
+            conversationCoordinator: context.conversationCoordinator,
             agentPublisher, // Include the shared AgentPublisher instance
-            claudeSessionId, // Pass the determined session ID
         };
 
         try {
@@ -98,6 +78,7 @@ export class AgentExecutor {
                 triggeringEvent: context.triggeringEvent,
                 rootEvent: conversation.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
                 conversationId: context.conversationId,
+                model: context.agent.llmConfig, // Include LLM configuration
             };
             await agentPublisher.typing({ state: "start" }, eventContext);
 
@@ -107,9 +88,6 @@ export class AgentExecutor {
             logger.info(
                 `Agent ${context.agent.name} completed execution successfully`
             );
-
-            // Stop typing indicator after successful execution
-            await agentPublisher.typing({ state: "stop" }, eventContext);
         } catch (error) {
             // Log execution flow failure
             logger.error(`Agent ${context.agent.name} execution failed`, {
@@ -118,20 +96,20 @@ export class AgentExecutor {
                 error: formatAnyError(error),
                 success: false,
             });
-            // Stop execution time tracking even on error
+            throw error;
+        } finally {
             const conversation = context.conversationCoordinator.getConversation(
                 context.conversationId
             );
-            if (conversation) {
-                stopExecutionTime(conversation);
-            }
-
+            if (conversation) stopExecutionTime(conversation);
+            
             // Ensure typing indicator is stopped even on error
             try {
                 const eventContext: EventContext = {
                     triggeringEvent: context.triggeringEvent,
                     rootEvent: conversation?.history[0] ?? context.triggeringEvent,
                     conversationId: context.conversationId,
+                    model: context.agent.llmConfig, // Include LLM configuration
                 };
                 await agentPublisher.typing({ state: "stop" }, eventContext);
             } catch (typingError) {
@@ -139,8 +117,6 @@ export class AgentExecutor {
                     error: formatAnyError(typingError),
                 });
             }
-
-            throw error;
         }
     }
 
@@ -357,21 +333,41 @@ Be completely transparent about your internal process. If you made a mistake or 
             rootEvent: context.conversationCoordinator.getConversation(context.conversationId)?.history[0] ?? context.triggeringEvent,
             conversationId: context.conversationId,
             phase: context.phase,
+            model: context.agent.llmConfig, // Include LLM configuration
         };
 
-        // Buffer to accumulate streaming content
+        // Separate buffers for content and reasoning
         let contentBuffer = '';
+        let reasoningBuffer = '';
 
         // Helper to flush accumulated content
-        const flushContentBuffer = async () => {
+        const flushContentBuffer = async (): Promise<void> => {
             if (contentBuffer.trim()) {
-                console.log('publihsing conversation event', contentBuffer.substring(0, 50));
+                console.log('publishing conversation event', contentBuffer.substring(0, 50));
+                
+                // Use regular conversation event for content
                 await agentPublisher.conversation({
                     content: contentBuffer
                 }, eventContext);
+                logger.info(`[AgentExecutor] Flushed content buffer (${contentBuffer.length} chars)`);
                 
-                logger.debug(`[AgentExecutor] Flushed content buffer (${contentBuffer.length} chars)`);
                 contentBuffer = '';
+            }
+        };
+
+        // Helper to flush accumulated reasoning
+        const flushReasoningBuffer = async (): Promise<void> => {
+            if (reasoningBuffer.trim().length > 0) {
+                console.log('publishing reasoning event', reasoningBuffer.substring(0, 50));
+                
+                // Use conversation event with reasoning tag
+                await agentPublisher.conversation({
+                    content: reasoningBuffer,
+                    isReasoning: true
+                }, eventContext);
+                logger.info(`[AgentExecutor] Flushed reasoning buffer (${reasoningBuffer.length} chars)`);
+                
+                reasoningBuffer = '';
             }
         };
 
@@ -380,26 +376,43 @@ Be completely transparent about your internal process. If you made a mistake or 
             // Accumulate content instead of streaming immediately
             contentBuffer += event.delta;
             // Still stream deltas for real-time display
-            await agentPublisher.handleContent(event, eventContext);
+            await agentPublisher.handleContent(event, eventContext, false);
+        });
+
+        llmService.on('reasoning', async (event) => {
+            // Accumulate reasoning separately
+            reasoningBuffer += event.delta;
+            // Stream reasoning deltas for real-time display with reasoning flag
+            await agentPublisher.handleContent(event, eventContext, true);
         });
         
         llmService.on('chunk-type-change', async (event) => {
-            logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`);
+            logger.info(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`);
+            // Flush both buffers on chunk type change
             await flushContentBuffer();
+            await flushReasoningBuffer();
         });
         
         llmService.on('complete', async (event) => {
-            // Clear the buffer without publishing (content is already in event.message)
-            contentBuffer = '';
+            // Check if we had reasoning or content before flushing
+            const hadContent = contentBuffer.trim().length > 0;
+            const hadReasoning = reasoningBuffer.trim().length > 0;
             
-            // Publish the complete message as a completion event
             if (event.message.trim()) {
+                const isReasoning = hadReasoning && !hadContent;
+                
                 await agentPublisher.complete({
-                    content: event.message
+                    content: event.message,
+                    usage: event.usage,
+                    isReasoning
                 }, eventContext);
                 
-                logger.info(`[AgentExecutor] Agent ${context.agent.name} completed (${event.message.length} chars)`);
+                logger.info(`[AgentExecutor] Agent ${context.agent.name} completed (${event.message.length} chars, reasoning: ${isReasoning})`);
             }
+            
+            // Clear buffers
+            contentBuffer = '';
+            reasoningBuffer = '';
         });
         
         llmService.on('stream-error', (event) => {

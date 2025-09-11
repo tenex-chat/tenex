@@ -186,7 +186,7 @@ export class ConversationCoordinator {
     conversationId: string,
     targetAgent: AgentInstance,
     triggeringEvent?: NDKEvent
-  ): Promise<{ messages: ModelMessage[]; claudeSessionId?: string }> {
+  ): Promise<{ messages: ModelMessage[] }> {
     const conversation = this.store.get(conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);
@@ -249,7 +249,6 @@ export class ConversationCoordinator {
 
     return {
       messages,
-      claudeSessionId: conversation.phase && agentState.claudeSessionsByPhase?.[conversation.phase],
     };
   }
 

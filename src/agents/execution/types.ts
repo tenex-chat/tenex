@@ -12,6 +12,5 @@ export interface ExecutionContext {
   triggeringEvent: NDKEvent;
   conversationCoordinator: ConversationCoordinator;
   agentPublisher: AgentPublisher; // Required: shared publisher instance for consistent event ordering
-  claudeSessionId?: string;
   isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
 }

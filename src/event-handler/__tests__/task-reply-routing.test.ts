@@ -79,7 +79,6 @@ describe("Task Reply Routing", () => {
   it("should route reply to task back to original conversation using task mapping", async () => {
     const taskId = "task-123";
     const conversationId = "conv-456";
-    const claudeSessionId = "session-789";
 
     // Create a reply to a task event
     const replyToTaskEvent = new NDKEvent(undefined, {
@@ -113,7 +112,6 @@ describe("Task Reply Routing", () => {
     mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined); // No direct conversation found
     mockConversationCoordinator.getTaskMapping.mockReturnValue({
       conversationId,
-      claudeSessionId,
     });
     mockConversationCoordinator.getConversation.mockImplementation((id: string) => {
       if (id === conversationId) return mockConversation;
@@ -138,11 +136,10 @@ describe("Task Reply Routing", () => {
       replyToTaskEvent
     );
 
-    // Verify agent executor was called with the correct Claude session ID
+    // Verify agent executor was called with the correct conversation ID
     expect(mockAgentExecutor.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationId,
-        claudeSessionId,
       })
     );
   });
@@ -242,7 +239,6 @@ describe("Task Reply Routing", () => {
     mockConversationCoordinator.getConversationByEvent.mockReturnValue(undefined);
     mockConversationCoordinator.getTaskMapping.mockReturnValue({
       conversationId,
-      claudeSessionId: mappedSessionId, // Mapping has a session ID
     });
     mockConversationCoordinator.getConversation.mockReturnValue(mockConversation);
 
@@ -252,10 +248,10 @@ describe("Task Reply Routing", () => {
       agentExecutor: mockAgentExecutor,
     });
 
-    // Verify the mapped session ID was used (not the event tag)
+    // Verify the executor was called with correct conversation ID
     expect(mockAgentExecutor.execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        claudeSessionId: mappedSessionId, // Should use mapped session, not event tag
+        conversationId,
       })
     );
   });

@@ -131,7 +131,6 @@ async function handleReplyLogic(
   const conversationResolver = new ConversationResolver(conversationCoordinator);
   const {
     conversation,
-    claudeSessionId: mappedClaudeSessionId,
     isNew,
   } = await conversationResolver.resolveConversationForEvent(event);
 
@@ -180,18 +179,7 @@ async function handleReplyLogic(
   
   targetAgents = nonSelfReplyAgents;
 
-  // 5. Extract claude-session
-  const effectiveEvent = event;
-  const claudeSessionId = mappedClaudeSessionId || AgentEventDecoder.getClaudeSessionId(effectiveEvent);
-  if (claudeSessionId) {
-    logger.info(
-      chalk.gray("Passing claude-session to execution context: ") +
-        chalk.cyan(claudeSessionId) +
-        (mappedClaudeSessionId ? chalk.gray(" (from task mapping)") : "")
-    );
-  }
-
-  // 6. Execute each target agent in parallel
+  // 5. Execute each target agent in parallel
   const executionPromises = targetAgents.map(async (targetAgent) => {
     // Build execution context for this agent
     const executionContext: ExecutionContext = {
@@ -199,9 +187,8 @@ async function handleReplyLogic(
       conversationId: conversation.id,
       phase: conversation.phase,
       projectPath: process.cwd(),
-      triggeringEvent: effectiveEvent,
+      triggeringEvent: event,
       conversationCoordinator,
-      claudeSessionId,
     };
 
     // Execute agent

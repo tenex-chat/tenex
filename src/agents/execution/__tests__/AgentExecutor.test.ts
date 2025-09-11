@@ -147,7 +147,6 @@ describe("AgentExecutor", () => {
       })),
       buildAgentMessages: mock(async () => ({
         messages: [{ role: "user" as const, content: "Test user message" }],
-        claudeSessionId: undefined,
       })),
       buildOrchestratorRoutingContext: mock(async () => ({
         user_request: "Test user request",
