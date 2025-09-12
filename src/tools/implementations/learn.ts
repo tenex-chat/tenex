@@ -61,6 +61,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
     triggeringEvent: context.triggeringEvent,
     rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
     conversationId: context.conversationId,
+    model: context.agent.llmConfig, // Include LLM configuration
   };
 
   // Use shared AgentPublisher instance from context to create and publish the lesson
@@ -77,6 +78,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],
           conversationId: context.conversationId,
+          model: context.agent.llmConfig, // Include LLM configuration
         }
       );
     }

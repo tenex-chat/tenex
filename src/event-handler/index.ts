@@ -43,7 +43,7 @@ export class EventHandler {
       this.projectPath,
       undefined // default persistence
     );
-    this.agentExecutor = new AgentExecutor(this.conversationCoordinator);
+    this.agentExecutor = new AgentExecutor();
 
     // Initialize components
     await this.conversationCoordinator.initialize();

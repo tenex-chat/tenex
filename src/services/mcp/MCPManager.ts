@@ -20,12 +20,6 @@ interface MCPClientEntry {
   config: MCPServerConfig;
 }
 
-interface MCPTool {
-  name: string;
-  description?: string;
-  parameters?: unknown;
-  execute: (args: unknown) => Promise<unknown>;
-}
 
 export class MCPManager {
   private static instance: MCPManager;
@@ -177,23 +171,20 @@ export class MCPManager {
         for (const [toolName, tool] of Object.entries(serverTools)) {
           const namespacedName = `mcp__${serverName}__${toolName}`;
           
-          // Ensure parameters have valid JSON Schema structure
-          let parameters = tool.parameters;
-          if (!parameters || typeof parameters !== 'object' || !('type' in parameters)) {
-            // Default to empty object schema if parameters are missing or invalid
-            parameters = {
-              type: 'object',
-              properties: {},
-              required: [],
-            };
-          }
+          // The tools from experimental_MCPClient are already CoreTool instances
+          // We just need to ensure they have the correct structure
+          // CoreTool should have: description, parameters (as zod schema), and execute function
           
-          tools[namespacedName] = {
-            ...tool,
-            parameters,
-            // Override the name to include namespace
-            description: tool.description || `${toolName} from ${serverName}`,
-          } as CoreTool<unknown, unknown>;
+          // Store the tool directly - it's already a proper CoreTool
+          tools[namespacedName] = tool;
+          
+          // Log the tool structure for debugging
+          logger.debug(`MCP tool '${namespacedName}' registered`, {
+            hasDescription: !!tool.description,
+            hasParameters: !!tool.parameters,
+            hasExecute: typeof tool.execute === 'function',
+            parametersType: tool.parameters ? typeof tool.parameters : 'undefined'
+          });
         }
 
         logger.debug(`Discovered ${Object.keys(serverTools).length} tools from MCP server '${serverName}'`);
@@ -207,16 +198,10 @@ export class MCPManager {
   }
 
   /**
-   * Get all cached MCP tools
+   * Get all cached MCP tools as an object keyed by tool name
    */
-  getCachedTools(): MCPTool[] {
-    // Convert to array format for backward compatibility
-    return Object.entries(this.cachedTools).map(([name, tool]) => ({
-      name,
-      description: tool.description,
-      parameters: tool.parameters,
-      execute: tool.execute || (async () => Promise.reject(new Error('Tool execution not available'))),
-    }));
+  getCachedTools(): Record<string, CoreTool<unknown, unknown>> {
+    return this.cachedTools;
   }
 
   /**

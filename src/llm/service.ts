@@ -10,11 +10,11 @@ import {
     generateText,
     stepCountIs,
     streamText,
-    smoothStream,
 } from "ai";
 import type { ModelMessage } from "ai";
 import chalk from "chalk";
 import { EventEmitter } from "tseep";
+import { LanguageModelUsageWithCostUsd } from "./types";
 
 // Define the event types for LLMService
 interface LLMServiceEvents {
@@ -30,7 +30,7 @@ interface LLMServiceEvents {
     complete: (data: {
         message: string;
         steps: StepResult<Record<string, AISdkTool>>[];
-        usage: LanguageModelUsage;
+        usage: LanguageModelUsageWithCostUsd;
     }) => void;
     "stream-error": (data: { error: unknown }) => void;
     // Add index signatures for EventEmitter compatibility
@@ -43,8 +43,8 @@ interface LLMServiceEvents {
  * Pure runtime concerns - no configuration management
  */
 export class LLMService extends EventEmitter<LLMServiceEvents> {
-    private readonly provider: string;
-    private readonly model: string;
+    public readonly provider: string;
+    public readonly model: string;
     private readonly temperature?: number;
     private readonly maxTokens?: number;
     private previousChunkType?: string;
@@ -90,7 +90,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             return messages;
         }
 
-        return messages.map((msg, index) => {
+        return messages.map((msg) => {
             // Only cache system messages and only if they're large enough (>1024 tokens estimate)
             if (msg.role === 'system' && msg.content.length > 4000) { // ~1000 tokens
                 return {
@@ -217,7 +217,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const startTime = Date.now();
 
         // Create the stream outside the promise
-        const { textStream } = streamText({
+        const { textStream, response } = streamText({
             model,
             messages: processedMessages,
             tools: tools,
@@ -225,61 +225,74 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             maxOutputTokens: this.maxTokens,
             stopWhen: stepCountIs(20),
             abortSignal: options?.abortSignal,
-            experimental_transform: smoothStream({
-                chunking: 'line'
-            }),
-            
+            providerOptions: {
+                openrouter: {
+                    usage: { include: true },
+                },
+            },
+
             // Check for delegation completion and inject follow-up hint
             prepareStep: async (options) => {
+                // console.log(
+                //     `running prepareStep (${options.stepNumber}) (${options.messages.length})`,
+                //     options.steps.map((s) => ({
+                //         content: s.content,
+                //         usage: s.usage,
+                //         finishReason: s.finishReason,
+                //         providerMetadata: s.providerMetadata,
+                //     }))
+                // );
+                // console.log(`<MESSAGES ${options.stepNumber}>`)
+                // console.log(JSON.stringify(options.messages, null, 4));
+                // console.log(`</MESSAGES ${options.stepNumber}>`);
+
                 const lastStep = options.steps[options.steps.length - 1];
                 const lastToolCall = lastStep?.toolCalls?.[0];
-                
+
                 // Check if last tool was a delegation
-                const delegationTools = ['delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'];
+                const delegationTools = [
+                    "delegate",
+                    "delegate_phase",
+                    "delegate_external",
+                    "delegate_followup",
+                ];
                 if (lastToolCall && delegationTools.includes(lastToolCall.toolName)) {
                     const lastResult = lastStep?.toolResults?.[0];
-                    
+
                     // Check if we got responses
                     if (lastResult?.responses?.length > 0) {
                         // Add assistant message about follow-up capability
                         return {
-                            messages: [{
-                                role: 'assistant',
-                                content: `I've received the delegation response. If I need any clarification or have follow-up questions, I can use delegate_followup to continue the conversation with the responding agent.`
-                            }],
+                            messages: [
+                                {
+                                    role: "assistant",
+                                    content: `I've received the delegation response. If I need any clarification or have follow-up questions, I can use delegate_followup to continue the conversation with the responding agent.`,
+                                },
+                            ],
                         };
                     }
                 }
             },
-            
-            onStepFinish: this.handleStepFinish.bind(this),
+
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(startTime),
         });
 
         // Consume the stream (this is what triggers everything!)
         try {
-            logger.info("[LLMService] Stream started", {
-                model: this.model,
-            });
-
             // CRITICAL: This loop is what actually triggers the stream execution
-            for await (const textPart of textStream) {
-                // process.stdout.write(textPart);
+            for await (const _chunk of textStream) {
+                // Consume the stream to trigger execution
             }
+
+            await textStream;
+
+            const responseAwaited = await response;
+            console.log("llm service response messages", responseAwaited?.messages);
         } catch (error) {
             await this.handleStreamError(error, startTime);
             throw error;
         }
-    }
-
-    private handleStepFinish(step: StepResult<TOOLS>): void {
-        console.log("onStepFinish", {
-            text: step.text,
-            finishReason: step.finishReason,
-            usage: step.usage,
-            providerMetadata: step.providerMetadata,
-        });
     }
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
@@ -294,11 +307,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             });
         }
 
-        // Check if we're transitioning out of reasoning-delta
-        if (this.previousChunkType === "reasoning-delta" && chunk.type !== "reasoning-delta") {
-            this.handleTextDelta("</thinking>");
-        }
-
         switch (chunk.type) {
             case "text-delta":
                 if (chunk.text) {
@@ -306,16 +314,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 }
                 break;
             case "reasoning-delta":
-                // Check if we're transitioning into reasoning-delta
-                if (this.previousChunkType !== "reasoning-delta") {
-                    this.handleTextDelta("<thinking>");
-                }
-                // Handle reasoning-delta like text-delta
+                // Handle reasoning-delta separately - emit reasoning event
                 if (chunk.text) {
-                    this.handleTextDelta(chunk.text);
+                    this.handleReasoningDelta(chunk.text);
                 }
                 break;
             case "tool-call":
+                console.log(chunk)
                 this.handleToolCall(chunk.toolCallId, chunk.toolName, chunk.input);
                 break;
             case "tool-result":
@@ -332,6 +337,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             e: StepResult<Record<string, AISdkTool>> & {
                 steps: StepResult<Record<string, AISdkTool>>[];
                 totalUsage: LanguageModelUsage;
+                providerMetadata: Record<string, any>;
             }
         ) => {
             const duration = Date.now() - startTime;
@@ -355,7 +361,10 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 this.emit("complete", {
                     message: e.text || "",
                     steps: e.steps,
-                    usage: e.totalUsage,
+                    usage: {
+                        costUsd: e.providerMetadata?.openrouter?.usage?.cost,
+                        ...(e.totalUsage || {}),
+                    },
                 });
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
@@ -391,7 +400,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         this.emit("content", { delta: text });
     }
 
+    private handleReasoningDelta(text: string): void {
+        this.emit("reasoning", { delta: text });
+    }
+
     private handleToolCall(toolCallId: string, toolName: string, args: unknown): void {
+        console.log("LLM Service: tool will execute", toolName, args);
         this.emit("tool-will-execute", {
             toolName,
             toolCallId,

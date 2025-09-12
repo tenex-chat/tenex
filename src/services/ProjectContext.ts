@@ -25,17 +25,17 @@ export class ProjectContext {
   /**
    * Signer the project uses (hardwired to project manager's signer)
    */
-  public readonly signer: NDKPrivateKeySigner;
+  public readonly signer?: NDKPrivateKeySigner;
 
   /**
    * Pubkey of the project (PM's pubkey)
    */
-  public readonly pubkey: Hexpubkey;
+  public readonly pubkey?: Hexpubkey;
 
   /**
    * The project manager agent for this project
    */
-  public projectManager: AgentInstance;
+  public projectManager?: AgentInstance;
 
   /**
    * Agent registry - single source of truth for all agents
@@ -90,49 +90,75 @@ export class ProjectContext {
       tag[0] === "agent" && tag[2] === "pm"
     );
     
-    let pmEventId: string;
-    if (pmAgentTag && pmAgentTag[1]) {
-      pmEventId = pmAgentTag[1];
-      logger.info("Found explicit PM designation in project tags");
-    } else {
-      // Fallback: use first agent (for projects without explicit PM)
-      const firstAgentTag = project.tags.find((tag: string[]) => tag[0] === "agent" && tag[1]);
-      if (!firstAgentTag) {
-        throw new Error(
-          "No agents found in project event. Project must have at least one agent tag."
-        );
-      }
-      pmEventId = firstAgentTag[1];
-      logger.info("No explicit PM found, using first agent as PM (legacy behavior)");
-    }
-
     let projectManagerAgent: AgentInstance | undefined;
     
-    // Find the agent with matching eventId
-    for (const agent of agents.values()) {
-      if (agent.eventId === pmEventId) {
-        projectManagerAgent = agent;
-        break;
+    if (pmAgentTag && pmAgentTag[1]) {
+      const pmEventId = pmAgentTag[1];
+      logger.info("Found explicit PM designation in project tags");
+      
+      // Find the agent with matching eventId
+      for (const agent of agents.values()) {
+        if (agent.eventId === pmEventId) {
+          projectManagerAgent = agent;
+          break;
+        }
+      }
+      
+      if (!projectManagerAgent) {
+        throw new Error(
+          `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
+        );
+      }
+    } else {
+      // Fallback: use first agent from tags or from registry
+      const firstAgentTag = project.tags.find((tag: string[]) => tag[0] === "agent" && tag[1]);
+      
+      if (firstAgentTag) {
+        const pmEventId = firstAgentTag[1];
+        logger.info("No explicit PM found, using first agent from project tags as PM");
+        
+        // Find the agent with matching eventId
+        for (const agent of agents.values()) {
+          if (agent.eventId === pmEventId) {
+            projectManagerAgent = agent;
+            break;
+          }
+        }
+        
+        if (!projectManagerAgent) {
+          throw new Error(
+            `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
+          );
+        }
+      } else if (agents.size > 0) {
+        // No agent tags in project, but agents exist in registry (e.g., global agents)
+        projectManagerAgent = agents.values().next().value;
+        logger.info("No agent tags in project event, using first agent from registry as PM", {
+          agentName: projectManagerAgent.name,
+          agentSlug: projectManagerAgent.slug
+        });
+      } else {
+        // No agents at all - this is allowed, project might work without agents
+        logger.warn("No agents found in project or registry. Project will run without a project manager.");
       }
     }
 
-    if (!projectManagerAgent) {
-      throw new Error(
-        `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
-      );
+    if (projectManagerAgent) {
+      logger.info(`Using "${projectManagerAgent.name}" as Project Manager`);
     }
 
-    logger.info(`Using "${projectManagerAgent.name}" as Project Manager`);
-
-    // Hardwire to project manager's signer and pubkey
-    this.signer = projectManagerAgent.signer;
-    this.pubkey = projectManagerAgent.pubkey;
-    this.projectManager = projectManagerAgent;
-    this.agentLessons = new Map();
+    // Hardwire to project manager's signer and pubkey (if available)
+    if (projectManagerAgent) {
+      this.signer = projectManagerAgent.signer;
+      this.pubkey = projectManagerAgent.pubkey;
+      this.projectManager = projectManagerAgent;
+      
+      // Tell AgentRegistry who the PM is so it can assign delegate tools correctly
+      // Note: This is synchronous now, file saving happens later
+      this.agentRegistry.setPMPubkey(projectManagerAgent.pubkey);
+    }
     
-    // Tell AgentRegistry who the PM is so it can assign delegate tools correctly
-    // Note: This is synchronous now, file saving happens later
-    this.agentRegistry.setPMPubkey(projectManagerAgent.pubkey);
+    this.agentLessons = new Map();
   }
 
   // =====================================================================================

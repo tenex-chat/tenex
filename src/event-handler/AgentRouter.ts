@@ -70,8 +70,7 @@ export  class AgentRouter {
    */
   static resolveTargetAgent(
     event: NDKEvent,
-    projectContext: ProjectContext,
-    projectManager: AgentInstance
+    projectContext: ProjectContext
   ): AgentInstance | null {
     const agents = this.resolveTargetAgents(event, projectContext);
     return agents.length > 0 ? agents[0] : null;

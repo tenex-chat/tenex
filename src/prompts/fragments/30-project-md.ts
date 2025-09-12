@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { countTotalFiles } from "../utils/projectUtils";
 import { fragmentRegistry } from "@/prompts/core/FragmentRegistry";
 import type { PromptFragment } from "@/prompts/core/types";
 
@@ -10,7 +11,6 @@ The PROJECT.md maintains your living understanding of:
 - What the project is.
 - What assumptions you've made to fill in gaps.
 - How the project has evolved based on user feedback.
-- Features the user has confirmed vs features you've inferred
 
 During REFLECTION phase, update context/PROJECT.md with everything new you learned 
 about what the project you manage is:
@@ -43,15 +43,36 @@ export const projectMdFragment: PromptFragment<ProjectMdArgs> = {
   priority: 30,
   template: () => {
     const projectMdPath = path.join("context", "PROJECT.md");
-    let content =
-      "The PROJECT.md file doesn't exist yet. If this is not a new project you should suggest to the user if they want to kickstart the creation of the PROJECT.md -- for this, you can use the `analyze` tool. Since this is such a critical moment, you should validate your understanding and iterate with the user, ask clarifying questions and try to nail down the specifics, it's better to underdefine the project spec than to proceed with incorrect assumptions.";
+    let content: string;
 
     try {
       if (fs.existsSync(projectMdPath)) {
         content = fs.readFileSync(projectMdPath, "utf-8");
+      } else {
+        // PROJECT.md doesn't exist - check if this is an established project
+        const fileCount = countTotalFiles(process.cwd());
+        
+        if (fileCount > 10) {
+          content = `The PROJECT.md file doesn't exist yet. This appears to be an established project with ${fileCount} files.
+
+**CRITICAL**: You MUST create a PROJECT.md immediately. As the PM agent, work with another agent to explore the codebase comprehensively. Use open-ended exploration:
+
+1. Start with: "Explore this codebase thoroughly and tell me what this project does, its main features, and how users interact with it"
+2. Follow up with specific questions based on what you learn:
+   - "What are the main user-facing features?"
+   - "What problems does this solve for users?"
+   - "Describe the user journey from start to finish"
+   - "Are there different user roles or personas?"
+   - "What are the key workflows or processes?"
+
+Remember: The agent helping you may not understand PROJECT.md's purpose. Focus on extracting PROJECT SPECIFICATION details (what the product IS and DOES for users, not HOW it's technically built).`;
+        } else {
+          content = "The PROJECT.md file doesn't exist yet. This appears to be a new or small project. Work with the user to define what this project should be, validating your understanding through clarifying questions. It's better to underdefine the project spec than to proceed with incorrect assumptions.";
+        }
       }
     } catch {
-      // Ignore errors
+      // Fallback if anything goes wrong
+      content = "The PROJECT.md file doesn't exist yet. Work with the user to understand and document what this project is about.";
     }
 
     return `${description}

@@ -17,6 +17,8 @@ import { logger } from "@/utils/logger";
 import { type NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
+import { isValidToolName } from "@/tools/registry";
+import { mcpService } from "@/services/mcp/MCPManager";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -173,7 +175,7 @@ export class AgentRegistry {
     if (!registryEntry) {
       // Generate new nsec for agent
       const signer = NDKPrivateKeySigner.generate();
-      const nsec = signer.privateKey;
+      const nsec = signer.nsec;
 
       // Create new registry entry
       const fileName = `${config.eventId || name.toLowerCase().replace(/[^a-z0-9]/g, "-")}.json`;
@@ -196,6 +198,7 @@ export class AgentRegistry {
         instructions: config.instructions,
         useCriteria: config.useCriteria,
         llmConfig: config.llmConfig,
+        phase: config.phase,
       };
 
       // Include tools if explicitly provided
@@ -233,14 +236,15 @@ export class AgentRegistry {
         }
       } else {
 
-        // Fallback: create definition from config if file doesn't exist
+        // Fallback: create definition from config if file doesn't exist (only include defined fields)
         agentDefinition = {
           name: config.name,
           role: config.role,
-          description: config.description,
-          instructions: config.instructions,
-          useCriteria: config.useCriteria,
-          llmConfig: config.llmConfig,
+          ...(config.description !== undefined && { description: config.description }),
+          ...(config.instructions !== undefined && { instructions: config.instructions }),
+          ...(config.useCriteria !== undefined && { useCriteria: config.useCriteria }),
+          ...(config.llmConfig !== undefined && { llmConfig: config.llmConfig }),
+          ...(config.phase !== undefined && { phase: config.phase }),
         };
         await writeJsonFile(definitionPath, agentDefinition);
       }
@@ -251,7 +255,7 @@ export class AgentRegistry {
     if (!nsec || nsec === "") {
       logger.warn(`Agent "${name}" has empty nsec, generating new one`);
       const newSigner = NDKPrivateKeySigner.generate();
-      nsec = newSigner.privateKey;
+      nsec = newSigner.nsec;
       
       // Update the registry with the new nsec
       registryEntry.nsec = nsec;
@@ -290,6 +294,30 @@ export class AgentRegistry {
 
   getAllAgentsMap(): Map<string, AgentInstance> {
     return new Map(this.agents);
+  }
+
+  /**
+   * Get agents filtered by phase
+   * @param phase - The phase to filter by (undefined returns agents without a phase)
+   * @returns Array of agents matching the phase
+   */
+  getAgentsByPhase(phase: string | undefined): AgentInstance[] {
+    const agents = Array.from(this.agents.values());
+    
+    if (phase === undefined) {
+      // Return agents without a specific phase (universal agents)
+      return agents.filter(agent => !agent.phase);
+    }
+    
+    // Return agents matching the phase or universal agents
+    const { normalizePhase } = require("@/conversations/utils/phaseUtils");
+    const normalizedPhase = normalizePhase(phase);
+    
+    return agents.filter(agent => {
+      if (!agent.phase) return true; // Universal agents work in all phases
+      const agentPhase = normalizePhase(agent.phase);
+      return agentPhase === normalizedPhase;
+    });
   }
   
   /**
@@ -607,7 +635,6 @@ export class AgentRegistry {
     const normalizedTools = this.normalizeAgentTools(newToolNames, isPM);
 
     // Validate the normalized tool names
-    const { isValidToolName } = await import("@/tools/registry");
     const validToolNames = normalizedTools.filter(isValidToolName);
     
     // Update the agent tools in memory
@@ -744,6 +771,7 @@ export class AgentRegistry {
       tools: agentDefinition.tools, // Preserve explicit tools configuration
       mcp: agentDefinition.mcp, // Preserve MCP configuration
       llmConfig: agentDefinition.llmConfig,
+      phase: agentDefinition.phase,
     };
 
     // If loading from global registry, create agent directly without recursive ensureAgent call
@@ -808,6 +836,7 @@ export class AgentRegistry {
       eventId: registryEntry.eventId,
       slug: slug,
       isGlobal: isGlobal,
+      phase: agentDefinition.phase,
     };
 
     // Set tools - use explicit tools if configured, otherwise use defaults
@@ -819,7 +848,6 @@ export class AgentRegistry {
     let toolNames = this.normalizeAgentTools(requestedTools, isPM);
 
     // Validate tool names - we now store tool names as strings, not instances
-    const { isValidToolName } = await import("@/tools/registry");
     const validToolNames: string[] = [];
     const unknownTools: string[] = [];
     const requestedMcpTools: string[] = [];
@@ -842,22 +870,20 @@ export class AgentRegistry {
     // Handle MCP tools if agent has MCP access
     if (agent.mcp !== false && requestedMcpTools.length > 0) {
       try {
-        const { mcpService } = await import("@/services/mcp/MCPManager");
         const allMcpTools = mcpService.getCachedTools();
         
-        // Filter to only include requested MCP tools
-        const filteredMcpTools = allMcpTools.filter(tool => 
-          requestedMcpTools.includes(tool.name)
-        );
+        // Check which requested MCP tools are available
+        const availableMcpToolNames: string[] = [];
+        const unavailableMcpTools: string[] = [];
         
-        // Add available MCP tool names
-        for (const tool of filteredMcpTools) {
-          validToolNames.push(tool.name);
+        for (const toolName of requestedMcpTools) {
+          if (allMcpTools[toolName]) {
+            availableMcpToolNames.push(toolName);
+            validToolNames.push(toolName);
+          } else {
+            unavailableMcpTools.push(toolName);
+          }
         }
-        
-        // Track which MCP tools are not yet available
-        const availableMcpToolNames = new Set(filteredMcpTools.map(t => t.name));
-        const unavailableMcpTools = requestedMcpTools.filter(name => !availableMcpToolNames.has(name));
         
         if (unavailableMcpTools.length > 0) {
           logger.debug(`Agent "${slug}" requested MCP tools not yet available:`, unavailableMcpTools);
@@ -868,10 +894,9 @@ export class AgentRegistry {
     } else if (agent.mcp !== false) {
       // Agent has MCP access but didn't request specific tools - give access to all
       try {
-        const { mcpService } = await import("@/services/mcp/MCPManager");
         const allMcpTools = mcpService.getCachedTools();
-        for (const tool of allMcpTools) {
-          validToolNames.push(tool.name);
+        for (const toolName of Object.keys(allMcpTools)) {
+          validToolNames.push(toolName);
         }
       } catch (error) {
         logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
@@ -908,7 +933,7 @@ export class AgentRegistry {
     if (!nsec || nsec === "") {
       logger.warn(`Agent "${slug}" has empty nsec in createAgentInstance, generating new one`);
       const newSigner = NDKPrivateKeySigner.generate();
-      nsec = newSigner.privateKey;
+      nsec = newSigner.nsec;
       
       // Update the registry with the new nsec
       registryEntry.nsec = nsec;
@@ -917,16 +942,17 @@ export class AgentRegistry {
     }
     const signer = new NDKPrivateKeySigner(nsec);
 
-    // Create agent definition from config
+    // Create agent definition from config (only include defined fields)
     const agentDefinition: StoredAgentData = {
       name: config.name,
       role: config.role,
-      description: config.description,
-      instructions: config.instructions,
-      useCriteria: config.useCriteria,
-      llmConfig: config.llmConfig,
-      tools: config.tools,
-      mcp: config.mcp,
+      ...(config.description !== undefined && { description: config.description }),
+      ...(config.instructions !== undefined && { instructions: config.instructions }),
+      ...(config.useCriteria !== undefined && { useCriteria: config.useCriteria }),
+      ...(config.llmConfig !== undefined && { llmConfig: config.llmConfig }),
+      ...(config.tools !== undefined && { tools: config.tools }),
+      ...(config.mcp !== undefined && { mcp: config.mcp }),
+      ...(config.phase !== undefined && { phase: config.phase }),
     };
 
     // Use the helper to build the agent instance
@@ -963,32 +989,32 @@ export class AgentRegistry {
       throw new Error("Agent definition must have a role property");
     }
 
-    // Optional fields with type validation
-    if (def.instructions !== undefined && typeof def.instructions !== "string") {
+    // Optional fields with type validation (null is allowed for all nullable fields)
+    if (def.instructions !== undefined && def.instructions !== null && typeof def.instructions !== "string") {
       throw new Error("Agent instructions must be a string");
     }
 
-    if (def.useCriteria !== undefined && typeof def.useCriteria !== "string") {
+    if (def.useCriteria !== undefined && def.useCriteria !== null && typeof def.useCriteria !== "string") {
       throw new Error("Agent useCriteria must be a string");
     }
 
-    if (def.description !== undefined && typeof def.description !== "string") {
+    if (def.description !== undefined && def.description !== null && typeof def.description !== "string") {
       throw new Error("Agent description must be a string");
     }
 
-    if (def.backend !== undefined && typeof def.backend !== "string") {
+    if (def.backend !== undefined && def.backend !== null && typeof def.backend !== "string") {
       throw new Error("Agent backend must be a string");
     }
 
-    if (def.tools !== undefined && !Array.isArray(def.tools)) {
+    if (def.tools !== undefined && def.tools !== null && !Array.isArray(def.tools)) {
       throw new Error("Agent tools must be an array");
     }
 
-    if (def.mcp !== undefined && typeof def.mcp !== "boolean") {
+    if (def.mcp !== undefined && def.mcp !== null && typeof def.mcp !== "boolean") {
       throw new Error("Agent mcp must be a boolean");
     }
 
-    if (def.llmConfig !== undefined && typeof def.llmConfig !== "string") {
+    if (def.llmConfig !== undefined && def.llmConfig !== null && typeof def.llmConfig !== "string") {
       throw new Error("Agent llmConfig must be a string");
     }
   }

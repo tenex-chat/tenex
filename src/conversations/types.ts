@@ -45,12 +45,3 @@ export interface ConversationMetadata {
   }; // NDKArticle referenced by kind:11 event (30023)
 }
 
-export interface PhaseTransition {
-  from: Phase;
-  to: Phase;
-  message: string; // Comprehensive context from the transition
-  instructions?: string; // Custom phase instructions (for dynamic phases)
-  timestamp: number;
-  agentPubkey: string; // Track which agent initiated
-  agentName: string; // Human-readable agent name
-}

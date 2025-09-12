@@ -43,6 +43,8 @@ export interface AgentInstance {
   slug: string;
   /** Whether this agent is from the global configuration */
   isGlobal?: boolean;
+  /** Project phase this agent instance is for */
+  phase?: string;
 }
 
 /**
@@ -93,6 +95,7 @@ export interface StoredAgentData {
   llmConfig?: string;
   tools?: string[]; // Tool names in storage - converted to Tool instances at runtime
   mcp?: boolean; // Whether this agent has access to MCP tools
+  phase?: string; // Project phase this agent definition is for
 }
 
 /**

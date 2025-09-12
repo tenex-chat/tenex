@@ -140,14 +140,14 @@ describe("MCPManager", () => {
       await manager.initialize("/test/project");
     });
 
-    it("should return namespaced tools", () => {
+    it("should return namespaced tools as an object", () => {
       const tools = manager.getCachedTools();
       
-      expect(tools).toBeArray();
-      expect(tools[0].name).toBe("mcp__test-server__test-tool");
-      expect(tools[0].description).toBeTruthy();
-      expect(tools[0].parameters).toBeDefined();
-      expect(tools[0].execute).toBeFunction();
+      expect(tools).toBeObject();
+      expect(tools["mcp__test-server__test-tool"]).toBeDefined();
+      expect(tools["mcp__test-server__test-tool"].description).toBeTruthy();
+      expect(tools["mcp__test-server__test-tool"].parameters).toBeDefined();
+      expect(tools["mcp__test-server__test-tool"].execute).toBeFunction();
     });
   });
 

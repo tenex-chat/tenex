@@ -9,7 +9,6 @@ import {
   type ConversationIntent,
   type DelegationIntent,
   type EventContext,
-  type StatusIntent,
 } from "../AgentEventEncoder";
 import { 
   TENEXTestFixture, 
@@ -102,7 +101,7 @@ describe("AgentEventEncoder", () => {
       // Check conversation tags are added
       const eTags = event.getMatchingTags("e");
       expect(eTags).toHaveLength(1);
-      expect(eTags[0]).toEqual(["e", "conv123"]); // References the conversation event
+      expect(eTags[0]).toEqual(["e", "trigger123", "", "reply"]); // References the triggering event
     });
 
     it("should include optional completion metadata", () => {
@@ -122,17 +121,16 @@ describe("AgentEventEncoder", () => {
         ...baseContext,
         model: "gpt-4",
         executionTime: 1500,
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 50,
-          total_tokens: 150,
-        },
-        toolCalls: [{ name: "search", arguments: { query: "test" } }],
       };
 
       const intent: CompletionIntent = {
         
         content: "Done",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+        },
       };
 
       const event = encoder.encodeCompletion(intent, contextWithMetadata);
@@ -142,11 +140,6 @@ describe("AgentEventEncoder", () => {
       expect(event.tagValue("llm-prompt-tokens")).toBe("100");
       expect(event.tagValue("llm-completion-tokens")).toBe("50");
       expect(event.tagValue("llm-total-tokens")).toBe("150");
-
-      const toolTags = event.getMatchingTags("tool");
-      expect(toolTags).toHaveLength(1);
-      expect(toolTags[0]).toEqual(["tool", "search"]); // Now only 2 elements
-      expect(toolTags[0]).toHaveLength(2);
     });
 
 
@@ -178,19 +171,17 @@ describe("AgentEventEncoder", () => {
 
       const tasks = encoder.encodeDelegation(intent, baseContext);
 
-      expect(tasks).toHaveLength(2);
+      expect(tasks).toHaveLength(1);
 
-      // Check first task
-      expect(tasks[0].kind).toBe(1934); // NDKTask.kind
+      // Check the single task event
+      expect(tasks[0].kind).toBe(1111); // GenericReply kind for delegations
       expect(tasks[0].content).toBe("Please review the authentication module");
-      expect(tasks[0].title).toBe("Review code");
 
-      const pTag1 = tasks[0].getMatchingTags("p")[0];
-      expect(pTag1[1]).toBe("recipient1"); // Check recipient pubkey
-
-      // Check second task
-      const pTag2 = tasks[1].getMatchingTags("p")[0];
-      expect(pTag2[1]).toBe("recipient2"); // Check recipient pubkey
+      // Check both recipients are tagged
+      const pTags = tasks[0].getMatchingTags("p");
+      expect(pTags).toHaveLength(2);
+      expect(pTags[0][1]).toBe("recipient1"); // First recipient
+      expect(pTags[1][1]).toBe("recipient2"); // Second recipient
     });
 
     it("should include phase information when provided", () => {
@@ -222,87 +213,11 @@ describe("AgentEventEncoder", () => {
       const tasks = encoder.encodeDelegation(intent, baseContext);
 
       const eTags = tasks[0].getMatchingTags("e");
-      expect(eTags).toContainEqual(["e", "conv123"]); // References conversation event
+      expect(eTags).toHaveLength(1);
+      expect(eTags[0]).toEqual(["e", "trigger123"]); // References triggering event
     });
   });
 
-  describe("encodeProjectStatus", () => {
-    beforeEach(() => {
-      // Setup mock project context for status tests
-      const mockProjectContext = {
-        project: {
-          pubkey: "projectOwner123",
-          tagReference: () => ["a", "31933:projectOwner123:test-project"],
-        },
-      };
-      (getProjectContext as ReturnType<typeof mock>).mockReturnValue(mockProjectContext);
-    });
-
-    it("should encode project status with owner p-tag", () => {
-      const intent: StatusIntent = {
-        type: "status",
-        agents: [
-          { pubkey: "agent1", slug: "agent-one" },
-          { pubkey: "agent2", slug: "agent-two" },
-        ],
-        models: [
-          { slug: "gpt-4", agents: ["agent-one"] },
-        ],
-        tools: [
-          { name: "search", agents: ["agent-one", "agent-two"] },
-        ],
-      };
-
-      const event = encoder.encodeProjectStatus(intent);
-
-      // Check event kind
-      expect(event.kind).toBe(EVENT_KINDS.PROJECT_STATUS);
-      expect(event.content).toBe("");
-
-      // Check project reference tag
-      const aTags = event.getMatchingTags("a");
-      expect(aTags).toHaveLength(1);
-      expect(aTags[0]).toEqual(["a", "31933:projectOwner123:test-project"]);
-
-      // Check p-tag for project owner
-      const pTags = event.getMatchingTags("p");
-      expect(pTags).toHaveLength(1);
-      expect(pTags[0]).toEqual(["p", "projectOwner123"]);
-
-      // Check agent tags
-      const agentTags = event.getMatchingTags("agent");
-      expect(agentTags).toHaveLength(2);
-      expect(agentTags[0]).toEqual(["agent", "agent1", "agent-one"]);
-      expect(agentTags[1]).toEqual(["agent", "agent2", "agent-two"]);
-
-      // Check model tags
-      const modelTags = event.getMatchingTags("model");
-      expect(modelTags).toHaveLength(1);
-      expect(modelTags[0]).toEqual(["model", "gpt-4", "agent-one"]);
-
-      // Check tool tags
-      const toolTags = event.getMatchingTags("tool");
-      expect(toolTags).toHaveLength(1);
-      expect(toolTags[0]).toEqual(["tool", "search", "agent-one", "agent-two"]);
-    });
-
-    it("should include queue tags when provided", () => {
-      const intent: StatusIntent = {
-        type: "status",
-        agents: [],
-        models: [],
-        tools: [],
-        queue: ["conv123", "conv456"],
-      };
-
-      const event = encoder.encodeProjectStatus(intent);
-
-      const queueTags = event.getMatchingTags("queue");
-      expect(queueTags).toHaveLength(2);
-      expect(queueTags[0]).toEqual(["queue", "conv123"]);
-      expect(queueTags[1]).toEqual(["queue", "conv456"]);
-    });
-  });
 
   describe("encodeConversation", () => {
     it("should create a simple response without completion semantics", () => {
@@ -318,8 +233,8 @@ describe("AgentEventEncoder", () => {
 
       // Check conversation tags
       const eTags = event.getMatchingTags("e");
-      expect(eTags).toHaveLength(1); // Only conversation event tag
-      expect(eTags[0]).toEqual(["e", "conv123"]); // References conversation event
+      expect(eTags).toHaveLength(1); // Only triggering event tag
+      expect(eTags[0]).toEqual(["e", "trigger123"]); // References triggering event
     });
   });
 });
@@ -327,13 +242,13 @@ describe("AgentEventEncoder", () => {
 describe("AgentEventDecoder", () => {
   // These tests use simple mocks since they only test static utility functions
   describe("isTaskCompletionEvent", () => {
-    it("should identify task completion by status tag", () => {
+    it("should not identify events with only status tag as task completions", () => {
       const event = createMockNDKEvent();
       event.tags = [
         ["status", "complete"]
       ];
 
-      expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(true);
+      expect(AgentEventDecoder.isTaskCompletionEvent(event)).toBe(false);
     });
 
     it("should identify task completion by K and P tags matching", () => {

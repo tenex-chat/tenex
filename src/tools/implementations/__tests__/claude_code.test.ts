@@ -18,7 +18,6 @@ describe("claude_code tool - simple test", () => {
       prompt: "Write a function to calculate fibonacci",
       systemPrompt: "You are a helpful coding assistant",
       title: "Fibonacci Calculator",
-      branch: "feature/fibonacci",
     });
 
     expect(result.ok).toBe(true);
@@ -26,7 +25,6 @@ describe("claude_code tool - simple test", () => {
       expect(result.value.value.prompt).toBe("Write a function to calculate fibonacci");
       expect(result.value.value.systemPrompt).toBe("You are a helpful coding assistant");
       expect(result.value.value.title).toBe("Fibonacci Calculator");
-      expect(result.value.value.branch).toBe("feature/fibonacci");
     }
   });
 
@@ -40,7 +38,6 @@ describe("claude_code tool - simple test", () => {
       expect(result.value.value.prompt).toBe("Create a hello world function");
       expect(result.value.value.systemPrompt).toBeUndefined();
       expect(result.value.value.title).toBeUndefined();
-      expect(result.value.value.branch).toBeUndefined();
     }
   });
 

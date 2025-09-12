@@ -86,6 +86,9 @@ export interface TenexLLMs {
     openai?: {
       apiKey: string;
     };
+    claudeCode?: {
+      apiKey: string;
+    };
   };
   configurations: {
     [name: string]: LLMConfiguration;

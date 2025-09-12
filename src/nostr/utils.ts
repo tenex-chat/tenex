@@ -10,7 +10,7 @@ export function isEventFromAgent(event: NDKEvent): boolean {
   const projectCtx = getProjectContext();
 
   // Check if it's from the project itself
-  if (projectCtx.pubkey === event.pubkey) {
+  if (projectCtx.pubkey && projectCtx.pubkey === event.pubkey) {
     return true;
   }
 

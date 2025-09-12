@@ -5,6 +5,8 @@ import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { NDKEventMetadata } from "@/events/NDKEventMetadata";
+import { getNDK } from "@/nostr/ndkClient";
 
 const delegatePhaseSchema = z.object({
   phase: z
@@ -45,8 +47,6 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   }
 
   if (title) {
-    const { NDKEventMetadata } = await import("@/events/NDKEventMetadata");
-    const { getNDK } = await import("@/nostr/ndkClient");
     const ndk = getNDK();
 
     const metadataEvent = new NDKEventMetadata(ndk);

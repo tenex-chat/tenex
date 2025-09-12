@@ -122,8 +122,8 @@ export class ProjectDisplay {
         
         // Count tools per server in the full set
         const allToolsByServer = new Map<string, number>();
-        for (const tool of allMcpTools) {
-          const parts = tool.name.split("__");
+        for (const toolName of Object.keys(allMcpTools)) {
+          const parts = toolName.split("__");
           if (parts.length >= 3) {
             const serverName = parts[1];
             allToolsByServer.set(serverName, (allToolsByServer.get(serverName) || 0) + 1);

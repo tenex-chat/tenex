@@ -11,14 +11,10 @@ import type { ExecutionContext } from "@/agents/execution/types";
 
 const delegateExternalSchema = z.object({
   content: z.string().describe("The content of the chat message to send"),
-  parentEventId: z
-    .string()
-    .nullable()
-    .describe("Optional parent event ID to reply to. If provided, will create a reply (kind:1111)"),
   recipient: z.string().describe("The recipient's pubkey or npub (will be p-tagged)"),
   projectId: z
     .string()
-    .nullable()
+    .optional()
     .describe("Optional project event ID (naddr1...) to reference in the message. This should be the project the agent you are delegating TO works on (if you know it)"),
 });
 
@@ -27,49 +23,31 @@ type DelegateExternalOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
 async function executeDelegateExternal(input: DelegateExternalInput, context: ExecutionContext): Promise<DelegateExternalOutput> {
-  const { content, parentEventId, recipient, projectId } = input;
+  const { content, recipient, projectId } = input;
 
   const ndk = getNDK();
   
   // Parse recipient using the utility function
-  const pubkey = parseNostrUser(recipient, ndk);
+  const pubkey = parseNostrUser(recipient);
   if (!pubkey) {
     throw new Error(`Invalid recipient format: ${recipient}`);
   }
 
   logger.info("🚀 Delegating to external agent", {
     agent: context.agent.name,
-    hasParent: !!parentEventId,
     hasProject: !!projectId,
     recipientPubkey: pubkey.substring(0, 8),
     contentLength: content.length,
   });
 
-  let chatEvent: NDKEvent;
-
   // Normalize optional IDs
-  const cleanParentId = normalizeNostrIdentifier(parentEventId);
   const cleanProjectId = normalizeNostrIdentifier(projectId);
 
   logger.debug("Processing recipient", { pubkey });
 
-  if (cleanParentId) {
-    // Fetch the parent event and create a reply
-    const parentEvent = await ndk.fetchEvent(cleanParentId);
-    if (!parentEvent) {
-      throw new Error(`Parent event not found: ${cleanParentId}`);
-    }
-
-    // Use the parent event's reply() method to create the reply event
-    chatEvent = await parentEvent.reply();
-    chatEvent.tags = chatEvent.tags.filter(t => t[0] !== 'p');
-  } else {
-    // Create a new kind:11 event for starting a thread
-    chatEvent = new NDKEvent(ndk);
-    chatEvent.kind = 11;
-    
-    // Add phase and tool tags
-  }
+  // Create a new kind:11 event for starting a thread
+  const chatEvent = new NDKEvent(ndk);
+  chatEvent.kind = 11;
   
   if (context.phase) chatEvent.tags.push(["phase", context.phase]);
   chatEvent.tags.push(["tool", "delegate_external"]);
@@ -80,10 +58,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   if (cleanProjectId) {
     const projectEvent = await ndk.fetchEvent(cleanProjectId);
     if (projectEvent) {
-      const tagRef = projectEvent.tagReference();
-      if (tagRef) {
-        chatEvent.tags.push(tagRef);
-      }
+        chatEvent.tag(projectEvent.tagReference());
     } else {
       logger.warn("Project event not found, skipping project tag", {
         projectId: cleanProjectId,

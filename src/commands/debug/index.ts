@@ -77,11 +77,11 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       const phase = (options.phase || "CHAT") as Phase;
 
       // Initialize MCP service to get tools
-      let mcpTools: Record<string, unknown>[] = [];
+      let mcpTools: Record<string, unknown> = {};
       try {
         await mcpService.initialize(projectPath);
         mcpTools = mcpService.getCachedTools();
-        logger.info(`Loaded ${mcpTools.length} MCP tools`);
+        logger.info(`Loaded ${Object.keys(mcpTools).length} MCP tools`);
       } catch (error) {
         logger.error(`Failed to initialize MCP service: ${error}`);
         // Continue without MCP tools - don't fail the whole debug command

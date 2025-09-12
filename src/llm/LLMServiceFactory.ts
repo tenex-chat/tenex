@@ -55,13 +55,17 @@ export class LLMServiceFactory {
             try {
                 switch (name) {
                     case "openrouter":
-                        this.providers.set(name, createOpenRouter({
-                            apiKey: config.apiKey,
-                            headers: {
-                                "X-Title": "TENEX",
-                                "HTTP-Referer": "https://github.com/pablof7z/tenex",
-                            },
-                        }));
+                        this.providers.set(
+                            name,
+                            createOpenRouter({
+                                apiKey: config.apiKey,
+                                usage: { include: true },
+                                headers: {
+                                    "X-Title": "TENEX",
+                                    "HTTP-Referer": "https://github.com/tenex-chat/tenex",
+                                },
+                            })
+                        );
                         logger.debug(`[LLMServiceFactory] Initialized OpenRouter provider`);
                         break;
                         
@@ -98,6 +102,19 @@ export class LLMServiceFactory {
                         
                         this.providers.set(name, ollamaProvider as Provider);
                         logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || 'default (http://localhost:11434)'}`);
+                        break;
+                    }
+                    
+                    case "claudeCode": {
+                        // Track 1: Limited claude_code provider
+                        // This creates a placeholder provider that will delegate to phase-0
+                        // The actual implementation happens through the existing agent/phase system
+                        logger.warn(`[LLMServiceFactory] ClaudeCode provider is limited to phase-0 operations only`);
+                        
+                        // We don't create an actual provider here since claudeCode works through phases
+                        // Instead, we'll handle this specially in the service creation
+                        this.providers.set(name, {} as Provider); // Placeholder
+                        logger.debug(`[LLMServiceFactory] Initialized limited ClaudeCode provider (phase-0 only)`);
                         break;
                     }
                         
@@ -141,6 +158,31 @@ export class LLMServiceFactory {
 
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
+        
+        // Special handling for claudeCode provider
+        if (actualProvider === 'claudeCode') {
+            // Track 1: Limited implementation
+            // claudeCode only supports phase-0 for now
+            if (config.model !== 'phase-0') {
+                throw new Error(
+                    `ClaudeCode provider only supports 'phase-0' model in Track 1. ` +
+                    `Requested model: ${config.model}`
+                );
+            }
+            logger.info(`[LLMServiceFactory] Creating limited ClaudeCode service for phase-0`);
+            
+            // For now, claudeCode will be handled through the existing phase system
+            // Return a service that will delegate to the phase-0 implementation
+            // This is a placeholder that will be replaced in Track 2
+            return new LLMService(
+                llmLogger,
+                this.registry,
+                actualProvider,
+                config.model,
+                config.temperature,
+                config.maxTokens
+            );
+        }
         
         // Verify the provider exists
         if (!this.providers.has(actualProvider)) {

@@ -174,9 +174,14 @@ export class OperationsStatusPublisher {
     // A-tag for the project
     event.tag(projectCtx.project.tagReference());
     
-    // Sign with project signer and publish
-    await event.sign(projectCtx.signer);
-    await event.publish();
+    // Sign with project signer and publish if available
+    if (projectCtx.signer) {
+      await event.sign(projectCtx.signer);
+      await event.publish();
+    } else {
+      logger.warn("No project signer available, cannot publish operations status event");
+      return;
+    }
     
     const isCleanup = operations.length === 0;
     logger.info('[OperationsStatusPublisher] Published event status', {

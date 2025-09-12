@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 /**
  * Handles processing of nostr entities in message content
  * Single Responsibility: Fetch and inline nostr event content
+ * Note: Thinking block stripping is handled by content-utils.ts
  */
 export class NostrEntityProcessor {
     private static readonly NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;

@@ -1,9 +1,6 @@
 import type { TenexLLMs, LLMConfiguration } from "@/services/config/types";
-import { configService } from "@/services";
-import { llmServiceFactory } from "../LLMServiceFactory";
 import inquirer from "inquirer";
 import chalk from "chalk";
-import { AI_SDK_PROVIDERS } from "../types";
 import type { AISdkProvider } from "../types";
 import { ModelSelector } from "./ModelSelector";
 import { ProviderConfigUI } from "./ProviderConfigUI";
@@ -191,7 +188,8 @@ export class ConfigurationManager {
       openrouter: "openai/gpt-4",
       anthropic: "claude-3-5-sonnet-latest",
       openai: "gpt-4",
-      ollama: "llama3.1:8b"
+      ollama: "llama3.1:8b",
+      claudeCode: "claude-3-5-sonnet-20241022" // Default model for Claude Code
     };
     return defaults[provider] || "";
   }

@@ -29,6 +29,10 @@ export const KNOWN_MODELS = {
     "google/gemini-2.0-flash",
     "meta-llama/llama-3.3-70b-instruct",
     // ... 300+ more models
+  ],
+  // ClaudeCode phases - LIMITED to phase-0
+  claudeCode: [
+    "phase-0",  // Only phase-0 is available in Track 1
   ]
 };
 

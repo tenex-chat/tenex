@@ -10,14 +10,15 @@ describe("Tool assignment", () => {
       } as Pick<AgentInstance, "slug">;
       const tools = getDefaultToolsForAgent(mockAgent);
 
-      // All agents now get the same comprehensive tool set
+      // All agents get the same default tool set (delegate tools are added separately)
       expect(tools).toContain("read_path");
       expect(tools).toContain("lesson_learn");
       expect(tools).toContain("claude_code");
-      expect(tools).toContain("delegate");
-      expect(tools).toContain("delegate_phase");
       expect(tools).toContain("write_context_file");
       expect(tools).toContain("shell");
+      // Delegate tools are NOT in defaults, they're added by getDelegateToolsForAgent
+      expect(tools).not.toContain("delegate");
+      expect(tools).not.toContain("delegate_phase");
     });
 
     it("different agents should get identical default tools", () => {
@@ -33,25 +34,28 @@ describe("Tool assignment", () => {
       expect(tools1).toEqual(tools2);
       expect(tools2).toEqual(tools3);
       
-      // Verify they all have core tools
+      // Verify they all have core tools (delegate tools are added separately)
       [tools1, tools2, tools3].forEach(tools => {
         expect(tools).toContain("read_path");
         expect(tools).toContain("lesson_learn");
         expect(tools).toContain("claude_code");
-        expect(tools).toContain("delegate");
+        // Delegate tools are NOT in defaults
+        expect(tools).not.toContain("delegate");
       });
     });
 
-    it("tools should include both delegate and delegate_phase", () => {
+    it("default tools should NOT include delegate tools", () => {
       const mockAgent = {
         slug: "test-agent",
       } as Pick<AgentInstance, "slug">;
       const tools = getDefaultToolsForAgent(mockAgent);
 
-      // All agents now have access to both delegation mechanisms
-      expect(tools).toContain("delegate");
-      expect(tools).toContain("delegate_phase");
-      expect(tools).toContain("delegate_external");
+      // Delegate tools are NOT in the default set
+      // They're added separately via getDelegateToolsForAgent
+      expect(tools).not.toContain("delegate");
+      expect(tools).not.toContain("delegate_phase");
+      expect(tools).not.toContain("delegate_external");
+      expect(tools).not.toContain("delegate_followup");
     });
 
     it("all agents should have access to agent management tools", () => {

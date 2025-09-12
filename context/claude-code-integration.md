@@ -76,7 +76,6 @@ The `claude_code` tool accepts:
 - `prompt` (required): The prompt for Claude Code
 - `systemPrompt` (optional): Additional context or constraints
 - `title` (optional): Task title for tracking
-- `branch` (optional): Git branch for the task
 
 ## When to Use Each Pattern
 

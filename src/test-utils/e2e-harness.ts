@@ -10,7 +10,6 @@ export type {
     E2ETestContext,
     ExecutionTrace,
     AgentExecutionRecord,
-    PhaseTransitionRecord,
     ToolCallRecord,
     ToolCall,
     AgentExecutionResult,

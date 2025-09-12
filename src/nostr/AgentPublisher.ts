@@ -1,5 +1,4 @@
 import type { AgentConfig, AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
@@ -20,6 +19,7 @@ import {
   type LessonIntent,
   type StreamingIntent,
   type TypingIntent,
+  type ToolUseIntent,
 } from "./AgentEventEncoder";
 
 /**
@@ -32,9 +32,9 @@ export class AgentPublisher {
   private encoder: AgentEventEncoder;
   private streamSequence = 0;
 
-  constructor(agent: AgentInstance, conversationCoordinator: ConversationCoordinator) {
+  constructor(agent: AgentInstance) {
     this.agent = agent;
-    this.encoder = new AgentEventEncoder(conversationCoordinator);
+    this.encoder = new AgentEventEncoder();
   }
 
 
@@ -191,6 +191,7 @@ export class AgentPublisher {
     return event;
   }
 
+
   /**
    * Publish an error event.
    * Creates and publishes an error notification event.
@@ -240,7 +241,7 @@ export class AgentPublisher {
    */
   async streaming(intent: StreamingIntent, context: EventContext): Promise<NDKEvent> {
     // Note: Don't flush stream for streaming events as they ARE the stream
-    const event = this.encoder.encodeStreamingProgress(intent, context);
+    const event = this.encoder.encodeStreamingContent(intent, context);
 
     // Sign and publish
     await event.sign(this.agent.signer);
@@ -272,21 +273,50 @@ export class AgentPublisher {
   }
 
   /**
+   * Publish a tool usage event.
+   * Creates and publishes an event with tool name and output tags.
+   */
+  async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+    logger.debug("Dispatching tool usage", {
+      agent: this.agent.name,
+      tool: intent.toolName,
+      contentLength: intent.content.length,
+    });
+
+    const event = this.encoder.encodeToolUse(intent, context);
+
+    // Sign and publish
+    await event.sign(this.agent.signer);
+    await event.publish();
+
+    logger.debug("Tool usage event published", {
+      eventId: event.id,
+      agent: this.agent.name,
+      tool: intent.toolName,
+    });
+
+    return event;
+  }
+
+  /**
    * Handle content streaming from LLMService.
    * Adds content to buffer and publishes streaming events.
    */
   async handleContent(
     event: { delta: string },
-    context: EventContext
+    context: EventContext,
+    isReasoning = false
   ): Promise<void> {
     // Stream the delta directly
     const streamingIntent: StreamingIntent = {
       content: event.delta,
       sequence: ++this.streamSequence,
+      isReasoning,
     };
     
     await this.streaming(streamingIntent, context);
   }
+
 
   /**
    * Create a task event that references the triggering event.
@@ -297,7 +327,6 @@ export class AgentPublisher {
     content: string,
     context: EventContext,
     claudeSessionId?: string,
-    branch?: string
   ): Promise<NDKTask> {
     // Use encoder to create task with proper tagging
     const task = this.encoder.encodeTask(
@@ -305,7 +334,6 @@ export class AgentPublisher {
       content,
       context,
       claudeSessionId,
-      branch
     );
 
     // Sign with agent's signer

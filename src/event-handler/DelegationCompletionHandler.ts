@@ -179,7 +179,7 @@ export class DelegationCompletionHandler {
         // Find first non-agent event (the original user request)
         const projectCtx = getProjectContext();
         const agentPubkeys = new Set([
-          projectCtx.pubkey,
+          ...(projectCtx.pubkey ? [projectCtx.pubkey] : []),
           ...Array.from(projectCtx.agents.values()).map((a) => a.pubkey),
         ]);
 

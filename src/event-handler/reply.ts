@@ -69,7 +69,6 @@ async function executeAgent(
   executionContext: ExecutionContext,
   agentExecutor: AgentExecutor,
   conversation: Conversation,
-  _conversationCoordinator: ConversationCoordinator,
   projectManager: AgentInstance,
   event: NDKEvent
 ): Promise<void> {
@@ -88,7 +87,7 @@ async function executeAgent(
 
     // Use AgentPublisher to publish error
     const { AgentPublisher } = await import("@/nostr/AgentPublisher");
-    const agentPublisher = new AgentPublisher(projectManager, _conversationCoordinator);
+    const agentPublisher = new AgentPublisher(projectManager);
 
     await agentPublisher.error(
       {
@@ -196,9 +195,8 @@ async function handleReplyLogic(
       executionContext,
       agentExecutor,
       conversation,
-      conversationCoordinator,
       projectManager,
-      effectiveEvent
+      event
     );
   });
   

@@ -92,4 +92,17 @@ export class NDKAgentDefinition extends NDKEvent {
     this.removeTag("use-criteria");
     if (value) this.tags.push(["use-criteria", value]);
   }
+
+  get phase(): string | undefined {
+    return this.tagValue("phase");
+  }
+
+  /**
+   * The project phase this agent definition is associated with.
+   * When set, this agent definition only applies to this specific phase.
+   */
+  set phase(value: string | undefined) {
+    this.removeTag("phase");
+    if (value) this.tags.push(["phase", value]);
+  }
 }

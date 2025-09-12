@@ -69,27 +69,39 @@ export class StatusPublisher {
     // Add p-tag for the project owner's pubkey
     event.tag(["p", projectCtx.project.pubkey]);
 
+    // Track unique agent slugs for single-letter tags
+    const uniqueAgentSlugs = new Set<string>();
+
     // Add agent pubkeys with PM flag for project manager
-    const pmPubkey = projectCtx.projectManager.pubkey;
+    const pmPubkey = projectCtx.projectManager?.pubkey;
     for (const agent of intent.agents) {
       const tags = ["agent", agent.pubkey, agent.slug];
       // Add "pm" flag if this is the project manager
-      if (agent.pubkey === pmPubkey) {
+      if (pmPubkey && agent.pubkey === pmPubkey) {
         tags.push("pm");
       }
       event.tag(tags);
+      
+      // Collect unique agent slugs
+      uniqueAgentSlugs.add(agent.slug);
     }
 
     // Add model access tags
     for (const model of intent.models) {
+      // Keep the multi-value tag for backward compatibility and human readability
       event.tag(["model", model.slug, ...model.agents]);
+      
+      // Collect agent slugs from models
+      console.log("model.agents", model.slug, model.agents);
+      for (const agentSlug of model.agents) {
+        uniqueAgentSlugs.add(agentSlug);
+      }
     }
 
     // Add tool access tags
     for (const tool of intent.tools) {
       event.tag(["tool", tool.name, ...tool.agents]);
     }
-
 
     return event;
   }
@@ -156,9 +168,13 @@ export class StatusPublisher {
       // Create and publish the status event directly
       const event = this.createStatusEvent(intent);
 
-      // Sign and publish with project signer
-      await event.sign(projectCtx.signer);
-      await event.publish();
+      // Sign and publish with project signer if available
+      if (projectCtx.signer) {
+        await event.sign(projectCtx.signer);
+        await event.publish();
+      } else {
+        logger.warn("No project signer available, cannot publish status event");
+      }
     } catch (err) {
       const errorMessage = formatAnyError(err);
       logger.warn(`Failed to publish status event: ${errorMessage}`);
@@ -169,7 +185,10 @@ export class StatusPublisher {
     try {
       const { llms } = await configService.loadConfig(projectPath);
 
-      if (!llms || !llms.configurations) return;
+      if (!llms || !llms.configurations) {
+        logger.debug("No LLM configurations found");
+        return;
+      }
 
       // Build a map of configuration slugs to agents that use them
       const configToAgents = new Map<string, Set<string>>();
@@ -179,32 +198,46 @@ export class StatusPublisher {
         configToAgents.set(configSlug, new Set());
       }
 
-      // Process agent-specific defaults to map agents to their configurations
-      if (llms.defaults && isProjectContextInitialized()) {
+      logger.debug(`Found ${Object.keys(llms.configurations).length} LLM configurations`);
+      logger.debug(`Global default configuration: ${llms.default || 'none'}`);
+
+      // Process agent-specific configurations
+      if (isProjectContextInitialized()) {
         const projectCtx = getProjectContext();
 
-        // Get the global default configuration if it exists
-        const globalDefault = llms.defaults?.agents || llms.defaults?.routing;
+        // Get the global default configuration name
+        const globalDefault = llms.default;
 
         // Map each agent to its configuration
-        for (const [agentSlug] of projectCtx.agentRegistry.getAllAgentsMap()) {
-          // Check if this agent has a specific configuration
-          const specificConfig = llms.defaults[agentSlug];
-
-          if (specificConfig && llms.configurations[specificConfig]) {
-            // Agent has a specific configuration
-            configToAgents.get(specificConfig)?.add(agentSlug);
+        const agentsList = Array.from(projectCtx.agentRegistry.getAllAgentsMap().keys());
+        logger.debug(`Mapping ${agentsList.length} agents to configurations: ${agentsList.join(', ')}`);
+        
+        for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
+          // Check if agent has a specific llmConfig
+          const agentConfig = agent.llmConfig;
+          
+          if (agentConfig && llms.configurations[agentConfig]) {
+            // Agent has a specific configuration that exists
+            configToAgents.get(agentConfig)?.add(agentSlug);
+            logger.debug(`Agent '${agentSlug}' mapped to specific configuration '${agentConfig}'`);
           } else if (globalDefault && llms.configurations[globalDefault]) {
-            // Agent uses the global default
+            // Fall back to global default configuration
             configToAgents.get(globalDefault)?.add(agentSlug);
+            logger.debug(`Agent '${agentSlug}' mapped to default configuration '${globalDefault}'`);
+          } else {
+            logger.debug(`Agent '${agentSlug}' not mapped - no valid configuration found (agent config: ${agentConfig}, default: ${globalDefault})`);
           }
-          // If neither specific nor global default, agent doesn't get mapped to any config
+        }
+      } else {
+        if (!isProjectContextInitialized()) {
+          logger.debug("Project context not initialized for agent mapping");
         }
       }
 
       // Add models to intent
       for (const [configSlug, agentSet] of configToAgents) {
         const agentSlugs = Array.from(agentSet).sort(); // Sort for consistency
+        logger.debug(`Configuration '${configSlug}' has ${agentSlugs.length} agents: ${agentSlugs.join(', ')}`);
         intent.models.push({
           slug: configSlug,
           agents: agentSlugs,
@@ -267,26 +300,15 @@ export class StatusPublisher {
         if (agent.mcp) {
           try {
             const mcpTools = mcpService.getCachedTools();
-            for (const mcpTool of mcpTools) {
-              let toolName = mcpTool.name;
+            for (const [toolNameKey] of Object.entries(mcpTools)) {
+              // Tool name is the key
               
-              // If tool doesn't have a name, compute one from description
-              if (!toolName && mcpTool.description) {
-                // Generate a name from the description
-                // Take first few words, lowercase, replace spaces with underscores
-                const words = mcpTool.description.toLowerCase()
-                  .replace(/[^a-z0-9\s]/g, '') // Remove special chars
-                  .split(/\s+/)
-                  .slice(0, 4); // Take first 4 words max
-                toolName = `mcp_${words.join('_')}`;
-                logger.debug(`Generated MCP tool name '${toolName}' from description: ${mcpTool.description}`);
-              }
-              
-              // Still skip if we couldn't generate a name
-              if (!toolName) {
-                logger.warn(`Skipping MCP tool without name or description: ${JSON.stringify(mcpTool)}`);
+              // Skip if somehow there's no tool name (shouldn't happen with object keys)
+              if (!toolNameKey) {
                 continue;
               }
+              
+              const toolName = toolNameKey;
               
               if (!toolAgentMap.has(toolName)) {
                 toolAgentMap.set(toolName, new Set());

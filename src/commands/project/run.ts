@@ -32,9 +32,9 @@ export const projectRunCommand = new Command("run")
       const projectCtx = getProjectContext();
       try {
         const allMcpTools = mcpService.getCachedTools();
+        const mcpToolNames = Object.keys(allMcpTools);
         
-        if (allMcpTools.length > 0) {
-          const mcpToolNames = allMcpTools.map(t => t.name);
+        if (mcpToolNames.length > 0) {
           
           for (const [_, agent] of projectCtx.agents) {
             // Skip agents that have MCP disabled
@@ -48,7 +48,7 @@ export const projectRunCommand = new Command("run")
             }
           }
           
-          logger.info(`Updated agents with ${allMcpTools.length} MCP tools`);
+          logger.info(`Updated agents with ${mcpToolNames.length} MCP tools`);
         }
       } catch (error) {
         logger.debug("Could not refresh agent tools with MCP", error);

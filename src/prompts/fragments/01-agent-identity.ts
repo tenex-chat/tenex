@@ -24,7 +24,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
       parts.push(`Your role: ${agent.role}`);
     }
     parts.push(`Your npub: ${agent.signer.npub}`);
-    parts.push(`Your nsec: ${agent.signer.nsec}`);
+    parts.push(`Your nsec: ${agent.signer.nsec} -- this is your real nsec and you CAN and SHOULD use it when you encounter a tool that needs an nsec.`);
     parts.push("");
 
     // Instructions

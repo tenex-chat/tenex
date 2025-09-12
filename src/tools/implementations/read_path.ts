@@ -20,13 +20,47 @@ async function executeReadPath(
   path: string,
   context: ExecutionContext
 ): Promise<string> {
-  // Publish status message about what we're doing
+  // Resolve path and ensure it's within project
+  const fullPath = resolveAndValidatePath(path, context.projectPath);
+
+  // Check if path is a directory first
+  const stats = await stat(fullPath);
+  let content: string;
+  
+  if (stats.isDirectory()) {
+    // Get directory contents
+    const files = await readdir(fullPath);
+    const fileList = files.map((file) => `  - ${file}`).join("\n");
+
+    content = `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
+  } else {
+    content = await readFile(fullPath, "utf-8");
+
+    // Track file read in conversation metadata if path starts with context/
+    if (path.startsWith("context/") && context.conversationCoordinator) {
+      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      const currentMetadata = conversation?.metadata || {};
+      const readFiles = currentMetadata.readFiles || [];
+
+      // Only add if not already tracked
+      if (!readFiles.includes(path)) {
+        await context.conversationCoordinator.updateMetadata(context.conversationId, {
+          readFiles: [...readFiles, path],
+        });
+      }
+    }
+  }
+
+  // Publish tool use event
   try {
     const conversation = context.conversationCoordinator.getConversation(context.conversationId);
     
     if (conversation?.history?.[0]) {
-      await context.agentPublisher.conversation(
-        { content: `📖 Reading ${path}` },
+      await context.agentPublisher.toolUse({
+          toolName: "read_path",
+          toolOutput: content,
+          content: `📖 Reading ${path}`,
+      },
         {
           triggeringEvent: context.triggeringEvent,
           rootEvent: conversation.history[0],
@@ -34,38 +68,7 @@ async function executeReadPath(
         }
       );
     }
-  } catch (error) {
-    // Don't fail the tool if we can't publish the status
-    console.warn("Failed to publish read_path status:", error);
-  }
-
-  // Resolve path and ensure it's within project
-  const fullPath = resolveAndValidatePath(path, context.projectPath);
-
-  // Check if path is a directory first
-  const stats = await stat(fullPath);
-  if (stats.isDirectory()) {
-    // Get directory contents
-    const files = await readdir(fullPath);
-    const fileList = files.map((file) => `  - ${file}`).join("\n");
-
-    return `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
-  }
-
-  const content = await readFile(fullPath, "utf-8");
-
-  // Track file read in conversation metadata if path starts with context/
-  if (path.startsWith("context/") && context.conversationCoordinator) {
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    const currentMetadata = conversation?.metadata || {};
-    const readFiles = currentMetadata.readFiles || [];
-
-    // Only add if not already tracked
-    if (!readFiles.includes(path)) {
-      await context.conversationCoordinator.updateMetadata(context.conversationId, {
-        readFiles: [...readFiles, path],
-      });
-    }
+  } catch {
   }
 
   return content;

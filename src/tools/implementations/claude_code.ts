@@ -11,7 +11,6 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import type { NDKTask } from "@nostr-dev-kit/ndk";
 import { llmOpsRegistry } from '@/services/LLMOperationsRegistry';
 
 export enum ClaudeCodeMode {
@@ -22,12 +21,7 @@ export enum ClaudeCodeMode {
 
 const claudeCodeSchema = z.object({
   prompt: z.string().min(1).describe("The prompt for Claude Code to execute"),
-  systemPrompt: z
-    .string()
-    .nullable()
-    .describe("Optional system prompt to provide additional context or constraints"),
   title: z.string().describe("Title for the task"),
-  branch: z.string().nullable().describe("Optional branch name for the task"),
   mode: z.enum([ClaudeCodeMode.WRITE, ClaudeCodeMode.PLAN, ClaudeCodeMode.READ]).describe("Execution mode: WRITE for making changes, PLAN for planning tasks, READ for research/analysis only"),
 });
 
@@ -48,12 +42,11 @@ async function executeClaudeCode(
   input: ClaudeCodeInput,
   context: ExecutionContext
 ): Promise<ClaudeCodeOutput> {
-  const { prompt, systemPrompt, title, branch, mode } = input;
+  const { prompt, title, mode } = input;
   const startTime = Date.now();
 
   logger.debug("[claude_code] Starting execution with LLMService", {
     prompt: prompt.substring(0, 100),
-    hasSystemPrompt: !!systemPrompt,
     mode,
     agent: context.agent.name,
   });
@@ -78,6 +71,7 @@ async function executeClaudeCode(
       triggeringEvent: context.triggeringEvent,
       rootEvent: rootEvent,
       conversationId: context.conversationId,
+      model: context.agent.llmConfig, // Include LLM configuration
     };
 
     // Create task through AgentPublisher
@@ -86,7 +80,6 @@ async function executeClaudeCode(
       prompt,
       baseEventContext,
       existingSessionId, // Only pass if we have a real session ID
-      branch
     );
 
     logger.info("[claude_code] Created task", {
@@ -167,6 +160,7 @@ async function executeClaudeCode(
 
     // Set up event handlers for Nostr publishing
     llmService.on('content', async ({ delta }) => {
+      logger.info("[claude_code] content", { delta });
       lastAssistantMessage += delta;
       messageCount++;
       
@@ -179,8 +173,7 @@ async function executeClaudeCode(
     });
 
     llmService.on('tool-did-execute', async ({ toolName, result }: any) => {
-      console.log("ai sdk cc tool-did-execute", chalk.green(toolName));
-      logger.debug("[claude_code] Tool executed", { toolName, result });
+      logger.info("[claude_code] Tool executed", { toolName, result });
       
       if (toolName === 'TodoWrite' && result?.todos) {
         const todos = result.todos as Array<{
@@ -243,12 +236,6 @@ async function executeClaudeCode(
 
     // Build messages
     const messages: any[] = [];
-    if (systemPrompt) {
-      messages.push({
-        role: 'system',
-        content: systemPrompt
-      });
-    }
     messages.push({
       role: 'user',
       content: prompt
@@ -308,6 +295,7 @@ async function executeClaudeCode(
         sessionId,
         totalCost,
         messageCount,
+        finalResponse,
         duration,
         mode,
         hasPlanResult: !!planResult,

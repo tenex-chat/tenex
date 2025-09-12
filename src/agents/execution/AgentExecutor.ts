@@ -33,7 +33,6 @@ export interface StandaloneAgentContext {
 
 export class AgentExecutor {
     constructor(
-        private conversationCoordinator: ConversationCoordinator,
         private standaloneContext?: StandaloneAgentContext
     ) {}
 
@@ -333,7 +332,7 @@ Be completely transparent about your internal process. If you made a mistake or 
             rootEvent: context.conversationCoordinator.getConversation(context.conversationId)?.history[0] ?? context.triggeringEvent,
             conversationId: context.conversationId,
             phase: context.phase,
-            model: context.agent.llmConfig, // Include LLM configuration
+            model: llmService.model
         };
 
         // Separate buffers for content and reasoning
@@ -342,11 +341,12 @@ Be completely transparent about your internal process. If you made a mistake or 
 
         // Helper to flush accumulated content
         const flushContentBuffer = async (): Promise<void> => {
-            if (contentBuffer.trim()) {
+            console.log("called flushContentBuffer");
+            if (contentBuffer.trim().length > 0) {
                 console.log('publishing conversation event', contentBuffer.substring(0, 50));
                 
                 // Use regular conversation event for content
-                await agentPublisher.conversation({
+                agentPublisher.conversation({
                     content: contentBuffer
                 }, eventContext);
                 logger.info(`[AgentExecutor] Flushed content buffer (${contentBuffer.length} chars)`);
@@ -357,11 +357,12 @@ Be completely transparent about your internal process. If you made a mistake or 
 
         // Helper to flush accumulated reasoning
         const flushReasoningBuffer = async (): Promise<void> => {
+            console.log("called flushReasoningBuffer");
             if (reasoningBuffer.trim().length > 0) {
                 console.log('publishing reasoning event', reasoningBuffer.substring(0, 50));
                 
                 // Use conversation event with reasoning tag
-                await agentPublisher.conversation({
+                agentPublisher.conversation({
                     content: reasoningBuffer,
                     isReasoning: true
                 }, eventContext);
@@ -397,6 +398,10 @@ Be completely transparent about your internal process. If you made a mistake or 
             // Check if we had reasoning or content before flushing
             const hadContent = contentBuffer.trim().length > 0;
             const hadReasoning = reasoningBuffer.trim().length > 0;
+
+            const lastStep = event.steps[event.steps.length - 1];
+            console.log("llmservice complete last step toolCalls", lastStep.toolCalls);
+            console.log("llmservice complete last step toolResults", lastStep.toolResults);
             
             if (event.message.trim()) {
                 const isReasoning = hadReasoning && !hadContent;

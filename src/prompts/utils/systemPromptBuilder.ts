@@ -172,15 +172,16 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
   }
 
   // Add project inventory as separate cacheable message for all agents
-  const inventoryContent = buildProjectInventoryContent(options);
-  if (inventoryContent) {
-    messages.push({
-      message: { role: "system", content: inventoryContent },
-      metadata: {
-        description: "Project inventory",
-      },
-    });
-  }
+  // XXX TEMPORARILY DISABLED! RESTORE ASAP!
+  // const inventoryContent = buildProjectInventoryContent();
+  // if (inventoryContent) {
+  //   messages.push({
+  //     message: { role: "system", content: inventoryContent },
+  //     metadata: {
+  //       description: "Project inventory",
+  //     },
+  //   });
+  // }
 
   return messages;
 }
@@ -247,7 +248,7 @@ function buildProjectMdContent(options: BuildSystemPromptOptions): string | null
 /**
  * Builds project inventory content as a separate message
  */
-function buildProjectInventoryContent(options: BuildSystemPromptOptions): string | null {
+function buildProjectInventoryContent(): string | null {
   const builder = new PromptBuilder();
   builder.add("project-inventory-context", {});
   const content = builder.build();

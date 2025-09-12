@@ -15,7 +15,8 @@ export class ProviderConfigUI {
       openrouter: "OpenRouter (300+ models)",
       anthropic: "Anthropic (Claude)",
       openai: "OpenAI (GPT)",
-      ollama: "Ollama (Local models)"
+      ollama: "Ollama (Local models)",
+      claudeCode: "Claude Code (Limited - Phase 0 only)"
     };
     return names[provider] || provider;
   }

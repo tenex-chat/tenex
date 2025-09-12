@@ -91,10 +91,6 @@ describe("AgentEventEncoder Integration Tests", () => {
               completion_tokens: 50,
               total_tokens: 200,
             },
-            toolCalls: [
-              { name: "search", arguments: { query: "anomaly detection" } },
-              { name: "calculate", arguments: { expression: "sum([1,2,3])" } },
-            ],
           },
         };
 
@@ -122,12 +118,6 @@ describe("AgentEventEncoder Integration Tests", () => {
         expect(event.tagValue("summary")).toBe("3 anomalies detected");
         expect(event.tagValue("execution-time")).toBe("2500");
         expect(event.tagValue("llm-total-tokens")).toBe("200");
-        
-        // Verify tool tags
-        const toolTags = event.getMatchingTags("tool");
-        expect(toolTags).toHaveLength(2);
-        expect(toolTags[0][1]).toBe("search");
-        expect(JSON.parse(toolTags[0][2])).toEqual({ query: "anomaly detection" });
       });
     });
 

@@ -266,4 +266,252 @@ describe("AgentConversationContext", () => {
       expect(messages[0].content).toContain("Response from agent 2");
     });
   });
+
+  describe("threading support", () => {
+    it("should use full history for root replies (E == e)", async () => {
+      // Create root event
+      const rootEvent = createMockNDKEvent();
+      rootEvent.id = "root-event";
+      rootEvent.content = "Original message";
+      rootEvent.pubkey = "user-pubkey";
+
+      // Create branch A
+      const branchA1 = createMockNDKEvent();
+      branchA1.id = "branch-a1";
+      branchA1.content = "Branch A message";
+      branchA1.pubkey = "agent-pubkey";
+      branchA1.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+
+      // Create branch B
+      const branchB1 = createMockNDKEvent();
+      branchB1.id = "branch-b1";
+      branchB1.content = "Branch B message";
+      branchB1.pubkey = "other-agent-pubkey";
+      branchB1.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+
+      // Triggering event replies to root
+      const triggeringEvent = createMockNDKEvent();
+      triggeringEvent.id = "trigger";
+      triggeringEvent.content = "Reply to root";
+      triggeringEvent.pubkey = "user-pubkey";
+      triggeringEvent.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+      triggeringEvent.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "root-event";
+        return undefined;
+      });
+
+      mockConversation.history = [rootEvent, branchA1, branchB1];
+
+      const messages = await context.buildMessages(
+        mockConversation,
+        mockAgentState,
+        triggeringEvent
+      );
+
+      // Should include all history (both branches) for root reply
+      expect(messages.length).toBe(4); // 3 history + 1 triggering
+      expect(messages.map(m => m.content)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Original message"),
+          expect.stringContaining("Branch A message"),
+          expect.stringContaining("Branch B message"),
+          expect.stringContaining("Reply to root")
+        ])
+      );
+    });
+
+    it("should filter to thread path for thread replies (E != e)", async () => {
+      // Create root event
+      const rootEvent = createMockNDKEvent();
+      rootEvent.id = "root-event";
+      rootEvent.content = "Original message";
+      rootEvent.pubkey = "user-pubkey";
+
+      // Create branch A
+      const branchA1 = createMockNDKEvent();
+      branchA1.id = "branch-a1";
+      branchA1.content = "Branch A message";
+      branchA1.pubkey = "agent-pubkey";
+      branchA1.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+      branchA1.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "root-event";
+        return undefined;
+      });
+
+      // Create deeper message in branch A
+      const branchA2 = createMockNDKEvent();
+      branchA2.id = "branch-a2";
+      branchA2.content = "Branch A deeper";
+      branchA2.pubkey = "user-pubkey";
+      branchA2.tags = [
+        ["E", "root-event"],
+        ["e", "branch-a1"]
+      ];
+      branchA2.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "branch-a1";
+        return undefined;
+      });
+
+      // Create branch B (should be filtered out)
+      const branchB1 = createMockNDKEvent();
+      branchB1.id = "branch-b1";
+      branchB1.content = "Branch B message";
+      branchB1.pubkey = "other-agent-pubkey";
+      branchB1.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+
+      // Triggering event replies to branch A2
+      const triggeringEvent = createMockNDKEvent();
+      triggeringEvent.id = "trigger";
+      triggeringEvent.content = "Reply in thread A";
+      triggeringEvent.pubkey = "user-pubkey";
+      triggeringEvent.tags = [
+        ["E", "root-event"],
+        ["e", "branch-a2"]
+      ];
+      triggeringEvent.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "branch-a2";
+        return undefined;
+      });
+
+      mockConversation.history = [rootEvent, branchA1, branchA2, branchB1];
+
+      const messages = await context.buildMessages(
+        mockConversation,
+        mockAgentState,
+        triggeringEvent
+      );
+
+      // Should only include thread A path, not branch B
+      expect(messages.length).toBe(4); // root + branch-a1 + branch-a2 + triggering
+      const messageContents = messages.map(m => m.content);
+      expect(messageContents).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Original message"),
+          expect.stringContaining("Branch A message"),
+          expect.stringContaining("Branch A deeper"),
+          expect.stringContaining("Reply in thread A")
+        ])
+      );
+      // Branch B should be filtered out
+      expect(messageContents).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Branch B message")
+        ])
+      );
+    });
+
+    it("should handle orphaned events gracefully", async () => {
+      // Create some events without proper parent chain
+      const event1 = createMockNDKEvent();
+      event1.id = "event-1";
+      event1.content = "Some message";
+      event1.pubkey = "user-pubkey";
+
+      // Triggering event refers to non-existent parent
+      const triggeringEvent = createMockNDKEvent();
+      triggeringEvent.id = "trigger";
+      triggeringEvent.content = "Orphaned reply";
+      triggeringEvent.pubkey = "user-pubkey";
+      triggeringEvent.tags = [
+        ["E", "root-event"],
+        ["e", "non-existent-parent"]
+      ];
+      triggeringEvent.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "non-existent-parent";
+        return undefined;
+      });
+
+      mockConversation.history = [event1];
+
+      const messages = await context.buildMessages(
+        mockConversation,
+        mockAgentState,
+        triggeringEvent
+      );
+
+      // Should fall back to full history when parent not found
+      expect(messages.length).toBe(2); // event1 + triggering
+    });
+
+    it("should filter missed events to thread context", async () => {
+      // Create root and branches
+      const rootEvent = createMockNDKEvent();
+      rootEvent.id = "root-event";
+      rootEvent.content = "Root";
+      rootEvent.pubkey = "user-pubkey";
+
+      const branchA = createMockNDKEvent();
+      branchA.id = "branch-a";
+      branchA.content = "Branch A";
+      branchA.pubkey = "agent-pubkey";
+      branchA.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+      branchA.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "root-event";
+        return undefined;
+      });
+
+      const branchB = createMockNDKEvent();
+      branchB.id = "branch-b";
+      branchB.content = "Branch B";
+      branchB.pubkey = "other-agent-pubkey";
+      branchB.tags = [
+        ["E", "root-event"],
+        ["e", "root-event"]
+      ];
+
+      // Triggering event in branch A
+      const triggeringEvent = createMockNDKEvent();
+      triggeringEvent.id = "trigger";
+      triggeringEvent.content = "Continue A";
+      triggeringEvent.pubkey = "user-pubkey";
+      triggeringEvent.tags = [
+        ["E", "root-event"],
+        ["e", "branch-a"]
+      ];
+      triggeringEvent.tagValue = mock((tag: string) => {
+        if (tag === "E") return "root-event";
+        if (tag === "e") return "branch-a";
+        return undefined;
+      });
+
+      // Build messages with missed history
+      const messages = await context.buildMessagesWithMissedHistory(
+        mockConversation,
+        mockAgentState,
+        [rootEvent, branchA, branchB], // All events as "missed"
+        undefined,
+        triggeringEvent
+      );
+
+      // Should filter missed events to only thread A
+      expect(messages.length).toBe(2); // missed block + triggering
+      const missedBlockContent = messages[0].content as string;
+      expect(missedBlockContent).toContain("Branch A");
+      expect(missedBlockContent).not.toContain("Branch B");
+    });
+  });
 });

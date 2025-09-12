@@ -3,10 +3,7 @@ import type {
     E2ETestContext, 
     ExecutionTrace, 
     AgentExecutionResult, 
-    RoutingDecision,
-    AgentExecutionRecord,
-    ToolCallRecord,
-    PhaseTransitionRecord
+    RoutingDecision
 } from "./e2e-types";
 
 /**
@@ -124,7 +121,7 @@ function extractRoutingDecision(orchestratorResult: AgentExecutionResult): Routi
         if (parsed.agents && Array.isArray(parsed.agents)) {
             return parsed;
         }
-    } catch (error) {
+    } catch {
         // Not a routing decision
     }
     return null;
