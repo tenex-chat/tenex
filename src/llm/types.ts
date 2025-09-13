@@ -15,7 +15,6 @@ export type { ExecutionContext };
 
 /**
  * AI SDK supported providers
- * Note: claudeCode is a limited provider (phase-0 only in Track 1)
  */
 export const AI_SDK_PROVIDERS = ["openrouter", "anthropic", "openai", "ollama", "claudeCode"] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];

@@ -1,5 +1,6 @@
 // Tool type removed - using AI SDK tools only
 import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import type { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
 
 /**
  * Simplified agent representation for UI display and selection
@@ -47,6 +48,8 @@ export interface AgentInstance {
   phase?: string;
   /** Phase definitions for this agent - maps phase names to their instructions */
   phases?: Record<string, string>;
+  /** Create a metadata store for this agent in a specific conversation */
+  createMetadataStore(conversationId: string): AgentMetadataStore;
 }
 
 /**

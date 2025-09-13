@@ -19,19 +19,6 @@ export class ConversationStore {
    * Store a conversation
    */
   set(id: string, conversation: Conversation): void {
-    // Debug logging for session tracking
-    if (conversation.agentStates) {
-      for (const [agentSlug, state] of conversation.agentStates.entries()) {
-        if (state.claudeSessionsByPhase) {
-          logger.debug(`[ConversationStore] Storing conversation ${id.substring(0, 8)} with existing sessions for agent ${agentSlug}:`, {
-            conversationId: id,
-            agentSlug,
-            sessions: state.claudeSessionsByPhase,
-          });
-        }
-      }
-    }
-    
     this.conversations.set(id, conversation);
     logger.debug(`[ConversationStore] Stored conversation ${id}`);
   }

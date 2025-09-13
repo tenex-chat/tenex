@@ -3,7 +3,7 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { AgentConversationContext } from "../AgentConversationContext";
-import { buildPhaseInstructions, formatPhaseTransitionMessage } from "@/prompts/utils/systemPromptBuilder";
+import { buildPhaseInstructions } from "@/prompts/utils/systemPromptBuilder";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
@@ -64,22 +64,7 @@ export class ConversationCoordinator {
    * Get a conversation by ID
    */
   getConversation(id: string): Conversation | undefined {
-    const conversation = this.store.get(id);
-    
-    // Debug logging to trace session usage
-    if (conversation?.agentStates) {
-      for (const [agentSlug, state] of conversation.agentStates.entries()) {
-        if (state.claudeSessionsByPhase) {
-          logger.debug(`[ConversationCoordinator] Conversation ${id.substring(0, 8)} has sessions for agent ${agentSlug}:`, {
-            conversationId: id,
-            agentSlug,
-            sessions: state.claudeSessionsByPhase,
-          });
-        }
-      }
-    }
-    
-    return conversation;
+    return this.store.get(id);
   }
 
   /**
@@ -144,40 +129,6 @@ export class ConversationCoordinator {
     await this.persistence.save(conversation);
   }
 
-  /**
-   * Update conversation phase
-   */
-  async updatePhase(
-    id: string,
-    phase: Phase,
-    message: string,
-    agentPubkey: string,
-    agentName: string,
-    phaseInstructions?: string
-  ): Promise<boolean> {
-    const conversation = this.store.get(id);
-    if (!conversation) {
-      throw new Error(`Conversation ${id} not found`);
-    }
-
-    const from = conversation.phase;
-
-    // No execution queue logic needed
-
-    // Update conversation
-    if (from !== phase) {
-      conversation.phase = phase;
-      conversation.phaseInstructions = phaseInstructions;
-      conversation.phaseStartedAt = Date.now();
-    }
-
-    logger.info(
-      `Phase transition: ${from} → ${phase} for conversation ${id.substring(0, 8)}`
-    );
-
-    await this.persistence.save(conversation);
-    return true;
-  }
 
   /**
    * Build messages for an agent
@@ -200,28 +151,12 @@ export class ConversationCoordinator {
     if (!agentState) {
       agentState = {
         lastProcessedMessageIndex: 0,
-        lastSeenPhase: undefined,
       };
       conversation.agentStates.set(targetAgent.slug, agentState);
     }
 
-    // Check if we need phase instructions
-    const needsPhaseInstructions = !agentState.lastSeenPhase || agentState.lastSeenPhase !== conversation.phase;
+    // Phase instructions are now handled transiently via event tags
     let phaseInstructions: string | undefined;
-    
-    if (needsPhaseInstructions) {
-      const instructions = buildPhaseInstructions(conversation.phase, conversation);
-      if (agentState.lastSeenPhase) {
-        phaseInstructions = formatPhaseTransitionMessage(
-          agentState.lastSeenPhase,
-          conversation.phase,
-          instructions
-        );
-      } else {
-        phaseInstructions = `=== CURRENT PHASE: ${conversation.phase.toUpperCase()} ===\n\n${instructions}`;
-      }
-      agentState.lastSeenPhase = conversation.phase;
-    }
 
     // Build messages using the stateless context
     const messages = await context.buildMessages(
@@ -233,17 +168,6 @@ export class ConversationCoordinator {
 
     // Update agent state
     agentState.lastProcessedMessageIndex = conversation.history.length;
-
-    // Extract and update session ID if present in triggering event
-    if (triggeringEvent) {
-      const sessionId = context.extractSessionId(triggeringEvent);
-      if (sessionId && conversation.phase) {
-        if (!agentState.claudeSessionsByPhase) {
-          agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
-        }
-        agentState.claudeSessionsByPhase[conversation.phase] = sessionId;
-      }
-    }
 
     await this.persistence.save(conversation);
 
@@ -269,7 +193,6 @@ export class ConversationCoordinator {
     if (!agentState) {
       agentState = {
         lastProcessedMessageIndex: 0,
-        lastSeenPhase: undefined,
       };
       conversation.agentStates.set(agentSlug, agentState);
     }

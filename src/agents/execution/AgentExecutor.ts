@@ -90,9 +90,12 @@ export class AgentExecutor {
             // Start execution time tracking
             startExecutionTime(conversation);
 
+            // Extract transient phase context from triggering event if it's a delegate_phase
+            const transientPhaseContext = this.extractPhaseContext(context.triggeringEvent);
+
             // Log execution flow start
             logger.info(
-                `Agent ${context.agent.name} starting execution in ${context.phase} phase`
+                `Agent ${context.agent.name} starting execution${transientPhaseContext?.phase ? ` in ${transientPhaseContext.phase} phase` : ''}`
             );
 
             // Publish typing indicator start using AgentPublisher
@@ -101,6 +104,7 @@ export class AgentExecutor {
                 rootEvent: conversation.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
                 conversationId: context.conversationId,
                 model: context.agent.llmConfig, // Include LLM configuration
+                phase: transientPhaseContext?.phase, // Include phase only if present
             };
             await agentPublisher.typing({ state: "start" }, eventContext);
 
@@ -143,6 +147,31 @@ export class AgentExecutor {
     }
 
     /**
+     * Extract phase context from triggering event if it contains delegate_phase tags
+     */
+    private extractPhaseContext(triggeringEvent: NDKEvent): { phase?: string; phaseInstructions?: string } | undefined {
+        // Check if this is a phase delegation by looking for the tool tag
+        const toolTag = triggeringEvent.tags.find(tag => tag[0] === 'tool' && tag[1] === 'delegate_phase');
+        if (!toolTag) {
+            return undefined;
+        }
+
+        // Extract phase name from phase tag
+        const phaseTag = triggeringEvent.tags.find(tag => tag[0] === 'phase');
+        if (!phaseTag || !phaseTag[1]) {
+            return undefined;
+        }
+
+        // Extract phase instructions from phase-instructions tag (optional)
+        const phaseInstructionsTag = triggeringEvent.tags.find(tag => tag[0] === 'phase-instructions');
+
+        return {
+            phase: phaseTag[1],
+            phaseInstructions: phaseInstructionsTag?.[1]
+        };
+    }
+
+    /**
      * Build the messages array for the agent execution
      */
     private async buildMessages(
@@ -158,6 +187,9 @@ export class AgentExecutor {
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
+
+        // Extract transient phase context from the triggering event
+        const transientPhaseContext = this.extractPhaseContext(context.triggeringEvent);
 
         // Get MCP tools for the prompt
         const mcpTools = mcpService.getCachedTools();
@@ -179,12 +211,13 @@ export class AgentExecutor {
             // Build standalone system prompt
             const systemMessages = buildStandaloneSystemPromptMessages({
                 agent: context.agent,
-                phase: context.phase,
+                phase: transientPhaseContext?.phase, // Only pass phase if present
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,
                 mcpTools,
                 triggeringEvent: context.triggeringEvent,
+                transientPhaseContext,
             });
 
             // Add all system messages
@@ -222,7 +255,7 @@ export class AgentExecutor {
             // Build system prompt messages for all agents (including orchestrator)
             const systemMessages = buildSystemPromptMessages({
                 agent: context.agent,
-                phase: context.phase,
+                phase: transientPhaseContext?.phase, // Only pass phase if present
                 project,
                 availableAgents,
                 conversation,
@@ -230,6 +263,7 @@ export class AgentExecutor {
                 mcpTools,
                 triggeringEvent: context.triggeringEvent,
                 isProjectManager,
+                transientPhaseContext,
             });
 
             // Add all system messages
@@ -348,13 +382,16 @@ Be completely transparent about your internal process. If you made a mistake or 
         const projectCtx = getProjectContext();
         const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
         const llmService = configService.createLLMService(llmLogger, context.agent.llmConfig);
-        
+
+        // Extract transient phase context for event publishing
+        const transientPhaseContext = this.extractPhaseContext(context.triggeringEvent);
+
         const agentPublisher = context.agentPublisher;
         const eventContext: EventContext = {
             triggeringEvent: context.triggeringEvent,
             rootEvent: context.conversationCoordinator.getConversation(context.conversationId)?.history[0] ?? context.triggeringEvent,
             conversationId: context.conversationId,
-            phase: context.phase,
+            phase: transientPhaseContext?.phase, // Use extracted phase, not context.phase
             model: llmService.model
         };
 
@@ -364,7 +401,6 @@ Be completely transparent about your internal process. If you made a mistake or 
 
         // Helper to flush accumulated content
         const flushContentBuffer = async (): Promise<void> => {
-            console.log("called flushContentBuffer");
             if (contentBuffer.trim().length > 0) {
                 console.log('publishing conversation event', contentBuffer.substring(0, 50));
                 
@@ -380,7 +416,6 @@ Be completely transparent about your internal process. If you made a mistake or 
 
         // Helper to flush accumulated reasoning
         const flushReasoningBuffer = async (): Promise<void> => {
-            console.log("called flushReasoningBuffer");
             if (reasoningBuffer.trim().length > 0) {
                 console.log('publishing reasoning event', reasoningBuffer.substring(0, 50));
                 
@@ -458,8 +493,8 @@ Be completely transparent about your internal process. If you made a mistake or 
             
             // Get the tool to generate human-readable content
             const tool = toolsObject[event.toolName];
-            const humanContent = tool?.getHumanReadableContent?.(event.args) 
-                || (event.toolName.startsWith('mcp__') 
+            const humanContent = tool?.getHumanReadableContent?.(event.args)
+                || (event.toolName.startsWith('mcp__')
                     ? `Executing ${formatMCPToolName(event.toolName)}`
                     : `Executing ${event.toolName}`);
 
@@ -468,10 +503,11 @@ Be completely transparent about your internal process. If you made a mistake or 
                 {
                     toolName: event.toolName,
                     content: humanContent,
+                    args: event.args,
                 },
                 eventContext
             );
-            
+
             // Store the tool call with its event ID for later association
             toolExecutions.set(event.toolCallId, {
                 toolCall: {

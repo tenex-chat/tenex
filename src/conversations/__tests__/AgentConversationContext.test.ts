@@ -96,8 +96,7 @@ describe("AgentConversationContext", () => {
 
     // Create mock agent state
     mockAgentState = {
-      lastProcessedMessageIndex: 0,
-      lastSeenPhase: undefined
+      lastProcessedMessageIndex: 0
     };
   });
 
@@ -169,7 +168,6 @@ describe("AgentConversationContext", () => {
 
       mockConversation.history = [event1];
       mockConversation.phase = "REFLECTION";
-      mockAgentState.lastSeenPhase = "CHAT";
 
       const phaseInstructions = "You are now in reflection phase";
 
@@ -220,23 +218,6 @@ describe("AgentConversationContext", () => {
       expect(messages[0].content).toContain("Previous delegation summary");
       expect(messages[1].role).toBe("user");
       expect(messages[1].content).toContain("New message");
-    });
-
-    it("should extract session ID from event", () => {
-      const event = createMockNDKEvent();
-      event.id = "event-123";
-      event.content = "Test message";
-      
-      // Mock the tagValue method to return a session ID
-      event.tagValue = mock((tag: string) => {
-        if (tag === "claude-session") {
-          return "session-123";
-        }
-        return undefined;
-      });
-
-      const sessionId = context.extractSessionId(event);
-      expect(sessionId).toBe("session-123");
     });
 
     it("should build messages with delegation responses", () => {

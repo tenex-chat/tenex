@@ -5,7 +5,6 @@ export interface ConversationMetadata {
   title: string;
   createdAt: number;
   updatedAt: number;
-  phase: string;
   eventCount: number;
   agentCount: number;
   archived?: boolean;
@@ -13,7 +12,6 @@ export interface ConversationMetadata {
 
 export interface ConversationSearchCriteria {
   title?: string;
-  phase?: string;
   dateFrom?: number;
   dateTo?: number;
   agentPubkey?: string;

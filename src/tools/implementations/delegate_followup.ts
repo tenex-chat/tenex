@@ -85,12 +85,17 @@ async function executeDelegateFollowup(
 
 // AI SDK tool factory
 export function createDelegateFollowupTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+  const toolInstance = tool({
     description: "Send a follow-up question to an agent you previously delegated to. Use after delegate or delegate_phase to ask clarifying questions about their response. The tool will wait for their response before continuing.",
     inputSchema: delegateFollowupSchema,
     execute: async (input: DelegateFollowupInput) => {
       return await executeDelegateFollowup(input, context);
     },
+  });
+
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: () => `Sending follow-up question`,
   });
 }
 

@@ -184,7 +184,7 @@ export class OperationsStatusPublisher {
     }
     
     const isCleanup = operations.length === 0;
-    logger.info('[OperationsStatusPublisher] Published event status', {
+    logger.debug('[OperationsStatusPublisher] Published event status', {
       eventId: eventId.substring(0, 8),
       agentCount: agentPubkeys.size,
       operationCount: operations.length,

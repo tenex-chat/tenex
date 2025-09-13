@@ -36,7 +36,7 @@ describe("Task Reply Routing", () => {
       slug: "test-agent",
       name: "Test Agent",
       pubkey: agentPubkey,
-      
+      createMetadataStore: mock(() => ({}))
     } as AgentInstance;
 
     // Create mock project context

@@ -79,7 +79,10 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
     mcp: false,
     eventId: "mock-event-id",
     slug: "mock-agent",
-    backend: "reason-act-loop",
+    createMetadataStore: () => ({
+      get: () => undefined,
+      set: () => {}
+    }),
     ...overrides,
   } as AgentInstance;
 }

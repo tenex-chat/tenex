@@ -23,12 +23,11 @@ describe("DelegationRegistry - Unified Approach (No Synthetic IDs)", () => {
     name: "Test Agent",
     pubkey: "agent1_pubkey_1234567890abcdef",
     signer: new NDKPrivateKeySigner(nsec1),
-    prompts: { systemPrompt: "test" },
+    role: "test",
     description: "Test agent",
-    capabilities: [],
-    model: "test-model",
-    nsec: nsec1,
-    project: undefined,
+    llmConfig: "test-model",
+    tools: [],
+    createMetadataStore: mock(() => ({}))
   };
 
   const mockAgent2: AgentInstance = {
@@ -36,12 +35,11 @@ describe("DelegationRegistry - Unified Approach (No Synthetic IDs)", () => {
     name: "Test Agent 2",
     pubkey: "agent2_pubkey_fedcba0987654321",
     signer: new NDKPrivateKeySigner(nsec2),
-    prompts: { systemPrompt: "test" },
+    role: "test",
     description: "Test agent 2",
-    capabilities: [],
-    model: "test-model",
-    nsec: nsec2,
-    project: undefined,
+    llmConfig: "test-model",
+    tools: [],
+    createMetadataStore: mock(() => ({}))
   };
 
   beforeAll(async () => {

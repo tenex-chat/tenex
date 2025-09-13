@@ -70,11 +70,22 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
 
 // AI SDK tool factory
 export function createDelegateTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+  const toolInstance = tool({
     description: "Delegate a task or question to one or more agents and wait for their responses. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys. Responses are returned synchronously - the tool waits for all agents to complete.",
     inputSchema: delegateSchema,
     execute: async (input: DelegateInput) => {
       return await executeDelegate(input, context);
+    },
+  });
+
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: ({ recipients }: DelegateInput) => {
+      if (recipients.length === 1) {
+        return `Delegating to ${recipients[0]}`;
+      } else {
+        return `Delegating to ${recipients.length} recipients`;
+      }
     },
   });
 }

@@ -23,6 +23,7 @@ export interface DelegationIntent {
   recipients: string[];
   request: string;
   phase?: string;
+  phaseInstructions?: string; // Instructions to be passed with phase delegation
 }
 
 export interface ConversationIntent {
@@ -65,6 +66,7 @@ export interface StatusIntent {
 export interface ToolUseIntent {
   toolName: string;
   content: string; // e.g., "Reading $path"
+  args?: unknown; // Tool arguments to be serialized
 }
 
 export type AgentIntent =
@@ -206,6 +208,11 @@ export class AgentEventEncoder {
         // Phase metadata if provided
         if (intent.phase) {
             event.tag(["phase", intent.phase]);
+
+            // Add phase instructions as a separate tag
+            if (intent.phaseInstructions) {
+                event.tag(["phase-instructions", intent.phaseInstructions]);
+            }
         }
 
         // Add standard metadata
@@ -497,6 +504,23 @@ export class AgentEventEncoder {
 
         // Add tool usage tags
         event.tag(["tool", intent.toolName]);
+
+        // Add tool-args tag with JSON serialization
+        // If args are provided and can be serialized, add them
+        // If the serialized args are > 1000 chars, add empty tag
+        if (intent.args !== undefined) {
+            try {
+                const serialized = JSON.stringify(intent.args);
+                if (serialized.length <= 1000) {
+                    event.tag(["tool-args", serialized]);
+                } else {
+                    event.tag(["tool-args"]);
+                }
+            } catch (error) {
+                // If serialization fails, add empty tag
+                event.tag(["tool-args"]);
+            }
+        }
 
         // Add standard metadata
         this.addStandardTags(event, context);

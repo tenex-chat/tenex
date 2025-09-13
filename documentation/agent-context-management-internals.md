@@ -114,9 +114,9 @@ The system maintains per-agent, per-conversation Claude sessions:
 3. **Session Propagation**: Passed through execution context to backends
 
 ```typescript
-// AgentExecutor.ts:72-83
-const agentState = conversation?.agentStates.get(context.agent.slug);
-const claudeSessionId = context.claudeSessionId || agentState?.claudeSessionId;
+// Session management is now handled via AgentMetadataStore
+const metadataStore = context.agent.createMetadataStore(context.conversationId);
+const claudeSessionId = metadataStore.get<string>('claudeSessionId');
 ```
 
 ## Interaction Patterns

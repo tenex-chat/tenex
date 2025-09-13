@@ -49,18 +49,6 @@ export class ConversationPersistenceService implements IConversationPersistenceS
       if (!meta.archived) {
         const conversation = await this.adapter.load(meta.id);
         if (conversation) {
-          // Debug logging for session tracking
-          if (conversation.agentStates) {
-            for (const [agentSlug, state] of conversation.agentStates.entries()) {
-              if (state.claudeSessionsByPhase) {
-                logger.debug(`[ConversationPersistenceService] Loaded conversation ${meta.id.substring(0, 8)} with sessions for agent ${agentSlug}:`, {
-                  conversationId: meta.id,
-                  agentSlug,
-                  sessions: state.claudeSessionsByPhase,
-                });
-              }
-            }
-          }
           conversations.push(conversation);
         }
       }
@@ -117,7 +105,6 @@ export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapte
       title: conversation.title || "",
       createdAt: conversation.history[0]?.created_at || Date.now(),
       updatedAt: Date.now(),
-      phase: conversation.phase,
       eventCount: conversation.history.length,
       agentCount: conversation.agentStates.size,
       archived: false,

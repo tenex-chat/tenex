@@ -5,6 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
+import { claudeCode } from "ai-sdk-provider-claude-code";
 import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
 import { createMockProvider } from "./providers/MockProvider";
@@ -106,15 +107,13 @@ export class LLMServiceFactory {
                     }
                     
                     case "claudeCode": {
-                        // Track 1: Limited claude_code provider
-                        // This creates a placeholder provider that will delegate to phase-0
-                        // The actual implementation happens through the existing agent/phase system
-                        logger.warn(`[LLMServiceFactory] ClaudeCode provider is limited to phase-0 operations only`);
-                        
-                        // We don't create an actual provider here since claudeCode works through phases
-                        // Instead, we'll handle this specially in the service creation
-                        this.providers.set(name, {} as Provider); // Placeholder
-                        logger.debug(`[LLMServiceFactory] Initialized limited ClaudeCode provider (phase-0 only)`);
+                        // ClaudeCode provider uses the ai-sdk-provider-claude-code package
+                        // It doesn't require an API key
+                        logger.debug(`[LLMServiceFactory] Initializing ClaudeCode provider`);
+
+                        // Create the actual claudeCode provider
+                        this.providers.set(name, claudeCode as Provider);
+                        logger.debug(`[LLMServiceFactory] Initialized ClaudeCode provider`);
                         break;
                     }
                         
@@ -159,30 +158,7 @@ export class LLMServiceFactory {
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
         
-        // Special handling for claudeCode provider
-        if (actualProvider === 'claudeCode') {
-            // Track 1: Limited implementation
-            // claudeCode only supports phase-0 for now
-            if (config.model !== 'phase-0') {
-                throw new Error(
-                    `ClaudeCode provider only supports 'phase-0' model in Track 1. ` +
-                    `Requested model: ${config.model}`
-                );
-            }
-            logger.info(`[LLMServiceFactory] Creating limited ClaudeCode service for phase-0`);
-            
-            // For now, claudeCode will be handled through the existing phase system
-            // Return a service that will delegate to the phase-0 implementation
-            // This is a placeholder that will be replaced in Track 2
-            return new LLMService(
-                llmLogger,
-                this.registry,
-                actualProvider,
-                config.model,
-                config.temperature,
-                config.maxTokens
-            );
-        }
+        // No special handling needed for claudeCode - it works like any other provider
         
         // Verify the provider exists
         if (!this.providers.has(actualProvider)) {

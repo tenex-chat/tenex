@@ -14,17 +14,13 @@ const ExecutionTimeSchema = z.object({
 // Simplified agent state schema
 export const AgentStateSchema = z.object({
   lastProcessedMessageIndex: z.number().int().min(0),
-  claudeSessionsByPhase: z.record(z.string(), z.string()).optional(), // Phase -> sessionId mapping
-  lastSeenPhase: z.string().optional(), // Phase as string
 });
 
 export const SerializedConversationSchema = z.object({
   id: z.string(),
   title: z.string(),
-  phase: PhaseSchema,
   history: z.array(z.string()),
   agentStates: z.record(z.string(), AgentStateSchema).optional(), // Map serialized as object
-  phaseStartedAt: z.number().optional(),
   metadata: ConversationMetadataSchema,
   executionTime: ExecutionTimeSchema.optional(),
 });
@@ -34,7 +30,6 @@ export const ConversationMetadataFileSchema = z.object({
   title: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
-  phase: z.string(),
   eventCount: z.number(),
   agentCount: z.number(),
   archived: z.boolean().optional(),

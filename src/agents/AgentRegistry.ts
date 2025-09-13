@@ -839,6 +839,12 @@ export class AgentRegistry {
       isGlobal: isGlobal,
       phase: agentDefinition.phase,
       phases: agentDefinition.phases,
+      createMetadataStore: (conversationId: string) => {
+        const { AgentMetadataStore } = require('@/conversations/services/AgentMetadataStore');
+        const { getProjectContext } = require('@/services');
+        const projectPath = getProjectContext().projectPath;
+        return new AgentMetadataStore(conversationId, slug, projectPath);
+      }
     };
 
     // Set tools - use explicit tools if configured, otherwise use defaults

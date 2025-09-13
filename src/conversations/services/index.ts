@@ -4,6 +4,7 @@ export {
   ProjectAgentResolver,
   StandaloneAgentResolver,
 } from "./AgentResolver";
+export { AgentMetadataStore } from "./AgentMetadataStore";
 export { ConversationCoordinator } from "./ConversationCoordinator";
 export { ConversationEventProcessor } from "./ConversationEventProcessor";
 export {

@@ -43,8 +43,7 @@ describe("Thinking Blocks in Conversation History", () => {
         context = new AgentConversationContext("test-conversation", "test-agent");
         
         mockAgentState = {
-            lastProcessedMessageIndex: 0,
-            lastSeenPhase: undefined
+            lastProcessedMessageIndex: 0
         };
 
         mockConversation = {

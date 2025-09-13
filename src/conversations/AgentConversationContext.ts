@@ -32,73 +32,152 @@ export class AgentConversationContext {
   ): string[] {
     const path: string[] = [];
     const eventMap = new Map<string, NDKEvent>();
-    
+
+    logger.info("[THREAD_PATH] Starting thread path construction", {
+      conversationId: this.conversationId,
+      targetEventId: targetEvent.id.substring(0, 8),
+      historySize: history.length,
+      targetEventKind: targetEvent.kind,
+      targetEventContent: targetEvent.content?.substring(0, 100)
+    });
+
     // Build a map of event IDs to events for quick lookup
     for (const event of history) {
       eventMap.set(event.id, event);
     }
+    logger.info("[THREAD_PATH] Built event map", {
+      mapSize: eventMap.size,
+      conversationId: this.conversationId
+    });
 
     // Get the root ID from E tag
     const rootId = targetEvent.tagValue("E");
+    logger.info("[THREAD_PATH] Extracted root ID from E tag", {
+      rootId: rootId?.substring(0, 8) || "none",
+      targetEventId: targetEvent.id.substring(0, 8),
+      conversationId: this.conversationId
+    });
+
     if (!rootId) {
       // No E tag means this is likely the root itself or an orphaned event
+      logger.info("[THREAD_PATH] No E tag found - returning full history", {
+        conversationId: this.conversationId,
+        reason: "Missing E tag indicates root or orphaned event",
+        returningEventCount: history.length
+      });
       return history.map(e => e.id);
     }
 
     // Trace back from target event to root via e tags
     let currentEvent: NDKEvent | undefined = targetEvent;
     const visitedIds = new Set<string>();
-    
+    let iteration = 0;
+
+    logger.info("[THREAD_PATH] Beginning parent traversal", {
+      startingEvent: currentEvent.id.substring(0, 8),
+      rootTarget: rootId.substring(0, 8),
+      conversationId: this.conversationId
+    });
+
     while (currentEvent) {
+      iteration++;
+
       // Prevent infinite loops
       if (visitedIds.has(currentEvent.id)) {
         logger.warn("[THREAD_PATH] Circular reference detected", {
           eventId: currentEvent.id,
-          conversationId: this.conversationId
+          conversationId: this.conversationId,
+          iteration,
+          visitedSoFar: Array.from(visitedIds).map(id => id.substring(0, 8))
         });
         break;
       }
       visitedIds.add(currentEvent.id);
-      
+
       // Add to path (we'll reverse it later)
       path.unshift(currentEvent.id);
-      
+
+      logger.info("[THREAD_PATH] Added event to path", {
+        iteration,
+        eventId: currentEvent.id.substring(0, 8),
+        eventKind: currentEvent.kind,
+        pathLengthSoFar: path.length,
+        conversationId: this.conversationId
+      });
+
       // Check if we've reached the root
       if (currentEvent.id === rootId) {
+        logger.info("[THREAD_PATH] Reached root event", {
+          rootId: rootId.substring(0, 8),
+          pathLength: path.length,
+          iterations: iteration,
+          conversationId: this.conversationId
+        });
         break;
       }
-      
+
       // Get parent via e tag
       const parentId = currentEvent.tagValue("e");
+      logger.info("[THREAD_PATH] Looking for parent via e tag", {
+        currentEventId: currentEvent.id.substring(0, 8),
+        parentId: parentId?.substring(0, 8) || "none",
+        conversationId: this.conversationId
+      });
+
       if (!parentId) {
         // No parent, we're at a thread root (or orphaned)
+        logger.info("[THREAD_PATH] No parent found - reached thread boundary", {
+          currentEventId: currentEvent.id.substring(0, 8),
+          pathLength: path.length,
+          conversationId: this.conversationId
+        });
         break;
       }
-      
+
       // If parent is the root, add it and stop
       if (parentId === rootId) {
         path.unshift(rootId);
+        logger.info("[THREAD_PATH] Parent is root - completing path", {
+          parentId: parentId.substring(0, 8),
+          rootId: rootId.substring(0, 8),
+          finalPathLength: path.length,
+          conversationId: this.conversationId
+        });
         break;
       }
-      
+
       // Move to parent
       currentEvent = eventMap.get(parentId);
-      
+
       // If parent not in history, we have an incomplete thread
       if (!currentEvent) {
-        logger.debug("[THREAD_PATH] Parent event not in history", {
-          parentId,
-          childId: path[0],
-          conversationId: this.conversationId
+        logger.info("[THREAD_PATH] Parent event not in history - incomplete thread", {
+          missingParentId: parentId.substring(0, 8),
+          childId: path[0].substring(0, 8),
+          conversationId: this.conversationId,
+          pathSoFar: path.map(id => id.substring(0, 8))
         });
         // Try to at least include the root if we know about it
         if (eventMap.has(rootId)) {
           path.unshift(rootId);
+          logger.info("[THREAD_PATH] Added known root to incomplete path", {
+            rootId: rootId.substring(0, 8),
+            finalPathLength: path.length,
+            conversationId: this.conversationId
+          });
         }
         break;
       }
     }
-    
+
+    logger.info("[THREAD_PATH] Thread path construction complete", {
+      conversationId: this.conversationId,
+      pathLength: path.length,
+      iterations: iteration,
+      threadPath: path.map(id => id.substring(0, 8)),
+      fullPath: path
+    });
+
     return path;
   }
 
@@ -109,67 +188,121 @@ export class AgentConversationContext {
     history: NDKEvent[],
     triggeringEvent?: NDKEvent
   ): NDKEvent[] {
+    logger.info("[THREAD_FILTER] Starting thread event filtering", {
+      conversationId: this.conversationId,
+      historySize: history.length,
+      hasTriggeringEvent: !!triggeringEvent,
+      triggeringEventId: triggeringEvent?.id.substring(0, 8),
+      triggeringEventKind: triggeringEvent?.kind
+    });
+
     // If no triggering event, return all history (root context)
     if (!triggeringEvent) {
+      logger.info("[THREAD_FILTER] No triggering event - returning full history", {
+        conversationId: this.conversationId,
+        returningEventCount: history.length
+      });
       return history;
     }
 
     // Get E and e tags to determine if this is a root or thread reply
     const rootTag = triggeringEvent.tagValue("E");
     const parentTag = triggeringEvent.tagValue("e");
-    
+
+    logger.info("[THREAD_FILTER] Analyzing event tags", {
+      conversationId: this.conversationId,
+      rootTag: rootTag?.substring(0, 8) || "none",
+      parentTag: parentTag?.substring(0, 8) || "none",
+      triggeringEventId: triggeringEvent.id.substring(0, 8)
+    });
+
     // If no root tag, treat as root conversation
     if (!rootTag) {
-      return history;
-    }
-    
-    // Check if this is a reply to the root (E == e or e points to root)
-    const rootEvent = history.find(e => e.id === rootTag);
-    const isRootReply = parentTag === rootTag || 
-                       (rootEvent && parentTag === rootEvent.id);
-    
-    if (isRootReply) {
-      // Root reply: include all chronological messages
-      logger.debug("[THREAD_FILTER] Root reply detected, using full history", {
+      logger.info("[THREAD_FILTER] No root tag (E) - treating as root conversation", {
         conversationId: this.conversationId,
-        rootTag,
-        parentTag
+        returningEventCount: history.length
       });
       return history;
     }
-    
-    // Thread reply: build thread-specific path
-    logger.debug("[THREAD_FILTER] Thread reply detected, filtering to thread path", {
+
+    // Check if this is a reply to the root (E == e or e points to root)
+    const rootEvent = history.find(e => e.id === rootTag);
+    const isRootReply = parentTag === rootTag ||
+                       (rootEvent && parentTag === rootEvent.id);
+
+    logger.info("[THREAD_FILTER] Root reply check", {
       conversationId: this.conversationId,
-      rootTag,
-      parentTag,
+      isRootReply,
+      rootTag: rootTag.substring(0, 8),
+      parentTag: parentTag?.substring(0, 8) || "none",
+      rootEventFound: !!rootEvent,
+      rootEventId: rootEvent?.id.substring(0, 8),
+      condition: parentTag === rootTag ? "e==E" : rootEvent && parentTag === rootEvent.id ? "e==rootEvent.id" : "neither"
+    });
+
+    if (isRootReply) {
+      // Root reply: include all chronological messages
+      logger.info("[THREAD_FILTER] Root reply detected - using full history", {
+        conversationId: this.conversationId,
+        rootTag: rootTag.substring(0, 8),
+        parentTag: parentTag?.substring(0, 8) || "none",
+        returningEventCount: history.length
+      });
+      return history;
+    }
+
+    // Thread reply: build thread-specific path
+    logger.info("[THREAD_FILTER] Thread reply detected - will filter to thread path", {
+      conversationId: this.conversationId,
+      rootTag: rootTag.substring(0, 8),
+      parentTag: parentTag?.substring(0, 8) || "none",
       historyLength: history.length
     });
-    
+
     // Find the parent event we're replying to
     const parentEvent = history.find(e => e.id === parentTag);
+    logger.info("[THREAD_FILTER] Looking for parent event", {
+      conversationId: this.conversationId,
+      parentTag: parentTag?.substring(0, 8) || "none",
+      parentEventFound: !!parentEvent,
+      parentEventKind: parentEvent?.kind,
+      parentEventContent: parentEvent?.content?.substring(0, 100)
+    });
+
     if (!parentEvent) {
-      logger.warn("[THREAD_FILTER] Parent event not found in history", {
-        parentTag,
-        conversationId: this.conversationId
+      logger.warn("[THREAD_FILTER] Parent event not found in history - falling back to full history", {
+        parentTag: parentTag?.substring(0, 8) || "none",
+        conversationId: this.conversationId,
+        historyEventIds: history.map(e => e.id.substring(0, 8))
       });
       // Fall back to full history if we can't find the parent
       return history;
     }
-    
+
     // Get the thread path
+    logger.info("[THREAD_FILTER] Building thread path from parent event", {
+      conversationId: this.conversationId,
+      parentEventId: parentEvent.id.substring(0, 8)
+    });
     const threadPath = this.getThreadPath(history, parentEvent);
-    
+
     // Filter history to only include events in the thread path
     const threadEvents = history.filter(e => threadPath.includes(e.id));
-    
-    logger.debug("[THREAD_FILTER] Filtered to thread events", {
+
+    logger.info("[THREAD_FILTER] Thread filtering complete", {
       conversationId: this.conversationId,
       originalCount: history.length,
       filteredCount: threadEvents.length,
-      threadPath
+      threadPath: threadPath.map(id => id.substring(0, 8)),
+      removedEvents: history
+        .filter(e => !threadPath.includes(e.id))
+        .map(e => ({
+          id: e.id.substring(0, 8),
+          kind: e.kind,
+          content: e.content?.substring(0, 50)
+        }))
     });
-    
+
     return threadEvents;
   }
 
@@ -182,24 +315,66 @@ export class AgentConversationContext {
   ): NDKEvent[] {
     const rootTag = triggeringEvent.tagValue("E");
     const parentTag = triggeringEvent.tagValue("e");
-    
+
+    logger.info("[FILTER_TO_THREAD] Starting event filtering for thread", {
+      conversationId: this.conversationId,
+      eventsCount: events.length,
+      triggeringEventId: triggeringEvent.id.substring(0, 8),
+      rootTag: rootTag?.substring(0, 8) || "none",
+      parentTag: parentTag?.substring(0, 8) || "none"
+    });
+
     if (!rootTag) {
+      logger.info("[FILTER_TO_THREAD] No root tag - returning all events", {
+        conversationId: this.conversationId,
+        returningEventCount: events.length
+      });
       return events;
     }
-    
+
     // Check if this is a root reply
     const isRootReply = parentTag === rootTag;
+    logger.info("[FILTER_TO_THREAD] Checking if root reply", {
+      conversationId: this.conversationId,
+      isRootReply,
+      condition: "e==E"
+    });
+
     if (isRootReply) {
+      logger.info("[FILTER_TO_THREAD] Root reply - returning all events", {
+        conversationId: this.conversationId,
+        returningEventCount: events.length
+      });
       return events;
     }
-    
+
     // Get the thread path from the full conversation history
     // We need this because missed events might not have all intermediate events
+    logger.info("[FILTER_TO_THREAD] Building thread path for filtering", {
+      conversationId: this.conversationId,
+      note: "Using full event list as history may be incomplete"
+    });
     const allEvents = [...events];
     const threadPath = this.getThreadPath(allEvents, triggeringEvent);
-    
+
     // Filter to only events in the thread path
-    return events.filter(e => threadPath.includes(e.id));
+    const filteredEvents = events.filter(e => threadPath.includes(e.id));
+
+    logger.info("[FILTER_TO_THREAD] Thread filtering complete", {
+      conversationId: this.conversationId,
+      originalCount: events.length,
+      filteredCount: filteredEvents.length,
+      threadPath: threadPath.map(id => id.substring(0, 8)),
+      removedEvents: events
+        .filter(e => !threadPath.includes(e.id))
+        .map(e => ({
+          id: e.id.substring(0, 8),
+          kind: e.kind,
+          content: e.content?.substring(0, 50)
+        }))
+    });
+
+    return filteredEvents;
   }
 
 
@@ -290,7 +465,7 @@ export class AgentConversationContext {
     // Add phase transition message if needed
     if (phaseInstructions) {
       const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        agentState.lastSeenPhase,
+        undefined,
         conversation.phase
       );
       messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
@@ -376,7 +551,7 @@ export class AgentConversationContext {
     // Add phase transition if needed
     if (phaseInstructions) {
       const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        agentState.lastSeenPhase,
+        undefined,
         conversation.phase
       );
       messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
@@ -436,7 +611,7 @@ export class AgentConversationContext {
     // Add phase transition if needed  
     if (phaseInstructions) {
       const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        agentState.lastSeenPhase,
+        undefined,
         conversation.phase
       );
       messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
@@ -453,12 +628,6 @@ export class AgentConversationContext {
     return messages;
   }
 
-  /**
-   * Extract session ID from an event (utility method)
-   */
-  extractSessionId(event: NDKEvent): string | undefined {
-    return event.tagValue?.("claude-session");
-  }
 
   /**
    * Build simple phase transition message (without instructions)

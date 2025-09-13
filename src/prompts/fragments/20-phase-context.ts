@@ -15,16 +15,10 @@ interface PhaseContextArgs {
 export const phaseContextFragment: PromptFragment<PhaseContextArgs> = {
   id: "phase-context",
   priority: 10,
-  template: ({ phase, phaseMetadata, conversation }) => {
+  template: ({ phase, phaseMetadata }) => {
     const parts: string[] = [];
 
     parts.push(`## Current Phase: ${phase.toUpperCase()}`);
-
-    // Add custom phase instructions if available
-    if (conversation?.phaseInstructions) {
-      parts.push(`### Phase Instructions\n${conversation.phaseInstructions}`);
-    }
-
 
     // Add any phase metadata
     if (phaseMetadata?.goal) {

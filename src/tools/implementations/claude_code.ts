@@ -4,7 +4,6 @@ import { createProviderRegistry } from 'ai';
 import chalk from "chalk";
 import { LLMService } from '@/llm/service';
 import { LLMLogger } from '@/logging/LLMLogger';
-import type { Phase } from "@/conversations/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { ExecutionContext } from "@/agents/execution/types";
@@ -52,10 +51,11 @@ async function executeClaudeCode(
   });
 
   try {
-    // Look up existing session
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    const agentState = conversation?.agentStates.get(context.agent.slug);
-    const existingSessionId = agentState?.claudeSessionsByPhase?.[context.phase];
+    // Create metadata store for this agent/conversation
+    const metadataStore = context.agent.createMetadataStore(context.conversationId);
+
+    // Get existing session from metadata
+    const existingSessionId = metadataStore.get<string>('claudeSessionId');
 
     if (existingSessionId) {
       logger.info(`[claude_code] Found existing session`, {
@@ -64,6 +64,9 @@ async function executeClaudeCode(
         conversationId: context.conversationId.substring(0, 8),
       });
     }
+
+    // Get conversation for other purposes
+    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
     // Create event context for Nostr publishing
     const rootEvent = conversation?.history[0] ?? context.triggeringEvent;
@@ -263,24 +266,10 @@ async function executeClaudeCode(
       const sessionId = capturedSessionId || existingSessionId;
 
       // Store session ID for future resumption
-      if (sessionId && conversation) {
-        const agentState = conversation.agentStates.get(context.agent.slug) || {
-          lastProcessedMessageIndex: 0,
-        };
+      if (sessionId) {
+        metadataStore.set('claudeSessionId', sessionId);
 
-        if (!agentState.claudeSessionsByPhase) {
-          agentState.claudeSessionsByPhase = {} as Record<Phase, string>;
-        }
-
-        agentState.claudeSessionsByPhase[context.phase] = sessionId;
-
-        await context.conversationCoordinator.updateAgentState(
-          context.conversationId,
-          context.agent.slug,
-          agentState
-        );
-
-        logger.info(`[claude_code] Stored session ID for phase ${context.phase}`, {
+        logger.info(`[claude_code] Stored session ID`, {
           sessionId,
           agent: context.agent.slug,
           conversationId: context.conversationId.substring(0, 8),

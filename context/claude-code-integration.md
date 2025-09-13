@@ -42,7 +42,7 @@ TENEX integrates Claude Code (Anthropic's code generation and execution model) t
 - **Composability** - Claude Code becomes one capability among many
 - **Flexibility** - Agents can combine Claude with other tools
 - **Deliberate invocation** - The "extra" LLM call is intentional, part of the agent's reasoning
-- **Session continuity** - Maintains claudeSessionId across invocations
+- **Session continuity** - Maintains session ID across invocations via AgentMetadataStore
 
 **Use cases:**
 - Specialist agents that need Claude for specific subtasks
@@ -66,9 +66,9 @@ Both patterns share the same underlying implementation:
 ### Session Management
 
 Both patterns support session continuity:
-- `claudeSessionId` is stored in ConversationManager's agent state
+- Session IDs are stored via AgentMetadataStore (decoupled from conversation state)
 - Sessions can be resumed for iterative development
-- Each agent maintains its own session state
+- Each agent maintains its own session state per conversation
 
 ### Tool Configuration
 

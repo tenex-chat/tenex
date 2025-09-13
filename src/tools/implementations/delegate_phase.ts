@@ -68,6 +68,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     metadataEvent.kind = 513;
     metadataEvent.setConversationId(context.conversationId);
     metadataEvent.title = title;
+    // metadataEvent.created_at = Math.floor(Date.now())-1;
 
     await metadataEvent.sign(context.agent.signer);
     await metadataEvent.publish();
@@ -83,17 +84,8 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     mode: "synchronous",
   });
 
-  // First, update the conversation phase
-  await context.conversationCoordinator.updatePhase(
-    context.conversationId,
-    actualPhaseName,
-    fullRequest, // Use the fullRequest as the phase transition message
-    context.agent.pubkey,
-    context.agent.name,
-    phase_instructions // Pass the phase instructions from configuration
-  );
-
   // Use DelegationService to execute the delegation
+  // Phase instructions are now passed through the delegation intent via event tags
   const delegationService = new DelegationService(
     context.agent,
     context.conversationId,
@@ -107,6 +99,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     recipients: [pubkey],
     request: fullRequest,
     phase: actualPhaseName, // Include phase in the delegation intent
+    phaseInstructions: phase_instructions, // Pass phase instructions to be included in event tags
   });
 
   logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
@@ -132,8 +125,8 @@ export function createDelegatePhaseTool(context: ExecutionContext): TenexTool {
     
     // Add human-readable content generation
     return Object.assign(toolInstance, {
-        getHumanReadableContent: ({ phase, recipient, fullRequest }: DelegatePhaseInput) => {
-            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipient}.`;
+        getHumanReadableContent: ({ phase, recipient }: DelegatePhaseInput) => {
+            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipient}`;
         }
     }) as TenexTool;
 }

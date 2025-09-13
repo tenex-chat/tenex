@@ -16,7 +16,7 @@ export class ProviderConfigUI {
       anthropic: "Anthropic (Claude)",
       openai: "OpenAI (GPT)",
       ollama: "Ollama (Local models)",
-      claudeCode: "Claude Code (Limited - Phase 0 only)"
+      claudeCode: "Claude Code"
     };
     return names[provider] || provider;
   }
@@ -25,7 +25,11 @@ export class ProviderConfigUI {
    * Configure a specific provider interactively
    */
   static async configureProvider(provider: string, currentConfig?: TenexLLMs): Promise<{ apiKey: string }> {
-    if (provider === 'ollama') {
+    if (provider === 'claudeCode') {
+      // Claude Code doesn't require an API key
+      console.log(chalk.green("✓ Claude Code provider configured (no API key required)"));
+      return { apiKey: "none" }; // Claude Code doesn't use API keys
+    } else if (provider === 'ollama') {
       // For Ollama, ask for base URL instead of API key
       const currentUrl = currentConfig?.providers[provider]?.apiKey || 'local';
       const { ollamaConfig } = await inquirer.prompt([{
@@ -38,7 +42,7 @@ export class ProviderConfigUI {
         ],
         default: currentUrl === 'local' ? 'local' : 'custom'
       }]);
-      
+
       let baseUrl = 'local';
       if (ollamaConfig === 'custom') {
         const { customUrl } = await inquirer.prompt([{
@@ -58,7 +62,7 @@ export class ProviderConfigUI {
         }]);
         baseUrl = customUrl;
       }
-      
+
       return { apiKey: baseUrl };
     } else {
       // For other providers, ask for API key
@@ -75,7 +79,7 @@ export class ProviderConfigUI {
           return true;
         }
       }]);
-      
+
       return { apiKey: apiKey || currentKey || "" };
     }
   }

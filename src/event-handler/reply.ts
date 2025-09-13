@@ -184,7 +184,6 @@ async function handleReplyLogic(
     const executionContext: ExecutionContext = {
       agent: targetAgent,
       conversationId: conversation.id,
-      phase: conversation.phase,
       projectPath: process.cwd(),
       triggeringEvent: event,
       conversationCoordinator,

@@ -152,28 +152,12 @@ export function createDelegateExternalTool(context: ExecutionContext): TenexTool
   // Add human-readable content generation
   return Object.assign(toolInstance, {
     getHumanReadableContent: ({ recipient, projectId }: DelegateExternalInput) => {
-      // Parse recipient to get pubkey and convert to npub
-      const pubkey = parseNostrUser(recipient);
-      let recipientDisplay = recipient;
-      
-      if (pubkey) {
-        const user = new NDKUser({ pubkey });
-        recipientDisplay = `nostr:${user.npub}`;
-      }
-      
-      // Build the message
-      let message = `Delegating to ${recipientDisplay}`;
-      
-      // Add project reference if provided
+      let message = `Delegating to external agent ${recipient}`;
       if (projectId) {
-        const cleanProjectId = normalizeNostrIdentifier(projectId);
-        if (cleanProjectId) {
-          message = `Delegating to nostr:${cleanProjectId} ${recipientDisplay}`;
-        }
+        message += ` in project ${projectId}`;
       }
-      
       return message;
-    }
+    },
   }) as TenexTool;
 }
 

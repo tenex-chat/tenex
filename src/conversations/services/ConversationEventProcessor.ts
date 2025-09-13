@@ -26,10 +26,8 @@ export class ConversationEventProcessor {
     const conversation: Conversation = {
       id,
       title,
-      phase: "CHAT", // Default initial phase - can be changed dynamically
       history: [event],
       agentStates: new Map(),
-      phaseStartedAt: Date.now(),
       metadata: {
         summary: event.content,
         referencedArticle,

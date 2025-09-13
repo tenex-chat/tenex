@@ -65,6 +65,7 @@ describe("AgentEventEncoder", () => {
     llmConfig: "test-config",
     tools: [],
     role: "test",
+    createMetadataStore: mock(() => ({})),
   };
 
   const mockTriggeringEvent = createMockNDKEvent();

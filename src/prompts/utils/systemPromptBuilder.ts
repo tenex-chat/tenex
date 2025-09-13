@@ -12,27 +12,29 @@ import "@/prompts/fragments"; // This auto-registers all fragments
 export interface BuildSystemPromptOptions {
   // Required data
   agent: AgentInstance;
-  phase: Phase;
   project: NDKProject;
 
   // Optional runtime data
+  phase?: Phase;
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
   isProjectManager?: boolean; // Indicates if this agent is the PM
+  transientPhaseContext?: { phase?: string; phaseInstructions?: string }; // Transient phase context from delegation
 }
 
 export interface BuildStandalonePromptOptions {
   // Required data
   agent: AgentInstance;
-  phase: Phase;
 
   // Optional runtime data
+  phase?: Phase;
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
+  transientPhaseContext?: { phase?: string; phaseInstructions?: string }; // Transient phase context from delegation
 }
 
 export interface SystemMessage {
@@ -48,10 +50,11 @@ export interface SystemMessage {
 function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    phase: Phase,
+    phase?: Phase,
     conversation?: Conversation,
     agentLessons?: Map<string, NDKAgentLesson[]>,
-    triggeringEvent?: NDKEvent
+    triggeringEvent?: NDKEvent,
+    transientPhaseContext?: { phase?: string; phaseInstructions?: string }
 ): void {
     // Add voice mode instructions if applicable
     builder.add("voice-mode", { isVoiceMode: isVoiceMode(triggeringEvent) });
@@ -68,6 +71,19 @@ function addCoreAgentFragments(
         conversation,
         agentLessons: agentLessons || new Map(),
     });
+
+    // Add phase context using a temporary raw fragment
+    const phaseInstructions = buildPhaseInstructions(phase, conversation, transientPhaseContext);
+    if (phaseInstructions) {
+        builder.addFragment(
+            {
+                id: "phase-instructions-raw",
+                priority: 20,
+                template: () => phaseInstructions,
+            },
+            {}
+        );
+    }
 }
 
 /**
@@ -104,41 +120,53 @@ function addDelegatedTaskContext(
 /**
  * Export phase instruction building for use by other modules
  */
-export function buildPhaseInstructions(phase: Phase, conversation?: Conversation): string {
-  // If the conversation has custom phase instructions, use those
-  if (conversation?.phaseInstructions) {
-    return `=== CURRENT PHASE: ${phase.toUpperCase()} ===
+export function buildPhaseInstructions(
+  phase?: Phase,
+  conversation?: Conversation,
+  transientPhaseContext?: { phase?: string; phaseInstructions?: string }
+): string {
+  // Use transient phase context if provided (from delegate_phase events)
+  if (transientPhaseContext?.phaseInstructions && transientPhaseContext.phase) {
+    return `=== CURRENT PHASE: ${transientPhaseContext.phase.toUpperCase()} ===
 
-${conversation.phaseInstructions}`;
+${transientPhaseContext.phaseInstructions}`;
   }
-  
-  // Otherwise, fall back to standard phase instructions
-  const builder = new PromptBuilder()
-      .add("phase-context", {
-          phase,
-          phaseMetadata: conversation?.metadata,
-          conversation,
-      });
 
-  return builder.build();
+  // No phase instructions if no phase is set
+  if (!phase && !transientPhaseContext?.phase) {
+    return "";
+  }
+
+  // Otherwise, fall back to standard phase instructions if phase exists
+  const effectivePhase = transientPhaseContext?.phase || phase;
+  if (effectivePhase) {
+    const builder = new PromptBuilder()
+        .add("phase-context", {
+            phase: effectivePhase,
+            phaseMetadata: conversation?.metadata,
+            conversation,
+        });
+
+    return builder.build();
+  }
+
+  return "";
 }
 
 /**
  * Export phase transition formatting for use by other modules
  */
 export function formatPhaseTransitionMessage(
-  lastSeenPhase: Phase,
   currentPhase: Phase,
   phaseInstructions: string
 ): string {
   return `=== PHASE TRANSITION ===
 
-You were last active in the ${lastSeenPhase.toUpperCase()} phase.
-The conversation has now moved to the ${currentPhase.toUpperCase()} phase.
+The conversation is now in the ${currentPhase.toUpperCase()} phase.
 
 ${phaseInstructions}
 
-Please adjust your behavior according to the new phase requirements.`;
+Please adjust your behavior according to the phase requirements.`;
 }
 
 /**
@@ -198,6 +226,7 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     conversation,
     agentLessons,
     triggeringEvent,
+    transientPhaseContext,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();
@@ -222,7 +251,8 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     phase,
     conversation,
     agentLessons,
-    triggeringEvent
+    triggeringEvent,
+    transientPhaseContext
   );
 
   // Add agent-specific fragments
@@ -290,6 +320,7 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     conversation,
     agentLessons,
     triggeringEvent,
+    transientPhaseContext,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();
@@ -311,7 +342,8 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     phase,
     conversation,
     agentLessons,
-    triggeringEvent
+    triggeringEvent,
+    transientPhaseContext
   );
 
   // Add agent-specific fragments only if multiple agents available

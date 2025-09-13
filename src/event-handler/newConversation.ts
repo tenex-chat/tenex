@@ -52,7 +52,6 @@ export const handleNewConversation = async (
     await context.agentExecutor.execute({
       agent: targetAgent,
       conversationId: conversation.id,
-      phase: conversation.phase,
       projectPath: process.cwd(),
       triggeringEvent: event,
       conversationCoordinator: context.conversationCoordinator,

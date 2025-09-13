@@ -293,11 +293,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             for await (const _chunk of textStream) {
                 // Consume the stream to trigger execution
             }
-
-            await textStream;
-
-            const responseAwaited = await response;
-            console.log("llm service response messages", responseAwaited?.messages);
         } catch (error) {
             await this.handleStreamError(error, startTime);
             throw error;
@@ -306,8 +301,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
-        const chunkText = 'text' in chunk ? chunk.text : '';
-        console.log("LLMService chunk", event, chunk.type, chalk.gray(chunkText));
 
         // Emit chunk-type-change event if the type changed
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
@@ -415,7 +408,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleToolCall(toolCallId: string, toolName: string, args: unknown): void {
-        console.log("LLM Service: tool will execute", toolName, args);
         this.emit("tool-will-execute", {
             toolName,
             toolCallId,
@@ -424,7 +416,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
-        console.log("LLM Service: tool did execute", toolName, result);
         this.emit("tool-did-execute", {
             toolName,
             toolCallId,

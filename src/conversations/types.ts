@@ -6,19 +6,13 @@ export type Phase = string;
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
   lastProcessedMessageIndex: number; // Index into Conversation.history
-  claudeSessionsByPhase?: Record<Phase, string>; // Claude Code session IDs per phase
-  claudeAiSdkSessionsByPhase?: Record<Phase, string>; // AI SDK Claude Code session IDs per phase (parallel implementation)
-  lastSeenPhase?: Phase; // Track the last phase this agent operated in
 }
 
 export interface Conversation {
   id: string;
   title?: string;
-  phase: Phase;
-  phaseInstructions?: string; // Custom instructions for the current phase
   history: NDKEvent[]; // The SINGLE source of truth for all events/messages
   agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
-  phaseStartedAt?: number;
   metadata: ConversationMetadata;
 
   // Execution time tracking

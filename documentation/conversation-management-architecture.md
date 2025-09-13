@@ -596,9 +596,12 @@ Each agent maintains independent state within a conversation:
 ```typescript
 interface AgentState {
     lastProcessedMessageIndex: number;  // Last message seen
-    claudeSessionId?: string;          // Session continuity
-    customState?: Record<string, any>; // Agent-specific data
 }
+
+// Session and metadata now handled separately via AgentMetadataStore
+const metadataStore = agent.createMetadataStore(conversationId);
+metadataStore.set('key', value);
+const value = metadataStore.get('key');
 ```
 
 ### State Update Mechanism
@@ -623,29 +626,18 @@ async updateAgentState(
 
 ### Session Continuity
 
-The system maintains session continuity for stateful backends:
+The system maintains session continuity for stateful backends via AgentMetadataStore:
 
 ```typescript
-private async getOrCreateSessionId(
-    agent: Agent,
-    conversation: Conversation
-): Promise<string | undefined> {
-    if (!agent.supportsSessions) return undefined;
-    
-    const agentState = conversation.agentStates.get(agent.slug);
-    if (agentState?.claudeSessionId) {
-        return agentState.claudeSessionId;
-    }
-    
-    // Create new session
-    const sessionId = generateSessionId();
-    await this.updateAgentState(
-        conversation.id,
-        agent.slug,
-        { claudeSessionId: sessionId }
-    );
-    
-    return sessionId;
+// Session management is now decoupled from conversation state
+const metadataStore = agent.createMetadataStore(conversationId);
+
+// Get existing session
+const existingSessionId = metadataStore.get<string>('claudeSessionId');
+
+// Store new session
+if (newSessionId) {
+    metadataStore.set('claudeSessionId', newSessionId);
 }
 ```
 

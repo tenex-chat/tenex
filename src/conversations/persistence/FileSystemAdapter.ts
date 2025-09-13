@@ -5,7 +5,6 @@ import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { z } from "zod";
-import type { Phase } from "../phases";
 import type { AgentState, Conversation } from "../types";
 import { type AgentStateSchema, MetadataFileSchema, SerializedConversationSchema } from "./schemas";
 import type {
@@ -46,8 +45,6 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
         for (const [key, state] of conversation.agentStates.entries()) {
           agentStatesObj[key] = {
             lastProcessedMessageIndex: state.lastProcessedMessageIndex,
-            claudeSessionsByPhase: state.claudeSessionsByPhase,
-            lastSeenPhase: state.lastSeenPhase,
           };
         }
       }
@@ -104,8 +101,6 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
         for (const [agentSlug, stateData] of Object.entries(data.agentStates)) {
           const state: AgentState = {
             lastProcessedMessageIndex: stateData.lastProcessedMessageIndex,
-            claudeSessionsByPhase: stateData.claudeSessionsByPhase,
-            lastSeenPhase: stateData.lastSeenPhase as Phase | undefined,
           };
           agentStatesMap.set(agentSlug, state);
         }
@@ -146,10 +141,8 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
       const conversation: Conversation = {
         id: data.id,
         title: data.title || undefined,
-        phase: data.phase as Phase, // Phase validation happens in schema parsing
         history: deduplicatedHistory,
         agentStates: agentStatesMap,
-        phaseStartedAt: data.phaseStartedAt,
         metadata: data.metadata,
         executionTime: data.executionTime || {
           totalSeconds: 0,
@@ -201,9 +194,6 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
         return false;
       }
 
-      if (criteria.phase && meta.phase !== criteria.phase) {
-        return false;
-      }
 
       if (criteria.dateFrom && meta.createdAt < criteria.dateFrom) {
         return false;
@@ -336,7 +326,6 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
           title: conversation.title || "",
           createdAt: conversation.history[0]?.created_at || Date.now() / 1000,
           updatedAt: Date.now() / 1000,
-          phase: conversation.phase,
           eventCount: conversation.history.length,
           agentCount: new Set(conversation.history.map((e) => e.pubkey)).size,
           archived: false,
