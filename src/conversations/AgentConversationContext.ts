@@ -3,11 +3,10 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { NostrEntityProcessor } from "./processors/NostrEntityProcessor";
 import { MessageRoleAssigner } from "./processors/MessageRoleAssigner";
-import { DelegationFormatter } from "./processors/DelegationFormatter";
 import { stripThinkingBlocks, isOnlyThinkingBlocks, logThinkingBlockRemoval, hasReasoningTag } from "./utils/content-utils";
-import type { AgentState, Conversation } from "./types";
-import type { Phase } from "./phases";
+import type { Conversation } from "./types";
 import { toolMessageStorage } from "./persistence/ToolMessageStorage";
+import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 
 /**
  * Orchestrates message building for a specific agent in a conversation.
@@ -306,87 +305,13 @@ export class AgentConversationContext {
     return threadEvents;
   }
 
-  /**
-   * Filter a list of events to only include those in the same thread
-   */
-  private filterEventsToThread(
-    events: NDKEvent[],
-    triggeringEvent: NDKEvent
-  ): NDKEvent[] {
-    const rootTag = triggeringEvent.tagValue("E");
-    const parentTag = triggeringEvent.tagValue("e");
-
-    logger.info("[FILTER_TO_THREAD] Starting event filtering for thread", {
-      conversationId: this.conversationId,
-      eventsCount: events.length,
-      triggeringEventId: triggeringEvent.id.substring(0, 8),
-      rootTag: rootTag?.substring(0, 8) || "none",
-      parentTag: parentTag?.substring(0, 8) || "none"
-    });
-
-    if (!rootTag) {
-      logger.info("[FILTER_TO_THREAD] No root tag - returning all events", {
-        conversationId: this.conversationId,
-        returningEventCount: events.length
-      });
-      return events;
-    }
-
-    // Check if this is a root reply
-    const isRootReply = parentTag === rootTag;
-    logger.info("[FILTER_TO_THREAD] Checking if root reply", {
-      conversationId: this.conversationId,
-      isRootReply,
-      condition: "e==E"
-    });
-
-    if (isRootReply) {
-      logger.info("[FILTER_TO_THREAD] Root reply - returning all events", {
-        conversationId: this.conversationId,
-        returningEventCount: events.length
-      });
-      return events;
-    }
-
-    // Get the thread path from the full conversation history
-    // We need this because missed events might not have all intermediate events
-    logger.info("[FILTER_TO_THREAD] Building thread path for filtering", {
-      conversationId: this.conversationId,
-      note: "Using full event list as history may be incomplete"
-    });
-    const allEvents = [...events];
-    const threadPath = this.getThreadPath(allEvents, triggeringEvent);
-
-    // Filter to only events in the thread path
-    const filteredEvents = events.filter(e => threadPath.includes(e.id));
-
-    logger.info("[FILTER_TO_THREAD] Thread filtering complete", {
-      conversationId: this.conversationId,
-      originalCount: events.length,
-      filteredCount: filteredEvents.length,
-      threadPath: threadPath.map(id => id.substring(0, 8)),
-      removedEvents: events
-        .filter(e => !threadPath.includes(e.id))
-        .map(e => ({
-          id: e.id.substring(0, 8),
-          kind: e.kind,
-          content: e.content?.substring(0, 50)
-        }))
-    });
-
-    return filteredEvents;
-  }
-
 
   /**
    * Build messages from conversation history for this agent
-   * This is now a pure function that doesn't maintain state
    */
   async buildMessages(
     conversation: Conversation,
-    agentState: AgentState,
-    triggeringEvent?: NDKEvent,
-    phaseInstructions?: string
+    triggeringEvent?: NDKEvent
   ): Promise<ModelMessage[]> {
     const messages: ModelMessage[] = [];
 
@@ -395,9 +320,29 @@ export class AgentConversationContext {
 
     // Process history up to (but not including) the triggering event
     for (const event of threadEvents) {
-      if (!event.content) continue;
+
+      // Check for phase transition before processing the event
+      const phaseTag = event.tagValue("phase")
+      const phaseInstructionsTag = event.tagValue('phase-instructions');
+
+      if (phaseTag) {
+        // This event marks a phase transition
+        const phaseContent = PromptBuilder.buildFragment("phase-transition", {
+          phase: phaseTag,
+          phaseInstructions: phaseInstructionsTag
+        });
+        if (phaseContent) {
+          messages.push({ role: "system", content: phaseContent });
+          logger.debug("[AGENT_CONTEXT] Added phase transition", {
+            eventId: event.id.substring(0, 8),
+            phase: phaseTag,
+            hasInstructions: !!phaseInstructionsTag,
+          });
+        }
+      }
+
       if (triggeringEvent?.id && event.id === triggeringEvent.id) {
-        break; // Don't include the triggering event in history
+          break; // Don't include the triggering event in history
       }
 
       // Check if this is a tool event from this agent
@@ -462,17 +407,8 @@ export class AgentConversationContext {
       // Skip tool events from other agents
     }
 
-    // Add phase transition message if needed
-    if (phaseInstructions) {
-      const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        undefined,
-        conversation.phase
-      );
-      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
-    }
-
     // Add the triggering event last
-    if (triggeringEvent && triggeringEvent.content) {
+    if (triggeringEvent) {
       // Skip if triggering event has reasoning tag
       if (hasReasoningTag(triggeringEvent)) {
         logger.debug("[AGENT_CONTEXT] Triggering event has reasoning tag, skipping", {
@@ -501,139 +437,9 @@ export class AgentConversationContext {
 
     logger.debug(`[AGENT_CONTEXT] Built ${messages.length} messages for ${this.agentSlug}`, {
       conversationId: this.conversationId,
-      hasPhaseInstructions: !!phaseInstructions,
       hasTriggeringEvent: !!triggeringEvent,
     });
 
     return messages;
-  }
-
-  /**
-   * Build messages with missed conversation history
-   * Used when an agent needs to catch up on messages they missed
-   */
-  async buildMessagesWithMissedHistory(
-    conversation: Conversation,
-    agentState: AgentState,
-    missedEvents: NDKEvent[],
-    delegationSummary?: string,
-    triggeringEvent?: NDKEvent,
-    phaseInstructions?: string
-  ): Promise<ModelMessage[]> {
-    const messages: ModelMessage[] = [];
-
-    // Filter missed events to only include those in the thread path
-    let threadFilteredMissedEvents = triggeringEvent 
-      ? this.filterEventsToThread(missedEvents, triggeringEvent)
-      : missedEvents;
-
-    // Filter out reasoning events
-    threadFilteredMissedEvents = threadFilteredMissedEvents.filter(event => {
-      if (hasReasoningTag(event)) {
-        logger.debug("[AGENT_CONTEXT] Filtering reasoning event from missed history", {
-          eventId: event.id.substring(0, 8),
-        });
-        return false;
-      }
-      return true;
-    });
-
-    // Add missed messages block if there are any
-    if (threadFilteredMissedEvents.length > 0) {
-      const missedBlock = await DelegationFormatter.buildMissedMessagesBlock(
-        threadFilteredMissedEvents,
-        this.agentSlug,
-        delegationSummary
-      );
-      messages.push(missedBlock);
-    }
-
-    // Add phase transition if needed
-    if (phaseInstructions) {
-      const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        undefined,
-        conversation.phase
-      );
-      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
-    }
-
-    // Add triggering event
-    if (triggeringEvent && triggeringEvent.content) {
-      // Skip if triggering event has reasoning tag
-      if (hasReasoningTag(triggeringEvent)) {
-        logger.debug("[AGENT_CONTEXT] Triggering event has reasoning tag, skipping", {
-          eventId: triggeringEvent.id.substring(0, 8),
-        });
-      } else if (isOnlyThinkingBlocks(triggeringEvent.content)) {
-        // Skip if triggering event is only thinking blocks
-        logger.debug("[AGENT_CONTEXT] Triggering event contains only thinking blocks, skipping", {
-          eventId: triggeringEvent.id.substring(0, 8),
-        });
-      } else {
-        // Strip thinking blocks from triggering event
-        const strippedContent = stripThinkingBlocks(triggeringEvent.content);
-        logThinkingBlockRemoval(triggeringEvent.id, triggeringEvent.content.length, strippedContent.length);
-        
-        const processed = await NostrEntityProcessor.processEntities(strippedContent);
-        const message = await MessageRoleAssigner.assignRole(
-          triggeringEvent,
-          processed,
-          this.agentSlug,
-          this.conversationId
-        );
-        messages.push(message);
-      }
-    }
-
-    return messages;
-  }
-
-  /**
-   * Build messages with delegation responses
-   */
-  buildMessagesWithDelegationResponses(
-    responses: Map<string, NDKEvent>,
-    originalRequest: string,
-    conversation: Conversation,
-    agentState: AgentState,
-    triggeringEvent?: NDKEvent,
-    phaseInstructions?: string
-  ): ModelMessage[] {
-    const messages: ModelMessage[] = [];
-
-    // Add the delegation responses block
-    const delegationBlock = DelegationFormatter.buildDelegationResponsesBlock(
-      responses,
-      originalRequest
-    );
-    messages.push(delegationBlock);
-
-    // Add phase transition if needed  
-    if (phaseInstructions) {
-      const phaseMessage = this.buildSimplePhaseTransitionMessage(
-        undefined,
-        conversation.phase
-      );
-      messages.push({ role: "system", content: phaseMessage + "\n\n" + phaseInstructions });
-    }
-
-    // Note: Triggering event would typically already be in the delegation responses
-    // but we can add it if needed for context
-    if (triggeringEvent && triggeringEvent.content) {
-      logger.debug("[AGENT_CONTEXT] Adding triggering event after delegation responses", {
-        eventId: triggeringEvent.id,
-      });
-    }
-
-    return messages;
-  }
-
-
-  /**
-   * Build simple phase transition message (without instructions)
-   * This is the simple format, different from the full transition with instructions
-   */
-  private buildSimplePhaseTransitionMessage(fromPhase: Phase | undefined, toPhase: Phase): string {
-    return `=== CURRENT PHASE: ${toPhase.toUpperCase()} ===`;
   }
 }

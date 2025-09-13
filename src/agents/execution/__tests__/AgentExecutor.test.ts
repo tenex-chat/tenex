@@ -8,19 +8,51 @@ import { AgentExecutor } from "../AgentExecutor";
 import type { ExecutionContext } from "../types";
 
 describe("AgentExecutor", () => {
-  let mockLLM: ReturnType<typeof createMockLLMService>;
+  let mockLLM: any;
   let mockAgent: AgentInstance;
   let mockContext: ExecutionContext;
   let mockNDK: NDK;
   let mockConversationCoordinator: ConversationCoordinator;
 
   beforeEach(() => {
+    // Create mock LLM service with event emitter pattern
+    const eventHandlers = new Map();
+    mockLLM = {
+      model: { id: "test-model" },
+      on: mock((event: string, handler: Function) => {
+        eventHandlers.set(event, handler);
+        return mockLLM;
+      }),
+      removeAllListeners: mock(() => {
+        eventHandlers.clear();
+      }),
+      stream: mock(async () => {
+        // Simulate streaming by calling the registered handlers
+        const contentHandler = eventHandlers.get("content");
+        const completeHandler = eventHandlers.get("complete");
+
+        if (contentHandler) {
+          await contentHandler({ delta: "Test response" });
+        }
+        if (completeHandler) {
+          await completeHandler({ message: "Test response", usage: {} });
+        }
+      }),
+    };
     // Mock required modules
     mock.module("@/services", () => ({
+      isProjectContextInitialized: () => true,
       getProjectContext: () => ({
         projectPath: "/test/project",
         configService: {
           getProjectPath: () => "/test/project",
+          createLLMService: () => mockLLM,
+        },
+        llmLogger: {
+          withAgent: () => ({
+            logRequest: () => {},
+            logResponse: () => {},
+          }),
         },
         project: {
           tags: [
@@ -43,7 +75,16 @@ describe("AgentExecutor", () => {
           ],
         ]),
         getLessonsForAgent: () => [],
+        getProjectManager: () => ({
+          id: "pm-id",
+          name: "Project Manager",
+          slug: "project-manager",
+          pubkey: "pm-pubkey",
+        }),
       }),
+      configService: {
+        createLLMService: () => mockLLM,
+      },
     }));
 
     mock.module("@/conversations/executionTime", () => ({
@@ -62,6 +103,20 @@ describe("AgentExecutor", () => {
         routingDecision: () => {},
         agentThinking: () => {},
       }),
+    }));
+
+    mock.module("@/services/LLMOperationsRegistry", () => ({
+      llmOpsRegistry: {
+        registerOperation: () => new AbortController().signal,
+        completeOperation: () => {},
+      },
+    }));
+
+    mock.module("@/conversations/persistence/ToolMessageStorage", () => ({
+      toolMessageStorage: {
+        store: async () => {},
+        load: async () => null,
+      },
     }));
 
     mock.module("@/tracing", () => ({
@@ -85,15 +140,32 @@ describe("AgentExecutor", () => {
           execute: async () => ({ success: true }),
         }),
       },
+      getToolsObject: () => ({}),
     }));
 
     mock.module("@/prompts/utils/systemPromptBuilder", () => ({
       buildSystemPrompt: () => "You are a test agent. Help users with their tasks.",
+      buildSystemPromptMessages: () => [
+        {
+          message: {
+            role: "system",
+            content: "You are a test agent. Help users with their tasks."
+          }
+        }
+      ],
+      buildStandaloneSystemPromptMessages: () => [
+        {
+          message: {
+            role: "system",
+            content: "You are a test agent. Help users with their tasks."
+          }
+        }
+      ],
     }));
 
-    mock.module("@/services/mcp/MCPService", () => ({
+    mock.module("@/services/mcp/MCPManager", () => ({
       mcpService: {
-        getAvailableTools: async () => [],
+        getCachedTools: () => [],
       },
     }));
 
@@ -191,6 +263,22 @@ describe("AgentExecutor", () => {
       tools: [],
       toolContext: {},
       conversationCoordinator: mockConversationCoordinator,
+      triggeringEvent: {
+        id: "test-event-id",
+        pubkey: "test-user-pubkey",
+        kind: 1,
+        content: "Test message",
+        tags: [],
+        created_at: Math.floor(Date.now() / 1000),
+        sig: "test-sig",
+      } as any,
+      agentPublisher: {
+        typing: mock(async () => {}),
+        conversation: mock(() => {}),
+        complete: mock(async () => {}),
+        toolUse: mock(async () => ({ id: "tool-event-id" })),
+        handleContent: mock(async () => {}),
+      } as any,
       onStreamStart: mock(() => {}),
       onStreamToken: mock(() => {}),
       onStreamToolCall: mock(() => {}),
@@ -207,7 +295,7 @@ describe("AgentExecutor", () => {
 
   describe("constructor", () => {
     it("should create an AgentExecutor instance", () => {
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       expect(executor).toBeDefined();
     });
   });
@@ -228,7 +316,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -257,7 +345,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -290,7 +378,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       await executor.execute(mockContext);
 
       expect(mockContext.onStreamStart).toHaveBeenCalledTimes(1);
@@ -309,7 +397,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
 
       try {
         await executor.execute(mockContext);
@@ -338,7 +426,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       await executor.execute(mockContext);
 
       // Should use default backend successfully
@@ -374,7 +462,7 @@ describe("AgentExecutor", () => {
         },
       }));
 
-      const executor = new AgentExecutor(mockConversationCoordinator);
+      const executor = new AgentExecutor();
       await executor.execute(mockContext);
 
       expect(mockContext.onComplete).toHaveBeenCalledWith({

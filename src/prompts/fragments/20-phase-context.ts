@@ -1,13 +1,13 @@
-import type { Phase, Conversation } from "@/conversations/types";
+import type { Conversation } from "@/conversations/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
  * Phase context fragment.
- * Provides context about the current phase and any transition information.  
+ * Provides context about the current phase and any transition information.
  */
 interface PhaseContextArgs {
-  phase: Phase;
+  phase: string;
   phaseMetadata?: Record<string, unknown>;
   conversation?: Conversation;
 }

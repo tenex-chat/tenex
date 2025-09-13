@@ -115,9 +115,7 @@ async function generateMainInventory(
   });
 
   // Use PromptBuilder to construct the prompt from fragments
-  const prompt = new PromptBuilder()
-    .add("main-inventory-generation", { repomixContent, focusFiles })
-    .build();
+  const prompt = PromptBuilder.buildFragment("main-inventory-generation", { repomixContent, focusFiles });
 
   const projectCtx = getProjectContext();
   const llmLogger = projectCtx.llmLogger;
@@ -168,14 +166,12 @@ async function generateModuleGuide(
   logger.debug("Generating module guide", { module: module.name });
 
   // Use PromptBuilder to construct the prompt from fragments
-  const prompt = new PromptBuilder()
-    .add("module-guide-generation", {
+  const prompt = PromptBuilder.buildFragment("module-guide-generation", {
       repomixContent,
       moduleName: module.name,
       modulePath: module.path,
       complexityReason: module.reason,
-    })
-    .build();
+    });
 
   const llmRouter = await loadLLMRouter(projectPath);
   const userMessage = new Message("user", prompt);
@@ -318,9 +314,7 @@ async function fallbackExtractComplexModules(
 
   try {
     // Use PromptBuilder to construct the prompt from fragments
-    const cleanupPrompt = new PromptBuilder()
-      .add("complex-modules-extraction", { content })
-      .build();
+    const cleanupPrompt = PromptBuilder.buildFragment("complex-modules-extraction", { content });
 
     const projectCtx = getProjectContext();
   const llmLogger = projectCtx.llmLogger;

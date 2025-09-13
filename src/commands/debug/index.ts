@@ -1,5 +1,4 @@
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import type { Phase } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
@@ -57,7 +56,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     if (agent) {
       logger.info(`${chalk.white("Name:")} ${agent.name}`);
       logger.info(`${chalk.white("Role:")} ${agent.role}`);
-      logger.info(`${chalk.white("Phase:")} ${options.phase}`);
+      if (options.phase) {
+        logger.info(`${chalk.white("Phase:")} ${options.phase}`);
+      }
       if (agent.tools && agent.tools.length > 0) {
         logger.info(`${chalk.white("Tools:")} ${agent.tools.join(", ")}`);
       }
@@ -72,9 +73,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
 
       // Get all available agents for delegations
       const availableAgents = Array.from(projectCtx.agents.values());
-
-      // Validate phase
-      const phase = (options.phase || "CHAT") as Phase;
 
       // Initialize MCP service to get tools
       let mcpTools: Record<string, unknown> = {};
@@ -100,7 +98,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
 
       const systemMessages = buildSystemPromptMessages({
         agent,
-        phase,
         project: projectCtx.project,
         availableAgents,
         conversation: undefined, // No conversation in debug mode

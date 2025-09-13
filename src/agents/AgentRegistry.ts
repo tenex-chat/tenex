@@ -784,32 +784,6 @@ export class AgentRegistry {
   }
 
   /**
-   * Get the PM pubkey for this project
-   */
-  private getPMPubkey(): string | undefined {
-    // Try ProjectContext first (most reliable when available)
-    const { isProjectContextInitialized, getProjectContext } = require("@/services");
-    if (isProjectContextInitialized()) {
-      return getProjectContext().projectManager?.pubkey;
-    }
-    
-    // Fall back to NDKProject if we have it
-    if (this.ndkProject) {
-      const pmEventId = this.ndkProject.tagValue("agent");
-      // Find agent with this event ID
-      for (const [_, agent] of this.agents) {
-        if (agent.eventId === pmEventId) {
-          return agent.pubkey;
-        }
-      }
-    }
-    
-    // Last resort: first agent in registry
-    const firstAgent = this.agents.values().next().value;
-    return firstAgent?.pubkey;
-  }
-
-  /**
    * Helper method to build an AgentInstance from configuration and registry data
    * Centralizes the logic for creating agent instances to avoid duplication
    */

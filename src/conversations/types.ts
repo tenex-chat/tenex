@@ -1,8 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
-// Phase is now just a string - fully dynamic
-export type Phase = string;
-
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
   lastProcessedMessageIndex: number; // Index into Conversation.history

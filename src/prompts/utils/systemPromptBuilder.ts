@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Phase, Conversation } from "@/conversations/types";
+import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
@@ -15,7 +15,6 @@ export interface BuildSystemPromptOptions {
   project: NDKProject;
 
   // Optional runtime data
-  phase?: Phase;
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
@@ -29,7 +28,6 @@ export interface BuildStandalonePromptOptions {
   agent: AgentInstance;
 
   // Optional runtime data
-  phase?: Phase;
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
@@ -50,7 +48,6 @@ export interface SystemMessage {
 function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    phase?: Phase,
     conversation?: Conversation,
     agentLessons?: Map<string, NDKAgentLesson[]>,
     triggeringEvent?: NDKEvent,
@@ -67,13 +64,12 @@ function addCoreAgentFragments(
     // Add retrieved lessons
     builder.add("retrieved-lessons", {
         agent,
-        phase,
         conversation,
         agentLessons: agentLessons || new Map(),
     });
 
-    // Add phase context using a temporary raw fragment
-    const phaseInstructions = buildPhaseInstructions(phase, conversation, transientPhaseContext);
+    // Add phase context from transient phase context only
+    const phaseInstructions = buildPhaseInstructions(conversation, transientPhaseContext);
     if (phaseInstructions) {
         builder.addFragment(
             {
@@ -121,7 +117,6 @@ function addDelegatedTaskContext(
  * Export phase instruction building for use by other modules
  */
 export function buildPhaseInstructions(
-  phase?: Phase,
   conversation?: Conversation,
   transientPhaseContext?: { phase?: string; phaseInstructions?: string }
 ): string {
@@ -132,32 +127,24 @@ export function buildPhaseInstructions(
 ${transientPhaseContext.phaseInstructions}`;
   }
 
-  // No phase instructions if no phase is set
-  if (!phase && !transientPhaseContext?.phase) {
+  // No phase instructions if no transient phase context
+  if (!transientPhaseContext?.phase) {
     return "";
   }
 
-  // Otherwise, fall back to standard phase instructions if phase exists
-  const effectivePhase = transientPhaseContext?.phase || phase;
-  if (effectivePhase) {
-    const builder = new PromptBuilder()
-        .add("phase-context", {
-            phase: effectivePhase,
-            phaseMetadata: conversation?.metadata,
-            conversation,
-        });
-
-    return builder.build();
-  }
-
-  return "";
+  // Otherwise, use standard phase context if phase exists
+  return PromptBuilder.buildFragment("phase-context", {
+      phase: transientPhaseContext.phase,
+      phaseMetadata: conversation?.metadata,
+      conversation,
+  });
 }
 
 /**
  * Export phase transition formatting for use by other modules
  */
 export function formatPhaseTransitionMessage(
-  currentPhase: Phase,
+  currentPhase: string,
   phaseInstructions: string
 ): string {
   return `=== PHASE TRANSITION ===
@@ -220,7 +207,6 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
 function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   const {
     agent,
-    phase,
     project,
     availableAgents = [],
     conversation,
@@ -248,7 +234,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   addCoreAgentFragments(
     systemPromptBuilder,
     agent,
-    phase,
     conversation,
     agentLessons,
     triggeringEvent,
@@ -269,24 +254,23 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
  * Builds PROJECT.md content as a separate message
  */
 function buildProjectMdContent(options: BuildSystemPromptOptions): string | null {
-  const builder = new PromptBuilder();
-  builder.add("project-md", {
+  const content = PromptBuilder.buildFragment("project-md", {
     projectPath: process.cwd(),
     currentAgent: options.agent,
   });
-  const content = builder.build();
   return content.trim() ? content : null;
 }
 
 /**
  * Builds project inventory content as a separate message
  */
-function buildProjectInventoryContent(): string | null {
-  const builder = new PromptBuilder();
-  builder.add("project-inventory-context", {});
-  const content = builder.build();
-  return content.trim() ? content : null;
-}
+// Temporarily disabled - will be restored later
+// function buildProjectInventoryContent(): string | null {
+//   const builder = new PromptBuilder();
+//   builder.add("project-inventory-context", {});
+//   const content = builder.build();
+//   return content.trim() ? content : null;
+// }
 
 /**
  * Builds system prompt messages for standalone agents (without project context).
@@ -315,7 +299,6 @@ export function buildStandaloneSystemPromptMessages(
 function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): string {
   const {
     agent,
-    phase,
     availableAgents = [],
     conversation,
     agentLessons,
@@ -339,7 +322,6 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
   addCoreAgentFragments(
     systemPromptBuilder,
     agent,
-    phase,
     conversation,
     agentLessons,
     triggeringEvent,

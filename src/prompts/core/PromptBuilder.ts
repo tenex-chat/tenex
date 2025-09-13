@@ -82,4 +82,14 @@ export class PromptBuilder {
   getFragmentCount(): number {
     return this.fragments.length;
   }
+
+  /**
+   * Static method for building a single fragment without creating an instance
+   * @param fragmentId The ID of the fragment to build
+   * @param args The arguments to pass to the fragment
+   * @returns The built fragment content as a string
+   */
+  static buildFragment<T>(fragmentId: string, args: T): string {
+    return new PromptBuilder().add(fragmentId, args).build();
+  }
 }

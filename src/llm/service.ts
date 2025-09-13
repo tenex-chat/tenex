@@ -239,7 +239,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const startTime = Date.now();
 
         // Create the stream outside the promise
-        const { textStream, response } = streamText({
+        const { textStream } = streamText({
             model,
             messages: processedMessages,
             tools: tools,

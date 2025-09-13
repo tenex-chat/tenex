@@ -20,6 +20,9 @@ import { projectMdFragment } from "./30-project-md";
 import { inventoryContextFragment } from "./30-project-inventory";
 import { mainInventoryPromptFragment } from "./90-inventory-generation";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
+import { debugModeFragment } from "./debug-mode";
+import { delegationCompletionFragment } from "./delegation-completion";
+import { phaseTransitionFragment } from "./phase-transition";
 
 /**
  * Register all fragments explicitly
@@ -30,6 +33,9 @@ export function registerAllFragments(): void {
   fragmentRegistry.register(agentIdentityFragment);
   fragmentRegistry.register(agentPhasesFragment);
   fragmentRegistry.register(delegatedTaskContextFragment);
+  fragmentRegistry.register(debugModeFragment);
+  fragmentRegistry.register(delegationCompletionFragment);
+  fragmentRegistry.register(phaseTransitionFragment);
 
   // Phase-related fragments
   fragmentRegistry.register(phaseContextFragment);

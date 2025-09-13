@@ -122,12 +122,28 @@ export class AgentEventEncoder {
      * the triggering event; otherwise we thread inside the triggering event.
      */
     eTagParentEvent(event: NDKEvent, rootEvent: NDKEvent, triggeringEvent: NDKEvent): void {
-        const triggeringEventFromOP = triggeringEvent.pubkey === rootEvent.pubkey;
-        const triggeringEventFirstLevelReply = triggeringEvent.tagValue("e") === rootEvent.id;
-        const replyToOP = triggeringEventFromOP && triggeringEventFirstLevelReply;
-        const replyToEvent = replyToOP ? rootEvent : triggeringEvent;
+        const projectCtx = getProjectContext();
+        const ownerPubkey = projectCtx?.project?.pubkey ?? rootEvent.pubkey;
 
-        event.tag(["e", replyToEvent.id]);
+        const triggeringPubkeyIsOwner = triggeringEvent.pubkey === ownerPubkey;
+        const eTagValue = triggeringEvent.tagValue("e");
+
+        let replyToEventId = triggeringEvent.id;
+
+        if (triggeringPubkeyIsOwner && eTagValue) {
+            // if the triggering pubkey is the owner of the project
+            // (or of the thread if there is no projet)
+
+            replyToEventId = eTagValue // reply inside the same parent
+        }
+
+        console.log("e-tagging parent", {
+            ownerPubkey,
+            triggeringPubkeyIsOwner,
+            eTagValue
+        })
+
+        event.tag(["e", replyToEventId]);
     }
 
     /**
@@ -142,18 +158,34 @@ export class AgentEventEncoder {
         // Add conversation tags (E, K, P for root)
         this.tagConversation(event, context.rootEvent);
 
-        // Simply e-tag the triggering event
-        event.tag(["e", context.triggeringEvent.id, "", "reply"]);
-
         // if the triggering event is authored by the same as the root event
         // and the triggering event is e-tagging the root event, let's also e-tag the root
         // event. This is so that this completion event also shows up in the main thread.
-        const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
-        const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
+        // const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
+        // const authorIsProductOwner = context.triggeringEvent.pubkey === projectCtx?.project?.pubkey;
+        
 
-        if (pTagsMatch && triggerTagsRoot) {
-            event.tag(["e", context.rootEvent.id, "", "root"]);
-        }
+        // console.log('encode completion', {
+        //     pTagsMatch, authorIsProductOwner, eTagValue,
+        //     productOwner: projectCtx?.project?.pubkey,
+        //     triggeringEventPubkey: context.triggeringEvent.pubkey
+        // })
+
+        // // This hack is to make the in-thread replies to the product owner (typically the human) appear
+        // // inline instead of threaded-in. This is probably not right.
+        // if (pTagsMatch && authorIsProductOwner && eTagValue) {
+        //     event.tag(["e", eTagValue, "", "reply"]);
+        // } else {
+        //     event.tag(["e", context.triggeringEvent.id, "", "reply"]);
+        // }
+        
+        // const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
+
+        // if (pTagsMatch && triggerTagsRoot) {
+        //     event.tag(["e", context.rootEvent.id, "", "root"]);
+        // }
+
+        this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
 
         // p-tag the agent that triggered us
         event.tag(["p", context.triggeringEvent.pubkey]);

@@ -155,15 +155,11 @@ export class ConversationCoordinator {
       conversation.agentStates.set(targetAgent.slug, agentState);
     }
 
-    // Phase instructions are now handled transiently via event tags
-    let phaseInstructions: string | undefined;
-
     // Build messages using the stateless context
+    // Phase transitions are now detected from event tags in buildMessages
     const messages = await context.buildMessages(
       conversation,
-      agentState,
-      triggeringEvent,
-      phaseInstructions
+      triggeringEvent
     );
 
     // Update agent state
