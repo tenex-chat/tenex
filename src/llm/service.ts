@@ -10,6 +10,8 @@ import {
     generateText,
     stepCountIs,
     streamText,
+    wrapLanguageModel,
+    extractReasoningMiddleware,
 } from "ai";
 import type { ModelMessage } from "ai";
 import chalk from "chalk";
@@ -74,10 +76,22 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     /**
      * Get a language model from the registry.
      * This method encapsulates the AI SDK's requirement for concatenated strings.
+     * Wraps the model with extract-reasoning-middleware to handle thinking tags.
      */
     private getLanguageModel(): LanguageModel {
         // AI SDK requires this format - we encapsulate it here
-        return this.registry.languageModel(`${this.provider}:${this.model}`);
+        const baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
+        
+        // Wrap with extract-reasoning-middleware to handle thinking tags
+        // This extracts content between <thinking> tags as reasoning
+        return wrapLanguageModel({
+            model: baseModel,
+            middleware: extractReasoningMiddleware({
+                tagName: 'thinking',
+                separator: '\n',
+                startWithReasoning: false,
+            }),
+        });
     }
 
     /**
@@ -141,6 +155,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
             });
+            
+            // Log if reasoning was extracted
+            if ('reasoning' in result && result.reasoning) {
+                logger.debug("[LLMService] Reasoning extracted from response", {
+                    reasoningLength: result.reasoning.length,
+                    textLength: result.text?.length || 0,
+                });
+            }
 
             const duration = Date.now() - startTime;
 
@@ -233,19 +255,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
             // Check for delegation completion and inject follow-up hint
             prepareStep: async (options) => {
-                // console.log(
-                //     `running prepareStep (${options.stepNumber}) (${options.messages.length})`,
-                //     options.steps.map((s) => ({
-                //         content: s.content,
-                //         usage: s.usage,
-                //         finishReason: s.finishReason,
-                //         providerMetadata: s.providerMetadata,
-                //     }))
-                // );
-                // console.log(`<MESSAGES ${options.stepNumber}>`)
-                // console.log(JSON.stringify(options.messages, null, 4));
-                // console.log(`</MESSAGES ${options.stepNumber}>`);
-
                 const lastStep = options.steps[options.steps.length - 1];
                 const lastToolCall = lastStep?.toolCalls?.[0];
 
@@ -297,7 +306,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
-        console.log("LLMService chunk", chunk.type, chalk.gray(chunk.text));
+        const chunkText = 'text' in chunk ? chunk.text : '';
+        console.log("LLMService chunk", event, chunk.type, chalk.gray(chunkText));
 
         // Emit chunk-type-change event if the type changed
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
@@ -309,13 +319,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         switch (chunk.type) {
             case "text-delta":
-                if (chunk.text) {
+                if ('text' in chunk && chunk.text) {
                     this.handleTextDelta(chunk.text);
                 }
                 break;
             case "reasoning-delta":
                 // Handle reasoning-delta separately - emit reasoning event
-                if (chunk.text) {
+                if ('text' in chunk && chunk.text) {
                     this.handleReasoningDelta(chunk.text);
                 }
                 break;

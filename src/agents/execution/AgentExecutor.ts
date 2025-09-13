@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
+import chalk from "chalk";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import {
@@ -19,6 +20,28 @@ import { startExecutionTime, stopExecutionTime } from "@/conversations/execution
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { configService } from "@/services";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
+
+/**
+ * Format MCP tool names for human readability
+ * Converts "mcp__repomix__pack_codebase" to "repomix's pack_codebase"
+ */
+function formatMCPToolName(toolName: string): string {
+    if (!toolName.startsWith('mcp__')) {
+        return toolName;
+    }
+    
+    // Split the MCP tool name: mcp__<server>__<tool>
+    const parts = toolName.split('__');
+    if (parts.length !== 3) {
+        return toolName;
+    }
+    
+    const [, serverName, toolMethod] = parts;
+    
+    // Simple format: server's tool_name
+    return `${serverName}'s ${toolMethod.replace(/_/g, ' ')}`;
+}
 
 /**
  * Minimal context for standalone agent execution
@@ -399,10 +422,6 @@ Be completely transparent about your internal process. If you made a mistake or 
             const hadContent = contentBuffer.trim().length > 0;
             const hadReasoning = reasoningBuffer.trim().length > 0;
 
-            const lastStep = event.steps[event.steps.length - 1];
-            console.log("llmservice complete last step toolCalls", lastStep.toolCalls);
-            console.log("llmservice complete last step toolResults", lastStep.toolResults);
-            
             if (event.message.trim()) {
                 const isReasoning = hadReasoning && !hadContent;
                 
@@ -422,6 +441,75 @@ Be completely transparent about your internal process. If you made a mistake or 
         
         llmService.on('stream-error', (event) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
+        });
+
+        // Tool execution tracking - store tool calls with their event IDs
+        const toolExecutions = new Map<string, { 
+            toolCall: any; 
+            toolResult: any;
+            toolEventId: string;
+        }>();
+
+        llmService.on('tool-will-execute', async (event) => {
+            logger.info('[AgentExecutor] Tool will execute', {
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+            });
+            
+            // Get the tool to generate human-readable content
+            const tool = toolsObject[event.toolName];
+            const humanContent = tool?.getHumanReadableContent?.(event.args) 
+                || (event.toolName.startsWith('mcp__') 
+                    ? `Executing ${formatMCPToolName(event.toolName)}`
+                    : `Executing ${event.toolName}`);
+
+            // Publish the tool event immediately when starting execution
+            const toolEvent = await agentPublisher.toolUse(
+                {
+                    toolName: event.toolName,
+                    content: humanContent,
+                },
+                eventContext
+            );
+            
+            // Store the tool call with its event ID for later association
+            toolExecutions.set(event.toolCallId, {
+                toolCall: {
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    input: event.args,
+                },
+                toolResult: null,
+                toolEventId: toolEvent.id,
+            });
+        });
+
+        llmService.on('tool-did-execute', async (event) => {
+            logger.info('[AgentExecutor] Tool did execute', {
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                error: event.error,
+            });
+
+            // Get the stored execution with its event ID
+            const execution = toolExecutions.get(event.toolCallId);
+            if (execution) {
+                // Update with tool result
+                execution.toolResult = {
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    output: event.result,
+                    error: event.error,
+                };
+
+                // Store the full tool messages to filesystem using the original event ID
+                await toolMessageStorage.store(
+                    execution.toolEventId,  // Use the event ID from when we started
+                    execution.toolCall,
+                    execution.toolResult,
+                    context.agent.pubkey
+                );
+            }
         });
 
         try {

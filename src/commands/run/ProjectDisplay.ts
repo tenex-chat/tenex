@@ -65,7 +65,13 @@ export class ProjectDisplay {
     logger.info(chalk.gray("\nAgent:       ") + chalk.yellow(agent.name));
     logger.info(chalk.gray("Slug:        ") + chalk.white(slug));
     logger.info(chalk.gray("Role:        ") + chalk.white(agent.role));
-    
+
+    // Display phases if defined
+    if (agent.phases && Object.keys(agent.phases).length > 0) {
+      const phaseNames = Object.keys(agent.phases).join(", ");
+      logger.info(chalk.gray("Phases:      ") + chalk.green(`[${Object.keys(agent.phases).length}] ${phaseNames}`));
+    }
+
     // Resolve and display the actual model that will be used
     const modelString = agent.llmConfig || "default";
     try {

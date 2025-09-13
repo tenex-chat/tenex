@@ -16,7 +16,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { type NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
+import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent, PHASE_MANAGEMENT_TOOLS } from "./constants";
 import { isValidToolName } from "@/tools/registry";
 import { mcpService } from "@/services/mcp/MCPManager";
 
@@ -363,8 +363,7 @@ export class AgentRegistry {
     // Reassign delegate tools for all loaded agents
     for (const agent of this.agents.values()) {
       agent.tools = agent.tools.filter(t => !DELEGATE_TOOLS.includes(t));
-      const isPM = agent.pubkey === pubkey;
-      const delegateTools = getDelegateToolsForAgent(isPM);
+      const delegateTools = getDelegateToolsForAgent(agent);
       agent.tools.push(...delegateTools);
     }
     
@@ -584,28 +583,31 @@ export class AgentRegistry {
 
   /**
    * Normalize agent tools by applying business rules:
-   * - Remove delegation tools from requested tools (they're added based on PM status)
-   * - Add appropriate delegation tools based on PM status
+   * - Remove delegation and phase management tools from requested tools (they're added based on phases)
+   * - Add appropriate delegation and phase management tools based on phases
    * - Ensure core tools are always present
    * @param requestedTools - Tools requested/configured for the agent
-   * @param isPM - Whether the agent is the Project Manager
+   * @param agent - The agent instance (or partial agent with phases)
    * @returns Normalized array of tool names
    */
-  private normalizeAgentTools(requestedTools: string[], isPM: boolean): string[] {
-    // Filter out delegation tools - they should never be in configuration
-    let toolNames = requestedTools.filter(tool => !DELEGATE_TOOLS.includes(tool));
-    
-    // Add the correct delegation tools based on PM status
-    const delegateTools = getDelegateToolsForAgent(isPM);
+  private normalizeAgentTools(requestedTools: string[], agent: { phases?: Record<string, string> }): string[] {
+    // Filter out delegation and phase management tools - they should never be in configuration
+    let toolNames = requestedTools.filter(tool =>
+      !DELEGATE_TOOLS.includes(tool) &&
+      !PHASE_MANAGEMENT_TOOLS.includes(tool)
+    );
+
+    // Add the correct delegation and phase management tools based on phases
+    const delegateTools = getDelegateToolsForAgent(agent);
     toolNames.push(...delegateTools);
-    
+
     // Ensure core tools are always included for ALL agents
     for (const coreTool of CORE_AGENT_TOOLS) {
       if (!toolNames.includes(coreTool)) {
         toolNames.push(coreTool);
       }
     }
-    
+
     return toolNames;
   }
 
@@ -631,8 +633,7 @@ export class AgentRegistry {
     }
 
     // Normalize tools according to business rules (delegation tools, core tools, etc.)
-    const isPM = registryInfo.entry.isPM === true;
-    const normalizedTools = this.normalizeAgentTools(newToolNames, isPM);
+    const normalizedTools = this.normalizeAgentTools(newToolNames, agent);
 
     // Validate the normalized tool names
     const validToolNames = normalizedTools.filter(isValidToolName);
@@ -837,6 +838,7 @@ export class AgentRegistry {
       slug: slug,
       isGlobal: isGlobal,
       phase: agentDefinition.phase,
+      phases: agentDefinition.phases,
     };
 
     // Set tools - use explicit tools if configured, otherwise use defaults
@@ -844,8 +846,7 @@ export class AgentRegistry {
       agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
     
     // Normalize tools according to business rules (delegation tools, core tools, etc.)
-    const isPM = registryEntry.isPM === true;
-    let toolNames = this.normalizeAgentTools(requestedTools, isPM);
+    let toolNames = this.normalizeAgentTools(requestedTools, agent);
 
     // Validate tool names - we now store tool names as strings, not instances
     const validToolNames: string[] = [];

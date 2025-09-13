@@ -193,7 +193,7 @@ export class ConversationCoordinator {
     }
 
     // Create a stateless agent context on-demand
-    const context = new AgentConversationContext(conversationId, targetAgent.slug);
+    const context = new AgentConversationContext(conversationId, targetAgent.slug, targetAgent.pubkey);
 
     // Get or initialize the agent's state
     let agentState = conversation.agentStates.get(targetAgent.slug);

@@ -45,6 +45,8 @@ export interface AgentInstance {
   isGlobal?: boolean;
   /** Project phase this agent instance is for */
   phase?: string;
+  /** Phase definitions for this agent - maps phase names to their instructions */
+  phases?: Record<string, string>;
 }
 
 /**
@@ -96,6 +98,7 @@ export interface StoredAgentData {
   tools?: string[]; // Tool names in storage - converted to Tool instances at runtime
   mcp?: boolean; // Whether this agent has access to MCP tools
   phase?: string; // Project phase this agent definition is for
+  phases?: Record<string, string>; // Phase definitions - maps phase names to their instructions
 }
 
 /**

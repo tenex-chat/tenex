@@ -14,8 +14,9 @@ const agentsWriteSchema = z.object({
   instructions: z.string().nullable().describe("System instructions that guide agent behavior"),
   useCriteria: z.string().nullable().describe("Criteria for when this agent should be selected"),
   llmConfig: z.string().nullable().describe("LLM configuration identifier"),
-  tools: z.array(z.string()).nullable().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
+  tools: z.array(z.string()).nullable().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) and phase management tools (add_phase, remove_phase) are automatically assigned based on whether the agent has phases defined - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, generate_inventory, shell, claude_code, nostr_projects, discover_capabilities, write_context_file, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
   mcp: z.boolean().nullable().describe("Whether this agent has access to MCP tools (defaults to true)"),
+  phases: z.record(z.string(), z.string()).nullable().describe("Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent gets delegate_phase tool instead of delegate tool."),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
@@ -40,7 +41,7 @@ interface AgentsWriteOutput {
 async function executeAgentsWrite(
   input: AgentsWriteInput
 ): Promise<AgentsWriteOutput> {
-  const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, mcp } = input;
+  const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, mcp, phases } = input;
 
   if (!slug) {
     return {
@@ -92,6 +93,7 @@ async function executeAgentsWrite(
     ...(llmConfig !== undefined && { llmConfig }),
     ...(tools !== undefined && { tools }),
     ...(mcp !== undefined && { mcp }),
+    ...(phases !== undefined && { phases }),
   };
 
   // Write the agent definition to file
@@ -139,6 +141,7 @@ async function executeAgentsWrite(
     llmConfig,
     tools,
     mcp,
+    phases,
   };
   
   // Use the existing agent registry to ensure the agent

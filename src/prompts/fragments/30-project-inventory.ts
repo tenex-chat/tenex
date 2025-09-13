@@ -179,6 +179,8 @@ export const inventoryContextFragment: PromptFragment<InventoryContextArgs> = {
     const parts: string[] = [];
 
     parts.push(`<project_inventory>
+Project Path: ${process.cwd()}
+
 The project inventory provides comprehensive information about this codebase:
 `);
 

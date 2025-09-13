@@ -4,6 +4,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
 import { resolveAndValidatePath } from "../utils";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { TenexTool } from "@/tools/registry";
 
 const readPathSchema = z.object({
   path: z
@@ -51,26 +52,6 @@ async function executeReadPath(
     }
   }
 
-  // Publish tool use event
-  try {
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    
-    if (conversation?.history?.[0]) {
-      await context.agentPublisher.toolUse({
-          toolName: "read_path",
-          toolOutput: content,
-          content: `📖 Reading ${path}`,
-      },
-        {
-          triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation.history[0],
-          conversationId: context.conversationId,
-        }
-      );
-    }
-  } catch {
-  }
-
   return content;
 }
 
@@ -78,8 +59,8 @@ async function executeReadPath(
  * Create an AI SDK tool for reading paths
  * This is the primary implementation
  */
-export function createReadPathTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+export function createReadPathTool(context: ExecutionContext): TenexTool {
+  const toolInstance = tool({
     description:
       "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Automatically tracks context file reads for conversation metadata. Safe and sandboxed to project directory.",
     
@@ -107,5 +88,12 @@ export function createReadPathTool(context: ExecutionContext): ReturnType<typeof
       }
     },
   });
+
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: ({ path }: z.infer<typeof readPathSchema>) => {
+      return `Reading ${path}`;
+    }
+  }) as TenexTool;
 }
 

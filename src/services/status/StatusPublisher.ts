@@ -88,11 +88,9 @@ export class StatusPublisher {
 
     // Add model access tags
     for (const model of intent.models) {
-      // Keep the multi-value tag for backward compatibility and human readability
       event.tag(["model", model.slug, ...model.agents]);
       
       // Collect agent slugs from models
-      console.log("model.agents", model.slug, model.agents);
       for (const agentSlug of model.agents) {
         uniqueAgentSlugs.add(agentSlug);
       }

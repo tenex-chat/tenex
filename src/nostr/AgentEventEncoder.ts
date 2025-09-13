@@ -64,7 +64,6 @@ export interface StatusIntent {
 
 export interface ToolUseIntent {
   toolName: string;
-  toolOutput: string;
   content: string; // e.g., "Reading $path"
 }
 
@@ -208,8 +207,6 @@ export class AgentEventEncoder {
         if (intent.phase) {
             event.tag(["phase", intent.phase]);
         }
-
-        event.tag(["tool", "delegate"]);
 
         // Add standard metadata
         this.addStandardTags(event, context);
@@ -483,8 +480,6 @@ export class AgentEventEncoder {
         followUpEvent.tags = followUpEvent.tags.filter((t) => t[0] !== "p");
         followUpEvent.tag(responseEvent.author);
 
-        followUpEvent.tag(["tool", "delegate_followup"]);
-
         return followUpEvent;
     }
 
@@ -502,7 +497,6 @@ export class AgentEventEncoder {
 
         // Add tool usage tags
         event.tag(["tool", intent.toolName]);
-        event.tag(["tool-output", intent.toolOutput]);
 
         // Add standard metadata
         this.addStandardTags(event, context);

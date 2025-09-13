@@ -7,6 +7,7 @@ import { DelegationFormatter } from "./processors/DelegationFormatter";
 import { stripThinkingBlocks, isOnlyThinkingBlocks, logThinkingBlockRemoval, hasReasoningTag } from "./utils/content-utils";
 import type { AgentState, Conversation } from "./types";
 import type { Phase } from "./phases";
+import { toolMessageStorage } from "./persistence/ToolMessageStorage";
 
 /**
  * Orchestrates message building for a specific agent in a conversation.
@@ -17,7 +18,8 @@ import type { Phase } from "./phases";
 export class AgentConversationContext {
   constructor(
     private conversationId: string,
-    private agentSlug: string
+    private agentSlug: string,
+    private agentPubkey?: string
   ) {}
 
   /**
@@ -200,6 +202,7 @@ export class AgentConversationContext {
     return events.filter(e => threadPath.includes(e.id));
   }
 
+
   /**
    * Build messages from conversation history for this agent
    * This is now a pure function that doesn't maintain state
@@ -222,37 +225,66 @@ export class AgentConversationContext {
         break; // Don't include the triggering event in history
       }
 
-      // Skip events with reasoning tag
-      if (hasReasoningTag(event)) {
-        logger.debug("[AGENT_CONTEXT] Skipping event with reasoning tag", {
-          eventId: event.id.substring(0, 8),
-          kind: event.kind,
-        });
-        continue;
-      }
+      // Check if this is a tool event from this agent
+      const isToolEvent = event.hasTag("tool");
+      const isThisAgent = this.agentPubkey && event.pubkey === this.agentPubkey;
 
-      // Skip events that are purely thinking blocks
-      if (isOnlyThinkingBlocks(event.content)) {
-        logger.debug("[AGENT_CONTEXT] Skipping event with only thinking blocks", {
-          eventId: event.id.substring(0, 8),
-          originalLength: event.content.length,
-        });
-        continue;
-      }
+      if (isToolEvent && isThisAgent) {
+        // Load the full tool messages from filesystem
+        const toolMessages = await toolMessageStorage.load(event.id);
+        if (toolMessages) {
+          messages.push(...toolMessages);
+          logger.debug("[AGENT_CONTEXT] Loaded tool messages", {
+            eventId: event.id.substring(0, 8),
+            messageCount: toolMessages.length,
+          });
+        } else {
+          // Fallback: use the human-readable content
+          const processed = await NostrEntityProcessor.processEntities(event.content);
+          const message = await MessageRoleAssigner.assignRole(
+            event,
+            processed,
+            this.agentSlug,
+            this.conversationId
+          );
+          messages.push(message);
+        }
+      } else if (!isToolEvent) {
+        // Regular non-tool message processing
+        
+        // Skip events with reasoning tag
+        if (hasReasoningTag(event)) {
+          logger.debug("[AGENT_CONTEXT] Skipping event with reasoning tag", {
+            eventId: event.id.substring(0, 8),
+            kind: event.kind,
+          });
+          continue;
+        }
 
-      // Strip thinking blocks from content
-      const strippedContent = stripThinkingBlocks(event.content);
-      logThinkingBlockRemoval(event.id, event.content.length, strippedContent.length);
-      
-      // Process the stripped content
-      const processed = await NostrEntityProcessor.processEntities(strippedContent);
-      const message = await MessageRoleAssigner.assignRole(
-        event, 
-        processed, 
-        this.agentSlug, 
-        this.conversationId
-      );
-      messages.push(message);
+        // Skip events that are purely thinking blocks
+        if (isOnlyThinkingBlocks(event.content)) {
+          logger.debug("[AGENT_CONTEXT] Skipping event with only thinking blocks", {
+            eventId: event.id.substring(0, 8),
+            originalLength: event.content.length,
+          });
+          continue;
+        }
+
+        // Strip thinking blocks from content
+        const strippedContent = stripThinkingBlocks(event.content);
+        logThinkingBlockRemoval(event.id, event.content.length, strippedContent.length);
+        
+        // Process the stripped content
+        const processed = await NostrEntityProcessor.processEntities(strippedContent);
+        const message = await MessageRoleAssigner.assignRole(
+          event, 
+          processed, 
+          this.agentSlug, 
+          this.conversationId
+        );
+        messages.push(message);
+      }
+      // Skip tool events from other agents
     }
 
     // Add phase transition message if needed
@@ -433,9 +465,6 @@ export class AgentConversationContext {
    * This is the simple format, different from the full transition with instructions
    */
   private buildSimplePhaseTransitionMessage(fromPhase: Phase | undefined, toPhase: Phase): string {
-    if (fromPhase) {
-      return `=== PHASE TRANSITION: ${fromPhase.toUpperCase()} → ${toPhase.toUpperCase()} ===`;
-    }
     return `=== CURRENT PHASE: ${toPhase.toUpperCase()} ===`;
   }
 }

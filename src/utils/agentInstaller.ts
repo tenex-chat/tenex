@@ -99,6 +99,17 @@ export async function installAgentFromEvent(
       logger.info(`Agent "${agentDef.title}" requests access to ${toolTags.length} tool(s):`, toolTags);
     }
 
+    // Extract phase definitions from the agent definition event
+    const phaseTags = agentEvent.tags.filter(tag => tag[0] === "phase" && tag[1] && tag[2]);
+    let phases: Record<string, string> | undefined;
+    if (phaseTags.length > 0) {
+      phases = {};
+      for (const [, phaseName, instructions] of phaseTags) {
+        phases[phaseName] = instructions;
+      }
+      logger.info(`Agent "${agentDef.title}" defines ${Object.keys(phases).length} phase(s):`, Object.keys(phases));
+    }
+
     // Save agent definition file
     const agentsDir = path.join(projectPath, ".tenex", "agents");
     await fs.mkdir(agentsDir, { recursive: true });
@@ -111,6 +122,7 @@ export async function installAgentFromEvent(
       instructions: agentDef.instructions,
       useCriteria: agentDef.useCriteria,
       tools: toolTags, // Include the requested tools
+      ...(phases && { phases }), // Include phases if defined
     };
     await fs.writeFile(filePath, JSON.stringify(agentData, null, 2));
     logger.info("Saved agent definition", { eventId: cleanEventId, name: agentDef.title });
@@ -124,6 +136,7 @@ export async function installAgentFromEvent(
       useCriteria: agentDef.useCriteria,
       tools: toolTags, // Include the requested tools
       eventId: agentDef.id,
+      ...(phases && { phases }), // Include phases if defined
     };
 
     // Register the agent

@@ -29,6 +29,8 @@ import { createReportWriteTool } from "./implementations/report_write";
 import { createReportReadTool } from "./implementations/report_read";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createReportDeleteTool } from "./implementations/report_delete";
+import { createAddPhaseTool } from "./implementations/add_phase";
+import { createRemovePhaseTool } from "./implementations/remove_phase";
 
 /**
  * Tool names available in the system
@@ -56,13 +58,26 @@ export type ToolName =
   | "report_write"
   | "report_read"
   | "reports_list"
-  | "report_delete";
+  | "report_delete"
+  | "add_phase"
+  | "remove_phase";
+
+/**
+ * Extended AI SDK Tool type with human-readable content generation
+ */
+export interface TenexTool extends CoreTool<any, any> {
+  /**
+   * Generate human-readable content for tool execution
+   * Used when publishing tool events to Nostr
+   */
+  getHumanReadableContent?: (args: any) => string;
+}
 
 /**
  * AI SDK Tool type - this is what the tool() function returns
  * CoreTool includes the description and parameters properties we need
  */
-export type AISdkTool = CoreTool<any, any>;
+export type AISdkTool = TenexTool;
 
 /**
  * Tool factory type - functions that create AI SDK tools with context
@@ -96,6 +111,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   report_read: createReportReadTool,
   reports_list: createReportsListTool,
   report_delete: createReportDeleteTool,
+  add_phase: createAddPhaseTool,
+  remove_phase: createRemovePhaseTool,
 };
 
 /**

@@ -209,6 +209,9 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     projectOwnerPubkey: project.pubkey,
   });
 
+  // Add agent phases awareness if agent has phases defined
+  systemPromptBuilder.add("agent-phases", { agent });
+
   // Add delegated task context if applicable
   addDelegatedTaskContext(systemPromptBuilder, triggeringEvent);
 

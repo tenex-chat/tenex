@@ -7,16 +7,12 @@ import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
+import type { TenexTool } from "@/tools/registry";
 
 const delegatePhaseSchema = z.object({
   phase: z
     .string()
-    .describe("The phase to switch to"),
-  phase_instructions: z
-    .string()
-    .describe(
-      "Detailed instructions and goals for this phase - what should be accomplished and how. Other agents are not aware of how YOU define phases; so you must provide clear and complete instructions of the goal, what to do, what not to do and phase constrains."
-    ),
+    .describe("The phase to switch to (must be defined in agent's phases configuration)"),
   recipient: z
     .string()
     .describe(
@@ -38,7 +34,26 @@ type DelegatePhaseOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
 async function executeDelegatePhase(input: DelegatePhaseInput, context: ExecutionContext): Promise<DelegatePhaseOutput> {
-  const { phase, phase_instructions, recipient, fullRequest, title } = input;
+  const { phase, recipient, fullRequest, title } = input;
+
+  // Validate that the phase exists in the agent's phases configuration
+  if (!context.agent.phases) {
+    throw new Error(`Agent ${context.agent.name} does not have any phases defined. Cannot use delegate_phase tool.`);
+  }
+
+  // Case-insensitive phase matching
+  const normalizedPhase = phase.toLowerCase();
+  const phaseEntry = Object.entries(context.agent.phases).find(
+    ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
+  );
+
+  if (!phaseEntry) {
+    const availablePhases = Object.keys(context.agent.phases).join(', ');
+    throw new Error(`Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`);
+  }
+
+  // Use the actual phase name and instructions from configuration
+  const [actualPhaseName, phase_instructions] = phaseEntry;
 
   // Resolve recipient to pubkey
   const pubkey = resolveRecipientToPubkey(recipient);
@@ -63,7 +78,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 
   logger.info("[delegate_phase() tool] 🎯 Starting phase delegation", {
     fromAgent: context.agent.slug,
-    phase: phase,
+    phase: actualPhaseName,
     recipient: recipient,
     mode: "synchronous",
   });
@@ -71,11 +86,11 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   // First, update the conversation phase
   await context.conversationCoordinator.updatePhase(
     context.conversationId,
-    phase,
+    actualPhaseName,
     fullRequest, // Use the fullRequest as the phase transition message
     context.agent.pubkey,
     context.agent.name,
-    phase_instructions // Pass the custom phase instructions
+    phase_instructions // Pass the phase instructions from configuration
   );
 
   // Use DelegationService to execute the delegation
@@ -85,17 +100,17 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     context.conversationCoordinator,
     context.triggeringEvent,
     context.agentPublisher, // Pass the required AgentPublisher
-    phase // Pass the new phase as context
+    actualPhaseName // Pass the new phase as context
   );
-  
+
   const responses = await delegationService.execute({
     recipients: [pubkey],
     request: fullRequest,
-    phase: phase, // Include phase in the delegation intent
+    phase: actualPhaseName, // Include phase in the delegation intent
   });
-  
+
   logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
-    phase: phase,
+    phase: actualPhaseName,
     recipient: recipient,
     responseCount: responses.responses.length,
     mode: "synchronous",
@@ -105,8 +120,8 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(context: ExecutionContext): Tool<any, any> {
-    return tool({
+export function createDelegatePhaseTool(context: ExecutionContext): TenexTool {
+    const toolInstance = tool({
         description:
             "Switch conversation phase and delegate a question or task to a specific agent.  Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation.",
         inputSchema: delegatePhaseSchema,
@@ -114,24 +129,32 @@ export function createDelegatePhaseTool(context: ExecutionContext): Tool<any, an
             return await executeDelegatePhase(input, context);
         },
     });
+    
+    // Add human-readable content generation
+    return Object.assign(toolInstance, {
+        getHumanReadableContent: ({ phase, recipient, fullRequest }: DelegatePhaseInput) => {
+            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipient}.`;
+        }
+    }) as TenexTool;
 }
 
 /**
- * Delegate Phase tool - enables the Project Manager to atomically switch phases and delegate work
+ * Delegate Phase tool - enables agents with defined phases to atomically switch phases and delegate work
  *
- * This tool combines phase switching with task delegation, ensuring the PM always:
+ * This tool combines phase switching with task delegation for agents that have phases defined:
  * 1. Switches to the appropriate phase for the work being done
- * 2. Provides custom phase instructions to guide agent behavior
+ * 2. Uses phase instructions from the agent's configuration
  * 3. Delegates the task to the appropriate specialist agent(s)
  * 4. Sets up proper event-driven callbacks for task completion
  *
- * Phase can be:
- * - Standard phases: CHAT, BRAINSTORM, PLAN, EXECUTE, VERIFICATION, CHORES, REFLECTION
- * - Custom phases: Any string that represents a project-specific phase
+ * Phase Requirements:
+ * - Agent must have phases defined in their configuration
+ * - Phase names are matched case-insensitively
+ * - If phase doesn't exist, tool fails with list of available phases
  *
  * Phase Instructions:
- * - Detailed instructions that define what should be accomplished in this phase
- * - These instructions override standard phase definitions for custom phases
+ * - Loaded from the agent's phases configuration
+ * - Each phase has predefined instructions
  * - Agents receive these instructions as part of their execution context
  *
  * The fullRequest serves dual purpose:

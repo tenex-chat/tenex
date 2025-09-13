@@ -5,9 +5,10 @@ import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { parseNostrUser, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { TenexTool } from "@/tools/registry";
 
 const delegateExternalSchema = z.object({
   content: z.string().describe("The content of the chat message to send"),
@@ -139,14 +140,41 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 }
 
 // AI SDK tool factory
-export function createDelegateExternalTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+export function createDelegateExternalTool(context: ExecutionContext): TenexTool {
+  const toolInstance = tool({
     description: "Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects.",
     inputSchema: delegateExternalSchema,
     execute: async (input: DelegateExternalInput) => {
       return await executeDelegateExternal(input, context);
     },
   });
+  
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: ({ recipient, projectId }: DelegateExternalInput) => {
+      // Parse recipient to get pubkey and convert to npub
+      const pubkey = parseNostrUser(recipient);
+      let recipientDisplay = recipient;
+      
+      if (pubkey) {
+        const user = new NDKUser({ pubkey });
+        recipientDisplay = `nostr:${user.npub}`;
+      }
+      
+      // Build the message
+      let message = `Delegating to ${recipientDisplay}`;
+      
+      // Add project reference if provided
+      if (projectId) {
+        const cleanProjectId = normalizeNostrIdentifier(projectId);
+        if (cleanProjectId) {
+          message = `Delegating to nostr:${cleanProjectId} ${recipientDisplay}`;
+        }
+      }
+      
+      return message;
+    }
+  }) as TenexTool;
 }
 
 

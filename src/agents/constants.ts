@@ -45,23 +45,33 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
 export const DELEGATE_TOOLS = ['delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'] as const;
 
 /**
- * Get the correct delegate tools for an agent based on PM status
+ * Phase management tools
+ */
+export const PHASE_MANAGEMENT_TOOLS = ['add_phase', 'remove_phase'] as const;
+
+/**
+ * Get the correct delegate tools for an agent based on whether they have phases defined
  * This is the SINGLE source of truth for delegate tool assignment
  */
-export function getDelegateToolsForAgent(isPM: boolean): string[] {
+export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): string[] {
   const tools: string[] = [];
-  
-  if (isPM) {
-    // PM gets delegate_phase (NOT delegate)
+
+  // Check if agent has phases defined
+  const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
+
+  if (hasPhases) {
+    // Agents with phases get delegate_phase
     tools.push('delegate_phase');
+    // Also add phase management tools by default for agents with phases
+    tools.push('add_phase', 'remove_phase');
   } else {
-    // Non-PM agents get delegate (NOT delegate_phase)
+    // Agents without phases get delegate
     tools.push('delegate');
   }
-  
+
   // All agents get delegate_external and delegate_followup
   tools.push('delegate_external');
   tools.push('delegate_followup');
-  
+
   return tools;
 }
