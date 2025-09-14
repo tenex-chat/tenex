@@ -1,10 +1,11 @@
-import { createClaudeCode } from "ai-sdk-provider-claude-code";
+import { createClaudeCode, createSdkMcpServer } from "ai-sdk-provider-claude-code";
 import { createProviderRegistry, type ProviderRegistry } from "ai";
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/registry";
 import { LLMService } from "../service";
 import type { ProviderStrategy } from "./ProviderStrategy";
+import { TenexToolsAdapter } from "./TenexToolsAdapter";
 import { logger } from "@/utils/logger";
 
 /**
@@ -31,41 +32,62 @@ export class ClaudeCodeProviderStrategy implements ProviderStrategy {
         const mcpTools = toolNames.filter(name => name.startsWith('mcp__'));
         const regularTools = toolNames.filter(name => !name.startsWith('mcp__'));
 
-        // Extract unique MCP server names
-        const mcpServers = [...new Set(
+        // Extract unique external MCP server names
+        const externalMcpServers = [...new Set(
             mcpTools.map(name => {
                 const parts = name.split('__');
                 return parts[1]; // Get server name from mcp__<server>__<tool>
             }).filter(Boolean)
         )];
 
-        logger.debug("[ClaudeCodeProviderStrategy] Creating Claude Code provider", {
+        logger.info("[ClaudeCodeProviderStrategy] Creating Claude Code provider", {
             agent: context?.agentName,
             regularTools,
-            mcpServers,
+            externalMcpServers,
             mcpToolCount: mcpTools.length
         });
 
+        // Create SDK MCP server for local TENEX tools if any exist
+        const tenexSdkServer = regularTools.length > 0 && context?.tools
+            ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
+            : undefined;
+
+        // Build mcpServers configuration
+        const mcpServersConfig: any = {};
+
+        // Add external MCP servers by name
+        // Note: External MCP servers should be configured separately in Claude Code's config
+        // We only add the SDK server here for TENEX tools
+        if (externalMcpServers.length > 0) {
+            logger.debug(`[ClaudeCodeProviderStrategy] External MCP servers required: ${externalMcpServers.join(', ')}`);
+            // External servers need to be configured in Claude Code's own configuration
+            // We can't add them here as they require full server definitions
+        }
+
+        // Add SDK MCP server for TENEX tools
+        if (tenexSdkServer) {
+            mcpServersConfig.tenex = tenexSdkServer;
+        }
+
+        // Build allowed tools list
+        // Only include TENEX tools via SDK server since external MCP servers
+        // need to be configured separately in Claude Code
+        const allowedTools = tenexSdkServer
+            ? regularTools.map(name => `mcp__tenex__${name}`) // TENEX tools via SDK server
+            : [];
+
         // Create Claude Code provider with runtime configuration
         const claudeCodeConfig = {
-            // Include MCP servers that this agent needs
-            mcpServers: mcpServers.length > 0 ? mcpServers : undefined,
+            // Include both external MCP servers and SDK MCP server
+            mcpServers: Object.keys(mcpServersConfig).length > 0 ? mcpServersConfig : undefined,
 
-            // Allow all tools that the agent has access to
-            allowedTools: toolNames.length > 0 ? toolNames : undefined,
+            // Allow all tools (both external MCP and TENEX via SDK)
+            allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
 
             // Default settings
             defaultSettings: {
-                // Use environment variable or default path
-                pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || '/usr/local/bin/claude',
-
                 // Permission mode - could be configurable per agent
-                permissionMode: 'default',
-
-                // Custom system prompt could include agent context
-                customSystemPrompt: context?.agentName
-                    ? `You are operating as the ${context.agentName} agent.`
-                    : undefined
+                permissionMode: 'bypassPermissions',
             }
         };
 

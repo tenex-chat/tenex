@@ -17,8 +17,7 @@ import "./fragments/10-referenced-article"; // Conditional
 // Priority 15 - Available agents
 import "./fragments/15-available-agents";
 
-// Priority 20 - Phase and mode context
-import "./fragments/20-phase-context"; // Shared
+// Priority 20 - Mode context
 import "./fragments/20-voice-mode"; // Conditional
 
 // Priority 24 - Lessons

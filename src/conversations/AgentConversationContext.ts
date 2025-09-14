@@ -333,7 +333,7 @@ export class AgentConversationContext {
         });
         if (phaseContent) {
           messages.push({ role: "system", content: phaseContent });
-          logger.debug("[AGENT_CONTEXT] Added phase transition", {
+          logger.info("[AGENT_CONTEXT] Added phase transition", {
             eventId: event.id.substring(0, 8),
             phase: phaseTag,
             hasInstructions: !!phaseInstructionsTag,
@@ -364,7 +364,7 @@ export class AgentConversationContext {
           const message = await MessageRoleAssigner.assignRole(
             event,
             processed,
-            this.agentSlug,
+            this.agentPubkey!,
             this.conversationId
           );
           messages.push(message);
@@ -397,9 +397,9 @@ export class AgentConversationContext {
         // Process the stripped content
         const processed = await NostrEntityProcessor.processEntities(strippedContent);
         const message = await MessageRoleAssigner.assignRole(
-          event, 
-          processed, 
-          this.agentSlug, 
+          event,
+          processed,
+          this.agentPubkey!,
           this.conversationId
         );
         messages.push(message);
@@ -428,7 +428,7 @@ export class AgentConversationContext {
         const message = await MessageRoleAssigner.assignRole(
           triggeringEvent,
           processed,
-          this.agentSlug,
+          this.agentPubkey!,
           this.conversationId
         );
         messages.push(message);

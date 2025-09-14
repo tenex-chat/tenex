@@ -11,6 +11,8 @@ import type { Phase, AgentState, Conversation, ConversationMetadata } from "../t
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
 import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
+import { ThreadService } from "./ThreadService";
+import { ParticipationIndex } from "./ParticipationIndex";
 
 /**
  * Coordinates between all conversation services.
@@ -20,7 +22,10 @@ export class ConversationCoordinator {
   private store: ConversationStore;
   private persistence: IConversationPersistenceService;
   private eventProcessor: ConversationEventProcessor;
-  
+
+  // NEW: Expose decomposed services for strategies to use
+  public readonly threadService = new ThreadService();
+  public readonly participationIndex = new ParticipationIndex();
 
   constructor(
     projectPath: string,
@@ -40,6 +45,11 @@ export class ConversationCoordinator {
   async initialize(): Promise<void> {
     await this.persistence.initialize();
     await this.loadConversations();
+
+    // Build participation indices for loaded conversations
+    for (const conversation of this.store.getAll()) {
+      this.participationIndex.buildIndex(conversation.id, conversation.history);
+    }
   }
 
   /**
@@ -110,6 +120,10 @@ export class ConversationCoordinator {
     }
 
     this.eventProcessor.processIncomingEvent(conversation, event);
+
+    // NEW: Update participation index whenever events are added
+    this.participationIndex.buildIndex(conversationId, conversation.history);
+
     await this.persistence.save(conversation);
   }
 

@@ -264,10 +264,14 @@ export class ConfigService {
    */
   createLLMService(
     llmLogger: LLMLogger,
-    configName?: string
+    configName?: string,
+    context?: {
+      tools?: Record<string, any>;
+      agentName?: string;
+    }
   ): LLMService {
     const config = this.getLLMConfig(configName);
-    return llmServiceFactory.createService(llmLogger, config);
+    return llmServiceFactory.createService(llmLogger, config, context);
   }
 
   // =====================================================================================

@@ -7,6 +7,11 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  * @returns true if the event is from an agent, false if from a user
  */
 export function isEventFromAgent(event: NDKEvent): boolean {
+  if (!isProjectContextInitialized()) {
+    // If no project context, we can't determine if it's from an agent
+    return false;
+  }
+
   const projectCtx = getProjectContext();
 
   // Check if it's from the project itself

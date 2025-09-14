@@ -4,7 +4,6 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -20,7 +19,6 @@ export interface BuildSystemPromptOptions {
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
   isProjectManager?: boolean; // Indicates if this agent is the PM
-  transientPhaseContext?: { phase?: string; phaseInstructions?: string }; // Transient phase context from delegation
 }
 
 export interface BuildStandalonePromptOptions {
@@ -32,7 +30,6 @@ export interface BuildStandalonePromptOptions {
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
-  transientPhaseContext?: { phase?: string; phaseInstructions?: string }; // Transient phase context from delegation
 }
 
 export interface SystemMessage {
@@ -50,12 +47,7 @@ function addCoreAgentFragments(
     agent: AgentInstance,
     conversation?: Conversation,
     agentLessons?: Map<string, NDKAgentLesson[]>,
-    triggeringEvent?: NDKEvent,
-    transientPhaseContext?: { phase?: string; phaseInstructions?: string }
 ): void {
-    // Add voice mode instructions if applicable
-    builder.add("voice-mode", { isVoiceMode: isVoiceMode(triggeringEvent) });
-
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
         builder.add("referenced-article", conversation.metadata.referencedArticle);
@@ -67,19 +59,6 @@ function addCoreAgentFragments(
         conversation,
         agentLessons: agentLessons || new Map(),
     });
-
-    // Add phase context from transient phase context only
-    const phaseInstructions = buildPhaseInstructions(conversation, transientPhaseContext);
-    if (phaseInstructions) {
-        builder.addFragment(
-            {
-                id: "phase-instructions-raw",
-                priority: 20,
-                template: () => phaseInstructions,
-            },
-            {}
-        );
-    }
 }
 
 /**
@@ -95,65 +74,6 @@ function addAgentFragments(
         agents: availableAgents,
         currentAgent: agent,
     });
-}
-
-/**
- * Add delegated task context if applicable
- */
-function addDelegatedTaskContext(
-    builder: PromptBuilder,
-    triggeringEvent?: NDKEvent
-): void {
-    // Check if this is a delegated task (NDKTask kind 1934)
-    const isDelegatedTask = triggeringEvent?.kind === 1934;
-    if (isDelegatedTask) {
-        builder.add("delegated-task-context", {
-            taskDescription: triggeringEvent?.content || "Complete the assigned task",
-        });
-    }
-}
-
-/**
- * Export phase instruction building for use by other modules
- */
-export function buildPhaseInstructions(
-  conversation?: Conversation,
-  transientPhaseContext?: { phase?: string; phaseInstructions?: string }
-): string {
-  // Use transient phase context if provided (from delegate_phase events)
-  if (transientPhaseContext?.phaseInstructions && transientPhaseContext.phase) {
-    return `=== CURRENT PHASE: ${transientPhaseContext.phase.toUpperCase()} ===
-
-${transientPhaseContext.phaseInstructions}`;
-  }
-
-  // No phase instructions if no transient phase context
-  if (!transientPhaseContext?.phase) {
-    return "";
-  }
-
-  // Otherwise, use standard phase context if phase exists
-  return PromptBuilder.buildFragment("phase-context", {
-      phase: transientPhaseContext.phase,
-      phaseMetadata: conversation?.metadata,
-      conversation,
-  });
-}
-
-/**
- * Export phase transition formatting for use by other modules
- */
-export function formatPhaseTransitionMessage(
-  currentPhase: string,
-  phaseInstructions: string
-): string {
-  return `=== PHASE TRANSITION ===
-
-The conversation is now in the ${currentPhase.toUpperCase()} phase.
-
-${phaseInstructions}
-
-Please adjust your behavior according to the phase requirements.`;
 }
 
 /**
@@ -212,7 +132,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     conversation,
     agentLessons,
     triggeringEvent,
-    transientPhaseContext,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();
@@ -227,17 +146,12 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   // Add agent phases awareness if agent has phases defined
   systemPromptBuilder.add("agent-phases", { agent });
 
-  // Add delegated task context if applicable
-  addDelegatedTaskContext(systemPromptBuilder, triggeringEvent);
-
   // Add core agent fragments using shared composition
   addCoreAgentFragments(
     systemPromptBuilder,
     agent,
     conversation,
     agentLessons,
-    triggeringEvent,
-    transientPhaseContext
   );
 
   // Add agent-specific fragments
@@ -303,7 +217,6 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     conversation,
     agentLessons,
     triggeringEvent,
-    transientPhaseContext,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();
@@ -315,17 +228,12 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
   });
 
-  // Add delegated task context if applicable
-  addDelegatedTaskContext(systemPromptBuilder, triggeringEvent);
-
   // Add core agent fragments using shared composition
   addCoreAgentFragments(
     systemPromptBuilder,
     agent,
     conversation,
     agentLessons,
-    triggeringEvent,
-    transientPhaseContext
   );
 
   // Add agent-specific fragments only if multiple agents available

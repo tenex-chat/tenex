@@ -14,7 +14,6 @@ import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
-import { phaseContextFragment } from "./20-phase-context";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { projectMdFragment } from "./30-project-md";
 import { inventoryContextFragment } from "./30-project-inventory";
@@ -37,9 +36,6 @@ export function registerAllFragments(): void {
   fragmentRegistry.register(delegationCompletionFragment);
   fragmentRegistry.register(phaseTransitionFragment);
 
-  // Phase-related fragments
-  fragmentRegistry.register(phaseContextFragment);
-  
   // Agent collaboration
   fragmentRegistry.register(availableAgentsFragment);
   
