@@ -2,12 +2,14 @@ import * as path from "node:path";
 import { EventMonitor } from "@/daemon/EventMonitor";
 import { ProcessManager } from "@/daemon/ProcessManager";
 import { ProjectManager } from "@/daemon/ProjectManager";
-import { initNDK, shutdownNDK } from "@/nostr/ndkClient";
+import { initNDK, shutdownNDK, getNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "@/utils/setup";
 import { Command } from "commander";
+import { SchedulerService } from "@/services/SchedulerService";
+import { ScheduledTaskHandler } from "@/nostr/ScheduledTaskHandler";
 
 export const daemonCommand = new Command("daemon")
   .description("Start the TENEX daemon to monitor Nostr events")
@@ -47,16 +49,29 @@ export const daemonCommand = new Command("daemon")
 
     // Initialize NDK and get singleton
     await initNDK();
+    const ndk = getNDK();
 
     // Initialize core components
     const projectManager = new ProjectManager(options.projectsPath);
     const processManager = new ProcessManager();
     const eventMonitor = new EventMonitor(projectManager, processManager);
+    
+    // Initialize scheduler service
+    const schedulerService = SchedulerService.getInstance();
+    await schedulerService.initialize(ndk, options.projectsPath);
+    
+    // Initialize scheduled task handler for Nostr events
+    const scheduledTaskHandler = new ScheduledTaskHandler(ndk, schedulerService);
+    await scheduledTaskHandler.initialize();
 
     // Set up graceful shutdown
     setupGracefulShutdown(async () => {
       // Stop monitoring new events
       await eventMonitor.stop();
+      
+      // Shutdown scheduler
+      schedulerService.shutdown();
+      scheduledTaskHandler.shutdown();
 
       // Stop all running projects
       await processManager.stopAll();

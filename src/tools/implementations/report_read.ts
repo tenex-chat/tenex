@@ -25,7 +25,79 @@ interface ReportReadOutput {
     hashtags?: string[];
     projectReference?: string;
   };
+  humanReadable?: string;
   message?: string;
+}
+
+/**
+ * Format article data for display
+ */
+function formatArticleContent(article: ReportReadOutput['article']): string {
+  if (!article) {
+    return "No article data available";
+  }
+
+  const sections: string[] = [];
+  
+  // Title section
+  if (article.title) {
+    sections.push(`# ${article.title}`);
+    sections.push(''); // Empty line for spacing
+  }
+  
+  // Metadata section
+  const metadata: string[] = [];
+  
+  if (article.slug) {
+    metadata.push(`**Slug:** ${article.slug}`);
+  }
+  
+  if (article.author) {
+    metadata.push(`**Author:** ${article.author}`);
+  }
+  
+  if (article.publishedAt) {
+    const date = new Date(article.publishedAt * 1000);
+    metadata.push(`**Published:** ${date.toLocaleString()}`);
+  }
+  
+  if (article.hashtags && article.hashtags.length > 0) {
+    metadata.push(`**Tags:** ${article.hashtags.map(tag => `#${tag}`).join(', ')}`);
+  }
+  
+  if (metadata.length > 0) {
+    sections.push(metadata.join('\n'));
+    sections.push(''); // Empty line for spacing
+  }
+  
+  // Summary section
+  if (article.summary) {
+    sections.push('## Summary');
+    sections.push(article.summary);
+    sections.push(''); // Empty line for spacing
+  }
+  
+  // Content section
+  if (article.content) {
+    sections.push('## Content');
+    sections.push(article.content);
+    sections.push(''); // Empty line for spacing
+  }
+  
+  // Reference section
+  if (article.projectReference) {
+    sections.push('---');
+    sections.push(`**Project Reference:** ${article.projectReference}`);
+  }
+  
+  if (article.id) {
+    if (!article.projectReference) {
+      sections.push('---');
+    }
+    sections.push(`**Nostr ID:** ${article.id}`);
+  }
+  
+  return sections.join('\n').trim();
 }
 
 /**
@@ -79,19 +151,22 @@ async function executeReportRead(
     agent: context.agent.name,
   });
 
+  const articleData = {
+    id: report.id,
+    slug: report.slug,
+    title: report.title,
+    summary: report.summary,
+    content: report.content,
+    author: report.author,
+    publishedAt: report.publishedAt,
+    hashtags: report.hashtags,
+    projectReference: report.projectReference,
+  };
+
   return {
     success: true,
-    article: {
-      id: report.id,
-      slug: report.slug,
-      title: report.title,
-      summary: report.summary,
-      content: report.content,
-      author: report.author,
-      publishedAt: report.publishedAt,
-      hashtags: report.hashtags,
-      projectReference: report.projectReference,
-    },
+    article: articleData,
+    humanReadable: formatArticleContent(articleData),
   };
 }
 
@@ -99,13 +174,20 @@ async function executeReportRead(
  * Create an AI SDK tool for reading reports
  */
 export function createReportReadTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
-    description: "Read an NDKArticle report by slug or naddr identifier",
+  const toolInstance = tool({
+    description: "Read a report by slug or naddr identifier",
     
     inputSchema: reportReadSchema,
     
     execute: async (input: ReportReadInput) => {
       return await executeReportRead(input, context);
     },
+  });
+
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: ({ identifier }: ReportReadInput) => {
+      return `Reading report: ${identifier}`;
+    }
   });
 }

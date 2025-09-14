@@ -11,7 +11,6 @@ export const CORE_AGENT_TOOLS = [
   "read_path",     // All agents need file system access
   "reports_list",  // All agents should see available reports
   "report_read",   // All agents should read reports
-  // NOTE: delegate tools are NOT core - they're added dynamically in AgentExecutor based on PM status
 ] as const;
 
 /**
