@@ -27,7 +27,6 @@ export class DelegationService {
     private conversationCoordinator: ConversationCoordinator,
     private triggeringEvent: NDKEvent,
     private publisher: AgentPublisher,
-    private phase?: string
   ) {}
 
   /**
@@ -55,7 +54,6 @@ export class DelegationService {
       triggeringEvent: this.triggeringEvent,
       rootEvent: conversation?.history[0] ?? this.triggeringEvent, // Use triggering event as fallback
       conversationId: this.conversationId,
-      phase: this.phase,
     };
 
     // Publish based on intent type

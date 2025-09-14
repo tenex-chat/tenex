@@ -1,5 +1,4 @@
 import { PromptFragment } from "@/prompts/core/types";
-import { fragmentRegistry } from "../core/FragmentRegistry";
 
 /**
  * Fragment for phase transition instructions

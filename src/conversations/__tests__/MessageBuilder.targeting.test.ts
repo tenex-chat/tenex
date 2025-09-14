@@ -14,12 +14,18 @@ mock.module("@/services", () => ({
 mock.module("@/services/PubkeyNameRepository", () => ({
   getPubkeyNameRepository: mock(() => ({
     getName: mock(async (pubkey: string) => {
-      // Return "TestUser" for user pubkeys, otherwise return the agent slug
+      // Map pubkeys to names
       if (pubkey === "user-pubkey") return "TestUser";
+      if (pubkey === "agent1-pubkey") return "code-writer";
+      if (pubkey === "agent2-pubkey") return "reviewer";
+      if (pubkey === "agent3-pubkey") return "project-manager";
       return "User";
     }),
     getNameSync: mock((pubkey: string) => {
       if (pubkey === "user-pubkey") return "TestUser";
+      if (pubkey === "agent1-pubkey") return "code-writer";
+      if (pubkey === "agent2-pubkey") return "reviewer";
+      if (pubkey === "agent3-pubkey") return "project-manager";
       return "User";
     })
   }))
@@ -98,7 +104,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Hello everyone",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       expect(message.role).toBe("user");
@@ -113,7 +119,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Please write some code",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       expect(message.role).toBe("user");
@@ -128,7 +134,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Please write some code",
-        "reviewer" // Different agent viewing the message
+        "agent2-pubkey" // Different agent viewing the message
       );
       
       expect(message.role).toBe("system");
@@ -145,7 +151,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message1 = await MessageRoleAssigner.assignRole(
         event,
         "Please collaborate on this",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       expect(message1.role).toBe("user");
@@ -155,7 +161,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message2 = await MessageRoleAssigner.assignRole(
         event,
         "Please collaborate on this",
-        "project-manager"
+        "agent3-pubkey"
       );
       
       expect(message2.role).toBe("system");
@@ -171,7 +177,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Mixed p-tags message",
-        "reviewer"
+        "agent2-pubkey"
       );
       
       // Should only show the agent that was targeted
@@ -187,7 +193,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "I've written the code",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       expect(message.role).toBe("assistant");
@@ -200,7 +206,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "I've written the code",
-        "reviewer" // Different agent viewing
+        "agent2-pubkey" // Different agent viewing
       );
       
       expect(message.role).toBe("system");
@@ -215,7 +221,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Can you review this code?",
-        "reviewer" // Targeted agent viewing
+        "agent2-pubkey" // Targeted agent viewing
       );
       
       expect(message.role).toBe("user");
@@ -230,7 +236,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Can you review this code?",
-        "project-manager" // Non-targeted agent observing
+        "agent3-pubkey" // Non-targeted agent observing
       );
       
       expect(message.role).toBe("system");
@@ -247,7 +253,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message1 = await MessageRoleAssigner.assignRole(
         event,
         "Need input from both of you",
-        "reviewer"
+        "agent2-pubkey"
       );
       
       expect(message1.role).toBe("user");
@@ -257,7 +263,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message2 = await MessageRoleAssigner.assignRole(
         event,
         "Need input from both of you",
-        "project-manager"
+        "agent3-pubkey"
       );
       
       expect(message2.role).toBe("user");
@@ -273,7 +279,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Anonymous message",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       // Should treat as user message (fallback)
@@ -287,7 +293,7 @@ describe("MessageRoleAssigner - Message Targeting", () => {
       const message = await MessageRoleAssigner.assignRole(
         event,
         "Message from unknown",
-        "code-writer"
+        "agent1-pubkey"
       );
       
       // Unknown pubkeys are treated as users (since isEventFromUser returns true for non-agent pubkeys)

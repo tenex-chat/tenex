@@ -131,11 +131,3 @@ export function clearProcessedEvents(): void {
     saveDebounceTimeout = null;
   }
 }
-
-/**
- * Get the total number of processed events
- * @returns The count of processed event IDs
- */
-export function getProcessedEventCount(): number {
-  return processedEventIds.size;
-}

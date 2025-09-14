@@ -46,7 +46,7 @@ export class AgentEventDecoder {
    * Check if this is a task completion event (for NDKTask kind:1934)
    * Note: This is different from delegation completions (kind:1111)
    */
-  static isTaskCompletionEvent(event: NDKEvent): boolean {
+  private static isTaskCompletionEvent(event: NDKEvent): boolean {
     // Only for actual NDKTask completions, not delegations
     if (
       event.tagValue("K") === NDKTask.kind.toString() &&
@@ -59,35 +59,12 @@ export class AgentEventDecoder {
   }
 
   /**
-   * Extract task ID from an event
-   */
-  static getTaskId(event: NDKEvent): string | undefined {
-    // For task completions, the task ID is in the E tag
-    if (AgentEventDecoder.isTaskCompletionEvent(event)) {
-      return event.tagValue("E");
-    }
-
-    // For task events themselves
-    if (event.kind === NDKTask.kind) {
-      return event.id;
-    }
-
-    return undefined;
-  }
-
-  /**
    * Get conversation root from event
    */
   static getConversationRoot(event: NDKEvent): string | undefined {
     return event.tagValue("E") || event.tagValue("A");
   }
 
-  /**
-   * Get Claude session ID from event
-   */
-  static getClaudeSessionId(event: NDKEvent): string | undefined {
-    return event.tagValue("claude-session");
-  }
 
   /**
    * Check if event is an orphaned reply (reply without findable root)
@@ -239,10 +216,4 @@ export class AgentEventDecoder {
     return event.kind === EVENT_KINDS.STREAMING_RESPONSE;
   }
 
-  /**
-   * Check if this is a typing indicator event
-   */
-  static isTypingEvent(event: NDKEvent): boolean {
-    return event.kind === EVENT_KINDS.TYPING_INDICATOR;
-  }
 }

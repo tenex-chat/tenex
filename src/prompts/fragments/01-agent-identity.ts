@@ -37,8 +37,8 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
       [
         "## Project Context",
         `- Title: "${projectTitle}"`,
-        `- Path: ${process.cwd()}`,
-        `- User pubkey: "${projectOwnerPubkey}"`,
+        `- Absolute Path: ${process.cwd()}`,
+        `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
       ].join("\n")
     );
 

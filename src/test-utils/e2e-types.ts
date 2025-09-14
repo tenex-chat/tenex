@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
-import type { AgentConversationContext } from "@/conversations/AgentConversationContext";
 import type { ConversationMessageRepository } from "@/conversations/ConversationMessageRepository";
 import type { MockLLMService } from "@/llm/__tests__/MockLLMService";
 import type { AgentRegistry } from "@/agents/AgentRegistry";
@@ -10,7 +9,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 export interface E2ETestContext {
     mockLLM: MockLLMService;
     conversationCoordinator: ConversationCoordinator;
-    agentContext: AgentConversationContext;
     messageRepo: ConversationMessageRepository;
     agentRegistry: AgentRegistry;
     projectContext: ProjectContext;

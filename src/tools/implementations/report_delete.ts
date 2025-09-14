@@ -29,7 +29,6 @@ async function executeReportDelete(
   logger.info("🗑️ Deleting report", {
     slug,
     agent: context.agent.name,
-    phase: context.phase,
   });
 
   const reportManager = new ReportManager();

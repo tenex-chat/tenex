@@ -14,6 +14,11 @@ describe("ThreadService", () => {
         tags: parentId ? [['e', parentId]] : [],
         content: `Message ${id}`,
         sig: 'mock-sig',
+        // Add the tagValue method that ThreadService needs
+        tagValue: function(tagName: string): string | undefined {
+            const tag = this.tags.find((t: string[]) => t[0] === tagName);
+            return tag ? tag[1] : undefined;
+        }
     } as NDKEvent);
 
     describe("getThreadToEvent", () => {

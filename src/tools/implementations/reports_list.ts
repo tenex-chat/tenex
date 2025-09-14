@@ -41,7 +41,6 @@ async function executeReportsList(input: ReportsListInput, context: ExecutionCon
   logger.info("📚 Listing reports", {
     allAgents,
     agent: context.agent.name,
-    phase: context.phase,
   });
 
   const reportManager = new ReportManager();

@@ -13,19 +13,19 @@ const delegatePhaseSchema = z.object({
   phase: z
     .string()
     .describe("The phase to switch to (must be defined in agent's phases configuration)"),
-  recipient: z
-    .string()
+  recipients: z
+    .array(z.string())
     .describe(
-      "Agent slug (e.g., 'architect'), npub, or hex pubkey to delegate to in this phase."
+      "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) to delegate to in this phase."
     ),
-  fullRequest: z
+  prompt: z
     .string()
     .describe(
-      "The complete request or question to delegate - this becomes the phase reason and delegation content"
+      "The request or question to delegate - this will be what the recipient processes."
     ),
   title: z
     .string()
-    .nullable()
+    .optional()
     .describe("Title for this conversation (if not already set)."),
 });
 
@@ -34,7 +34,7 @@ type DelegatePhaseOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
 async function executeDelegatePhase(input: DelegatePhaseInput, context: ExecutionContext): Promise<DelegatePhaseOutput> {
-  const { phase, recipient, fullRequest, title } = input;
+  const { phase, recipients, prompt, title } = input;
 
   // Validate that the phase exists in the agent's phases configuration
   if (!context.agent.phases) {
@@ -55,10 +55,33 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   // Use the actual phase name and instructions from configuration
   const [actualPhaseName, phase_instructions] = phaseEntry;
 
-  // Resolve recipient to pubkey
-  const pubkey = resolveRecipientToPubkey(recipient);
-  if (!pubkey) {
-    throw new Error(`Could not resolve recipient: ${recipient}`);
+  // Recipients is always an array due to schema validation
+  if (!Array.isArray(recipients)) {
+    throw new Error("Recipients must be an array of strings");
+  }
+
+  // Resolve recipients to pubkeys
+  const resolvedPubkeys: string[] = [];
+  const failedRecipients: string[] = [];
+
+  for (const recipient of recipients) {
+    const pubkey = resolveRecipientToPubkey(recipient);
+    if (pubkey) {
+      resolvedPubkeys.push(pubkey);
+    } else {
+      failedRecipients.push(recipient);
+    }
+  }
+
+  if (failedRecipients.length > 0) {
+    logger.warn("Some recipients could not be resolved", {
+      failed: failedRecipients,
+      resolved: resolvedPubkeys.length,
+    });
+  }
+
+  if (resolvedPubkeys.length === 0) {
+    throw new Error("No valid recipients provided.");
   }
 
   if (title) {
@@ -80,7 +103,8 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   logger.info("[delegate_phase() tool] 🎯 Starting phase delegation", {
     fromAgent: context.agent.slug,
     phase: actualPhaseName,
-    recipient: recipient,
+    recipients: recipients,
+    recipientCount: resolvedPubkeys.length,
     mode: "synchronous",
   });
 
@@ -96,15 +120,15 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   );
 
   const responses = await delegationService.execute({
-    recipients: [pubkey],
-    request: fullRequest,
+    recipients: resolvedPubkeys,
+    request: prompt,
     phase: actualPhaseName, // Include phase in the delegation intent
     phaseInstructions: phase_instructions, // Pass phase instructions to be included in event tags
   });
 
   logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
     phase: actualPhaseName,
-    recipient: recipient,
+    recipientCount: resolvedPubkeys.length,
     responseCount: responses.responses.length,
     mode: "synchronous",
   });
@@ -116,17 +140,21 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 export function createDelegatePhaseTool(context: ExecutionContext): TenexTool {
     const toolInstance = tool({
         description:
-            "Switch conversation phase and delegate a question or task to a specific agent.  Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation.",
+            "Switch conversation phase and delegate a question or task to one or more agents. Use for complex multi-step operations that require specialized expertise. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
         inputSchema: delegatePhaseSchema,
         execute: async (input: DelegatePhaseInput) => {
             return await executeDelegatePhase(input, context);
         },
     });
-    
+
     // Add human-readable content generation
     return Object.assign(toolInstance, {
-        getHumanReadableContent: ({ phase, recipient }: DelegatePhaseInput) => {
-            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipient}`;
+        getHumanReadableContent: ({ phase, recipients }: DelegatePhaseInput) => {
+            if (recipients.length === 1) {
+                return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients[0]}`;
+            } else {
+                return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.length} recipients`;
+            }
         }
     }) as TenexTool;
 }
@@ -150,17 +178,21 @@ export function createDelegatePhaseTool(context: ExecutionContext): TenexTool {
  * - Each phase has predefined instructions
  * - Agents receive these instructions as part of their execution context
  *
- * The fullRequest serves dual purpose:
+ * The prompt serves dual purpose:
  * - Becomes the phase transition reason (context for all agents)
  * - Is the actual task delegated to the specified recipients
  *
- * Recipient can be:
- * - Agent slug (e.g., "architect", "planner") - resolved from project agents
- * - Agent name (e.g., "Architect", "Planner") - resolved from project agents
- * - Npub (e.g., "npub1...") - decoded to hex pubkey
- * - Hex pubkey (64 characters) - used directly
+ * Recipients can be:
+ * - A single recipient or array of recipients
+ * - Agent slugs (e.g., "architect", "planner") - resolved from project agents
+ * - Agent names (e.g., "Architect", "Planner") - resolved from project agents
+ * - Npubs (e.g., "npub1...") - decoded to hex pubkeys
+ * - Hex pubkeys (64 characters) - used directly
  *
- * If recipient cannot be resolved, the tool fails with an error.
+ * If any recipient cannot be resolved, the tool fails with an error.
+ *
+ * When delegating to multiple recipients, the agent will wait for all responses
+ * before continuing. The agent should NOT complete after delegating.
  *
  * The agent should NOT complete after using delegate_phase.
  */

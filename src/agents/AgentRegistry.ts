@@ -50,6 +50,17 @@ export class AgentRegistry {
     }
   }
 
+  /**
+   * Get the base path for the project
+   */
+  getBasePath(): string {
+    // If basePath already includes .tenex, extract the project path
+    if (this.basePath.endsWith(".tenex")) {
+      return path.dirname(this.basePath);
+    }
+    return this.basePath;
+  }
+
   async loadFromProject(ndkProject?: NDKProject): Promise<void> {
     // Ensure .tenex directory exists
     const tenexDir = this.basePath.endsWith(".tenex")
@@ -815,8 +826,8 @@ export class AgentRegistry {
       phases: agentDefinition.phases,
       createMetadataStore: (conversationId: string) => {
         const { AgentMetadataStore } = require('@/conversations/services/AgentMetadataStore');
-        const { getProjectContext } = require('@/services');
-        const projectPath = getProjectContext().projectPath;
+        // Use the registry's basePath to get the project path
+        const projectPath = this.getBasePath();
         return new AgentMetadataStore(conversationId, slug, projectPath);
       }
     };

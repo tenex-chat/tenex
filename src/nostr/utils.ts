@@ -107,3 +107,39 @@ export function isEventTargetedToAgent(event: NDKEvent, agentSlug: string): bool
   const targetedSlugs = getTargetedAgentSlugsFromEvent(event);
   return targetedSlugs.includes(agentSlug);
 }
+
+/**
+ * Get the agent pubkeys that are targeted by this event based on p-tags
+ * @param event - The NDK event to check
+ * @returns Array of agent pubkeys that are targeted by this event
+ */
+export function getTargetedAgentPubkeys(event: NDKEvent): string[] {
+  if (!isProjectContextInitialized()) {
+    return [];
+  }
+
+  const projectCtx = getProjectContext();
+  const targetedPubkeys: string[] = [];
+
+  // Get all p-tags from the event
+  const pTags = event.getMatchingTags("p");
+  if (pTags.length === 0) {
+    return [];
+  }
+
+  // Check each p-tag to see if it matches an agent
+  for (const pTag of pTags) {
+    const pubkey = pTag[1];
+    if (!pubkey) continue;
+
+    // Check if this pubkey belongs to an agent
+    for (const agent of projectCtx.agents.values()) {
+      if (agent.pubkey === pubkey) {
+        targetedPubkeys.push(pubkey);
+        break;
+      }
+    }
+  }
+
+  return targetedPubkeys;
+}

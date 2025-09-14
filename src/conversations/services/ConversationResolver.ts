@@ -2,7 +2,7 @@ import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 
 
@@ -86,12 +86,19 @@ export class ConversationResolver {
     );
 
     // Create a synthetic root event based on the reply
-    const syntheticRootEvent: NDKEvent = {
-      ...event,
-      id: convRoot || event.id, // Use conversation root if available, otherwise use the reply's ID
-      content: `[Orphaned conversation - original root not found]\n\n${event.content}`,
-      tags: event.tags.filter((tag) => tag[0] !== "E" && tag[0] !== "e"), // Remove reply tags
-    } as NDKEvent;
+    // Use NDKEvent constructor to maintain proper prototype chain
+    const { getNDK } = await import("@/nostr/ndkClient");
+    const ndk = getNDK();
+    const syntheticRootEvent = new NDKEvent(ndk);
+
+    // Copy properties from the original event
+    syntheticRootEvent.id = convRoot || event.id; // Use conversation root if available, otherwise use the reply's ID
+    syntheticRootEvent.content = `[Orphaned conversation - original root not found]\n\n${event.content}`;
+    syntheticRootEvent.tags = event.tags.filter((tag) => tag[0] !== "E" && tag[0] !== "e"); // Remove reply tags
+    syntheticRootEvent.kind = event.kind;
+    syntheticRootEvent.pubkey = event.pubkey;
+    syntheticRootEvent.created_at = event.created_at;
+    syntheticRootEvent.sig = event.sig;
 
     const conversation = await this.conversationCoordinator.createConversation(syntheticRootEvent);
 

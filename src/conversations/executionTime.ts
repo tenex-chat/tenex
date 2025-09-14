@@ -54,30 +54,16 @@ export function getTotalExecutionTimeSeconds(conversation: Conversation): number
 }
 
 /**
- * Check if conversation is currently tracking execution time
- */
-export function isExecutionActive(conversation: Conversation): boolean {
-  return conversation.executionTime.isActive;
-}
-
-/**
- * Initialize execution time for a new conversation
- */
-export function initializeExecutionTime(conversation: Conversation): void {
-  conversation.executionTime = {
-    totalSeconds: 0,
-    currentSessionStart: undefined,
-    isActive: false,
-    lastUpdated: Date.now(),
-  };
-}
-
-/**
  * Ensure conversation has execution time initialized (for loaded conversations)
  */
 export function ensureExecutionTimeInitialized(conversation: Conversation): void {
   if (!conversation.executionTime) {
-    initializeExecutionTime(conversation);
+    conversation.executionTime = {
+      totalSeconds: 0,
+      currentSessionStart: undefined,
+      isActive: false,
+      lastUpdated: Date.now(),
+    };
     return;
   }
 

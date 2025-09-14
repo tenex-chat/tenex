@@ -46,14 +46,29 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 
   logger.debug("Processing recipient", { pubkey });
 
+  // Check for previous delegations to the same recipient in this conversation
+  const registry = DelegationRegistry.getInstance();
+  const previousDelegation = registry.getDelegationByConversationKey(
+    context.conversationId,
+    context.agent.pubkey,
+    pubkey
+  );
+
   // Create a new kind:11 event for starting a thread
   const chatEvent = new NDKEvent(ndk);
   chatEvent.kind = 11;
-  
-  if (context.phase) chatEvent.tags.push(["phase", context.phase]);
-  chatEvent.tags.push(["tool", "delegate_external"]);
+
   chatEvent.content = content;
   chatEvent.tags.push(["p", pubkey]);
+
+  // If there was a previous delegation to this recipient, make this a reply to maintain thread continuity
+  if (previousDelegation) {
+    chatEvent.tags.push(["e", previousDelegation.delegationEventId, "", "reply"]);
+    logger.info("🔗 Creating threaded delegation - replying to previous delegation", {
+      previousDelegationId: previousDelegation.delegationEventId.substring(0, 8),
+      recipient: pubkey.substring(0, 8),
+    });
+  }
 
   // Add project reference if provided
   if (cleanProjectId) {
@@ -68,18 +83,16 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   }
 
   logger.debug("Chat event details", { eventId: chatEvent.id, kind: chatEvent.kind });
-  
+
   // Sign and publish the event
   await chatEvent.sign(context.agent.signer);
   chatEvent.publish();
 
-  const registry = DelegationRegistry.getInstance();
   const batchId = await registry.registerDelegation({
     delegationEventId: chatEvent.id,
     recipients: [{
       pubkey: pubkey,
       request: content,
-      phase: context.phase,
     }],
     delegatingAgent: context.agent,
     rootConversationId: context.conversationId,
@@ -142,7 +155,11 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 // AI SDK tool factory
 export function createDelegateExternalTool(context: ExecutionContext): TenexTool {
   const toolInstance = tool({
-    description: "Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects.",
+    description: `Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects. If you don't know their pubkey you can use nostr_projects tools.
+
+When using this tool, provide context to the recipient, introduce yourself and explain you are an agent and the project you are working on. It's important for the recipient to understand where you're coming from.
+
+`,
     inputSchema: delegateExternalSchema,
     execute: async (input: DelegateExternalInput) => {
       return await executeDelegateExternal(input, context);

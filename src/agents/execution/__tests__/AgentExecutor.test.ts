@@ -217,9 +217,6 @@ describe("AgentExecutor", () => {
           lastUpdated: Date.now(),
         },
       })),
-      buildAgentMessages: mock(async () => ({
-        messages: [{ role: "user" as const, content: "Test user message" }],
-      })),
       buildOrchestratorRoutingContext: mock(async () => ({
         user_request: "Test user request",
         workflow_narrative:

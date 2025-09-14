@@ -19,6 +19,7 @@ export interface BuildSystemPromptOptions {
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
   isProjectManager?: boolean; // Indicates if this agent is the PM
+  projectManagerPubkey?: string; // Pubkey of the project manager
 }
 
 export interface BuildStandalonePromptOptions {
@@ -30,6 +31,7 @@ export interface BuildStandalonePromptOptions {
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
   triggeringEvent?: NDKEvent;
+  projectManagerPubkey?: string; // Pubkey of the project manager
 }
 
 export interface SystemMessage {
@@ -67,12 +69,14 @@ function addCoreAgentFragments(
 function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    availableAgents: AgentInstance[]
+    availableAgents: AgentInstance[],
+    projectManagerPubkey?: string
 ): void {
     // Add available agents for delegations
     builder.add("available-agents", {
         agents: availableAgents,
         currentAgent: agent,
+        projectManagerPubkey,
     });
 }
 
@@ -158,7 +162,8 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   addAgentFragments(
     systemPromptBuilder,
     agent,
-    availableAgents
+    availableAgents,
+    options.projectManagerPubkey
   );
 
   return systemPromptBuilder.build();
@@ -241,7 +246,8 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     addAgentFragments(
       systemPromptBuilder,
       agent,
-      availableAgents
+      availableAgents,
+      options.projectManagerPubkey
     );
   }
 

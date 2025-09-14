@@ -56,11 +56,6 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
   }
 }
 
-export function ensureDirectorySync(dirPath: string): void {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
 
 export async function directoryExists(dirPath: string): Promise<boolean> {
   try {
@@ -74,17 +69,6 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
   }
 }
 
-export function directoryExistsSync(dirPath: string): boolean {
-  try {
-    const stat = fs.statSync(dirPath);
-    return stat.isDirectory();
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return false;
-    }
-    throw err;
-  }
-}
 
 // Path existence check (works for both files and directories)
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -109,17 +93,6 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-export function fileExistsSync(filePath: string): boolean {
-  try {
-    const stat = fs.statSync(filePath);
-    return stat.isFile();
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return false;
-    }
-    throw err;
-  }
-}
 
 // JSON operations with error handling
 export async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -135,18 +108,6 @@ export async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-export function readJsonFileSync<T>(filePath: string): T | null {
-  try {
-    const content = fs.readFileSync(resolvePath(filePath), "utf-8");
-    return JSON.parse(content) as T;
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    logger.error(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
-    throw err;
-  }
-}
 
 export async function writeJsonFile<T>(
   filePath: string,
@@ -159,142 +120,7 @@ export async function writeJsonFile<T>(
   await fsPromises.writeFile(resolvedPath, JSON.stringify(data, null, spaces));
 }
 
-export function writeJsonFileSync<T>(
-  filePath: string,
-  data: T,
-  options?: { spaces?: number }
-): void {
-  const resolvedPath = resolvePath(filePath);
-  ensureDirectorySync(path.dirname(resolvedPath));
-  const spaces = options?.spaces ?? 2;
-  fs.writeFileSync(resolvedPath, JSON.stringify(data, null, spaces));
-}
 
-// Text file operations
-export async function readTextFile(filePath: string): Promise<string | null> {
-  try {
-    return await fsPromises.readFile(resolvePath(filePath), "utf-8");
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    logger.error(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
-    throw err;
-  }
-}
-
-export function readTextFileSync(filePath: string): string | null {
-  try {
-    return fs.readFileSync(resolvePath(filePath), "utf-8");
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    logger.error(`Failed to read text file ${filePath}: ${formatAnyError(err)}`);
-    throw err;
-  }
-}
-
-export async function writeTextFile(filePath: string, content: string): Promise<void> {
-  const resolvedPath = resolvePath(filePath);
-  await ensureDirectory(path.dirname(resolvedPath));
-  await fsPromises.writeFile(resolvedPath, content, "utf-8");
-}
-
-export function writeTextFileSync(filePath: string, content: string): void {
-  const resolvedPath = resolvePath(filePath);
-  ensureDirectorySync(path.dirname(resolvedPath));
-  fs.writeFileSync(resolvedPath, content, "utf-8");
-}
-
-// Directory listing
-export async function listDirectory(dirPath: string): Promise<string[]> {
-  try {
-    return await fsPromises.readdir(resolvePath(dirPath));
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return [];
-    }
-    throw err;
-  }
-}
-
-export function listDirectorySync(dirPath: string): string[] {
-  try {
-    return fs.readdirSync(resolvePath(dirPath));
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return [];
-    }
-    throw err;
-  }
-}
-
-// File copying
-export async function copyFile(src: string, dest: string): Promise<void> {
-  const resolvedDest = resolvePath(dest);
-  await ensureDirectory(path.dirname(resolvedDest));
-  await fsPromises.copyFile(resolvePath(src), resolvedDest);
-}
-
-export function copyFileSync(src: string, dest: string): void {
-  const resolvedDest = resolvePath(dest);
-  ensureDirectorySync(path.dirname(resolvedDest));
-  fs.copyFileSync(resolvePath(src), resolvedDest);
-}
-
-// File deletion
-export async function deleteFile(filePath: string): Promise<void> {
-  try {
-    await fsPromises.unlink(resolvePath(filePath));
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      // File doesn't exist, that's fine
-      return;
-    }
-    throw err;
-  }
-}
-
-export function deleteFileSync(filePath: string): void {
-  try {
-    fs.unlinkSync(resolvePath(filePath));
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      // File doesn't exist, that's fine
-      return;
-    }
-    throw err;
-  }
-}
-
-// Directory deletion
-export async function deleteDirectory(
-  dirPath: string,
-  options?: { recursive?: boolean }
-): Promise<void> {
-  try {
-    await fsPromises.rm(resolvePath(dirPath), { recursive: options?.recursive ?? true });
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      // Directory doesn't exist, that's fine
-      return;
-    }
-    throw err;
-  }
-}
-
-export function deleteDirectorySync(dirPath: string, options?: { recursive?: boolean }): void {
-  try {
-    fs.rmSync(resolvePath(dirPath), { recursive: options?.recursive ?? true });
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      // Directory doesn't exist, that's fine
-      return;
-    }
-    throw err;
-  }
-}
 
 // File stats
 export async function getFileStats(filePath: string): Promise<Stats | null> {
@@ -308,13 +134,3 @@ export async function getFileStats(filePath: string): Promise<Stats | null> {
   }
 }
 
-export function getFileStatsSync(filePath: string): Stats | null {
-  try {
-    return fs.statSync(resolvePath(filePath));
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      return null;
-    }
-    throw err;
-  }
-}

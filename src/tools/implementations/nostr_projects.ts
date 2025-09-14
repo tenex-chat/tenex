@@ -16,7 +16,7 @@ const nostrProjectsSchema = z
       .string()
       .nullable()
       .describe(
-        "Public key to fetch projects for. Defaults to project owner's pubkey if available"
+        "Public key to fetch projects for. Defaults to project owner's pubkey"
       ),
   })
   .partial(); // Make all properties optional, effectively allowing empty object
@@ -59,7 +59,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
   
   if (input.pubkey) {
     // Parse the provided pubkey (handles npub, nprofile, hex, with/without nostr: prefix)
-    targetPubkey = parseNostrUser(input.pubkey, ndk);
+    targetPubkey = parseNostrUser(input.pubkey);
     if (!targetPubkey) {
       throw new Error(`Invalid pubkey format: ${input.pubkey}`);
     }
@@ -80,29 +80,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
   logger.info("🔍 Fetching projects for pubkey", {
     pubkey: targetPubkey,
     agent: context.agent.name,
-    phase: context.phase,
   });
-
-  // Publish status message about what we're doing
-  try {
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    
-    if (conversation?.history?.[0]) {
-      // Format the pubkey as npub for the status message
-      const user = new NDKUser({ pubkey: targetPubkey });
-      await context.agentPublisher.conversation(
-        { content: `🔍 Getting nostr:${user.npub}'s projects` },
-        {
-          triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation.history[0],
-          conversationId: context.conversationId,
-        }
-      );
-    }
-  } catch (error) {
-    // Don't fail the tool if we can't publish the status
-    logger.warn("Failed to publish nostr_projects status:", error);
-  }
 
   // Calculate 1 minute ago timestamp for online status check
   const oneMinuteAgo = Math.floor(Date.now() / 1000) - 60;
@@ -275,8 +253,18 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
 // AI SDK tool factory
 export function createNostrProjectsTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: "Fetch Nostr projects for a pubkey, including online status and spec documents",
+    description: "Fetch Nostr projects for a pubkey. When you need to see someone's projects or you are asked to communicate with an agent in a different project, use this tool as a Yellow Pages for projects and agents",
     inputSchema: nostrProjectsSchema,
+    getHumanReadableContent: (input: NostrProjectsInput) => {
+      if (!input.pubkey) {
+        return "Getting your projects";
+      }
+      
+      const targetPubkey = parseNostrUser(input.pubkey);
+      const user = new NDKUser({pubkey: targetPubkey});
+
+      return `Getting ${user.npub}'s projects`;
+    },
     execute: async (input: NostrProjectsInput) => {
       return await executeNostrProjects(input, context);
     },

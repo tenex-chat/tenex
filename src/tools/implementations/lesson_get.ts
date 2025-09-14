@@ -26,7 +26,6 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
     agent: context.agent.name,
     agentPubkey: context.agent.pubkey,
     title,
-    phase: context.phase,
     conversationId: context.conversationId,
   });
 
@@ -53,33 +52,13 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
     throw new Error(`No lesson found with title: "${title}"`);
   }
 
-  // Publish status update about reading the lesson
-  try {
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    
-    if (conversation?.history?.[0]) {
-      const lessonTitle = lesson.title || title;
-      const lessonNaddr = lesson.encode();
-      await context.agentPublisher.conversation(
-        { content: `Reading [${lessonTitle}](nostr:${lessonNaddr})` },
-        {
-          triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation.history[0],
-          conversationId: context.conversationId,
-        }
-      );
-    }
-  } catch (error) {
-    // Don't fail the tool if we can't publish the status
-    logger.warn("Failed to publish lesson_get status:", error);
-  }
+  // No longer publishing status update - using getHumanReadableContent instead
 
   logger.info("✅ Successfully retrieved lesson from memory", {
     agent: context.agent.name,
     agentPubkey: context.agent.pubkey,
     title: lesson.title || title,
     hasDetailed: !!lesson.detailed,
-    phase: context.phase,
     conversationId: context.conversationId,
   });
 
@@ -95,12 +74,19 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
 
 // AI SDK tool factory
 export function createLessonGetTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+  const toolInstance = tool({
     description: "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",
     inputSchema: lessonGetSchema,
     execute: async (input: LessonGetInput) => {
       return await executeLessonGet(input, context);
     },
+  });
+
+  // Add human-readable content generation
+  return Object.assign(toolInstance, {
+    getHumanReadableContent: ({ title }: LessonGetInput) => {
+      return `Reading lesson: ${title}`;
+    }
   });
 }
 

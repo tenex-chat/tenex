@@ -3,7 +3,6 @@ import path from "node:path";
 import fs from "fs-extra";
 import { Database } from "bun:sqlite";
 import { ConversationCoordinator } from "@/conversations";
-import { AgentConversationContext } from "@/conversations/AgentConversationContext";
 import { ConversationMessageRepository } from "@/conversations/ConversationMessageRepository";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ProjectContext } from "@/services/ProjectContext";
@@ -106,13 +105,6 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         mockProjectContext
     );
     
-    // Create agent context
-    const agentContext = new AgentConversationContext(
-        pmAgent,
-        conversationCoordinator,
-        mockProjectContext
-    );
-    
     // Cleanup function
     const cleanup = async () => {
         try {
@@ -127,7 +119,6 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
     return {
         mockLLM,
         conversationCoordinator,
-        agentContext,
         messageRepo,
         agentRegistry,
         projectContext: mockProjectContext,

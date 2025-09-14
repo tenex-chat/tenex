@@ -9,12 +9,13 @@ import type { PromptFragment } from "../core/types";
 interface AvailableAgentsArgs {
   agents: AgentInstance[];
   currentAgent: AgentInstance;
+  projectManagerPubkey?: string;
 }
 
 export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
   id: "available-agents",
   priority: 15,
-  template: ({ agents, currentAgent }) => {
+  template: ({ agents, currentAgent, projectManagerPubkey }) => {
     // Filter out current agent
     const coworkers = agents.filter((agent) => agent.pubkey !== currentAgent.pubkey);
 
@@ -24,7 +25,10 @@ export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
 
     const agentList = coworkers
       .map((agent) => {
-        const parts = [ `(${agent.slug})`, `  Role: ${agent.role}` ];
+        // Check if this agent is the current PM of the project
+        const isPM = projectManagerPubkey && agent.pubkey === projectManagerPubkey;
+        const roleDisplay = isPM ? `${agent.role} [PM]` : agent.role;
+        const parts = [ `(${agent.slug})`, `  Role: ${roleDisplay}` ];
 
         if (agent.useCriteria) {
           parts.push(`  Use Criteria: ${agent.useCriteria}`);
@@ -39,7 +43,9 @@ export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
     return `## Available Agents
 You are part of a multi-agent system, these are agents immediately available in the system:
 
-${agentList}`;
+${agentList}
+
+The PM of this project only has knowledge of *this* project.`;
   },
 };
 

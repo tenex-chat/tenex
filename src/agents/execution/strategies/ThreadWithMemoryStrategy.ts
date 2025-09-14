@@ -5,7 +5,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import { NostrEntityProcessor } from "@/conversations/processors/NostrEntityProcessor";
-import { MessageRoleAssigner } from "@/conversations/processors/MessageRoleAssigner";
+import { EventToModelMessage } from "@/conversations/processors/EventToModelMessage";
 import {
     buildSystemPromptMessages
 } from "@/prompts/utils/systemPromptBuilder";
@@ -79,7 +79,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
         // Build a map of thread roots to full threads where agent participated
         const agentThreads: Map<string, NDKEvent[]> = new Map();
-        const currentThreadIds = new Set(currentThread.map(e => e.id));
 
         for (const eventId of agentEventIds) {
             const thread = threadService.getThreadToEvent(eventId, conversation.history);
@@ -130,7 +129,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                         event,
                         context.agent.pubkey,
                         context.conversationId,
-                        context.agent.slug
                     );
                     messages.push(...processedMessages);
                 }
@@ -167,7 +165,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 event,
                 context.agent.pubkey,
                 context.conversationId,
-                context.agent.slug
             );
             messages.push(...processedMessages);
 
@@ -194,35 +191,43 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
     /**
      * Process a single event into messages
      */
-    private async processEvent(event: NDKEvent, agentPubkey: string, conversationId: string, targetAgentSlug: string): Promise<ModelMessage[]> {
+    private async processEvent(event: NDKEvent, agentPubkey: string, conversationId: string): Promise<ModelMessage[]> {
         const messages: ModelMessage[] = [];
 
         // Check if this is a tool event from this agent
         const isToolEvent = event.tags.some(t => t[0] === 'tool');
         const isThisAgent = event.pubkey === agentPubkey;
 
-        if (isToolEvent && isThisAgent) {
-            // Load tool messages from storage
-            const toolMessages = await toolMessageStorage.load(event.id);
-            if (toolMessages) {
-                messages.push(...toolMessages);
-                return messages;
+        if (isToolEvent) {
+            if (isThisAgent) {
+                // Load tool messages from storage
+                const toolMessages = await toolMessageStorage.load(event.id);
+                if (toolMessages) {
+                    messages.push(...toolMessages);
+                    return messages;
+                }
+            } else {
+                console.log("Skipping tool event from a different agent from thread");
+                return [];
             }
         }
 
         // Process regular message
         const content = await this.processEventContent(event, agentPubkey);
 
-        // Use MessageRoleAssigner for proper attribution
-        const message = await MessageRoleAssigner.assignRole(
+        // Use EventToModelMessage for proper attribution
+        const result = await EventToModelMessage.transform(
             event,
             content,
             agentPubkey,
             conversationId
         );
-        messages.push(message);
 
-        console.log(chalk.green("Turning event"), event.inspect, chalk.green("into message"), chalk.white(JSON.stringify(message)));
+        // Handle both single message and array of messages (for phase transitions)
+        const messagesToAdd = Array.isArray(result) ? result : [result];
+        messages.push(...messagesToAdd);
+
+        console.log(chalk.green("Turning event"), event.inspect, chalk.green("into message(s)"), chalk.white(JSON.stringify(messagesToAdd)));
 
         return messages;
     }
@@ -284,6 +289,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 agentLessons: agentLessonsMap,
                 triggeringEvent,
                 isProjectManager,
+                projectManagerPubkey: projectCtx.getProjectManager().pubkey,
             });
 
             for (const systemMsg of systemMessages) {

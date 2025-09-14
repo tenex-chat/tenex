@@ -12,7 +12,6 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { MessageGenerationStrategy } from "./strategies/types";
 import {
-    DefaultMessageGenerationStrategy,
     ThreadWithMemoryStrategy
 } from "./strategies";
 import { getProjectContext } from "@/services";
@@ -53,18 +52,8 @@ export class AgentExecutor {
      * Select appropriate message generation strategy
      */
     private selectStrategy(): MessageGenerationStrategy {
-        // Check environment variable for strategy selection
-        const strategyType = process.env.MESSAGE_STRATEGY || "thread-memory";
-
-        logger.info(`[AgentExecutor] Selecting message strategy: ${strategyType}`);
-
-        switch (strategyType) {
-            case 'thread-memory':
-                return new ThreadWithMemoryStrategy();
-            case 'default':
-            default:
-                return new DefaultMessageGenerationStrategy(this.standaloneContext);
-        }
+        // Always use ThreadWithMemoryStrategy as it's now the only strategy
+        return new ThreadWithMemoryStrategy();
     }
 
     /**

@@ -1,13 +1,9 @@
-import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ModelMessage } from "ai";
-import { AgentConversationContext } from "../AgentConversationContext";
-import { buildPhaseInstructions } from "@/prompts/utils/systemPromptBuilder";
 import { ensureExecutionTimeInitialized } from "../executionTime";
 import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
-import type { Phase, AgentState, Conversation, ConversationMetadata } from "../types";
+import type { AgentState, Conversation, ConversationMetadata } from "../types";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
 import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
@@ -145,48 +141,6 @@ export class ConversationCoordinator {
 
 
   /**
-   * Build messages for an agent
-   */
-  async buildAgentMessages(
-    conversationId: string,
-    targetAgent: AgentInstance,
-    triggeringEvent?: NDKEvent
-  ): Promise<{ messages: ModelMessage[] }> {
-    const conversation = this.store.get(conversationId);
-    if (!conversation) {
-      throw new Error(`Conversation ${conversationId} not found`);
-    }
-
-    // Create a stateless agent context on-demand
-    const context = new AgentConversationContext(conversationId, targetAgent.slug, targetAgent.pubkey);
-
-    // Get or initialize the agent's state
-    let agentState = conversation.agentStates.get(targetAgent.slug);
-    if (!agentState) {
-      agentState = {
-        lastProcessedMessageIndex: 0,
-      };
-      conversation.agentStates.set(targetAgent.slug, agentState);
-    }
-
-    // Build messages using the stateless context
-    // Phase transitions are now detected from event tags in buildMessages
-    const messages = await context.buildMessages(
-      conversation,
-      triggeringEvent
-    );
-
-    // Update agent state
-    agentState.lastProcessedMessageIndex = conversation.history.length;
-
-    await this.persistence.save(conversation);
-
-    return {
-      messages,
-    };
-  }
-
-  /**
    * Update an agent's state
    */
   async updateAgentState(
@@ -251,16 +205,6 @@ export class ConversationCoordinator {
 
     await this.persistence.save(conversation);
   }
-
-
-  /**
-   * Get phase history for a conversation
-   */
-  getPhaseHistory(conversationId: string): NDKEvent[] {
-    const conversation = this.store.get(conversationId);
-    return conversation?.history || [];
-  }
-
 
   /**
    * Clean up conversation metadata
