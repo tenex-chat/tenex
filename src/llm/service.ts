@@ -1,6 +1,7 @@
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
+import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import {
     type LanguageModelUsage,
     type LanguageModel,
@@ -14,9 +15,8 @@ import {
     extractReasoningMiddleware,
 } from "ai";
 import type { ModelMessage } from "ai";
-import chalk from "chalk";
 import { EventEmitter } from "tseep";
-import { LanguageModelUsageWithCostUsd } from "./types";
+import type { LanguageModelUsageWithCostUsd } from "./types";
 
 // Define the event types for LLMService
 interface LLMServiceEvents {
@@ -35,6 +35,8 @@ interface LLMServiceEvents {
         usage: LanguageModelUsageWithCostUsd;
     }) => void;
     "stream-error": (data: { error: unknown }) => void;
+    "session-captured": (data: { sessionId: string }) => void;
+    reasoning?: (data: { delta: string }) => void;
     // Add index signatures for EventEmitter compatibility
     [key: string]: (...args: any[]) => void;
     [key: symbol]: (...args: any[]) => void;
@@ -50,40 +52,82 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly temperature?: number;
     private readonly maxTokens?: number;
     private previousChunkType?: string;
+    private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel; // Claude Code provider function
+    private readonly sessionId?: string; // Session ID for resuming claude_code conversations
 
     constructor(
         private readonly llmLogger: LLMLogger,
-        private readonly registry: ProviderRegistry,
+        private readonly registry: ProviderRegistry | null, // Null for Claude Code
         provider: string,
         model: string,
         temperature?: number,
-        maxTokens?: number
+        maxTokens?: number,
+        claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel, // Claude Code provider function
+        sessionId?: string // Session ID for resuming claude_code conversations
     ) {
         super();
         this.provider = provider;
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
+        this.claudeCodeProviderFunction = claudeCodeProviderFunction;
+        this.sessionId = sessionId;
+
+        // Validate that we have either a registry or Claude Code provider
+        if (!registry && !claudeCodeProviderFunction) {
+            throw new Error("LLMService requires either a registry or Claude Code provider function");
+        }
 
         logger.debug("[LLMService] Initialized", {
             provider: this.provider,
             model: this.model,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
+            isClaudeCode: provider === 'claudeCode',
         });
     }
 
     /**
-     * Get a language model from the registry.
-     * This method encapsulates the AI SDK's requirement for concatenated strings.
-     * Wraps the model with extract-reasoning-middleware to handle thinking tags.
+     * Get a language model instance.
+     * For Claude Code: Creates model with system prompt from messages.
+     * For standard providers: Gets model from registry.
+     * Wraps all models with extract-reasoning-middleware.
      */
-    private getLanguageModel(): LanguageModel {
-        // AI SDK requires this format - we encapsulate it here
-        const baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
-        
+    private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
+        let baseModel: LanguageModel;
+
+        if (this.claudeCodeProviderFunction) {
+            // Claude Code provider
+            const systemPrompt = messages?.find(m => m.role === 'system')?.content;
+
+            // Call provider function with model, system prompt, and session ID if available
+            const options: ClaudeCodeSettings = {
+                customSystemPrompt: systemPrompt
+            };
+            
+            if (this.sessionId) {
+                options.resume = this.sessionId;
+                logger.debug("[LLMService] Resuming Claude Code session", {
+                    sessionId: this.sessionId,
+                    model: this.model
+                });
+            }
+            
+            baseModel = this.claudeCodeProviderFunction(this.model, options);
+
+            logger.debug("[LLMService] Created Claude Code model", {
+                model: this.model,
+                hasSystemPrompt: !!systemPrompt,
+                systemPromptLength: systemPrompt?.length || 0
+            });
+        } else if (this.registry) {
+            // Standard providers use registry
+            baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
+        } else {
+            throw new Error("No provider available for model creation");
+        }
+
         // Wrap with extract-reasoning-middleware to handle thinking tags
-        // This extracts content between <thinking> tags as reasoning
         return wrapLanguageModel({
             model: baseModel,
             middleware: extractReasoningMiddleware({
@@ -104,9 +148,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             return messages;
         }
 
+        // Rough estimate: 4 characters per token (configurable if needed)
+        const CHARS_PER_TOKEN_ESTIMATE = 4;
+        const MIN_TOKENS_FOR_CACHE = 1024;
+        const minCharsForCache = MIN_TOKENS_FOR_CACHE * CHARS_PER_TOKEN_ESTIMATE;
+
         return messages.map((msg) => {
-            // Only cache system messages and only if they're large enough (>1024 tokens estimate)
-            if (msg.role === 'system' && msg.content.length > 4000) { // ~1000 tokens
+            // Only cache system messages and only if they're large enough
+            if (msg.role === 'system' && msg.content.length > minCharsForCache) {
                 return {
                     ...msg,
                     providerOptions: {
@@ -128,7 +177,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             maxTokens?: number;
         }
     ): Promise<unknown> {
-        const model = this.getLanguageModel();
+        const model = this.getLanguageModel(messages);
         const startTime = Date.now();
         
         // Add provider-specific cache control
@@ -155,6 +204,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
             });
+            
+            // Capture session ID from provider metadata if using Claude Code
+            if (this.provider === 'claudeCode' && result.providerMetadata?.['claude-code']?.sessionId) {
+                const capturedSessionId = result.providerMetadata['claude-code'].sessionId;
+                logger.info("[LLMService] Captured Claude Code session ID from complete", {
+                    sessionId: capturedSessionId,
+                    provider: this.provider
+                });
+                // Emit session ID for storage by the executor
+                this.emit('session-captured', { sessionId: capturedSessionId });
+            }
             
             // Log if reasoning was extracted
             if ('reasoning' in result && result.reasoning) {
@@ -212,13 +272,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     async stream(
-        messages: ModelMessage[], 
+        messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
         }
     ): Promise<void> {
-        const model = this.getLanguageModel();
+        const model = this.getLanguageModel(messages);
         
         // Add provider-specific cache control
         const processedMessages = this.addCacheControl(messages);
@@ -323,7 +383,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 }
                 break;
             case "tool-call":
-                console.log(chunk)
                 this.handleToolCall(chunk.toolCallId, chunk.toolName, chunk.input);
                 break;
             case "tool-result":
@@ -355,6 +414,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     startTime,
                 });
 
+                // Capture session ID from provider metadata if using Claude Code
+                if (this.provider === 'claudeCode' && e.providerMetadata?.['claude-code']?.sessionId) {
+                    const capturedSessionId = e.providerMetadata['claude-code'].sessionId;
+                    logger.info("[LLMService] Captured Claude Code session ID from stream", {
+                        sessionId: capturedSessionId,
+                        provider: this.provider
+                    });
+                    // Emit session ID for storage by the executor
+                    this.emit('session-captured', { sessionId: capturedSessionId });
+                }
+                
                 logger.info("[LLMService] Stream finished", {
                     duration,
                     model: this.model,
@@ -379,7 +449,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private async handleStreamError(error: unknown, startTime: number): Promise<void> {
-        console.log("error", error);
         const duration = Date.now() - startTime;
 
         await this.llmLogger

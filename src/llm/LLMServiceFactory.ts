@@ -9,17 +9,17 @@ import { createOllama } from "ollama-ai-provider-v2";
 import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
 import { createMockProvider } from "./providers/MockProvider";
-import type { ProviderStrategy } from "./providers/ProviderStrategy";
-import { DefaultProviderStrategy } from "./providers/DefaultProviderStrategy";
-import { ClaudeCodeProviderStrategy } from "./providers/ClaudeCodeProviderStrategy";
+import { createClaudeCode, type ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
+import { PermissionMode } from "@anthropic-ai/claude-code";
+import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
 
 /**
  * Factory for creating LLM services with proper provider initialization
  */
 export class LLMServiceFactory {
     private providers: Map<string, Provider> = new Map();
-    private strategies: Map<string, ProviderStrategy> = new Map();
     private registry: ProviderRegistry | null = null;
+    private claudeCodeApiKey: string | null = null; // Store Claude Code API key for runtime use
     private initialized = false;
 
     /**
@@ -27,30 +27,15 @@ export class LLMServiceFactory {
      */
     initializeProviders(providerConfigs: Record<string, { apiKey: string }>): void {
         this.providers.clear();
-        this.strategies.clear();
-
-        // Set up default strategy for most providers
-        const defaultStrategy = new DefaultProviderStrategy();
+        this.claudeCodeApiKey = null;
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === 'true') {
             logger.debug("[LLMServiceFactory] Mock LLM mode enabled via USE_MOCK_LLM environment variable");
 
-            // Load mock scenarios from file if specified
-            const mockConfig = undefined;
-            if (process.env.MOCK_LLM_SCENARIOS) {
-                try {
-                    // TODO: Load scenarios from file
-                    logger.debug(`[LLMServiceFactory] Loading mock scenarios from: ${process.env.MOCK_LLM_SCENARIOS}`);
-                } catch (error) {
-                    logger.warn("[LLMServiceFactory] Failed to load mock scenarios, using defaults", {
-                        error: error instanceof Error ? error.message : String(error)
-                    });
-                }
-            }
-
-            this.providers.set("mock", createMockProvider(mockConfig));
-            this.strategies.set("mock", defaultStrategy);
+            // Mock scenarios loading is not yet implemented
+            // For now, just use default mock provider
+            this.providers.set("mock", createMockProvider());
 
             // In mock mode, we only use the mock provider
             // Other providers can still be initialized but won't be used by default
@@ -76,7 +61,6 @@ export class LLMServiceFactory {
                                 },
                             })
                         );
-                        this.strategies.set(name, defaultStrategy);
                         logger.debug(`[LLMServiceFactory] Initialized OpenRouter provider`);
                         break;
                         
@@ -84,7 +68,6 @@ export class LLMServiceFactory {
                         this.providers.set(name, createAnthropic({
                             apiKey: config.apiKey
                         }));
-                        this.strategies.set(name, defaultStrategy);
                         logger.debug(`[LLMServiceFactory] Initialized Anthropic provider`);
                         break;
 
@@ -92,7 +75,6 @@ export class LLMServiceFactory {
                         this.providers.set(name, createOpenAI({
                             apiKey: config.apiKey
                         }));
-                        this.strategies.set(name, defaultStrategy);
                         logger.debug(`[LLMServiceFactory] Initialized OpenAI provider`);
                         break;
                         
@@ -114,16 +96,14 @@ export class LLMServiceFactory {
                         const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
 
                         this.providers.set(name, ollamaProvider as Provider);
-                        this.strategies.set(name, defaultStrategy);
                         logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || 'default (http://localhost:11434)'}`);
                         break;
                     }
                     
                     case "claudeCode": {
-                        // Claude Code requires runtime configuration with tools
-                        // Only register the strategy, not the provider itself
-                        this.strategies.set(name, new ClaudeCodeProviderStrategy());
-                        logger.debug(`[LLMServiceFactory] Registered ClaudeCode strategy (runtime provider creation)`);
+                        // Store API key for runtime Claude Code creation
+                        this.claudeCodeApiKey = config.apiKey;
+                        logger.debug(`[LLMServiceFactory] Stored Claude Code API key for runtime use`);
                         break;
                     }
                         
@@ -158,7 +138,7 @@ export class LLMServiceFactory {
      * Create an LLM service from a resolved configuration
      * @param llmLogger Logger for the service
      * @param config LLM configuration
-     * @param context Optional runtime context for providers that need it
+     * @param context Optional runtime context for Claude Code
      */
     createService(
         llmLogger: LLMLogger,
@@ -166,6 +146,7 @@ export class LLMServiceFactory {
         context?: {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
+            sessionId?: string; // Session ID for resuming claude_code conversations
         }
     ): LLMService {
         if (!this.initialized) {
@@ -175,31 +156,101 @@ export class LLMServiceFactory {
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
 
-        // Get the strategy for this provider
-        const strategy = this.strategies.get(actualProvider);
-        if (!strategy) {
-            const available = Array.from(this.strategies.keys());
+        if (actualProvider === 'mock' && actualProvider !== config.provider) {
+            logger.debug(`[LLMServiceFactory] Using mock provider instead of ${config.provider} due to USE_MOCK_LLM=true`);
+        }
+
+        // Handle Claude Code provider specially
+        if (actualProvider === 'claudeCode') {
+            if (!this.claudeCodeApiKey) {
+                throw new Error("Claude Code API key not configured");
+            }
+
+            // Extract tool names from the provided tools
+            const toolNames = context?.tools ? Object.keys(context.tools) : [];
+            const regularTools = toolNames.filter(name => !name.startsWith('mcp__'));
+
+            logger.info("[LLMServiceFactory] Creating Claude Code provider", {
+                agent: context?.agentName,
+                regularTools,
+                toolCount: regularTools.length
+            });
+
+            // Create SDK MCP server for local TENEX tools if any exist
+            const tenexSdkServer = regularTools.length > 0 && context?.tools
+                ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
+                : undefined;
+
+            // Build mcpServers configuration
+            const mcpServersConfig: Record<string, unknown> = {};
+            if (tenexSdkServer) {
+                mcpServersConfig.tenex = tenexSdkServer;
+            }
+
+            // Build allowed tools list
+            const allowedTools = tenexSdkServer
+                ? regularTools.map(name => `mcp__tenex__${name}`)
+                : [];
+
+            // Create Claude Code provider with runtime configuration
+            const claudeCodeConfig = {
+                defaultSettings: {
+                    permissionMode: "bypassPermissions" as PermissionMode,
+                },
+                mcpServers: mcpServersConfig,
+                allowedTools: allowedTools,
+                logger: {
+                    warn: (message: string) => logger.warn("[ClaudeCode]", message),
+                    error: (message: string) => logger.error("[ClaudeCode]", message),
+                },
+            };
+
+            // Create the provider function that can accept resume parameter
+            const providerFunction = (model: string, options?: ClaudeCodeSettings) => {
+                return createClaudeCode(claudeCodeConfig)(model, options);
+            };
+
+            logger.info("[LLMServiceFactory] Created Claude Code provider function", {
+                agent: context?.agentName,
+                mcpServers: Object.keys(mcpServersConfig),
+                allowedTools,
+                toolCount: allowedTools.length
+            });
+
+            // Return LLMService with Claude Code provider function and session ID
+            return new LLMService(
+                llmLogger,
+                null, // No registry for Claude Code
+                'claudeCode',
+                config.model,
+                config.temperature,
+                config.maxTokens,
+                providerFunction,
+                context?.sessionId // Pass session ID if available
+            );
+        }
+
+        // For standard providers, check if provider is available
+        if (!this.providers.has(actualProvider)) {
+            const available = Array.from(this.providers.keys());
             throw new Error(
                 `Provider "${actualProvider}" not available. ` +
                 `Initialized providers: ${available.length > 0 ? available.join(", ") : "none"}`
             );
         }
 
-        // Check if this provider requires runtime context but none was provided
-        if (strategy.requiresRuntimeContext() && !context?.tools) {
-            logger.warn(`[LLMServiceFactory] Provider ${actualProvider} requires runtime context but none provided`);
+        // Return standard LLMService with registry
+        if (!this.registry) {
+            throw new Error("Provider registry not initialized");
         }
 
-        if (actualProvider === 'mock' && actualProvider !== config.provider) {
-            logger.debug(`[LLMServiceFactory] Using mock provider instead of ${config.provider} due to USE_MOCK_LLM=true`);
-        }
-
-        // Use strategy to create the service
-        return strategy.createService(
+        return new LLMService(
             llmLogger,
-            { ...config, provider: actualProvider }, // Use actual provider in case of mock override
-            this.registry!,
-            context
+            this.registry,
+            actualProvider,
+            config.model,
+            config.temperature,
+            config.maxTokens
         );
     }
 
@@ -207,16 +258,19 @@ export class LLMServiceFactory {
      * Check if a provider is available
      */
     hasProvider(providerName: string): boolean {
-        // Check strategies which includes all providers (including runtime ones like claudeCode)
-        return this.strategies.has(providerName);
+        // Check standard providers or Claude Code
+        return this.providers.has(providerName) || (providerName === 'claudeCode' && !!this.claudeCodeApiKey);
     }
 
     /**
      * Get list of available providers
      */
     getAvailableProviders(): string[] {
-        // Return all strategies which includes runtime providers
-        return Array.from(this.strategies.keys());
+        const providers = Array.from(this.providers.keys());
+        if (this.claudeCodeApiKey) {
+            providers.push('claudeCode');
+        }
+        return providers;
     }
 
     /**
