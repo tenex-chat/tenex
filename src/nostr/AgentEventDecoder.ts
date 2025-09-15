@@ -216,4 +216,28 @@ export class AgentEventDecoder {
     return event.kind === EVENT_KINDS.STREAMING_RESPONSE;
   }
 
+  /**
+   * Get moderator pubkey from a kind:11 brainstorm event
+   * The moderator is specified in the first p-tag
+   */
+  static getModerator(event: NDKEvent): string | null {
+    if (event.kind !== 11) return null;
+    
+    // The moderator is the first p-tag
+    const pTag = event.tagValue("p");
+    return pTag || null;
+  }
+
+  /**
+   * Get participant pubkeys from a kind:11 brainstorm event
+   * Participants are specified in "participant" tags
+   */
+  static getParticipants(event: NDKEvent): string[] {
+    if (event.kind !== 11) return [];
+    
+    // Get all participant tags
+    const participantTags = event.tags.filter(tag => tag[0] === "participant");
+    return participantTags.map(tag => tag[1]).filter(pubkey => !!pubkey);
+  }
+
 }

@@ -11,11 +11,22 @@ import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
+import { BrainstormService } from "../services/BrainstormService";
 
 
 interface EventHandlerContext {
   conversationCoordinator: ConversationCoordinator;
   agentExecutor: AgentExecutor;
+}
+
+/**
+ * Check if an event is a brainstorm event
+ */
+function isBrainstormEvent(event: NDKEvent): boolean {
+  if (event.kind !== 11) return false;
+  
+  const modeTags = event.tags.filter(tag => tag[0] === "mode" && tag[1] === "brainstorm");
+  return modeTags.length > 0;
 }
 
 /**
@@ -126,12 +137,30 @@ async function handleReplyLogic(
     throw new Error("Project Manager agent not found - required for conversation coordination");
   }
 
-  // 1. Resolve conversation context
+  // 1. Check if this is a brainstorm follow-up
   const conversationResolver = new ConversationResolver(conversationCoordinator);
+  
+  // First, try to resolve to see if we can find the root
+  const preliminaryResolution = await conversationResolver.resolveConversationForEvent(event);
+  if (preliminaryResolution.conversation) {
+    const rootEvent = preliminaryResolution.conversation.history[0];
+    if (rootEvent && isBrainstormEvent(rootEvent)) {
+      logger.info("Detected brainstorm follow-up, delegating to BrainstormService", {
+        eventId: event.id?.substring(0, 8),
+        rootId: rootEvent.id?.substring(0, 8)
+      });
+      
+      const brainstormService = new BrainstormService(projectCtx);
+      await brainstormService.handleFollowUp(event);
+      return;
+    }
+  }
+
+  // 2. Continue with normal resolution if not a brainstorm follow-up
   const {
     conversation,
     isNew,
-  } = await conversationResolver.resolveConversationForEvent(event);
+  } = preliminaryResolution;
 
   if (!conversation) {
     logger.error("No conversation found or created for event", {

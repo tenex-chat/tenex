@@ -12,6 +12,7 @@ import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
+import { BrainstormService } from "../services/BrainstormService";
 
 
 const IGNORED_EVENT_KINDS = [
@@ -149,10 +150,15 @@ export class EventHandler {
         break;
 
       case NDKKind.Thread: // kind 11
-        await handleNewConversation(event, {
-          conversationCoordinator: this.conversationCoordinator,
-          agentExecutor: this.agentExecutor,
-        });
+        // Check if this is a brainstorm event before regular handling
+        if (this.isBrainstormEvent(event)) {
+          await this.handleBrainstormEvent(event);
+        } else {
+          await handleNewConversation(event, {
+            conversationCoordinator: this.conversationCoordinator,
+            agentExecutor: this.agentExecutor,
+          });
+        }
         break;
 
       case NDKProject.kind: // kind 31933
@@ -356,5 +362,36 @@ export class EventHandler {
     // Save all conversations before shutting down
     await this.conversationCoordinator.cleanup();
     logger.info("EventHandler cleanup completed");
+  }
+
+  /**
+   * Check if an event is a brainstorm event
+   */
+  private isBrainstormEvent(event: NDKEvent): boolean {
+    if (event.kind !== NDKKind.Thread) return false;
+    
+    const modeTags = event.tags.filter(tag => tag[0] === "mode" && tag[1] === "brainstorm");
+    return modeTags.length > 0;
+  }
+
+  /**
+   * Handle a brainstorm event
+   */
+  private async handleBrainstormEvent(event: NDKEvent): Promise<void> {
+    try {
+      logger.info("Handling brainstorm event", {
+        eventId: event.id?.substring(0, 8),
+        content: event.content?.substring(0, 50)
+      });
+
+      const projectCtx = getProjectContext();
+      const brainstormService = new BrainstormService(projectCtx);
+      await brainstormService.start(event);
+    } catch (error) {
+      logger.error("Failed to handle brainstorm event", {
+        eventId: event.id,
+        error: formatAnyError(error)
+      });
+    }
   }
 }

@@ -6,6 +6,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { getToolsObject } from "@/tools/registry";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
+import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { configService } from "@/services";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -37,6 +38,11 @@ function formatMCPToolName(toolName: string): string {
     return `${serverName}'s ${toolMethod.replace(/_/g, ' ')}`;
 }
 
+export interface LLMCompletionRequest {
+    messages: ModelMessage[];
+    tools?: Record<string, any>;
+}
+
 export class AgentExecutor {
     private messageStrategy: MessageGenerationStrategy;
 
@@ -54,6 +60,52 @@ export class AgentExecutor {
     private selectStrategy(): MessageGenerationStrategy {
         // Always use ThreadWithMemoryStrategy as it's now the only strategy
         return new ThreadWithMemoryStrategy();
+    }
+
+    /**
+     * Prepare an LLM request without executing it.
+     * This method builds the messages and determines the tools/configuration
+     * but doesn't actually call the LLM. Used by BrainstormService.
+     */
+    async prepareLLMRequest(
+        agent: AgentInstance,
+        initialPrompt: string,
+        originalEvent: NDKEvent,
+        conversationHistory: ModelMessage[] = []
+    ): Promise<LLMCompletionRequest> {
+        // Build a minimal execution context for message generation
+        const context: Partial<ExecutionContext> = {
+            agent,
+            triggeringEvent: originalEvent,
+            conversationId: originalEvent.id, // Use event ID as conversation ID for stateless calls
+            projectPath: process.cwd(),
+        };
+
+        // If we have conversation history, prepend it to the messages
+        let messages: ModelMessage[] = [];
+        
+        if (conversationHistory.length > 0) {
+            messages = [...conversationHistory];
+        } else {
+            // Build messages using the strategy if no history provided
+            // Note: This requires a full ExecutionContext with conversationCoordinator
+            // For brainstorming, we'll build messages manually
+            messages = [
+                {
+                    role: "user",
+                    content: initialPrompt
+                }
+            ];
+        }
+
+        // Get tools for the agent
+        const toolNames = agent.tools || [];
+        const tools = toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
+
+        return {
+            messages,
+            tools
+        };
     }
 
     /**
