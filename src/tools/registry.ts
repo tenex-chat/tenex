@@ -6,6 +6,7 @@
 
 import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { dynamicToolService } from "@/services/DynamicToolService";
 import { createReadPathTool } from "./implementations/read_path";
 import { createWriteContextFileTool } from "./implementations/write_context_file";
 import { createGenerateInventoryTool } from "./implementations/generate_inventory";
@@ -30,7 +31,11 @@ import { createReportReadTool } from "./implementations/report_read";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createReportDeleteTool } from "./implementations/report_delete";
 import { createAddPhaseTool } from "./implementations/add_phase";
-import { createRemovePhaseTool } from "./implementations/remove_phase";
+import { createRemovePhaseTool } from "./implementations/phase_remove";
+import { createScheduleTaskTool } from "./implementations/schedule_task";
+import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
+import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
+import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 
 /**
  * Tool names available in the system
@@ -59,25 +64,20 @@ export type ToolName =
   | "report_read"
   | "reports_list"
   | "report_delete"
-  | "add_phase"
-  | "remove_phase";
+  | "phase_add"
+  | "phase_remove"
+  | "schedule_task"
+  | "schedule_tasks_list"
+  | "schedule_task_cancel"
+  | "create_dynamic_tool";
 
 /**
- * Extended AI SDK Tool type with human-readable content generation
+ * AI SDK Tool type - tools with optional human-readable content generation
+ * The getHumanReadableContent function is attached as a non-enumerable property
  */
-export interface TenexTool extends CoreTool<any, any> {
-  /**
-   * Generate human-readable content for tool execution
-   * Used when publishing tool events to Nostr
-   */
+export type AISdkTool = CoreTool<any, any> & {
   getHumanReadableContent?: (args: any) => string;
-}
-
-/**
- * AI SDK Tool type - this is what the tool() function returns
- * CoreTool includes the description and parameters properties we need
- */
-export type AISdkTool = TenexTool;
+};
 
 /**
  * Tool factory type - functions that create AI SDK tools with context
@@ -88,31 +88,55 @@ export type ToolFactory = (context: ExecutionContext) => AISdkTool;
  * Registry of tool factories
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
-  read_path: createReadPathTool,
-  write_context_file: createWriteContextFileTool,
-  generate_inventory: createGenerateInventoryTool,
-  lesson_learn: createLessonLearnTool,
-  lesson_get: createLessonGetTool,
-  shell: createShellTool,
+  // Agent tools
   agents_discover: createAgentsDiscoverTool,
   agents_hire: createAgentsHireTool,
   agents_list: createAgentsListTool,
   agents_read: createAgentsReadTool,
   agents_write: createAgentsWriteTool,
-  discover_capabilities: createMcpDiscoverTool,
-  delegate: createDelegateTool,
-  delegate_phase: createDelegatePhaseTool,
-  delegate_followup: createDelegateFollowupTool,
-  nostr_projects: createNostrProjectsTool,
+
+  // Claude code
   claude_code: createClaudeCodeTool,
+
+  // Project tools
   create_project: createCreateProjectTool,
+  nostr_projects: createNostrProjectsTool,
+
+  // Delegation tools
   delegate_external: createDelegateExternalTool,
-  report_write: createReportWriteTool,
-  report_read: createReportReadTool,
-  reports_list: createReportsListTool,
+  delegate_followup: createDelegateFollowupTool,
+  delegate_phase: createDelegatePhaseTool,
+  delegate: createDelegateTool,
+
+  discover_capabilities: createMcpDiscoverTool,
+  generate_inventory: createGenerateInventoryTool,
+
+  // Lesson tools
+  lesson_get: createLessonGetTool,
+  lesson_learn: createLessonLearnTool,
+
+  // Phase management tools
+  phase_add: createAddPhaseTool,
+  phase_remove: createRemovePhaseTool,
+
+  read_path: createReadPathTool,
+
+  // Report tools
   report_delete: createReportDeleteTool,
-  add_phase: createAddPhaseTool,
-  remove_phase: createRemovePhaseTool,
+  report_read: createReportReadTool,
+  report_write: createReportWriteTool,
+  reports_list: createReportsListTool,
+
+  // Schedule tools
+  schedule_task_cancel: createCancelScheduledTaskTool,
+  schedule_task: createScheduleTaskTool,
+  schedule_tasks_list: createListScheduledTasksTool,
+  
+  shell: createShellTool,
+  write_context_file: createWriteContextFileTool,
+  
+  // Dynamic tool creation
+  create_dynamic_tool: createCreateDynamicToolTool,
 };
 
 /**
@@ -123,7 +147,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
  */
 export function getTool(name: ToolName, context: ExecutionContext): AISdkTool | undefined {
   const factory = toolFactories[name];
-  return factory ? factory(context) : undefined;
+  const ret = factory ? factory(context) : undefined;
+  return ret;
 }
 
 /**
@@ -159,40 +184,56 @@ export function getAllToolNames(): ToolName[] {
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
- * @param names - Tool names to include (can include MCP tool names)
+ * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
  * @param context - Execution context for the tools
- * @returns Object with tools keyed by name
+ * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
-export function getToolsObject(names: string[], context: ExecutionContext): Record<string, AISdkTool> {
-  const tools: Record<string, AISdkTool> = {};
-  
-  // Separate MCP tools from regular tools
+export function getToolsObject(names: string[], context: ExecutionContext): Record<string, CoreTool<any, any>> {
+  const tools: Record<string, CoreTool<any, any>> = {};
+
+  // Separate MCP tools, dynamic tools, and regular tools
   const regularTools: ToolName[] = [];
   const mcpToolNames: string[] = [];
-  
+  const dynamicToolNames: string[] = [];
+
   for (const name of names) {
     if (name.startsWith('mcp__')) {
       mcpToolNames.push(name);
     } else if (name in toolFactories) {
       regularTools.push(name as ToolName);
+    } else if (dynamicToolService.isDynamicTool(name)) {
+      dynamicToolNames.push(name);
     }
   }
-  
+
   // Add regular tools
   for (const name of regularTools) {
     const tool = getTool(name, context);
     if (tool) {
+      // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
       tools[name] = tool;
     }
   }
-  
+
+  // Add dynamic tools
+  if (dynamicToolNames.length > 0) {
+    const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+    for (const name of dynamicToolNames) {
+      if (dynamicTools[name]) {
+        tools[name] = dynamicTools[name];
+      } else {
+        console.debug(`Dynamic tool '${name}' not found`);
+      }
+    }
+  }
+
   // Add MCP tools if any requested
   if (mcpToolNames.length > 0) {
     try {
       // Import and get MCP tools dynamically
       const { mcpService } = require("@/services/mcp/MCPManager");
       const allMcpTools = mcpService.getCachedTools();
-      
+
       for (const mcpToolName of mcpToolNames) {
         // getCachedTools returns an object keyed by tool name
         const mcpTool = allMcpTools[mcpToolName];
@@ -209,25 +250,31 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
       console.debug("Could not load MCP tools:", error);
     }
   }
-  
+
   return tools;
 }
 
 /**
  * Get all tools as a keyed object
  * @param context - Execution context for the tools
- * @returns Object with all tools keyed by name
+ * @returns Object with all tools keyed by name (returns the underlying CoreTool)
  */
-export function getAllToolsObject(context: ExecutionContext): Record<string, AISdkTool> {
-  const tools: Record<string, AISdkTool> = {};
-  
+export function getAllToolsObject(context: ExecutionContext): Record<string, CoreTool<any, any>> {
+  const tools: Record<string, CoreTool<any, any>> = {};
+
+  // Add static tools
   for (const name of Object.keys(toolFactories) as ToolName[]) {
     const tool = getTool(name, context);
     if (tool) {
+      // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
       tools[name] = tool;
     }
   }
-  
+
+  // Add dynamic tools
+  const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+  Object.assign(tools, dynamicTools);
+
   return tools;
 }
 
@@ -237,7 +284,17 @@ export function getAllToolsObject(context: ExecutionContext): Record<string, AIS
  * @returns True if the tool name is valid
  */
 export function isValidToolName(name: string): name is ToolName {
-  return name in toolFactories;
+  return name in toolFactories || dynamicToolService.isDynamicTool(name);
+}
+
+/**
+ * Get all available tool names including dynamic tools
+ * @returns Array of all tool names (static and dynamic)
+ */
+export function getAllAvailableToolNames(): string[] {
+  const staticTools = getAllToolNames();
+  const dynamicTools = Array.from(dynamicToolService.getDynamicTools().keys());
+  return [...staticTools, ...dynamicTools];
 }
 
 

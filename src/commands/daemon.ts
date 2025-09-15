@@ -3,13 +3,12 @@ import { EventMonitor } from "@/daemon/EventMonitor";
 import { ProcessManager } from "@/daemon/ProcessManager";
 import { ProjectManager } from "@/daemon/ProjectManager";
 import { initNDK, shutdownNDK, getNDK } from "@/nostr/ndkClient";
-import { configService } from "@/services";
+import { configService, dynamicToolService } from "@/services";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "@/utils/setup";
 import { Command } from "commander";
 import { SchedulerService } from "@/services/SchedulerService";
-import { ScheduledTaskHandler } from "@/nostr/ScheduledTaskHandler";
 
 export const daemonCommand = new Command("daemon")
   .description("Start the TENEX daemon to monitor Nostr events")
@@ -60,9 +59,8 @@ export const daemonCommand = new Command("daemon")
     const schedulerService = SchedulerService.getInstance();
     await schedulerService.initialize(ndk, options.projectsPath);
     
-    // Initialize scheduled task handler for Nostr events
-    const scheduledTaskHandler = new ScheduledTaskHandler(ndk, schedulerService);
-    await scheduledTaskHandler.initialize();
+    // Initialize dynamic tool service
+    await dynamicToolService.initialize();
 
     // Set up graceful shutdown
     setupGracefulShutdown(async () => {
@@ -71,7 +69,9 @@ export const daemonCommand = new Command("daemon")
       
       // Shutdown scheduler
       schedulerService.shutdown();
-      scheduledTaskHandler.shutdown();
+      
+      // Shutdown dynamic tool service
+      dynamicToolService.shutdown();
 
       // Stop all running projects
       await processManager.stopAll();

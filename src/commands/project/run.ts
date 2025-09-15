@@ -3,9 +3,10 @@ import { ProjectDisplay } from "@/commands/run/ProjectDisplay";
 import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
 // LLMLogger will be accessed from ProjectContext
-import { shutdownNDK } from "@/nostr/ndkClient";
-import { configService, getProjectContext } from "@/services";
+import { shutdownNDK, getNDK } from "@/nostr/ndkClient";
+import { configService, getProjectContext, dynamicToolService } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
+import { SchedulerService } from "@/services/SchedulerService";
 import { StatusPublisher } from "@/services/status";
 import { handleCliError } from "@/utils/cli-error";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -26,6 +27,13 @@ export const projectRunCommand = new Command("run")
 
       // Initialize MCP service BEFORE displaying agents so MCP tools are available
       await mcpService.initialize(projectPath);
+
+      // Initialize scheduler service
+      const schedulerService = SchedulerService.getInstance();
+      await schedulerService.initialize(getNDK(), projectPath);
+      
+      // Initialize dynamic tool service
+      await dynamicToolService.initialize();
 
       // Refresh agent tools now that MCP is initialized
       // Update the agents directly in ProjectContext since AgentRegistry isn't exposed
@@ -54,7 +62,7 @@ export const projectRunCommand = new Command("run")
         logger.debug("Could not refresh agent tools with MCP", error);
       }
 
-      // Display project information (now with MCP tools available)
+      // Display project information (now with MCP tools and scheduler available)
       const projectDisplay = new ProjectDisplay();
       await projectDisplay.displayProjectInfo(projectPath);
 
@@ -113,6 +121,12 @@ async function runProjectListener(projectPath: string): Promise<void> {
 
       // Clean up event handler subscriptions
       await eventHandler.cleanup();
+
+      // Shutdown scheduler service
+      SchedulerService.getInstance().shutdown();
+      
+      // Shutdown dynamic tool service
+      dynamicToolService.shutdown();
 
       // Shutdown MCP service
       await mcpService.shutdown();

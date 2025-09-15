@@ -104,7 +104,7 @@ async function executeCreateProject(
       // This is typically the project-manager agent creating projects
       
       // Sign and publish the event
-      await project.sign(context.agent.signer);
+      await context.agent.sign(project);
       await project.publish();
 
       logger.info("✅ NDKProject created successfully", {

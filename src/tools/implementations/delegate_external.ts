@@ -8,7 +8,6 @@ import { parseNostrUser, normalizeNostrIdentifier } from "@/utils/nostr-entity-p
 import { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { TenexTool } from "@/tools/registry";
 
 const delegateExternalSchema = z.object({
   content: z.string().describe("The content of the chat message to send"),
@@ -63,7 +62,9 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 
   // If there was a previous delegation to this recipient, make this a reply to maintain thread continuity
   if (previousDelegation) {
-    chatEvent.tags.push(["e", previousDelegation.delegationEventId, "", "reply"]);
+    chatEvent.kind = 1111;
+    chatEvent.tags.push(["E", previousDelegation.delegationEventId]);
+    chatEvent.tags.push(["e", previousDelegation.delegationEventId]);
     logger.info("🔗 Creating threaded delegation - replying to previous delegation", {
       previousDelegationId: previousDelegation.delegationEventId.substring(0, 8),
       recipient: pubkey.substring(0, 8),
@@ -85,7 +86,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   logger.debug("Chat event details", { eventId: chatEvent.id, kind: chatEvent.kind });
 
   // Sign and publish the event
-  await chatEvent.sign(context.agent.signer);
+  await context.agent.sign(chatEvent);
   chatEvent.publish();
 
   const batchId = await registry.registerDelegation({
@@ -153,8 +154,8 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 }
 
 // AI SDK tool factory
-export function createDelegateExternalTool(context: ExecutionContext): TenexTool {
-  const toolInstance = tool({
+export function createDelegateExternalTool(context: ExecutionContext) {
+  const aiTool = tool({
     description: `Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects. If you don't know their pubkey you can use nostr_projects tools.
 
 When using this tool, provide context to the recipient, introduce yourself and explain you are an agent and the project you are working on. It's important for the recipient to understand where you're coming from.
@@ -165,17 +166,20 @@ When using this tool, provide context to the recipient, introduce yourself and e
       return await executeDelegateExternal(input, context);
     },
   });
-  
-  // Add human-readable content generation
-  return Object.assign(toolInstance, {
-    getHumanReadableContent: ({ recipient, projectId }: DelegateExternalInput) => {
+
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ recipient, projectId }: DelegateExternalInput) => {
       let message = `Delegating to external agent ${recipient}`;
       if (projectId) {
         message += ` in project ${projectId}`;
       }
       return message;
     },
-  }) as TenexTool;
+    enumerable: false,
+    configurable: true
+  });
+
+  return aiTool;
 }
 
 

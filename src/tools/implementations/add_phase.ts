@@ -2,7 +2,6 @@ import { tool } from 'ai';
 import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import type { TenexTool } from "@/tools/registry";
 import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
 import * as path from "node:path";
 import { getProjectContext } from "@/services";
@@ -118,8 +117,8 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
 }
 
 // AI SDK tool factory
-export function createAddPhaseTool(context: ExecutionContext): TenexTool {
-  const toolInstance = tool({
+export function createAddPhaseTool(context: ExecutionContext) {
+  const aiTool = tool({
     description:
       "Add a new phase definition to your agent configuration. This allows you to define new phases that you can switch to using delegate_phase. Each phase has a name and detailed instructions for what should be accomplished.",
     inputSchema: addPhaseSchema,
@@ -128,10 +127,13 @@ export function createAddPhaseTool(context: ExecutionContext): TenexTool {
     },
   });
 
-  // Add human-readable content generation
-  return Object.assign(toolInstance, {
-    getHumanReadableContent: ({ phaseName }: AddPhaseInput) => {
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ phaseName }: AddPhaseInput) => {
       return `Adding phase: ${phaseName}`;
-    }
-  }) as TenexTool;
+    },
+    enumerable: false,
+    configurable: true
+  });
+
+  return aiTool;
 }

@@ -166,7 +166,7 @@ class LessonService {
       lessonEvent.tag(this.project);
     }
 
-    await lessonEvent.sign(signer);
+    await lessonEvent.sign(signer, { pTags: false });
     await lessonEvent.publish();
 
     logger.info("✅ Lesson published to Nostr", {

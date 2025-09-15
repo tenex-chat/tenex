@@ -91,7 +91,7 @@ async function executeWriteContextFile(
     article.tag(projectCtx.project);
 
     // Sign with the agent's signer
-    await article.sign(context.agent.signer);
+    await context.agent.sign(article);
     await article.publish();
 
     logger.debug("Published NDKArticle for context file", { filename, dTag });
@@ -122,7 +122,7 @@ async function executeWriteContextFile(
         reply.content = changelog;
         reply.created_at = Math.floor(Date.now() / 1000);
 
-        await reply.sign(context.agent.signer);
+        await context.agent.sign(reply);
         await reply.publish();
 
         logger.debug("Published changelog reply", { changelog, dTag });

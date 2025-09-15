@@ -2,7 +2,6 @@ import { tool } from 'ai';
 import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import type { TenexTool } from "@/tools/registry";
 import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
 import * as path from "node:path";
 import { getProjectContext } from "@/services";
@@ -133,8 +132,8 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
 }
 
 // AI SDK tool factory
-export function createRemovePhaseTool(context: ExecutionContext): TenexTool {
-  const toolInstance = tool({
+export function createRemovePhaseTool(context: ExecutionContext) {
+  const aiTool = tool({
     description:
       "Remove a phase definition from your agent configuration. Use this to delete phases that are no longer needed. If you remove all phases, you'll switch back to using the regular delegate tool instead of delegate_phase.",
     inputSchema: removePhaseSchema,
@@ -143,10 +142,13 @@ export function createRemovePhaseTool(context: ExecutionContext): TenexTool {
     },
   });
 
-  // Add human-readable content generation
-  return Object.assign(toolInstance, {
-    getHumanReadableContent: ({ phaseName }: RemovePhaseInput) => {
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ phaseName }: RemovePhaseInput) => {
       return `Removing phase: ${phaseName}`;
-    }
-  }) as TenexTool;
+    },
+    enumerable: false,
+    configurable: true
+  });
+
+  return aiTool;
 }

@@ -3,12 +3,14 @@ import { logger } from "@/utils/logger";
 
 import type { AgentInstance } from "@/agents/types";
 import { getProjectContext, configService } from "@/services";
+import { SchedulerService } from "@/services/SchedulerService";
 import chalk from "chalk";
 
 export class ProjectDisplay {
   async displayProjectInfo(projectPath: string): Promise<void> {
     this.displayBasicInfo(projectPath);
     await this.displayAgentConfigurations();
+    await this.displayScheduledTasks();
     // Note: Documentation display moved to after subscription EOSE
     logger.info(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
   }
@@ -161,6 +163,63 @@ export class ProjectDisplay {
     logger.info(chalk.gray("Pubkey:      ") + chalk.white(agent.pubkey));
     if (agent.eventId) {
       logger.info(chalk.gray("Event ID:    ") + chalk.gray(agent.eventId));
+    }
+  }
+
+  private async displayScheduledTasks(): Promise<void> {
+    try {
+      const schedulerService = SchedulerService.getInstance();
+      const tasks = await schedulerService.getTasks();
+
+      logger.info(chalk.blue("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+      logger.info(chalk.cyan("⏰ Scheduled Tasks"));
+      logger.info(chalk.blue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+
+      if (tasks.length === 0) {
+        logger.info(chalk.gray("No scheduled tasks configured."));
+        return;
+      }
+
+      const projectCtx = getProjectContext();
+
+      for (const task of tasks) {
+        logger.info(chalk.gray("\nTask ID:     ") + chalk.white(task.id));
+        logger.info(chalk.gray("Schedule:    ") + chalk.yellow(task.schedule));
+        logger.info(chalk.gray("Prompt:      ") + chalk.white(task.prompt.slice(0, 60) + (task.prompt.length > 60 ? "..." : "")));
+
+        // Try to resolve agent from pubkey
+        if (task.agentPubkey) {
+          const agent = projectCtx.getAgentByPubkey(task.agentPubkey);
+          if (agent) {
+            logger.info(chalk.gray("Agent:       ") + chalk.magenta(agent.name));
+          } else {
+            logger.info(chalk.gray("Agent:       ") + chalk.gray(task.agentPubkey.slice(0, 8) + "..."));
+          }
+        }
+
+        if (task.createdAt) {
+          const created = new Date(task.createdAt).toLocaleString();
+          logger.info(chalk.gray("Created:     ") + chalk.gray(created));
+        }
+
+        if (task.lastRun) {
+          const lastRun = new Date(task.lastRun).toLocaleString();
+          logger.info(chalk.gray("Last Run:    ") + chalk.green(lastRun));
+        }
+
+        // Calculate next run time using cron-parser if possible
+        try {
+          const cronParser = await import('cron-parser');
+          const interval = cronParser.parseExpression(task.schedule);
+          const nextRun = interval.next().toDate();
+          logger.info(chalk.gray("Next Run:    ") + chalk.cyan(nextRun.toLocaleString()));
+        } catch {
+          // If cron-parser is not available or fails, just skip showing next run
+        }
+      }
+    } catch (error) {
+      logger.debug("Could not display scheduled tasks", error);
+      // Don't fail the startup if we can't display scheduled tasks
     }
   }
 }

@@ -52,7 +52,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeCompletion(intent, context);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     logger.debug("Completion event published", {
@@ -78,7 +78,7 @@ export class AgentPublisher {
 
     // Sign the event (should be single event now)
     for (const event of events) {
-      await event.sign(this.agent.signer);
+      await this.agent.sign(event);
     }
     
     // Register delegation using the new clean interface
@@ -144,7 +144,7 @@ export class AgentPublisher {
     const followUpEvent = this.encoder.encodeFollowUp(responseEvent, intent.request);
     
     // Sign the event
-    await followUpEvent.sign(this.agent.signer);
+    await this.agent.sign(followUpEvent);
     
     // Register with DelegationRegistry for tracking
     const registry = DelegationRegistry.getInstance();
@@ -185,7 +185,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeConversation(intent, context);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     return event;
@@ -205,7 +205,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeError(intent, context);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     logger.debug("Error event published", {
@@ -230,7 +230,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeTypingIndicator(intent, context, this.agent);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     return event;
@@ -244,7 +244,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeStreamingContent(intent, context);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     return event;
@@ -261,7 +261,7 @@ export class AgentPublisher {
     const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
     // Sign and publish
-    await lessonEvent.sign(this.agent.signer);
+    await this.agent.sign(lessonEvent);
     await lessonEvent.publish();
 
     logger.debug("Lesson event published", {
@@ -286,7 +286,7 @@ export class AgentPublisher {
     const event = this.encoder.encodeToolUse(intent, context);
 
     // Sign and publish
-    await event.sign(this.agent.signer);
+    await this.agent.sign(event);
     await event.publish();
 
     logger.debug("Tool usage event published", {
@@ -337,7 +337,7 @@ export class AgentPublisher {
     );
 
     // Sign with agent's signer
-    await task.sign(this.agent.signer);
+    await this.agent.sign(task);
     await task.publish();
 
     logger.debug("Created task", {
@@ -370,7 +370,7 @@ export class AgentPublisher {
     this.encoder.addStandardTags(update, context);
 
     update.tag(["status", status]);
-    await update.sign(this.agent.signer);
+    await this.agent.sign(update);
     await update.publish();
 
     logger.debug("Published task update", {
@@ -393,7 +393,13 @@ export class AgentPublisher {
     agentRole: string,
     projectTitle: string,
     projectEvent: NDKProject,
-    agentDefinitionEventId?: string
+    agentDefinitionEventId?: string,
+    agentMetadata?: {
+      description?: string;
+      instructions?: string;
+      useCriteria?: string;
+      phases?: Record<string, string>;
+    }
   ): Promise<void> {
     try {
       // Generate random dicebear avatar
@@ -424,7 +430,26 @@ export class AgentPublisher {
         profileEvent.tags.push(["e", agentDefinitionEventId]);
       }
 
-      await profileEvent.sign(signer);
+      // Add metadata tags for agents without NDKAgentDefinition event ID
+      if (!agentDefinitionEventId && agentMetadata) {
+        if (agentMetadata.description) {
+          profileEvent.tags.push(["description", agentMetadata.description]);
+        }
+        if (agentMetadata.instructions) {
+          profileEvent.tags.push(["instructions", agentMetadata.instructions]);
+        }
+        if (agentMetadata.useCriteria) {
+          profileEvent.tags.push(["use-criteria", agentMetadata.useCriteria]);
+        }
+        if (agentMetadata.phases) {
+          // Add phase tags with instructions
+          for (const [phaseName, instructions] of Object.entries(agentMetadata.phases)) {
+            profileEvent.tags.push(["phase", phaseName, instructions]);
+          }
+        }
+      }
+
+      await profileEvent.sign(signer, { pTags: false });
       profileEvent.publish();
     } catch (error) {
       logger.error("Failed to publish agent profile", {
@@ -475,7 +500,7 @@ export class AgentPublisher {
       // Add the other tags
       requestEvent.tags.push(...tags);
 
-      await requestEvent.sign(signer);
+      await requestEvent.sign(signer, { pTags: false });
       await requestEvent.publish();
 
       logger.debug("Published agent request", {
@@ -504,6 +529,14 @@ export class AgentPublisher {
     projectEvent: NDKProject,
     ndkAgentEventId?: string
   ): Promise<void> {
+    // Prepare metadata for agents without NDKAgentDefinition
+    const agentMetadata = !ndkAgentEventId ? {
+      description: agentConfig.description,
+      instructions: agentConfig.instructions,
+      useCriteria: agentConfig.useCriteria,
+      phases: agentConfig.phases
+    } : undefined;
+
     // Publish profile event
     await AgentPublisher.publishAgentProfile(
       signer,
@@ -511,7 +544,8 @@ export class AgentPublisher {
       agentConfig.role,
       projectTitle,
       projectEvent,
-      ndkAgentEventId
+      ndkAgentEventId,
+      agentMetadata
     );
 
     // Publish request event

@@ -88,7 +88,7 @@ export class ReportManager {
     article.tags.push(["p", agent.pubkey, "", "author"]);
     
     // Sign and publish the article
-    await article.sign(agent.signer);
+    await agent.sign(article);
     await article.publish();
     
     // Return the encoded article ID
@@ -261,7 +261,7 @@ export class ReportManager {
     deletedArticle.tags.push(["p", agent.pubkey, "", "author"]);
     
     // Sign and publish the updated article
-    await deletedArticle.sign(agent.signer);
+    await agent.sign(deletedArticle);
     await deletedArticle.publish();
     
     logger.info("🗑️ Report marked as deleted", {

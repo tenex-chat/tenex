@@ -4,15 +4,15 @@ import * as path from 'path';
 import { logger } from '../utils/logger';
 import { ConfigService } from './ConfigService';
 import NDK, { NDKEvent } from '@nostr-dev-kit/ndk';
-import { spawn } from 'node:child_process';
 
 interface ScheduledTask {
   id: string;
-  schedule: string;
+  schedule: string; // Cron expression
   prompt: string;
   createdAt: string;
   lastRun?: string;
   nextRun?: string;
+  agentPubkey?: string; // The agent that created this task
 }
 
 export class SchedulerService {
@@ -59,43 +59,53 @@ export class SchedulerService {
     logger.info(`SchedulerService initialized with ${this.taskMetadata.size} tasks`);
   }
 
-  public async addTask(schedule: string, prompt: string): Promise<string> {
+  public async addTask(schedule: string, prompt: string, agentPubkey?: string): Promise<string> {
     // Validate cron expression
     if (!cron.validate(schedule)) {
       throw new Error(`Invalid cron expression: ${schedule}`);
     }
 
     const taskId = this.generateTaskId();
+
+    // Store locally for cron management
     const task: ScheduledTask = {
       id: taskId,
       schedule,
       prompt,
       createdAt: new Date().toISOString(),
+      agentPubkey: agentPubkey || ConfigService.getInstance().getConfig().systemAgentPubkeys?.[0]
     };
 
     this.taskMetadata.set(taskId, task);
+
+    // Start the cron task
     this.startTask(task);
-    
+
     await this.saveTasks();
-    
-    logger.info(`Scheduled task ${taskId} with schedule: ${schedule}`);
+
+    logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`);
     return taskId;
   }
 
+
   public async removeTask(taskId: string): Promise<boolean> {
+    // Stop cron task if exists
     const cronTask = this.tasks.get(taskId);
     if (cronTask) {
       cronTask.stop();
       this.tasks.delete(taskId);
-      this.taskMetadata.delete(taskId);
-      await this.saveTasks();
-      logger.info(`Removed scheduled task ${taskId}`);
-      return true;
     }
-    return false;
+
+    // Remove from local storage
+    this.taskMetadata.delete(taskId);
+    await this.saveTasks();
+
+    logger.info(`Removed scheduled task ${taskId}`);
+    return true;
   }
 
-  public getTasks(): ScheduledTask[] {
+  public async getTasks(): Promise<ScheduledTask[]> {
+    // Return local tasks
     return Array.from(this.taskMetadata.values());
   }
 
@@ -108,62 +118,76 @@ export class SchedulerService {
     });
 
     this.tasks.set(task.id, cronTask);
+    logger.debug(`Started cron task ${task.id} with schedule: ${task.schedule}`);
   }
 
   private async executeTask(task: ScheduledTask): Promise<void> {
     logger.info(`Executing scheduled task ${task.id}: ${task.prompt}`);
-    
+
     try {
+      // Try to get NDK instance if not already set
       if (!this.ndk) {
-        throw new Error('SchedulerService not properly initialized');
+        logger.warn('NDK not available in SchedulerService, attempting to get instance');
+        try {
+          const { getNDK } = await import('@/nostr/ndkClient');
+          this.ndk = getNDK();
+          if (!this.ndk) {
+            throw new Error('NDK instance not available');
+          }
+        } catch (ndkError) {
+          logger.error('Failed to get NDK instance:', ndkError);
+          throw new Error('SchedulerService not properly initialized - NDK unavailable');
+        }
       }
 
       // Update last run time
       task.lastRun = new Date().toISOString();
       await this.saveTasks();
 
-      // Get the user's pubkey from config
-      const config = ConfigService.getInstance();
-      const userPubkey = config.getConfig().userPubkey;
+      // Publish kind:11 event to trigger the agent
+      await this.publishAgentTriggerEvent(task);
 
-      if (!userPubkey) {
-        throw new Error('User pubkey not configured');
-      }
-
-      // Create a Nostr event for the scheduled task
-      const event = new NDKEvent(this.ndk);
-      event.kind = 1; // Text note
-      event.content = task.prompt;
-      event.tags = [
-        ['schedule-task', task.id],
-        ['scheduled-at', new Date().toISOString()]
-      ];
-      
-      // Publish the event to trigger normal processing
-      await event.publish();
-
-      // Optionally spawn a process to handle the task directly
-      if (this.projectPath) {
-        const cliBinPath = path.join(__dirname, '..', '..', 'tenex.ts');
-        const child = spawn('bun', ['run', cliBinPath, 'project', 'run', '--prompt', task.prompt], {
-          cwd: this.projectPath,
-          stdio: 'inherit',
-          detached: false,
-        });
-
-        child.on('exit', (code) => {
-          logger.info(`Scheduled task ${task.id} process exited with code ${code}`);
-        });
-
-        child.on('error', (error) => {
-          logger.error(`Scheduled task ${task.id} process error:`, error);
-        });
-      }
-
-      logger.info(`Successfully executed scheduled task ${task.id}`);
-    } catch (error) {
+      logger.info(`Successfully triggered scheduled task ${task.id} via kind:11 event`);
+    } catch (error: any) {
       logger.error(`Failed to execute scheduled task ${task.id}:`, error);
     }
+  }
+
+  private async publishAgentTriggerEvent(task: ScheduledTask): Promise<void> {
+    if (!this.ndk) {
+      throw new Error('NDK not initialized');
+    }
+
+    const event = new NDKEvent(this.ndk);
+    event.kind = 11; // Agent request event
+    event.content = task.prompt;
+
+    const config = ConfigService.getInstance().getConfig();
+    const projectRef = `${config.projectPubkey || config.userPubkey}:tenex:${this.projectPath?.split('/').pop() || 'default'}`;
+
+    // Build tags
+    const tags: string[][] = [
+      ['a', projectRef], // Project reference
+    ];
+
+    // Add p-tag for the agent that created this task
+    if (task.agentPubkey) {
+      tags.push(['p', task.agentPubkey]);
+    } else if (config.systemAgentPubkeys?.length > 0) {
+      tags.push(['p', config.systemAgentPubkeys[0]]);
+    }
+
+    // Add metadata about the scheduled task
+    tags.push(['scheduled-task-id', task.id]);
+    tags.push(['scheduled-task-cron', task.schedule]);
+
+    event.tags = tags;
+
+    // If the task has an agent pubkey, sign with that agent's key
+    // Otherwise use the default signing
+    await event.publish();
+
+    logger.info(`Published kind:11 event for scheduled task ${task.id}`);
   }
 
   private async loadTasks(): Promise<void> {
@@ -209,6 +233,21 @@ export class SchedulerService {
     }
     
     this.tasks.clear();
+    this.taskMetadata.clear(); // Also clear metadata
     logger.info('SchedulerService shutdown complete');
+  }
+  
+  public async clearAllTasks(): Promise<void> {
+    // Stop and remove all tasks
+    for (const taskId of Array.from(this.tasks.keys())) {
+      await this.removeTask(taskId);
+    }
+    
+    // Clear the tasks file
+    try {
+      await fs.writeFile(this.taskFilePath, JSON.stringify([], null, 2));
+    } catch (error) {
+      logger.error('Failed to clear tasks file:', error);
+    }
   }
 }

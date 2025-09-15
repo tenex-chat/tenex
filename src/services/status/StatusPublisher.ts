@@ -168,7 +168,7 @@ export class StatusPublisher {
 
       // Sign and publish with project signer if available
       if (projectCtx.signer) {
-        await event.sign(projectCtx.signer);
+        await event.sign(projectCtx.signer, { pTags: false });
         await event.publish();
       } else {
         logger.warn("No project signer available, cannot publish status event");

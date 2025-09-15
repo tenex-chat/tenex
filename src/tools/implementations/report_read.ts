@@ -112,13 +112,17 @@ async function executeReportRead(
   logger.info("📖 Reading report", {
     identifier,
     agent: context.agent.name,
-    phase: context.phase,
   });
 
   const reportManager = new ReportManager();
-  
+
+  // Remove nostr: prefix if present
+  const cleanIdentifier = identifier.startsWith('nostr:')
+    ? identifier.slice(6)
+    : identifier;
+
   // Use agent pubkey for slug lookups
-  const report = await reportManager.readReport(identifier, context.agent.pubkey);
+  const report = await reportManager.readReport(cleanIdentifier, context.agent.pubkey);
 
   if (!report) {
     logger.info("📭 No report found", {
@@ -173,21 +177,24 @@ async function executeReportRead(
 /**
  * Create an AI SDK tool for reading reports
  */
-export function createReportReadTool(context: ExecutionContext): ReturnType<typeof tool> {
-  const toolInstance = tool({
+export function createReportReadTool(context: ExecutionContext) {
+  const aiTool = tool({
     description: "Read a report by slug or naddr identifier",
-    
+
     inputSchema: reportReadSchema,
-    
+
     execute: async (input: ReportReadInput) => {
       return await executeReportRead(input, context);
     },
   });
 
-  // Add human-readable content generation
-  return Object.assign(toolInstance, {
-    getHumanReadableContent: ({ identifier }: ReportReadInput) => {
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ identifier }: ReportReadInput) => {
       return `Reading report: ${identifier}`;
-    }
+    },
+    enumerable: false,
+    configurable: true
   });
+
+  return aiTool;
 }

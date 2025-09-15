@@ -100,7 +100,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 // AI SDK tool factory
 export function createLessonLearnTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: "Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.",
+    description: `Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.`,
     inputSchema: lessonLearnSchema,
     execute: async (input: LessonLearnInput) => {
       return await executeLessonLearn(input, context);

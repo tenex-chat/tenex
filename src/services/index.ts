@@ -4,6 +4,7 @@
 
 export { ConfigService, configService } from "./ConfigService";
 export { DelegationRegistry } from "./DelegationRegistry";
+export { DynamicToolService, dynamicToolService } from "./DynamicToolService";
 export {
   getProjectContext,
   isProjectContextInitialized,

@@ -14,7 +14,7 @@ import type { TenexAgents } from "@/services/config/types";
 // Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import { type NDKProject } from "@nostr-dev-kit/ndk";
+import { type NDKProject, type NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent, PHASE_MANAGEMENT_TOOLS } from "./constants";
 import { isValidToolName } from "@/tools/registry";
@@ -721,6 +721,7 @@ export class AgentRegistry {
       projectEvent = ndkProject;
 
       // Publish agent profile (kind:0) and request event using static method
+      // The publishAgentCreation method now handles passing metadata for agents without eventId
       await AgentPublisher.publishAgentCreation(
         signer,
         config,
@@ -829,6 +830,10 @@ export class AgentRegistry {
         // Use the registry's basePath to get the project path
         const projectPath = this.getBasePath();
         return new AgentMetadataStore(conversationId, slug, projectPath);
+      },
+      sign: async (event: NDKEvent) => {
+        // Sign the event with pTags: false to prevent automatic p-tag addition
+        await event.sign(signer, { pTags: false });
       }
     };
 
@@ -1026,13 +1031,22 @@ export class AgentRegistry {
     // Republish kind:0 for each agent
     for (const [slug, agent] of Array.from(this.agents.entries())) {
       try {
+        // Prepare metadata for agents without NDKAgentDefinition
+        const agentMetadata = !agent.eventId ? {
+          description: agent.description,
+          instructions: agent.instructions,
+          useCriteria: agent.useCriteria,
+          phases: agent.phases
+        } : undefined;
+
         await AgentPublisher.publishAgentProfile(
           agent.signer,
           agent.name,
           agent.role,
           projectTitle,
           projectEvent,
-          agent.eventId
+          agent.eventId,
+          agentMetadata
         );
       } catch (error) {
         logger.error(`Failed to republish kind:0 for agent: ${slug}`, {

@@ -73,8 +73,8 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
 }
 
 // AI SDK tool factory
-export function createLessonGetTool(context: ExecutionContext): ReturnType<typeof tool> {
-  const toolInstance = tool({
+export function createLessonGetTool(context: ExecutionContext) {
+  const aiTool = tool({
     description: "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",
     inputSchema: lessonGetSchema,
     execute: async (input: LessonGetInput) => {
@@ -82,11 +82,14 @@ export function createLessonGetTool(context: ExecutionContext): ReturnType<typeo
     },
   });
 
-  // Add human-readable content generation
-  return Object.assign(toolInstance, {
-    getHumanReadableContent: ({ title }: LessonGetInput) => {
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ title }: LessonGetInput) => {
       return `Reading lesson: ${title}`;
-    }
+    },
+    enumerable: false,
+    configurable: true
   });
+
+  return aiTool;
 }
 

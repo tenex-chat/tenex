@@ -7,7 +7,6 @@ import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
-import type { TenexTool } from "@/tools/registry";
 
 const delegatePhaseSchema = z.object({
   phase: z
@@ -93,7 +92,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     metadataEvent.title = title;
     // metadataEvent.created_at = Math.floor(Date.now())-1;
 
-    await metadataEvent.sign(context.agent.signer);
+    await context.agent.sign(metadataEvent);
     await metadataEvent.publish();
 
     context.conversationCoordinator.setTitle(context.conversationId, title);
@@ -137,26 +136,25 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(context: ExecutionContext): TenexTool {
-    const toolInstance = tool({
+export function createDelegatePhaseTool(context: ExecutionContext) {
+    const aiTool = tool({
         description:
-            "Switch conversation phase and delegate a question or task to one or more agents. Use for complex multi-step operations that require specialized expertise. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
+            "Switch conversation phase and delegate a question or task to one or more agents. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
         inputSchema: delegatePhaseSchema,
         execute: async (input: DelegatePhaseInput) => {
             return await executeDelegatePhase(input, context);
         },
     });
 
-    // Add human-readable content generation
-    return Object.assign(toolInstance, {
-        getHumanReadableContent: ({ phase, recipients }: DelegatePhaseInput) => {
-            if (recipients.length === 1) {
-                return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients[0]}`;
-            } else {
-                return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.length} recipients`;
-            }
-        }
-    }) as TenexTool;
+    Object.defineProperty(aiTool, 'getHumanReadableContent', {
+        value: ({ phase, recipients }: DelegatePhaseInput) => {
+            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.join(', ')}`;
+        },
+        enumerable: false,
+        configurable: true
+    });
+
+    return aiTool;
 }
 
 /**

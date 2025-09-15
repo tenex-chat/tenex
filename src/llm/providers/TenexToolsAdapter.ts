@@ -14,7 +14,7 @@ export class TenexToolsAdapter {
      */
     static createSdkMcpServer(
         tools: Record<string, AISdkTool>,
-        context: any // ExecutionContext from AgentExecutor
+        _context: { agentName?: string } // Execution context
     ): SdkMcpServer | undefined {
         // Filter out MCP tools - they're handled separately
         const localTools = Object.entries(tools).filter(

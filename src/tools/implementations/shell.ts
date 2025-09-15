@@ -87,13 +87,13 @@ async function executeShell(
 /**
  * Create an AI SDK tool for executing shell commands
  */
-export function createShellTool(context: ExecutionContext): ReturnType<typeof tool> {
-  return tool({
+export function createShellTool(context: ExecutionContext) {
+  const aiTool = tool({
     description:
       "Execute shell commands in the project directory. Use for system operations like git, npm, build tools, etc. NEVER use for file operations - use read_path/write_path instead. NEVER use for code modifications - edit files directly. Restricted to project-manager agent only. Commands run with timeout (default 2 minutes). Always prefer specialized tools over shell commands when available.",
-    
+
     inputSchema: shellSchema,
-    
+
     execute: async (input: ShellInput) => {
       try {
         return await executeShell(input, context);
@@ -102,5 +102,15 @@ export function createShellTool(context: ExecutionContext): ReturnType<typeof to
       }
     },
   });
+
+  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    value: ({ command }: ShellInput) => {
+      return `Executing: ${command}`;
+    },
+    enumerable: false,
+    configurable: true
+  });
+
+  return aiTool;
 }
 
