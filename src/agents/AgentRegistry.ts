@@ -210,6 +210,7 @@ export class AgentRegistry {
         useCriteria: config.useCriteria,
         llmConfig: config.llmConfig,
         phase: config.phase,
+        phases: config.phases,
       };
 
       // Include tools if explicitly provided
@@ -256,6 +257,7 @@ export class AgentRegistry {
           ...(config.useCriteria !== undefined && { useCriteria: config.useCriteria }),
           ...(config.llmConfig !== undefined && { llmConfig: config.llmConfig }),
           ...(config.phase !== undefined && { phase: config.phase }),
+          ...(config.phases !== undefined && { phases: config.phases }),
         };
         await writeJsonFile(definitionPath, agentDefinition);
       }

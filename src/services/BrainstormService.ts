@@ -223,8 +223,7 @@ export class BrainstormService {
                 notChosenEvent.kind = 1111; // GenericReply
                 notChosenEvent.tags = [
                     ["e", event.id],
-                    ["not-chosen"], // Special tag to mark as not chosen
-                    ["brainstorm-participant", response.agent.pubkey]
+                    ["not-chosen"] // Special tag to mark as not chosen
                 ];
                 
                 await response.agent.sign(notChosenEvent);

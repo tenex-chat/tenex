@@ -13,6 +13,8 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
+import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { getNDK } from "@/nostr";
 import chalk from "chalk";
 
 /**
@@ -212,7 +214,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             }
         }
 
-        // Process regular message
+        // Process regular message - only strip thinking blocks, don't process entities
         const content = await this.processEventContent(event, agentPubkey);
 
         // Use EventToModelMessage for proper attribution
@@ -227,13 +229,21 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         const messagesToAdd = Array.isArray(result) ? result : [result];
         messages.push(...messagesToAdd);
 
+        // If not from this agent and contains nostr entities, append system messages with entity content
+        if (event.pubkey !== agentPubkey) {
+            const entityMessages = await this.processNostrEntities(event.content || '');
+            if (entityMessages.length > 0) {
+                messages.push(...entityMessages);
+            }
+        }
+
         console.log(chalk.green("Turning event"), event.inspect, chalk.green("into message(s)"), chalk.white(JSON.stringify(messagesToAdd)));
 
         return messages;
     }
 
     /**
-     * Process event content (strip thinking blocks, process entities)
+     * Process event content (only strip thinking blocks, keep nostr entities intact)
      */
     private async processEventContent(event: NDKEvent, agentPubkey: string): Promise<string> {
         let content = event.content || '';
@@ -241,11 +251,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // Strip thinking blocks
         content = this.stripThinkingBlocks(content);
 
-        // Process entities if it's from another agent (using static method)
-        if (event.pubkey !== agentPubkey) {
-            content = await NostrEntityProcessor.processEntities(content);
-        }
-
+        // Don't process entities - keep original nostr: references intact
         return content;
     }
 
@@ -254,6 +260,60 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
      */
     private stripThinkingBlocks(content: string): string {
         return content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+    }
+
+    /**
+     * Process nostr entities and create system messages for them
+     */
+    private async processNostrEntities(content: string): Promise<ModelMessage[]> {
+        const messages: ModelMessage[] = [];
+        
+        // Extract nostr entities from content
+        const entities = NostrEntityProcessor.extractEntities(content);
+        if (entities.length === 0) {
+            return messages;
+        }
+
+        const ndk = getNDK();
+        const nameRepo = getPubkeyNameRepository();
+
+        for (const entity of entities) {
+            try {
+                const bech32Id = entity.replace("nostr:", "");
+                const event = await ndk.fetchEvent(bech32Id);
+
+                if (event) {
+                    // Get author name
+                    const authorName = await nameRepo.getName(event.pubkey);
+                    
+                    // Format timestamp
+                    const timestamp = new Date(event.created_at * 1000).toISOString();
+                    
+                    // Create system message with event content
+                    const systemContent = `Nostr event ${bech32Id.substring(0, 12)}... published by ${authorName} on ${timestamp}:\n\n${event.content}`;
+                    
+                    messages.push({
+                        role: "system",
+                        content: systemContent
+                    });
+
+                    logger.debug("[ThreadWithMemoryStrategy] Added nostr entity as system message", {
+                        entity,
+                        kind: event.kind,
+                        author: authorName,
+                        contentLength: event.content?.length || 0,
+                    });
+                }
+            } catch (error) {
+                logger.warn("[ThreadWithMemoryStrategy] Failed to fetch nostr entity", {
+                    entity,
+                    error,
+                });
+                // Skip entity if fetch fails
+            }
+        }
+
+        return messages;
     }
 
     /**
