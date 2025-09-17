@@ -33,19 +33,18 @@ export class DelegationService {
    * Execute a delegation and wait for all responses.
    */
   async execute(intent: DelegationIntent): Promise<DelegationResponses> {
-    // Check for self-delegation
+    // Allow self-delegation - agents can now delegate to themselves
     const selfDelegationAttempts = intent.recipients.filter(
       pubkey => pubkey === this.agent.pubkey
     );
     
     if (selfDelegationAttempts.length > 0) {
-      logger.warn("[DelegationService] ❌ Agent attempted to delegate to itself", {
+      logger.info("[DelegationService] 🔄 Agent delegating to itself", {
         fromAgent: this.agent.slug,
         agentPubkey: this.agent.pubkey,
-        attemptedRecipients: intent.recipients,
+        phase: intent.phase,
+        request: intent.request,
       });
-      
-      throw new Error("Cannot delegate to yourself. Consider handling this task directly or choosing a different agent to delegate to.");
     }
 
     // Build event context

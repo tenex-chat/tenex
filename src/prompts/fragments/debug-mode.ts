@@ -19,15 +19,19 @@ The user has included "#debug" in their message. They are asking you to explain 
 
 Provide a transparent, honest analysis of:
 
-1. **System Prompt Influence**: Which specific parts of your system prompt or instructions guided this decision
-2. **Reasoning Chain**: The step-by-step thought process that led to your choice
-3. **Alternatives Considered**: Other approaches you evaluated but didn't choose, and why
-4. **Assumptions Made**: Any implicit assumptions about the project, user needs, or context
-5. **Constraints Applied**: Technical, architectural, or guideline constraints that limited options
-6. **Confidence Level**: How certain you were about this decision and any doubts you had
-7. **Pattern Matching**: If you followed a common pattern or best practice, explain why it seemed applicable
+1. Transparent response of the decision-making process. <-- This is the critical part.
+2. Your understanding of the current status of the current conversation. What was said recently? Who did what? Which agents are involved and what was the last thing they accomplished. Include textual quotes from the agents and users that are involved in the conversation.
+3. **System Prompt Influence**: Which specific parts of your system prompt or instructions guided this decision
+4. **Reasoning Chain**: The step-by-step thought process that led to your choice
+5. **Alternatives Considered**: Other approaches you evaluated but didn't choose, and why
+6. **Assumptions Made**: Any implicit assumptions about the project, user needs, or context
+7. **Constraints Applied**: Technical, architectural, or guideline constraints that limited options
+8. **Confidence Level**: How certain you were about this decision and any doubts you had
+9. **Pattern Matching**: If you followed a common pattern or best practice, explain why it seemed applicable
 
 Be completely transparent about your internal process. If you made a mistake or could have done better, acknowledge it. The goal is to help the user understand exactly how you arrived at your decision.
+
+ONLY reply to the question being asked; do NOT perform any other action, do NOT call any tool. Do not apologize. Just transparently respond.
 === END DEBUG MODE ===`;
   },
 };
@@ -37,6 +41,6 @@ Be completely transparent about your internal process. If you made a mistake or 
 /**
  * Helper function to check if debug mode is enabled
  */
-export function isDebugMode(triggeringEvent?: NDKEvent): boolean {
-  return triggeringEvent?.content?.includes("#debug") || false;
+export function isDebugMode(triggeringEvent: NDKEvent): boolean {
+  return triggeringEvent.content.includes("#debug") || false;
 }

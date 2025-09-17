@@ -14,6 +14,8 @@ const voiceModeFragment: PromptFragment<VoiceModeOptions> = {
 
     return `## Voice Mode Guidelines
 
+CRITICAL: You are currently in "voice mode" -- heed this guidelines consistently.
+
 You are generating text that will be converted to speech and read aloud. Please follow these guidelines:
 
 ### Text Formatting for TTS

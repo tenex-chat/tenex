@@ -37,8 +37,8 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
     parts.push("## Phase Management");
     parts.push("");
     parts.push("You can manage your phases dynamically using:");
-    parts.push("- `add_phase`: Add a new phase with its instructions");
-    parts.push("- `remove_phase`: Remove an existing phase");
+    parts.push("- `phase_add`: Add a new phase with its instructions");
+    parts.push("- `phase_remove`: Remove an existing phase");
     parts.push("");
     parts.push("When you delegate to a phase:");
     parts.push("1. The conversation switches to that phase");

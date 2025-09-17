@@ -2,7 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 
 // Import fragment registration manifest
@@ -17,7 +17,6 @@ export interface BuildSystemPromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  triggeringEvent?: NDKEvent;
   isProjectManager?: boolean; // Indicates if this agent is the PM
   projectManagerPubkey?: string; // Pubkey of the project manager
 }
@@ -30,7 +29,6 @@ export interface BuildStandalonePromptOptions {
   availableAgents?: AgentInstance[];
   conversation?: Conversation;
   agentLessons?: Map<string, NDKAgentLesson[]>;
-  triggeringEvent?: NDKEvent;
   projectManagerPubkey?: string; // Pubkey of the project manager
 }
 
@@ -135,7 +133,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
     availableAgents = [],
     conversation,
     agentLessons,
-    triggeringEvent,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();
@@ -221,7 +218,6 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
     availableAgents = [],
     conversation,
     agentLessons,
-    triggeringEvent,
   } = options;
 
   const systemPromptBuilder = new PromptBuilder();

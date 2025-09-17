@@ -137,12 +137,6 @@ export class AgentEventEncoder {
             replyToEventId = eTagValue // reply inside the same parent
         }
 
-        console.log("e-tagging parent", {
-            ownerPubkey,
-            triggeringPubkeyIsOwner,
-            eTagValue
-        })
-
         event.tag(["e", replyToEventId]);
     }
 
@@ -229,6 +223,7 @@ export class AgentEventEncoder {
         const event = new NDKEvent(getNDK());
         event.kind = 1111; // NIP-22 comment/conversation kind
         event.content = intent.request;
+        event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
         this.addConversationTags(event, context);
 

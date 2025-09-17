@@ -362,6 +362,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
 
+        console.log('handleChunk', chunk);
+
         // Emit chunk-type-change event if the type changed
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
             this.emit("chunk-type-change", {

@@ -62,7 +62,7 @@ export function getDelegateToolsForAgent(agent: { phases?: Record<string, string
     // Agents with phases get delegate_phase
     tools.push('delegate_phase');
     // Also add phase management tools by default for agents with phases
-    tools.push('add_phase', 'remove_phase');
+    tools.push('phase_add', 'phase_remove');
   } else {
     // Agents without phases get delegate
     tools.push('delegate');

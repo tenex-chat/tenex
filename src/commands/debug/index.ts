@@ -102,7 +102,6 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
         availableAgents,
         conversation: undefined, // No conversation in debug mode
         agentLessons: agentLessonsMap,
-        mcpTools,
         isProjectManager,
       });
 

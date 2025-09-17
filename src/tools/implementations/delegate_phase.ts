@@ -186,6 +186,7 @@ export function createDelegatePhaseTool(context: ExecutionContext) {
  * - Agent names (e.g., "Architect", "Planner") - resolved from project agents
  * - Npubs (e.g., "npub1...") - decoded to hex pubkeys
  * - Hex pubkeys (64 characters) - used directly
+ * - The agent itself (self-delegation) - allows phase transitions without external delegation
  *
  * If any recipient cannot be resolved, the tool fails with an error.
  *

@@ -40,7 +40,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         const messages: ModelMessage[] = [];
 
         // Add system prompt
-        await this.addSystemPrompt(messages, context, triggeringEvent);
+        await this.addSystemPrompt(messages, context);
 
         // 1. Get current thread (from root to triggering event)
         logger.info("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
@@ -99,6 +99,31 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             }
         }
 
+        // CRITICAL: Also check if any agent responses have become sub-thread roots
+        // This happens when other events reply to the agent's messages
+        for (const eventId of agentEventIds) {
+            // Check if this agent event has children (making it a sub-thread root)
+            const hasReplies = conversation.history.some(e => e.tagValue("e") === eventId);
+
+            if (hasReplies && !agentThreads.has(eventId)) {
+                // This agent response is itself a sub-thread root
+                // Get the complete sub-thread starting from this agent event
+                const subThread = this.getSubThreadFromRoot(eventId, conversation.history);
+
+                if (subThread.length > 0) {
+                    agentThreads.set(eventId, subThread);
+                    logger.info("[ThreadWithMemoryStrategy] Found sub-thread rooted at agent response", {
+                        subThreadRoot: eventId.substring(0, 8),
+                        subThreadLength: subThread.length,
+                        childEvents: subThread.slice(1).map(e => ({
+                            id: e.id.substring(0, 8),
+                            content: e.content?.substring(0, 30)
+                        }))
+                    });
+                }
+            }
+        }
+
         logger.info("[ThreadWithMemoryStrategy] Agent threads analysis", {
             agentName: context.agent.name,
             agentThreadCount: agentThreads.size,
@@ -110,6 +135,12 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         const currentThreadRoot = currentThread[0]?.id;
         const otherThreads = Array.from(agentThreads.entries())
             .filter(([rootId]) => rootId !== currentThreadRoot);
+
+        logger.info("[ThreadWithMemoryStrategy] Retrieved other threads", {
+            currentThreadRoot,
+            otherThreadCount: otherThreads.length,
+            agentName: context.agent.name,
+        });
 
         if (otherThreads.length > 0) {
             messages.push({
@@ -146,6 +177,11 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 role: "system",
                 content: "Current thread you are responding to:"
             });
+        } else {
+            logger.info("[ThreadWithMemoryStrategy] No other threads according to this thing", {
+                otherThreadCount: otherThreads.length,
+                agentName: context.agent.name,
+            });
         }
 
 
@@ -162,7 +198,21 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         });
 
         // Process and add ALL events in current thread
-        for (const event of currentThread) {
+        for (let i = 0; i < currentThread.length; i++) {
+            const event = currentThread[i];
+            const isTriggeringEvent = event.id === triggeringEvent.id;
+
+            // Add a clear marker before the triggering event
+            if (isTriggeringEvent && !event.pubkey.includes(context.agent.pubkey)) {
+                messages.push({
+                    role: "system",
+                    content: "═══ IMPORTANT: THE FOLLOWING IS THE MESSAGE TO RESPOND TO. ═══"
+                });
+                logger.info("[ThreadWithMemoryStrategy] Added triggering event marker", {
+                    eventId: event.id.substring(0, 8)
+                });
+            }
+
             const processedMessages = await this.processEvent(
                 event,
                 context.agent.pubkey,
@@ -174,7 +224,8 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 eventId: event.id.substring(0, 8),
                 eventContent: event.content?.substring(0, 30),
                 messageCount: processedMessages.length,
-                isAgent: event.pubkey === context.agent.pubkey
+                isAgent: event.pubkey === context.agent.pubkey,
+                isTriggeringEvent
             });
         }
 
@@ -196,11 +247,23 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
     private async processEvent(event: NDKEvent, agentPubkey: string, conversationId: string): Promise<ModelMessage[]> {
         const messages: ModelMessage[] = [];
 
+        // Skip reasoning events - they should not be included in context
+        const isReasoningEvent = event.tags.some(t => t[0] === 'reasoning');
+        if (isReasoningEvent) {
+            logger.debug("[ThreadWithMemoryStrategy] Skipping reasoning event", {
+                eventId: event.id.substring(0, 8),
+                pubkey: event.pubkey.substring(0, 8)
+            });
+            return [];
+        }
+
         // Check if this is a tool event from this agent
         const isToolEvent = event.tags.some(t => t[0] === 'tool');
         const isThisAgent = event.pubkey === agentPubkey;
 
         if (isToolEvent) {
+            const toolName = event.tagValue("tool")
+            console.log('Found a tool event', toolName)
             if (isThisAgent) {
                 // Load tool messages from storage
                 const toolMessages = await toolMessageStorage.load(event.id);
@@ -209,9 +272,22 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                     return messages;
                 }
             } else {
-                console.log("Skipping tool event from a different agent from thread");
+                // Try to get the agent that published this event
+                if (isProjectContextInitialized()) {
+                    const projectCtx = getProjectContext();
+                    const otherAgent = projectCtx.getAgentByPubkey(event.pubkey);
+                    if (otherAgent) {
+                        console.log(`Skipping tool event from agent: ${otherAgent.slug} (${otherAgent.name})`);
+                    } else {
+                        console.log(`Skipping tool event from unknown agent with pubkey: ${event.pubkey.substring(0, 8)}`);
+                    }
+                } else {
+                    console.log("Skipping tool event from a different agent from thread");
+                }
                 return [];
             }
+        } else {
+            console.log('Not a tool event')
         }
 
         // Process regular message - only strip thinking blocks, don't process entities
@@ -237,7 +313,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             }
         }
 
-        console.log(chalk.green("Turning event"), event.inspect, chalk.green("into message(s)"), chalk.white(JSON.stringify(messagesToAdd)));
+        // console.log(chalk.green("Turning event"), event.inspect, chalk.green("into message(s)"), chalk.white(JSON.stringify(messagesToAdd)));
 
         return messages;
     }
@@ -245,7 +321,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
     /**
      * Process event content (only strip thinking blocks, keep nostr entities intact)
      */
-    private async processEventContent(event: NDKEvent, agentPubkey: string): Promise<string> {
+    private async processEventContent(event: NDKEvent): Promise<string> {
         let content = event.content || '';
 
         // Strip thinking blocks
@@ -321,8 +397,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
      */
     private async addSystemPrompt(
         messages: ModelMessage[],
-        context: ExecutionContext,
-        triggeringEvent: NDKEvent
+        context: ExecutionContext
     ): Promise<void> {
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         if (!conversation) return;
@@ -347,7 +422,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,
-                triggeringEvent,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
             });
@@ -362,6 +436,32 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 content: `You are ${context.agent.name}. ${context.agent.instructions || ""}`,
             });
         }
+    }
+
+    /**
+     * Get a complete sub-thread starting from a given root event
+     * Includes the root event and all its descendants
+     */
+    private getSubThreadFromRoot(rootId: string, history: NDKEvent[]): NDKEvent[] {
+        const thread: NDKEvent[] = [];
+        const queue = [rootId];
+        const visited = new Set<string>();
+
+        while (queue.length > 0) {
+            const currentId = queue.shift()!;
+            if (visited.has(currentId)) continue;
+            visited.add(currentId);
+
+            const event = history.find(e => e.id === currentId);
+            if (event) {
+                thread.push(event);
+                // Find all children of this event
+                const children = history.filter(e => e.tagValue("e") === currentId);
+                queue.push(...children.map(c => c.id));
+            }
+        }
+
+        return thread.sort((a, b) => a.created_at - b.created_at);
     }
 
     /**
