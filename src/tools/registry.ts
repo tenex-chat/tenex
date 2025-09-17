@@ -36,6 +36,7 @@ import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
+import { createAskTool } from "./implementations/ask";
 
 /**
  * Tool names available in the system
@@ -56,6 +57,7 @@ export type ToolName =
   | "delegate"
   | "delegate_phase"
   | "delegate_followup"
+  | "ask"
   | "nostr_projects"
   | "claude_code"
   | "create_project"
@@ -94,6 +96,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   agents_list: createAgentsListTool,
   agents_read: createAgentsReadTool,
   agents_write: createAgentsWriteTool,
+  
+  // Ask tool
+  ask: createAskTool,
 
   // Claude code
   claude_code: createClaudeCodeTool,

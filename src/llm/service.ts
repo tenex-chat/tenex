@@ -305,7 +305,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             tools: tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
-            stopWhen: stepCountIs(20),
+            stopWhen: stepCountIs(50),
             abortSignal: options?.abortSignal,
             providerOptions: {
                 openrouter: {

@@ -4,6 +4,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
+import { nip19 } from "nostr-tools";
 
 /**
  * Centralized module for encoding and decoding agent event semantics.
@@ -24,6 +25,12 @@ export interface DelegationIntent {
   request: string;
   phase?: string;
   phaseInstructions?: string; // Instructions to be passed with phase delegation
+  type?: "delegation" | "delegation_followup" | "ask";
+}
+
+export interface AskIntent {
+  content: string;
+  suggestions?: string[];
 }
 
 export interface ConversationIntent {
@@ -72,6 +79,7 @@ export interface ToolUseIntent {
 export type AgentIntent =
   | CompletionIntent
   | DelegationIntent
+  | AskIntent
   | ConversationIntent
   | ErrorIntent
   | TypingIntent
@@ -216,13 +224,55 @@ export class AgentEventEncoder {
     }
 
     /**
+     * Prepend recipient identifiers to message content for delegation.
+     * Uses agent slugs for known agents, npub format for external recipients.
+     */
+    private prependRecipientsToContent(content: string, recipients: string[]): string {
+        // Check if content already starts with nostr:npub or @slug patterns
+        const hasNostrPrefix = content.startsWith('nostr:');
+        const hasSlugPrefix = content.match(/^@[\w-]+:/);
+
+        if (hasNostrPrefix || hasSlugPrefix) {
+            return content;
+        }
+
+        // Get project context to look up agents
+        const projectCtx = getProjectContext();
+        const agentRegistry = projectCtx.agentRegistry;
+
+        // Build recipient identifiers
+        const recipientIdentifiers = recipients.map(pubkey => {
+            // Check if this pubkey belongs to an agent in the system
+            const agent = agentRegistry.getAgentByPubkey(pubkey);
+            if (agent) {
+                return `@${agent.slug}`;
+            }
+
+            // For external recipients, use nostr:npub format
+            try {
+                const npub = nip19.npubEncode(pubkey);
+                return `nostr:${npub}`;
+            } catch (error) {
+                logger.warn("Failed to encode pubkey to npub", { pubkey, error });
+                return `nostr:${pubkey}`; // Fallback to hex if encoding fails
+            }
+        });
+
+        // Prepend recipients to content
+        return `${recipientIdentifiers.join(', ')}: ${content}`;
+    }
+
+    /**
      * Encode a delegation intent into a single kind:1111 conversation event.
      * Creates a single event with multiple p-tags for all recipients.
      */
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
         const event = new NDKEvent(getNDK());
         event.kind = 1111; // NIP-22 comment/conversation kind
-        event.content = intent.request;
+
+        // Prepend recipients to the content
+        event.content = this.prependRecipientsToContent(intent.request, intent.recipients);
+
         event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
         this.addConversationTags(event, context);
@@ -251,6 +301,48 @@ export class AgentEventEncoder {
         });
 
         return [event];
+    }
+
+    /**
+     * Encode an Ask intent into a kind:1111 event with suggestions as tags.
+     * Creates an event that asks a question to the project manager/human user.
+     */
+    encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = 1111; // NIP-22 comment/conversation kind
+        event.content = intent.content;
+
+        // Add conversation tags
+        this.addConversationTags(event, context);
+
+        // Get project owner to ask the question to
+        const projectCtx = getProjectContext();
+        const ownerPubkey = projectCtx?.project?.pubkey;
+        
+        if (ownerPubkey) {
+            event.tag(["p", ownerPubkey]);
+        }
+
+        // Add suggestions as individual tags if provided
+        if (intent.suggestions && intent.suggestions.length > 0) {
+            for (const suggestion of intent.suggestions) {
+                event.tag(["suggestion", suggestion]);
+            }
+        }
+
+        // Mark this as an ask event
+        event.tag(["intent", "ask"]);
+
+        // Add standard metadata
+        this.addStandardTags(event, context);
+
+        logger.debug("Encoded ask event", {
+            content: intent.content,
+            suggestions: intent.suggestions,
+            recipient: ownerPubkey?.substring(0, 8),
+        });
+
+        return event;
     }
 
     /**
@@ -508,7 +600,9 @@ export class AgentEventEncoder {
             followUpEvent.tags.push(["e", eTagVal]); // Root thread tag
         }
 
-        followUpEvent.content = message;
+        // Prepend recipient to content for follow-ups (single recipient)
+        const recipientPubkey = responseEvent.pubkey;
+        followUpEvent.content = this.prependRecipientsToContent(message, [recipientPubkey]);
 
         // Clean out p-tags and add recipient
         followUpEvent.tags = followUpEvent.tags.filter((t) => t[0] !== "p");

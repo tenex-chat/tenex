@@ -32,7 +32,7 @@ export class DelegationService {
   /**
    * Execute a delegation and wait for all responses.
    */
-  async execute(intent: DelegationIntent): Promise<DelegationResponses> {
+  async execute(intent: DelegationIntent & { suggestions?: string[] }): Promise<DelegationResponses> {
     // Allow self-delegation - agents can now delegate to themselves
     const selfDelegationAttempts = intent.recipients.filter(
       pubkey => pubkey === this.agent.pubkey
@@ -56,9 +56,20 @@ export class DelegationService {
     };
 
     // Publish based on intent type
-    const result = intent.type === "delegation_followup"
-      ? await this.publisher.delegateFollowUp(intent, eventContext)
-      : await this.publisher.delegate(intent, eventContext);
+    let result: { batchId: string };
+    
+    if (intent.type === "ask") {
+      // Handle ask intent
+      const askResult = await this.publisher.ask({
+        content: intent.request,
+        suggestions: intent.suggestions,
+      }, eventContext);
+      result = { batchId: askResult.batchId };
+    } else if (intent.type === "delegation_followup") {
+      result = await this.publisher.delegateFollowUp(intent, eventContext);
+    } else {
+      result = await this.publisher.delegate(intent, eventContext);
+    }
 
     // Wait for all responses
     const registry = DelegationRegistry.getInstance();

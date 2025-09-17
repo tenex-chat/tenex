@@ -8,6 +8,7 @@ import {
   type CompletionIntent,
   type ConversationIntent,
   type DelegationIntent,
+  type AskIntent,
   type EventContext,
 } from "../AgentEventEncoder";
 import { 
@@ -27,6 +28,12 @@ mock.module("@/nostr/ndkClient", () => ({
 
 mock.module("@/services", () => ({
   getProjectContext: mock(),
+}));
+
+mock.module("nostr-tools", () => ({
+  nip19: {
+    npubEncode: mock((pubkey: string) => `npub_${pubkey.substring(0, 8)}`),
+  },
 }));
 
 import { getProjectContext } from "@/services";
@@ -162,27 +169,104 @@ describe("AgentEventEncoder", () => {
   });
 
   describe("encodeDelegation", () => {
-    it("should create task events for each recipient", () => {
+    beforeEach(() => {
+      // Setup mock agent registry for delegation tests
+      const mockArchitect: Partial<AgentInstance> = {
+        slug: "architect",
+        name: "Architect",
+        pubkey: "architect123",
+      };
+
+      const mockDeveloper: Partial<AgentInstance> = {
+        slug: "developer",
+        name: "Developer",
+        pubkey: "developer456",
+      };
+
+      const mockAgentRegistry = {
+        getAgentByPubkey: mock((pubkey: string) => {
+          if (pubkey === "architect123") return mockArchitect;
+          if (pubkey === "developer456") return mockDeveloper;
+          return undefined;
+        }),
+      };
+
+      const projectContext = {
+        project: {
+          pubkey: "defaultOwner",
+          tagReference: () => ["a", "31933:defaultOwner:default-project"],
+        },
+        agentRegistry: mockAgentRegistry,
+      };
+
+      (getProjectContext as ReturnType<typeof mock>).mockReturnValue(projectContext);
+    });
+
+    it("should prepend agent slugs for known agents", () => {
       const intent: DelegationIntent = {
-        
-        recipients: ["recipient1", "recipient2"],
-        title: "Review code",
+        recipients: ["architect123", "developer456"],
         request: "Please review the authentication module",
       };
 
       const tasks = encoder.encodeDelegation(intent, baseContext);
 
       expect(tasks).toHaveLength(1);
-
-      // Check the single task event
-      expect(tasks[0].kind).toBe(1111); // GenericReply kind for delegations
-      expect(tasks[0].content).toBe("Please review the authentication module");
+      expect(tasks[0].kind).toBe(1111);
+      expect(tasks[0].content).toBe("@architect, @developer: Please review the authentication module");
 
       // Check both recipients are tagged
       const pTags = tasks[0].getMatchingTags("p");
       expect(pTags).toHaveLength(2);
-      expect(pTags[0][1]).toBe("recipient1"); // First recipient
-      expect(pTags[1][1]).toBe("recipient2"); // Second recipient
+      expect(pTags[0][1]).toBe("architect123");
+      expect(pTags[1][1]).toBe("developer456");
+    });
+
+    it("should prepend npub for unknown agents", () => {
+      const intent: DelegationIntent = {
+        recipients: ["unknownpubkey789"],
+        request: "Please review this code",
+      };
+
+      const tasks = encoder.encodeDelegation(intent, baseContext);
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].content).toBe("nostr:npub_unknownp: Please review this code");
+    });
+
+    it("should handle mixed known and unknown agents", () => {
+      const intent: DelegationIntent = {
+        recipients: ["architect123", "unknownpubkey789"],
+        request: "Collaborate on this task",
+      };
+
+      const tasks = encoder.encodeDelegation(intent, baseContext);
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].content).toBe("@architect, nostr:npub_unknownp: Collaborate on this task");
+    });
+
+    it("should not prepend if content already starts with nostr:", () => {
+      const intent: DelegationIntent = {
+        recipients: ["architect123"],
+        request: "nostr:npub123: Already formatted message",
+      };
+
+      const tasks = encoder.encodeDelegation(intent, baseContext);
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].content).toBe("nostr:npub123: Already formatted message");
+    });
+
+    it("should not prepend if content already starts with @slug:", () => {
+      const intent: DelegationIntent = {
+        recipients: ["architect123"],
+        request: "@architect: Already formatted message",
+      };
+
+      const tasks = encoder.encodeDelegation(intent, baseContext);
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].content).toBe("@architect: Already formatted message");
     });
 
     it("should include phase information when provided", () => {
@@ -236,6 +320,97 @@ describe("AgentEventEncoder", () => {
       const eTags = event.getMatchingTags("e");
       expect(eTags).toHaveLength(1); // Only triggering event tag
       expect(eTags[0]).toEqual(["e", "trigger123"]); // References triggering event
+    });
+  });
+
+  describe("encodeAsk", () => {
+    it("should encode an ask intent with open-ended question", () => {
+      const intent: AskIntent = {
+        content: "What approach should I take for implementing this feature?",
+      };
+
+      const event = encoder.encodeAsk(intent, baseContext);
+
+      expect(event.kind).toBe(1111);
+      expect(event.content).toBe("What approach should I take for implementing this feature?");
+
+      // Check for project owner p-tag
+      const pTags = event.getMatchingTags("p");
+      expect(pTags).toHaveLength(1);
+      expect(pTags[0]).toEqual(["p", "defaultOwner"]);
+
+      // Check for intent tag
+      const intentTags = event.getMatchingTags("intent");
+      expect(intentTags).toHaveLength(1);
+      expect(intentTags[0]).toEqual(["intent", "ask"]);
+
+      // Should not have suggestion tags for open-ended
+      const suggestionTags = event.getMatchingTags("suggestion");
+      expect(suggestionTags).toHaveLength(0);
+    });
+
+    it("should encode an ask intent with yes/no question", () => {
+      const intent: AskIntent = {
+        content: "Should I proceed with this implementation?",
+        suggestions: ["Yes", "No"],
+      };
+
+      const event = encoder.encodeAsk(intent, baseContext);
+
+      expect(event.kind).toBe(1111);
+      expect(event.content).toBe("Should I proceed with this implementation?");
+
+      // Check for suggestion tags
+      const suggestionTags = event.getMatchingTags("suggestion");
+      expect(suggestionTags).toHaveLength(2);
+      expect(suggestionTags).toContainEqual(["suggestion", "Yes"]);
+      expect(suggestionTags).toContainEqual(["suggestion", "No"]);
+    });
+
+    it("should encode an ask intent with multiple choice", () => {
+      const intent: AskIntent = {
+        content: "Which database should we use?",
+        suggestions: ["PostgreSQL", "MongoDB", "Redis", "SQLite"],
+      };
+
+      const event = encoder.encodeAsk(intent, baseContext);
+
+      expect(event.kind).toBe(1111);
+      expect(event.content).toBe("Which database should we use?");
+
+      // Check for all suggestion tags
+      const suggestionTags = event.getMatchingTags("suggestion");
+      expect(suggestionTags).toHaveLength(4);
+      expect(suggestionTags).toContainEqual(["suggestion", "PostgreSQL"]);
+      expect(suggestionTags).toContainEqual(["suggestion", "MongoDB"]);
+      expect(suggestionTags).toContainEqual(["suggestion", "Redis"]);
+      expect(suggestionTags).toContainEqual(["suggestion", "SQLite"]);
+    });
+
+    it("should include conversation threading tags", () => {
+      const intent: AskIntent = {
+        content: "Test question",
+      };
+
+      const event = encoder.encodeAsk(intent, baseContext);
+
+      // Check conversation tags (E, K, P for root)
+      const ETags = event.getMatchingTags("E");
+      expect(ETags).toHaveLength(1);
+      expect(ETags[0]).toEqual(["E", "conv123"]);
+
+      const KTags = event.getMatchingTags("K");
+      expect(KTags).toHaveLength(1);
+      expect(KTags[0]).toEqual(["K", NDKKind.Text.toString()]);
+
+      const PTags = event.getMatchingTags("P");
+      expect(PTags).toHaveLength(1);
+      expect(PTags[0]).toEqual(["P", "user123"]);
+
+      // Check e-tag for triggering event
+      const eTags = event.getMatchingTags("e");
+      expect(eTags).toHaveLength(1);
+      expect(eTags[0]).toEqual(["e", "trigger123"]);
     });
   });
 });

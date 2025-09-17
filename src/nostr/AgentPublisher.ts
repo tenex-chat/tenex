@@ -14,6 +14,7 @@ import {
   type CompletionIntent,
   type ConversationIntent,
   type DelegationIntent,
+  type AskIntent,
   type ErrorIntent,
   type EventContext,
   type LessonIntent,
@@ -170,6 +171,61 @@ export class AgentPublisher {
     });
     
     return { events: [followUpEvent], batchId };
+  }
+
+  /**
+   * Publish an ask event.
+   * Creates and publishes an event asking a question to the project manager/human user.
+   */
+  async ask(
+    intent: AskIntent,
+    context: EventContext
+  ): Promise<{
+    event: NDKEvent;
+    batchId: string;
+  }> {
+    logger.debug("[AgentPublisher] Publishing ask event", {
+      agent: this.agent.name,
+      content: intent.content,
+      hasSuggestions: !!intent.suggestions,
+      suggestionCount: intent.suggestions?.length,
+    });
+
+    const event = this.encoder.encodeAsk(intent, context);
+
+    // Sign the event
+    await this.agent.sign(event);
+
+    // Get project owner pubkey for registration
+    const projectCtx = await import("@/services").then(m => m.getProjectContext());
+    const ownerPubkey = projectCtx?.project?.pubkey;
+
+    if (!ownerPubkey) {
+      throw new Error("No project owner configured - cannot determine who to ask");
+    }
+
+    // Register with DelegationRegistry for tracking (ask uses delegation infrastructure)
+    const registry = DelegationRegistry.getInstance();
+    const batchId = await registry.registerDelegation({
+      delegationEventId: event.id,
+      recipients: [{
+        pubkey: ownerPubkey,
+        request: intent.content,
+      }],
+      delegatingAgent: this.agent,
+      rootConversationId: context.rootEvent.id,
+      originalRequest: intent.content,
+    });
+
+    // Publish the event
+    await event.publish();
+
+    logger.debug("Ask event published", {
+      eventId: event.id?.substring(0, 8),
+      batchId,
+    });
+
+    return { event, batchId };
   }
 
   /**
