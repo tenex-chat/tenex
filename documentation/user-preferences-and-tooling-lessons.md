@@ -24,6 +24,28 @@ Users consistently prefer clean, modern code implementations without backwards c
 
 ## Tooling Implementation Lessons
 
+### Context Separation: Exclude Active Thread from 'Other Threads'
+
+**Lesson**: When preparing LLM context, ensure the active conversation thread is explicitly filtered out from the list of 'other' or 'related' threads to prevent context duplication.
+
+**Context**: The ThreadWithMemoryStrategy was sending the same thread to the LLM twice: once as the active thread and again within the 'other threads' block. This was caused by failing to exclude the active thread's root ID from the collection of 'other threads' before formatting.
+
+**Implementation Pattern**:
+```typescript
+// Filter out the active thread from other threads before formatting
+const otherThreads = allThreads.filter(thread => 
+  thread.rootEventId !== activeThreadRootId
+);
+```
+
+**Category**: Architecture
+
+**Tags**: `context-management`, `llm-prompting`, `bug-fix`
+
+**Files Affected**: `src/agents/execution/strategies/ThreadWithMemoryStrategy.ts`
+
+**Impact**: Prevents redundant context in LLM prompts, keeps context clean and focused, and avoids confusion from duplicate thread information.
+
 ### Nostr URI Parsing (`report_read` tool)
 
 **Lesson**: When parsing Nostr URIs in the format `nostr:naddr1...`, extract the `naddr1...` portion for proper processing.

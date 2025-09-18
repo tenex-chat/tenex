@@ -183,9 +183,19 @@ async function handleReplyLogic(
     return;
   }
 
-  // 4. Filter out self-replies
+  // 4. Filter out self-replies (except for agents with delegate_phase tool)
   const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
-  if (nonSelfReplyAgents.length === 0) {
+
+  // Check if any of the filtered agents have delegate_phase tool
+  const selfReplyAgentsWithDelegatePhase = targetAgents.filter(agent => {
+    // Agent is p-tagging themselves AND has delegate_phase tool
+    return agent.pubkey === event.pubkey && agent.tools?.includes('delegate_phase');
+  });
+
+  // Allow agents with delegate_phase to continue even if they're self-replying
+  const finalTargetAgents = [...nonSelfReplyAgents, ...selfReplyAgentsWithDelegatePhase];
+
+  if (finalTargetAgents.length === 0) {
     const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents);
     logger.info(
       chalk.gray(
@@ -194,18 +204,31 @@ async function handleReplyLogic(
     );
     return;
   }
-  
-  // Log if some agents were filtered out due to self-reply
+
+  // Log filtering actions
   if (nonSelfReplyAgents.length < targetAgents.length) {
     const filteredAgents = targetAgents.filter(a => !nonSelfReplyAgents.includes(a));
-    logger.info(
-      chalk.gray(
-        `Filtered out self-reply for: ${filteredAgents.map(a => a.name).join(", ")}`
-      )
-    );
+    const allowedSelfReplies = filteredAgents.filter(a => a.tools?.includes('delegate_phase'));
+    const blockedSelfReplies = filteredAgents.filter(a => !a.tools?.includes('delegate_phase'));
+
+    if (allowedSelfReplies.length > 0) {
+      logger.info(
+        chalk.gray(
+          `Allowing self-reply for agents with delegate_phase: ${allowedSelfReplies.map(a => a.name).join(", ")}`
+        )
+      );
+    }
+
+    if (blockedSelfReplies.length > 0) {
+      logger.info(
+        chalk.gray(
+          `Filtered out self-reply for: ${blockedSelfReplies.map(a => a.name).join(", ")}`
+        )
+      );
+    }
   }
-  
-  targetAgents = nonSelfReplyAgents;
+
+  targetAgents = finalTargetAgents;
 
   // 5. Execute each target agent in parallel
   const executionPromises = targetAgents.map(async (targetAgent) => {

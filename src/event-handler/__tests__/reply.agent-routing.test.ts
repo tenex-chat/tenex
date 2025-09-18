@@ -70,6 +70,21 @@ describe("Agent Event Routing", () => {
       ]),
       getAgent: (slug: string) => mockProjectContext.agents.get(slug),
       getProjectManager: () => pmAgent,  // Dynamic PM getter
+      getAgentByPubkey: (pubkey: string) => {
+        for (const agent of mockProjectContext.agents.values()) {
+          if (agent.pubkey === pubkey) {
+            return agent;
+          }
+        }
+        return undefined;
+      },
+      agentRegistry: {
+        getBasePath: () => "/test/path",
+      },
+      getAgentSlugs: () => Array.from(mockProjectContext.agents.keys()),
+      project: {
+        tagValue: (tag: string) => tag === "d" ? "test-project" : undefined,
+      },
     };
 
     // Mock getProjectContext

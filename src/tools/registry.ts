@@ -37,6 +37,7 @@ import { createListScheduledTasksTool } from "./implementations/schedule_tasks_l
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createAskTool } from "./implementations/ask";
+import { createUploadBlobTool } from "./implementations/upload_blob";
 
 /**
  * Tool names available in the system
@@ -71,7 +72,8 @@ export type ToolName =
   | "schedule_task"
   | "schedule_tasks_list"
   | "schedule_task_cancel"
-  | "create_dynamic_tool";
+  | "create_dynamic_tool"
+  | "upload_blob";
 
 /**
  * AI SDK Tool type - tools with optional human-readable content generation
@@ -142,6 +144,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   
   // Dynamic tool creation
   create_dynamic_tool: createCreateDynamicToolTool,
+  
+  // Upload tools
+  upload_blob: createUploadBlobTool,
 };
 
 /**

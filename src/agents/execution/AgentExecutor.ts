@@ -16,6 +16,7 @@ import {
     ThreadWithMemoryStrategy
 } from "./strategies";
 import { getProjectContext } from "@/services";
+import { providerSupportsStreaming } from "@/llm/provider-configs";
 
 /**
  * Format MCP tool names for human readability
@@ -311,19 +312,63 @@ export class AgentExecutor {
             }
         };
 
+        // Check if provider supports streaming
+        const supportsStreaming = providerSupportsStreaming(llmService.provider as any);
+
+        // Timeout tracker for non-streaming providers
+        let publishTimeout: NodeJS.Timeout | null = null;
+        let pendingContent = '';
+        let pendingReasoning = '';
+
+        // Helper to schedule publishing for non-streaming providers
+        const schedulePublish = () => {
+            if (publishTimeout) {
+                clearTimeout(publishTimeout);
+            }
+
+            publishTimeout = setTimeout(async () => {
+                if (pendingReasoning) {
+                    await agentPublisher.conversation({
+                        content: pendingReasoning,
+                        isReasoning: true
+                    }, eventContext);
+                    pendingReasoning = '';
+                }
+                if (pendingContent) {
+                    await agentPublisher.conversation({
+                        content: pendingContent
+                    }, eventContext);
+                    pendingContent = '';
+                }
+                publishTimeout = null;
+            }, 500);
+        };
+
         // Wire up event handlers
         llmService.on('content', async (event) => {
-            // Accumulate content instead of streaming immediately
             contentBuffer += event.delta;
-            // Still stream deltas for real-time display
-            await agentPublisher.handleContent(event, eventContext, false);
+
+            if (supportsStreaming) {
+                // Still stream deltas for real-time display
+                await agentPublisher.handleContent(event, eventContext, false);
+            } else {
+                // For non-streaming providers, accumulate and delay publish
+                pendingContent += event.delta;
+                schedulePublish();
+            }
         });
 
         llmService.on('reasoning', async (event) => {
-            // Accumulate reasoning separately
             reasoningBuffer += event.delta;
-            // Stream reasoning deltas for real-time display with reasoning flag
-            await agentPublisher.handleContent(event, eventContext, true);
+
+            if (supportsStreaming) {
+                // Stream reasoning deltas for real-time display with reasoning flag
+                await agentPublisher.handleContent(event, eventContext, true);
+            } else {
+                // For non-streaming providers, accumulate and delay publish
+                pendingReasoning += event.delta;
+                schedulePublish();
+            }
         });
         
         llmService.on('chunk-type-change', async (event) => {
@@ -334,22 +379,37 @@ export class AgentExecutor {
         });
         
         llmService.on('complete', async (event) => {
+            // For non-streaming providers, clear any pending timeout
+            if (!supportsStreaming) {
+                if (publishTimeout) {
+                    clearTimeout(publishTimeout);
+                    publishTimeout = null;
+                }
+                // Clear pending content since we're handling it in complete
+                pendingContent = '';
+                pendingReasoning = '';
+            }
+
             // Check if we had reasoning or content before flushing
             const hadContent = contentBuffer.trim().length > 0;
             const hadReasoning = reasoningBuffer.trim().length > 0;
 
             if (event.message.trim()) {
                 const isReasoning = hadReasoning && !hadContent;
-                
+
                 await agentPublisher.complete({
                     content: event.message,
                     usage: event.usage,
                     isReasoning
                 }, eventContext);
-                
-                logger.info(`[AgentExecutor] Agent ${context.agent.name} completed (${event.message.length} chars, reasoning: ${isReasoning})`);
+
+                logger.info(`[AgentExecutor] Agent ${context.agent.name} completed`, {
+                    charCount: event.message.length,
+                    isReasoning,
+                    finishReason: event.finishReason
+                });
             }
-            
+
             // Clear buffers
             contentBuffer = '';
             reasoningBuffer = '';

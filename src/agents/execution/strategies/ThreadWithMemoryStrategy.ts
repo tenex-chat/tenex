@@ -16,6 +16,7 @@ import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 import { getNDK } from "@/nostr";
 import chalk from "chalk";
+import { ThreadedConversationFormatter, ThreadNode, FormatterOptions } from "@/conversations/formatters/ThreadedConversationFormatter";
 
 /**
  * Message generation strategy that includes thread context and agent memory
@@ -30,7 +31,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         context: ExecutionContext,
         triggeringEvent: NDKEvent
     ): Promise<ModelMessage[]> {
-        const { threadService, participationIndex } = context.conversationCoordinator;
+        const { threadService } = context.conversationCoordinator;
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
 
         if (!conversation) {
@@ -67,108 +68,37 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             }))
         });
 
-        // 2. Find ALL threads where agent participated
-        const agentEventIds = participationIndex.getAgentParticipations(
-            context.conversationId,
-            context.agent.pubkey
+        // 2. Create a Set of event IDs from the active branch
+        const activeBranchIds = new Set<string>(currentThread.map(e => e.id));
+        
+        logger.info("[ThreadWithMemoryStrategy] Active branch identified", {
+            activeBranchSize: activeBranchIds.size,
+            activeBranchIds: Array.from(activeBranchIds).slice(0, 5).map(id => id.substring(0, 8))
+        });
+
+        // 3. Get ALL events in the conversation and format other branches
+        const allEvents = conversation.history;
+        const formatter = new ThreadedConversationFormatter();
+        const otherBranchesFormatted = formatter.formatOtherBranches(
+            allEvents,
+            context.agent.pubkey,
+            activeBranchIds
         );
 
-        logger.info("[ThreadWithMemoryStrategy] Agent participations found", {
-            agentPubkey: context.agent.pubkey.substring(0, 8),
-            participationCount: agentEventIds.length,
-            participationIds: agentEventIds.map(id => id.substring(0, 8))
-        });
-
-        // Build a map of thread roots to full threads where agent participated
-        const agentThreads: Map<string, NDKEvent[]> = new Map();
-
-        for (const eventId of agentEventIds) {
-            const thread = threadService.getThreadToEvent(eventId, conversation.history);
-            if (thread.length > 0) {
-                const threadRoot = thread[0].id;
-
-                // Store the full thread (not just agent's message)
-                if (!agentThreads.has(threadRoot)) {
-                    agentThreads.set(threadRoot, thread);
-                    logger.debug("[ThreadWithMemoryStrategy] Found agent thread", {
-                        threadRoot: threadRoot.substring(0, 8),
-                        threadLength: thread.length,
-                        agentEventInThread: eventId.substring(0, 8)
-                    });
-                }
-            }
-        }
-
-        // CRITICAL: Also check if any agent responses have become sub-thread roots
-        // This happens when other events reply to the agent's messages
-        for (const eventId of agentEventIds) {
-            // Check if this agent event has children (making it a sub-thread root)
-            const hasReplies = conversation.history.some(e => e.tagValue("e") === eventId);
-
-            if (hasReplies && !agentThreads.has(eventId)) {
-                // This agent response is itself a sub-thread root
-                // Get the complete sub-thread starting from this agent event
-                const subThread = this.getSubThreadFromRoot(eventId, conversation.history);
-
-                if (subThread.length > 0) {
-                    agentThreads.set(eventId, subThread);
-                    logger.info("[ThreadWithMemoryStrategy] Found sub-thread rooted at agent response", {
-                        subThreadRoot: eventId.substring(0, 8),
-                        subThreadLength: subThread.length,
-                        childEvents: subThread.slice(1).map(e => ({
-                            id: e.id.substring(0, 8),
-                            content: e.content?.substring(0, 30)
-                        }))
-                    });
-                }
-            }
-        }
-
-        logger.info("[ThreadWithMemoryStrategy] Agent threads analysis", {
-            agentName: context.agent.name,
-            agentThreadCount: agentThreads.size,
-            currentThreadRoot: currentThread[0]?.id.substring(0, 8),
-            agentThreadRoots: Array.from(agentThreads.keys()).map(id => id.substring(0, 8))
-        });
-
-        // 3. Add agent's previous threads (excluding current) with FULL context
-        const currentThreadRoot = currentThread[0]?.id;
-        const otherThreads = Array.from(agentThreads.entries())
-            .filter(([rootId]) => rootId !== currentThreadRoot);
-
-        logger.info("[ThreadWithMemoryStrategy] Retrieved other threads", {
-            currentThreadRoot,
-            otherThreadCount: otherThreads.length,
-            agentName: context.agent.name,
-        });
-
-        if (otherThreads.length > 0) {
+        if (otherBranchesFormatted) {
+            // Enhance with agent names
+            const enhancedContent = await this.enhanceFormattedContent(
+                otherBranchesFormatted,
+                context.agent.pubkey,
+                context.agent.name
+            );
+            
             messages.push({
                 role: "system",
-                content: "Your previous participations in other threads of this conversation (showing full thread context):"
+                content: `You were active in these other related subthreads in this conversation:\n\n${enhancedContent}`
             });
 
-            for (const [threadRoot, thread] of otherThreads) {
-                // Add thread marker
-                messages.push({
-                    role: "system",
-                    content: `[Previous thread ${threadRoot.substring(0, 8)}]:`
-                });
-
-                // Show the FULL thread including ALL agent participations
-                // The agent needs to see the complete context of what happened in this thread
-                for (const event of thread) {
-                    const processedMessages = await this.processEvent(
-                        event,
-                        context.agent.pubkey,
-                        context.conversationId,
-                    );
-                    messages.push(...processedMessages);
-                }
-            }
-
-            logger.info("[ThreadWithMemoryStrategy] Added agent memory from other threads", {
-                otherThreadCount: otherThreads.length,
+            logger.info("[ThreadWithMemoryStrategy] Added agent memory from other branches", {
                 agentName: context.agent.name
             });
 
@@ -178,8 +108,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 content: "Current thread you are responding to:"
             });
         } else {
-            logger.info("[ThreadWithMemoryStrategy] No other threads according to this thing", {
-                otherThreadCount: otherThreads.length,
+            logger.info("[ThreadWithMemoryStrategy] No other branches with agent participation", {
                 agentName: context.agent.name,
             });
         }
@@ -234,11 +163,25 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
         logger.info("[ThreadWithMemoryStrategy] Message building complete", {
             totalMessages: messages.length,
-            hasMemoryFromOtherThreads: otherThreads.length > 0,
+            hasMemoryFromOtherThreads: otherBranchesFormatted !== null,
             currentThreadLength: currentThread.length
         });
 
         return messages;
+    }
+
+    /**
+     * Enhance formatted content with agent names
+     */
+    private async enhanceFormattedContent(
+        formattedContent: string,
+        agentPubkey: string,
+        agentName: string
+    ): Promise<string> {
+        // This is a simplified version - in the future we could parse
+        // the formatted content and replace pubkeys with names
+        // For now, just return the formatted content as-is
+        return formattedContent;
     }
 
     /**
@@ -438,31 +381,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         }
     }
 
-    /**
-     * Get a complete sub-thread starting from a given root event
-     * Includes the root event and all its descendants
-     */
-    private getSubThreadFromRoot(rootId: string, history: NDKEvent[]): NDKEvent[] {
-        const thread: NDKEvent[] = [];
-        const queue = [rootId];
-        const visited = new Set<string>();
-
-        while (queue.length > 0) {
-            const currentId = queue.shift()!;
-            if (visited.has(currentId)) continue;
-            visited.add(currentId);
-
-            const event = history.find(e => e.id === currentId);
-            if (event) {
-                thread.push(event);
-                // Find all children of this event
-                const children = history.filter(e => e.tagValue("e") === currentId);
-                queue.push(...children.map(c => c.id));
-            }
-        }
-
-        return thread.sort((a, b) => a.created_at - b.created_at);
-    }
 
     /**
      * Add special context instructions (voice mode, debug mode, delegation completion, etc.)

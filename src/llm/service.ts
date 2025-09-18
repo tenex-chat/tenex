@@ -17,7 +17,6 @@ import {
 import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 import type { LanguageModelUsageWithCostUsd } from "./types";
-import { providerSupportsStreaming } from "./provider-configs";
 
 // Define the event types for LLMService
 interface LLMServiceEvents {
@@ -34,6 +33,7 @@ interface LLMServiceEvents {
         message: string;
         steps: StepResult<Record<string, AISdkTool>>[];
         usage: LanguageModelUsageWithCostUsd;
+        finishReason?: string;
     }) => void;
     "stream-error": (data: { error: unknown }) => void;
     "session-captured": (data: { sessionId: string }) => void;
@@ -280,15 +280,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
-        
-        // Check if provider supports streaming
-        const supportsStreaming = providerSupportsStreaming(this.provider as any);
-        
-        if (!supportsStreaming) {
-            // For non-streaming providers, simulate streaming
-            return this.simulateStream(messages, tools, options);
-        }
-        
+
         // Add provider-specific cache control
         const processedMessages = this.addCacheControl(messages);
 
@@ -440,6 +432,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     duration,
                     model: this.model,
                     startTime,
+                    finishReason: e.finishReason,
                 });
 
                 this.emit("complete", {
@@ -449,6 +442,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                         costUsd: e.providerMetadata?.openrouter?.usage?.cost,
                         ...(e.totalUsage || {}),
                     },
+                    finishReason: e.finishReason,
                 });
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
@@ -503,117 +497,4 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         });
     }
 
-    /**
-     * Simulate streaming for providers that don't support it (like claudeCode)
-     * Makes a regular generateText call and yields the result as a stream.
-     * 
-     * This ensures that all LLM providers appear to support streaming from the
-     * perspective of downstream consumers, maintaining a consistent interface
-     * and avoiding the need for special handling of non-streaming providers.
-     * 
-     * The simulation:
-     * 1. Makes a complete (non-streaming) call to the provider
-     * 2. Emits the entire response as a single "content" delta event
-     * 3. Emits tool events if present
-     * 4. Emits a "complete" event to signal the end of the stream
-     */
-    private async simulateStream(
-        messages: ModelMessage[],
-        tools: Record<string, AISdkTool>,
-        options?: {
-            abortSignal?: AbortSignal;
-        }
-    ): Promise<void> {
-        const startTime = Date.now();
-        
-        logger.info("[LLMService] Simulating stream for non-streaming provider", {
-            provider: this.provider,
-            model: this.model,
-        });
-
-        try {
-            // Make a regular non-streaming call
-            const result = await this.complete(messages, tools, {
-                temperature: this.temperature,
-                maxTokens: this.maxTokens,
-            });
-
-            // Type guard to check if result has the expected structure
-            const typedResult = result as any;
-            
-            // Extract text from content array (AI SDK v2 format)
-            let text = "";
-            if (typedResult.content && Array.isArray(typedResult.content)) {
-                text = typedResult.content
-                    .filter((c: any) => c.type === 'text')
-                    .map((c: any) => c.text)
-                    .join('');
-            } else if (typedResult.text) {
-                // Fallback for old format
-                text = typedResult.text;
-            }
-            
-            const usage = typedResult.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-            const steps = typedResult.steps || [];
-            
-            // Simulate streaming by emitting the entire content as a single chunk
-            // followed by a complete event
-            if (text) {
-                // Emit the entire content as a single delta
-                this.emit("content", { delta: text });
-            }
-
-            // Handle any tool calls from the result
-            if (typedResult.toolCalls && Array.isArray(typedResult.toolCalls)) {
-                for (const toolCall of typedResult.toolCalls) {
-                    // Emit tool-will-execute
-                    this.emit("tool-will-execute", {
-                        toolName: toolCall.toolName,
-                        toolCallId: toolCall.toolCallId,
-                        args: toolCall.args,
-                    });
-                    
-                    // Find corresponding tool result if any
-                    const toolResult = typedResult.toolResults?.find(
-                        (r: any) => r.toolCallId === toolCall.toolCallId
-                    );
-                    
-                    if (toolResult) {
-                        // Emit tool-did-execute
-                        this.emit("tool-did-execute", {
-                            toolName: toolCall.toolName,
-                            toolCallId: toolCall.toolCallId,
-                            result: toolResult.result,
-                        });
-                    }
-                }
-            }
-
-            // Emit complete event to signal end of "stream"
-            const duration = Date.now() - startTime;
-            
-            logger.info("[LLMService] Simulated stream complete", {
-                duration,
-                model: this.model,
-                provider: this.provider,
-                textLength: text.length,
-            });
-
-            // Get costUsd from providerMetadata if available
-            const costUsd = typedResult.providerMetadata?.openrouter?.usage?.cost ||
-                           typedResult.providerMetadata?.['claude-code']?.costUsd;
-
-            this.emit("complete", {
-                message: text,
-                steps,
-                usage: {
-                    costUsd,
-                    ...usage,
-                },
-            });
-        } catch (error) {
-            await this.handleStreamError(error, startTime);
-            throw error;
-        }
-    }
 }

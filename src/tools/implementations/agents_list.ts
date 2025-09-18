@@ -43,7 +43,6 @@ type AgentsListOutput = {
 
 /**
  * Core implementation of the agents_list functionality
- * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsList(
   input: AgentsListInput

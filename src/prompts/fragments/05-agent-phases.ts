@@ -23,7 +23,7 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
 
     parts.push("## Your Defined Phases");
     parts.push("");
-    parts.push("You have the following phases defined. When you use the delegate_phase tool, you must specify one of these phases:");
+    parts.push("You manage the following phases. When you use the delegate_phase tool, you must specify one of these phases:");
     parts.push("");
 
     // List all phases with their instructions
