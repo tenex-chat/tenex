@@ -204,6 +204,11 @@ async function executeUploadBlob(
 ): Promise<UploadBlobOutput> {
   const { input: dataInput, mimeType: providedMimeType, description } = input;
   
+  // Validate that input is provided
+  if (!dataInput) {
+    throw new Error('Input is required for upload_blob tool');
+  }
+  
   logger.info('[upload_blob] Starting blob upload', {
     hasFilePath: !dataInput.startsWith('data:') && !dataInput.includes(','),
     hasMimeType: !!providedMimeType,

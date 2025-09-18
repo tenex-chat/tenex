@@ -77,4 +77,34 @@ describe('upload_blob tool', () => {
       expect(schema.shape).toHaveProperty('description');
     });
   });
+
+  describe('error handling', () => {
+    it('should handle undefined input gracefully', () => {
+      const tool = createUploadBlobTool(mockContext);
+      
+      // Test getHumanReadableContent with undefined input
+      const humanReadable = (tool as any).getHumanReadableContent({
+        input: undefined,
+        description: 'Some description'
+      });
+      expect(humanReadable).toBe('Uploading blob data');
+    });
+    
+    it('should handle completely undefined args', () => {
+      const tool = createUploadBlobTool(mockContext);
+      
+      // Test getHumanReadableContent with undefined args
+      const humanReadable = (tool as any).getHumanReadableContent(undefined);
+      expect(humanReadable).toBe('Uploading blob data');
+    });
+
+    it('should throw error when executing with undefined input', async () => {
+      const tool = createUploadBlobTool(mockContext);
+      
+      // Test that execute throws when input is undefined
+      await expect(tool.execute({ input: undefined } as any)).rejects.toThrow(
+        'Input is required for upload_blob tool'
+      );
+    });
+  });
 });

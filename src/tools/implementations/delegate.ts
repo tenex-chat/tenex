@@ -52,6 +52,19 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
     throw new Error("No valid recipients provided.");
   }
 
+  // Check for self-delegation (not allowed in regular delegate tool)
+  const selfDelegationAttempts = resolvedPubkeys.filter(
+    pubkey => pubkey === context.agent.pubkey
+  );
+  
+  if (selfDelegationAttempts.length > 0) {
+    throw new Error(
+      `Self-delegation is not permitted with the delegate tool. ` +
+      `Agent "${context.agent.slug}" cannot delegate to itself. ` +
+      `Use the delegate_phase tool if you need to transition phases within the same agent.`
+    );
+  }
+
   // Use DelegationService to execute the delegation
   const delegationService = new DelegationService(
     context.agent,

@@ -33,13 +33,21 @@ export class DelegationService {
    * Execute a delegation and wait for all responses.
    */
   async execute(intent: DelegationIntent & { suggestions?: string[] }): Promise<DelegationResponses> {
-    // Allow self-delegation - agents can now delegate to themselves
+    // Check for self-delegation attempts
     const selfDelegationAttempts = intent.recipients.filter(
       pubkey => pubkey === this.agent.pubkey
     );
     
+    // Only allow self-delegation when phase is explicitly provided (i.e., delegate_phase tool)
     if (selfDelegationAttempts.length > 0) {
-      logger.info("[DelegationService] 🔄 Agent delegating to itself", {
+      if (!intent.phase) {
+        throw new Error(
+          `Self-delegation is not permitted. Agent "${this.agent.slug}" cannot delegate to itself. ` +
+          `Self-delegation is only allowed when using the delegate_phase tool for phase transitions.`
+        );
+      }
+      
+      logger.info("[DelegationService] 🔄 Agent delegating to itself via phase transition", {
         fromAgent: this.agent.slug,
         agentPubkey: this.agent.pubkey,
         phase: intent.phase,

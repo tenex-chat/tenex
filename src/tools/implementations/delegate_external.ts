@@ -24,14 +24,23 @@ type DelegateExternalOutput = DelegationResponses;
 // Core implementation - extracted from existing execute function
 async function executeDelegateExternal(input: DelegateExternalInput, context: ExecutionContext): Promise<DelegateExternalOutput> {
   const { content, recipient, projectId } = input;
-
-  const ndk = getNDK();
   
   // Parse recipient using the utility function
   const pubkey = parseNostrUser(recipient);
   if (!pubkey) {
     throw new Error(`Invalid recipient format: ${recipient}`);
   }
+
+  // Check for self-delegation (not allowed in delegate_external tool)
+  if (pubkey === context.agent.pubkey) {
+    throw new Error(
+      `Self-delegation is not permitted with the delegate_external tool. ` +
+      `Agent "${context.agent.slug}" cannot delegate to itself as an external agent. ` +
+      `Use the delegate_phase tool if you need to transition phases within the same agent.`
+    );
+  }
+
+  const ndk = getNDK();
 
   logger.info("🚀 Delegating to external agent", {
     agent: context.agent.name,
