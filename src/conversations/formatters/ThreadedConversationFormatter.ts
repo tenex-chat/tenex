@@ -24,6 +24,7 @@ export interface FormatterOptions {
   includeToolCalls: boolean;
   treeStyle: 'ascii' | 'unicode' | 'markdown';
   compactMode: boolean; // Single-line per message
+  currentAgentPubkey?: string; // The agent we're formatting for (to show "you")
 }
 
 export class ThreadedConversationFormatter {
@@ -42,7 +43,7 @@ export class ThreadedConversationFormatter {
   /**
    * Build tree structure from flat event list
    */
-  buildThreadTree(events: NDKEvent[]): ThreadNode[] {
+  async buildThreadTree(events: NDKEvent[]): Promise<ThreadNode[]> {
     return this.treeBuilder.buildFromEvents(events);
   }
 
@@ -75,14 +76,14 @@ export class ThreadedConversationFormatter {
    * Format branches where the agent participated, excluding the active branch
    * This is the main entry point for getting "other threads" context
    */
-  public formatOtherBranches(
+  public async formatOtherBranches(
     allEvents: NDKEvent[],
     agentPubkey: string,
     activeBranchIds: Set<string>
-  ): string | null {
+  ): Promise<string | null> {
     // 1. Build complete conversation tree from all events
-    const completeTree = this.buildThreadTree(allEvents);
-    
+    const completeTree = await this.buildThreadTree(allEvents);
+
     // 2. Prune the active branch from the tree
     const prunedTree = this.pruneBranch(completeTree, activeBranchIds);
     
@@ -100,9 +101,10 @@ export class ThreadedConversationFormatter {
       timestampFormat: 'time-only',
       includeToolCalls: true,
       treeStyle: 'ascii',
-      compactMode: true
+      compactMode: true,
+      currentAgentPubkey: agentPubkey // Pass the agent we're formatting for
     };
-    
+
     const result: string[] = [];
     for (let i = 0; i < agentBranches.length; i++) {
       if (i > 0) {
@@ -254,15 +256,21 @@ export class ThreadedConversationFormatter {
 
   private renderNode(node: ThreadNode, options: FormatterOptions, prefix: string, isLast: boolean): string {
     const lines: string[] = [];
-    
+
     // Format the current node
     const message = this.messageFormatter.format(node, options);
-    const timestamp = options.includeTimestamps 
+    const timestamp = options.includeTimestamps
       ? this.timestampFormatter.format(node.timestamp, options.timestampFormat)
       : '';
-    
+
+    // Add "(you)" if this is the current agent
+    let agentName = node.agent || 'Unknown';
+    if (options.currentAgentPubkey && node.event.pubkey === options.currentAgentPubkey) {
+      agentName = `${agentName} (you)`;
+    }
+
     const connector = this.treeRenderer.getConnector(options.treeStyle, isLast);
-    const line = `${prefix}${connector}${node.agent || 'Unknown'}${timestamp}: ${message}`;
+    const line = `${prefix}${connector}${agentName}${timestamp}: ${message}`;
     lines.push(line);
     
     // Render children with appropriate prefixes

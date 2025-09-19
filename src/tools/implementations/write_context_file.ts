@@ -13,7 +13,7 @@ const WriteContextFileArgsSchema = z.object({
   filename: z.string().min(1, "filename must be a non-empty string"),
   content: z.string().min(1, "content must be a non-empty string"),
   title: z.string().min(1, "title must be a non-empty string"),
-  changelog: z.string().nullable(),
+  changelog: z.string().nullable().optional(),
 });
 
 type WriteContextFileInput = z.infer<typeof WriteContextFileArgsSchema>;

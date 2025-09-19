@@ -6,11 +6,12 @@ import type { AgentInstance } from "./types";
  * These are fundamental capabilities that every agent needs.
  */
 export const CORE_AGENT_TOOLS = [
-  "lesson_get",    // All agents should access lessons
-  "lesson_learn",  // All agents should be able to learn
-  "read_path",     // All agents need file system access
-  "reports_list",  // All agents should see available reports
-  "report_read",   // All agents should read reports
+    "lesson_get", // All agents should access lessons
+    "lesson_learn", // All agents should be able to learn
+    "read_path", // All agents need file system access
+    "codebase_search", // All agents need file system access
+    "reports_list", // All agents should see available reports
+    "report_read", // All agents should read reports
 ] as const;
 
 /**
@@ -26,6 +27,7 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
   const tools = [
     "read_path",
     "lesson_learn", 
+    "codebase_search",
     "claude_code",
     "write_context_file",
     "shell",
@@ -41,12 +43,12 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
 /**
  * Delegate tools that should be excluded from configuration and kind 24010 events
  */
-export const DELEGATE_TOOLS = ['delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'] as const;
+export const DELEGATE_TOOLS = ['ask', 'delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'] as const;
 
 /**
  * Phase management tools
  */
-export const PHASE_MANAGEMENT_TOOLS = ['add_phase', 'remove_phase'] as const;
+export const PHASE_MANAGEMENT_TOOLS = ['phase_add', 'phase_remove'] as const;
 
 /**
  * Get the correct delegate tools for an agent based on whether they have phases defined

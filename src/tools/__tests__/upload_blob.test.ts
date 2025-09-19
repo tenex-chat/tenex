@@ -42,7 +42,9 @@ describe('upload_blob tool', () => {
 
     it('should create tool with correct description', () => {
       const tool = createUploadBlobTool(mockContext);
-      expect(tool.description).toContain('Upload files or base64 blobs to a Blossom server');
+      expect(tool.description).toContain('Upload files, URLs, or base64 blobs to a Blossom server');
+      expect(tool.description).toContain("IMPORTANT: The parameter is named 'input'");
+      expect(tool.description).toContain("not 'url' or 'file'");
     });
 
     it('should have human-readable content generator', () => {
@@ -64,6 +66,25 @@ describe('upload_blob tool', () => {
         description: 'Avatar image'
       });
       expect(humanReadable).toBe('Uploading blob data - Avatar image');
+    });
+
+    it('should handle URL input in human-readable content', () => {
+      const tool = createUploadBlobTool(mockContext);
+      
+      const humanReadable = (tool as any).getHumanReadableContent({
+        input: 'https://example.com/image.jpg',
+        description: 'Profile picture'
+      });
+      expect(humanReadable).toBe('Downloading and uploading from example.com - Profile picture');
+    });
+
+    it('should handle URL input without description', () => {
+      const tool = createUploadBlobTool(mockContext);
+      
+      const humanReadable = (tool as any).getHumanReadableContent({
+        input: 'https://cdn.example.com/media/photo.png'
+      });
+      expect(humanReadable).toBe('Downloading and uploading from cdn.example.com');
     });
   });
 
@@ -100,10 +121,10 @@ describe('upload_blob tool', () => {
 
     it('should throw error when executing with undefined input', async () => {
       const tool = createUploadBlobTool(mockContext);
-      
+
       // Test that execute throws when input is undefined
       await expect(tool.execute({ input: undefined } as any)).rejects.toThrow(
-        'Input is required for upload_blob tool'
+        "The 'input' parameter is required. Pass the URL, file path, or base64 data via { input: '...' }. Note: The parameter name is 'input', not 'url' or 'file'."
       );
     });
   });

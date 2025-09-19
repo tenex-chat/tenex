@@ -8,14 +8,11 @@ import * as crypto from 'crypto';
 
 const uploadBlobSchema = z.object({
   input: z
-    .union([
-      z.string().describe("File path to upload or base64-encoded blob data"),
-    ])
-    .describe("Either a file path or base64-encoded blob data to upload"),
+      .string().describe("REQUIRED: The source to upload - can be a file path (e.g., /path/to/file.jpg), URL to download from (e.g., https://example.com/image.jpg), or base64-encoded blob data. This parameter must be named 'input', not 'url' or 'file'."),
   mimeType: z
     .string()
     .optional()
-    .describe("MIME type of the data (e.g., 'image/jpeg', 'video/mp4'). If not provided, it will be detected from the file extension or data"),
+    .describe("MIME type of the data (e.g., 'image/jpeg', 'video/mp4'). If not provided, it will be detected from the file extension, URL response headers, or data"),
   description: z
     .string()
     .optional()
@@ -115,6 +112,70 @@ function getExtensionFromMimeType(mimeType: string): string {
 }
 
 /**
+ * Check if input is a URL
+ */
+function isURL(input: string): boolean {
+  try {
+    const url = new URL(input);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Download media from URL
+ */
+async function downloadFromURL(url: string): Promise<{ data: Buffer; mimeType?: string; filename?: string }> {
+  logger.info('[upload_blob] Downloading from URL', { url });
+  
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'TENEX/1.0 (Blossom Upload Tool)'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to download from URL: ${response.status} ${response.statusText}`);
+  }
+
+  // Get content type from headers
+  const contentType = response.headers.get('content-type');
+  const mimeType = contentType?.split(';')[0].trim();
+  
+  // Try to extract filename from Content-Disposition header or URL
+  let filename: string | undefined;
+  const contentDisposition = response.headers.get('content-disposition');
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    if (filenameMatch) {
+      filename = filenameMatch[1].replace(/['"]/g, '');
+    }
+  }
+  
+  if (!filename) {
+    // Try to extract filename from URL
+    const urlPath = new URL(url).pathname;
+    const pathSegments = urlPath.split('/');
+    const lastSegment = pathSegments[pathSegments.length - 1];
+    if (lastSegment && lastSegment.includes('.')) {
+      filename = lastSegment;
+    }
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const data = Buffer.from(arrayBuffer);
+  
+  logger.info('[upload_blob] Downloaded from URL', {
+    size: data.length,
+    mimeType,
+    filename
+  });
+
+  return { data, mimeType, filename };
+}
+
+/**
  * Calculate SHA256 hash of data
  */
 function calculateSHA256(data: Buffer): string {
@@ -206,11 +267,12 @@ async function executeUploadBlob(
   
   // Validate that input is provided
   if (!dataInput) {
-    throw new Error('Input is required for upload_blob tool');
+    throw new Error("The 'input' parameter is required. Pass the URL, file path, or base64 data via { input: '...' }. Note: The parameter name is 'input', not 'url' or 'file'.");
   }
   
   logger.info('[upload_blob] Starting blob upload', {
-    hasFilePath: !dataInput.startsWith('data:') && !dataInput.includes(','),
+    isURL: isURL(dataInput),
+    hasFilePath: !isURL(dataInput) && !dataInput.startsWith('data:') && !dataInput.includes(','),
     hasMimeType: !!providedMimeType,
     description,
   });
@@ -225,8 +287,14 @@ async function executeUploadBlob(
   let mimeType: string;
   let uploadDescription: string;
 
-  // Check if input is a file path or base64 data
-  if (dataInput.startsWith('data:') || dataInput.includes(',')) {
+  // Check if input is a URL
+  if (isURL(dataInput)) {
+    // Handle URL download
+    const downloadResult = await downloadFromURL(dataInput);
+    data = downloadResult.data;
+    mimeType = providedMimeType || downloadResult.mimeType || detectMimeType(downloadResult.filename, data);
+    uploadDescription = description || downloadResult.filename || 'Upload from URL';
+  } else if (dataInput.startsWith('data:') || dataInput.includes(',')) {
     // Handle base64 data (with or without data URL prefix)
     const base64Data = dataInput.includes(',') 
       ? dataInput.split(',')[1] 
@@ -301,15 +369,22 @@ async function executeUploadBlob(
  */
 export function createUploadBlobTool(context: ExecutionContext) {
   const aiTool = tool({
-    description: `Upload files or base64 blobs to a Blossom server. 
-    
-    Accepts either:
-    - File paths (relative or absolute)
-    - Base64-encoded data (with or without data: URL prefix)
-    
+    description: `Upload files, URLs, or base64 blobs to a Blossom server.
+
+    IMPORTANT: The parameter is named 'input' (not 'url' or 'file').
+
+    Pass the source via the 'input' parameter:
+    - URLs: { input: "https://example.com/image.jpg" }
+    - File paths: { input: "/path/to/file.jpg" }
+    - Base64 data: { input: "data:image/jpeg;base64,..." } or { input: "<base64_string>" }
+
+    Optional parameters:
+    - mimeType: Specify MIME type (auto-detected if not provided)
+    - description: Add a description for the upload
+
     The Blossom server URL is configured in .tenex/config.json (default: https://blossom.primal.net).
     Returns the URL of the uploaded media with appropriate file extension.`,
-    parameters: uploadBlobSchema,
+    inputSchema: uploadBlobSchema,
     execute: async (input: UploadBlobInput) => {
       return await executeUploadBlob(input, context);
     },
@@ -322,8 +397,11 @@ export function createUploadBlobTool(context: ExecutionContext) {
         return 'Uploading blob data';
       }
       const { input, description } = args;
-      const isFile = !input.startsWith('data:') && !input.includes(',');
-      if (isFile) {
+      
+      if (isURL(input)) {
+        const url = new URL(input);
+        return `Downloading and uploading from ${url.hostname}${description ? ` - ${description}` : ''}`;
+      } else if (!input.startsWith('data:') && !input.includes(',')) {
         return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ''}`;
       } else {
         return `Uploading blob data${description ? ` - ${description}` : ''}`;
@@ -337,21 +415,22 @@ export function createUploadBlobTool(context: ExecutionContext) {
 }
 
 /**
- * upload_blob tool - Upload files or base64 blobs to a Blossom server
+ * upload_blob tool - Upload files, URLs, or base64 blobs to a Blossom server
  * 
- * This tool enables agents to upload media files or binary data to a Blossom server,
+ * This tool enables agents to upload media to a Blossom server from various sources,
  * following the Blossom protocol specification for decentralized media storage.
  * 
  * Features:
+ * - Downloads and uploads media from URLs (http/https)
  * - Supports file uploads from the filesystem
  * - Supports base64-encoded blob uploads
- * - Automatic MIME type detection
+ * - Automatic MIME type detection from file extensions, URL headers, or data
  * - Proper file extension handling in returned URLs
  * - Configurable Blossom server URL via .tenex/config.json
  * - Nostr event-based authentication (kind 24242)
  * 
  * The tool handles the complete Blossom upload workflow:
- * 1. Reads file or decodes base64 data
+ * 1. Downloads from URL, reads file, or decodes base64 data
  * 2. Calculates SHA256 hash
  * 3. Creates and signs authorization event
  * 4. Uploads to Blossom server with proper headers

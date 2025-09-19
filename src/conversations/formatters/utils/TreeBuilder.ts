@@ -1,24 +1,25 @@
 import { NDKEvent } from '@nostr-dev-kit/ndk';
 import { ThreadNode } from '../ThreadedConversationFormatter';
+import { getPubkeyNameRepository } from '@/services/PubkeyNameRepository';
 
 export class TreeBuilder {
   /**
    * Build tree structure from flat event list
    */
-  buildFromEvents(events: NDKEvent[]): ThreadNode[] {
+  async buildFromEvents(events: NDKEvent[]): Promise<ThreadNode[]> {
     if (events.length === 0) {
       return [];
     }
-    
+
     // Create node map indexed by event ID
     const nodeMap = new Map<string, ThreadNode>();
     const rootNodes: ThreadNode[] = [];
-    
+
     // First pass: create all nodes
     for (const event of events) {
       const node: ThreadNode = {
         event,
-        agent: this.extractAgentName(event),
+        agent: await this.extractAgentName(event),
         timestamp: new Date(event.created_at! * 1000),
         content: event.content,
         toolCall: this.extractToolCall(event),
@@ -74,30 +75,11 @@ export class TreeBuilder {
     return null;
   }
   
-  private extractAgentName(event: NDKEvent): string | undefined {
-    // Look for agent identifier in tags
-    const agentTag = event.tags.find(tag => tag[0] === 'agent');
-    if (agentTag && agentTag[1]) {
-      return agentTag[1];
-    }
-    
-    // Try to extract from p tags with agent marker
-    const pTags = event.tags.filter(tag => tag[0] === 'p');
-    for (const pTag of pTags) {
-      if (pTag[3] && pTag[3].startsWith('agent:')) {
-        return pTag[3].substring(6);
-      }
-    }
-    
-    // Fallback: check if content suggests an agent
-    if (event.content.startsWith('[') && event.content.includes(']:')) {
-      const match = event.content.match(/^\[([^\]]+)\]:/); 
-      if (match) {
-        return match[1];
-      }
-    }
-    
-    return undefined;
+  private async extractAgentName(event: NDKEvent): Promise<string | undefined> {
+    // Use the PubkeyNameRepository to resolve the actual name
+    const nameRepo = getPubkeyNameRepository();
+    const name = await nameRepo.getName(event.pubkey);
+    return name;
   }
   
   private extractToolCall(event: NDKEvent): { name: string; args?: string } | undefined {

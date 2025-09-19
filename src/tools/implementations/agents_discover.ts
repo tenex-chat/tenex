@@ -4,7 +4,7 @@ import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 const agentsDiscoverSchema = z.object({
-  searchText: z.string().nullable().describe("Text to search for in agent name/description/role"),
+  searchText: z.string().nullable().optional().describe("Text to search for in agent name/description/role"),
   limit: z.coerce.number().default(50).describe("Maximum number of agents to return"),
 });
 

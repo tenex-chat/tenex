@@ -44,7 +44,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         await this.addSystemPrompt(messages, context);
 
         // 1. Get current thread (from root to triggering event)
-        logger.info("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
+        logger.debug("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
             triggeringEventId: triggeringEvent.id.substring(0, 8),
             triggeringContent: triggeringEvent.content?.substring(0, 50),
             triggeringParent: triggeringEvent.tagValue("e")?.substring(0, 8),
@@ -56,7 +56,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             conversation.history
         );
 
-        logger.info("[ThreadWithMemoryStrategy] Current thread retrieved", {
+        logger.debug("[ThreadWithMemoryStrategy] Current thread retrieved", {
             conversationId: context.conversationId.substring(0, 8),
             agentName: context.agent.name,
             currentThreadLength: currentThread.length,
@@ -71,7 +71,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // 2. Create a Set of event IDs from the active branch
         const activeBranchIds = new Set<string>(currentThread.map(e => e.id));
         
-        logger.info("[ThreadWithMemoryStrategy] Active branch identified", {
+        logger.debug("[ThreadWithMemoryStrategy] Active branch identified", {
             activeBranchSize: activeBranchIds.size,
             activeBranchIds: Array.from(activeBranchIds).slice(0, 5).map(id => id.substring(0, 8))
         });
@@ -79,7 +79,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // 3. Get ALL events in the conversation and format other branches
         const allEvents = conversation.history;
         const formatter = new ThreadedConversationFormatter();
-        const otherBranchesFormatted = formatter.formatOtherBranches(
+        const otherBranchesFormatted = await formatter.formatOtherBranches(
             allEvents,
             context.agent.pubkey,
             activeBranchIds
@@ -98,7 +98,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 content: `You were active in these other related subthreads in this conversation:\n\n${enhancedContent}`
             });
 
-            logger.info("[ThreadWithMemoryStrategy] Added agent memory from other branches", {
+            logger.debug("[ThreadWithMemoryStrategy] Added agent memory from other branches", {
                 agentName: context.agent.name
             });
 
@@ -108,13 +108,13 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 content: "Current thread you are responding to:"
             });
         } else {
-            logger.info("[ThreadWithMemoryStrategy] No other branches with agent participation", {
+            logger.debug("[ThreadWithMemoryStrategy] No other branches with agent participation", {
                 agentName: context.agent.name,
             });
         }
 
 
-        logger.info("[ThreadWithMemoryStrategy] Adding current thread events", {
+        logger.debug("[ThreadWithMemoryStrategy] Adding current thread events", {
             threadLength: currentThread.length,
             firstEvent: currentThread[0] ? {
                 id: currentThread[0].id.substring(0, 8),
@@ -137,7 +137,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                     role: "system",
                     content: "═══ IMPORTANT: THE FOLLOWING IS THE MESSAGE TO RESPOND TO. ═══"
                 });
-                logger.info("[ThreadWithMemoryStrategy] Added triggering event marker", {
+                logger.debug("[ThreadWithMemoryStrategy] Added triggering event marker", {
                     eventId: event.id.substring(0, 8)
                 });
             }
@@ -161,7 +161,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // Add special context instructions if needed
         await this.addSpecialContext(messages, context, triggeringEvent);
 
-        logger.info("[ThreadWithMemoryStrategy] Message building complete", {
+        logger.debug("[ThreadWithMemoryStrategy] Message building complete", {
             totalMessages: messages.length,
             hasMemoryFromOtherThreads: otherBranchesFormatted !== null,
             currentThreadLength: currentThread.length
@@ -396,7 +396,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         if (isVoiceMode(triggeringEvent)) {
             contextBuilder.add("voice-mode", { isVoiceMode: true });
 
-            logger.info("[ThreadWithMemoryStrategy] Voice mode activated", {
+            logger.debug("[ThreadWithMemoryStrategy] Voice mode activated", {
                 agent: context.agent.name
             });
         }
@@ -407,7 +407,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 isDelegationCompletion: true
             });
 
-            logger.info("[ThreadWithMemoryStrategy] Added delegation completion context", {
+            logger.debug("[ThreadWithMemoryStrategy] Added delegation completion context", {
                 agent: context.agent.name
             });
         }
@@ -416,7 +416,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         if (isDebugMode(triggeringEvent)) {
             contextBuilder.add("debug-mode", { enabled: true });
 
-            logger.info("[ThreadWithMemoryStrategy] Debug mode activated", {
+            logger.debug("[ThreadWithMemoryStrategy] Debug mode activated", {
                 agent: context.agent.name
             });
         }

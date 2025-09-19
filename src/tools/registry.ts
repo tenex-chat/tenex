@@ -38,12 +38,14 @@ import { createCancelScheduledTaskTool } from "./implementations/schedule_task_c
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createAskTool } from "./implementations/ask";
 import { createUploadBlobTool } from "./implementations/upload_blob";
+import { createCodebaseSearchTool } from "./implementations/codebase_search";
 
 /**
  * Tool names available in the system
  */
 export type ToolName =
   | "read_path"
+  | "codebase_search"
   | "write_context_file"
   | "generate_inventory"
   | "lesson_learn"
@@ -104,6 +106,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
   // Claude code
   claude_code: createClaudeCodeTool,
+  
+  // Codebase search
+  codebase_search: createCodebaseSearchTool,
 
   // Project tools
   create_project: createCreateProjectTool,

@@ -15,6 +15,7 @@ const nostrProjectsSchema = z
     pubkey: z
       .string()
       .nullable()
+      .optional()
       .describe(
         "Public key to fetch projects for. Defaults to project owner's pubkey"
       ),

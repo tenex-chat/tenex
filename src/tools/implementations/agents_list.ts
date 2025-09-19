@@ -7,10 +7,12 @@ const agentsListSchema = z.object({
   includeGlobal: z
     .boolean()
     .nullable()
+    .optional()
     .describe("Whether to include global agents in the list (default: true)"),
   verbose: z
     .boolean()
     .nullable()
+    .optional()
     .describe("Whether to include full instructions and details (default: false)"),
 });
 

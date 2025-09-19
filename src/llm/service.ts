@@ -79,12 +79,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             throw new Error("LLMService requires either a registry or Claude Code provider function");
         }
 
-        logger.debug("[LLMService] Initialized", {
+        logger.debug("[LLMService] 🆕 INITIALIZED", {
             provider: this.provider,
             model: this.model,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
             isClaudeCode: provider === 'claudeCode',
+            sessionId: this.sessionId || 'NONE',
+            hasSessionId: !!this.sessionId,
         });
     }
 
@@ -108,18 +110,26 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             
             if (this.sessionId) {
                 options.resume = this.sessionId;
-                logger.debug("[LLMService] Resuming Claude Code session", {
+                logger.info("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
                     sessionId: this.sessionId,
-                    model: this.model
+                    model: this.model,
+                    optionsKeys: Object.keys(options)
+                });
+            } else {
+                logger.info("[LLMService] 🆕 NEW CLAUDE CODE SESSION (no resume)", {
+                    model: this.model,
+                    optionsKeys: Object.keys(options)
                 });
             }
             
             baseModel = this.claudeCodeProviderFunction(this.model, options);
 
-            logger.debug("[LLMService] Created Claude Code model", {
+            logger.info("[LLMService] 🎯 CREATED CLAUDE CODE MODEL", {
                 model: this.model,
                 hasSystemPrompt: !!systemPrompt,
-                systemPromptLength: systemPrompt?.length || 0
+                systemPromptLength: systemPrompt?.length || 0,
+                resumeSessionId: options.resume || 'NONE',
+                hasResume: 'resume' in options
             });
         } else if (this.registry) {
             // Standard providers use registry
@@ -363,8 +373,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
 
-        console.log('handleChunk', chunk);
-
         // Emit chunk-type-change event if the type changed
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
             this.emit("chunk-type-change", {
@@ -391,6 +399,47 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             case "tool-result":
                 this.handleToolResult(chunk.toolCallId, chunk.toolName, chunk.output);
                 break;
+            case "tool-input-start":
+                // Tool input is starting to stream - we can log but don't need to process
+                logger.debug("[LLMService] Tool input starting", {
+                    toolCallId: chunk.toolCallId,
+                    toolName: chunk.toolName
+                });
+                break;
+            case "tool-input-delta":
+                // Tool input is being incrementally streamed - can be used for real-time display
+                logger.debug("[LLMService] Tool input delta", {
+                    toolCallId: chunk.toolCallId,
+                    text: chunk.text
+                });
+                break;
+            case "tool-input-available":
+                // Full tool input is now available - could be useful for logging
+                logger.debug("[LLMService] Tool input available", {
+                    toolCallId: chunk.toolCallId
+                });
+                break;
+            case "reasoning-start":
+                logger.debug("[LLMService] Reasoning started", {
+                    id: chunk.id
+                });
+                break;
+            case "reasoning-end":
+                logger.debug("[LLMService] Reasoning ended", {
+                    id: chunk.id
+                });
+                break;
+            case "error":
+                logger.error("[LLMService] Error chunk received", {
+                    error: chunk.error
+                });
+                break;
+            default:
+                // Log unknown chunk types for debugging
+                logger.debug("[LLMService] Unknown chunk type", {
+                    type: chunk.type,
+                    chunk
+                });
         }
 
         // Update previous chunk type
@@ -418,14 +467,28 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 });
 
                 // Capture session ID from provider metadata if using Claude Code
+                logger.info("[LLMService] 🔍 CHECKING FOR CLAUDE CODE SESSION IN METADATA", {
+                    provider: this.provider,
+                    isClaudeCode: this.provider === 'claudeCode',
+                    hasProviderMetadata: !!e.providerMetadata,
+                    providerMetadataKeys: e.providerMetadata ? Object.keys(e.providerMetadata) : [],
+                    claudeCodeMetadata: e.providerMetadata?.['claude-code']
+                });
+
                 if (this.provider === 'claudeCode' && e.providerMetadata?.['claude-code']?.sessionId) {
                     const capturedSessionId = e.providerMetadata['claude-code'].sessionId;
-                    logger.info("[LLMService] Captured Claude Code session ID from stream", {
-                        sessionId: capturedSessionId,
-                        provider: this.provider
+                    logger.info("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
+                        capturedSessionId,
+                        previousSessionId: this.sessionId || 'NONE',
+                        provider: this.provider,
+                        sessionChanged: capturedSessionId !== this.sessionId
                     });
                     // Emit session ID for storage by the executor
                     this.emit('session-captured', { sessionId: capturedSessionId });
+                } else if (this.provider === 'claudeCode') {
+                    logger.warn("[LLMService] ⚠️ NO CLAUDE CODE SESSION IN METADATA", {
+                        providerMetadata: e.providerMetadata
+                    });
                 }
                 
                 logger.info("[LLMService] Stream finished", {

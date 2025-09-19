@@ -6,7 +6,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
-import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
+import { createProviderRegistry, generateText, streamText, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
 import { createMockProvider } from "./providers/MockProvider";
 import { createClaudeCode, type ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
@@ -170,8 +170,10 @@ export class LLMServiceFactory {
             const toolNames = context?.tools ? Object.keys(context.tools) : [];
             const regularTools = toolNames.filter(name => !name.startsWith('mcp__'));
 
-            logger.info("[LLMServiceFactory] Creating Claude Code provider", {
+            logger.info("[LLMServiceFactory] 🚀 CREATING CLAUDE CODE PROVIDER", {
                 agent: context?.agentName,
+                sessionId: context?.sessionId || 'NONE',
+                hasSessionId: !!context?.sessionId,
                 regularTools,
                 toolCount: regularTools.length
             });
@@ -210,14 +212,23 @@ export class LLMServiceFactory {
                 return createClaudeCode(claudeCodeConfig)(model, options);
             };
 
-            logger.info("[LLMServiceFactory] Created Claude Code provider function", {
+            logger.info("[LLMServiceFactory] ✅ CREATED CLAUDE CODE PROVIDER FUNCTION", {
                 agent: context?.agentName,
+                sessionId: context?.sessionId || 'NONE',
+                hasSessionId: !!context?.sessionId,
                 mcpServers: Object.keys(mcpServersConfig),
                 allowedTools,
                 toolCount: allowedTools.length
             });
 
             // Return LLMService with Claude Code provider function and session ID
+            logger.info("[LLMServiceFactory] 📦 RETURNING LLMSERVICE WITH SESSION", {
+                sessionId: context?.sessionId || 'NONE',
+                hasSessionId: !!context?.sessionId,
+                provider: 'claudeCode',
+                model: config.model
+            });
+
             return new LLMService(
                 llmLogger,
                 null, // No registry for Claude Code

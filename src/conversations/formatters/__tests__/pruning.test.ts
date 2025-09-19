@@ -26,7 +26,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
   };
 
   describe('formatOtherBranches', () => {
-    it('should exclude the active branch completely', () => {
+    it('should exclude the active branch completely', async () => {
       // Create a conversation tree:
       // root1
       //   ├── child1 (agent)
@@ -47,7 +47,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       // child1 is NOT in the active branch since it's a sibling branch
       const activeBranchIds = new Set(['root1', 'child2', 'child3']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should only include child1 branch (where agent participated but not in active branch)
       expect(result).toBeTruthy();
@@ -56,7 +56,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       expect(result!).not.toContain('Agent response 2');
     });
 
-    it('should return null when agent only participated in active branch', () => {
+    it('should return null when agent only participated in active branch', async () => {
       const agentPubkey = 'agent123';
       const userPubkey = 'user456';
       
@@ -69,12 +69,12 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       // All events are in the active branch
       const activeBranchIds = new Set(['root1', 'child1', 'child2']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       expect(result).toBeNull();
     });
 
-    it('should handle multiple separate threads correctly', () => {
+    it('should handle multiple separate threads correctly', async () => {
       // Create two separate conversation trees:
       // root1                    root2
       //   ├── child1 (agent)       └── child4 (agent)
@@ -101,7 +101,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       // Active branch is the second tree
       const activeBranchIds = new Set(['root2', 'child4', 'child5']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include only the first tree where agent participated
       expect(result).toContain('Agent in first tree');
@@ -109,7 +109,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       expect(result).not.toContain('User in second tree');
     });
 
-    it('should preserve complete context of branches where agent participated', () => {
+    it('should preserve complete context of branches where agent participated', async () => {
       // Tree structure:
       // root
       //   ├── branch1
@@ -130,7 +130,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       
       const activeBranchIds = new Set(['root', 'branch2']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include the complete branch1 context
       expect(result).toBeTruthy();
@@ -140,7 +140,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       expect(result!).not.toContain('Branch 2 (active)');
     });
 
-    it('should handle deeply nested threads with agent participation', () => {
+    it('should handle deeply nested threads with agent participation', async () => {
       const agentPubkey = 'agent123';
       const userPubkey = 'user456';
       
@@ -155,7 +155,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       
       const activeBranchIds = new Set(['root', 'active_branch']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include the deep branch where agent participated
       expect(result).toBeTruthy();
@@ -164,7 +164,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       expect(result!).not.toContain('Active branch');
     });
 
-    it('should correctly handle when active branch is a sub-thread', () => {
+    it('should correctly handle when active branch is a sub-thread', async () => {
       // Tree where active branch is not from root:
       // root
       //   ├── branch1
@@ -190,7 +190,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       // Active branch is the sub-thread starting from sub_branch
       const activeBranchIds = new Set(['sub_branch', 'continuation']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include agent_msg (not in active branch) and agent_other branch
       expect(result).toContain('Agent message');
@@ -201,7 +201,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
   });
 
   describe('pruneBranch edge cases', () => {
-    it('should handle empty active branch set', () => {
+    it('should handle empty active branch set', async () => {
       const agentPubkey = 'agent123';
       const userPubkey = 'user456';
       
@@ -212,14 +212,14 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       
       const activeBranchIds = new Set<string>(); // Empty set
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include everything since nothing is pruned
       expect(result).toContain('Root');
       expect(result).toContain('Child');
     });
 
-    it('should handle when entire tree is active branch', () => {
+    it('should handle when entire tree is active branch', async () => {
       const agentPubkey = 'agent123';
       const userPubkey = 'user456';
       
@@ -232,12 +232,12 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       // Entire tree is active
       const activeBranchIds = new Set(['root', 'child1', 'child2']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       expect(result).toBeNull();
     });
 
-    it('should handle orphaned events gracefully', () => {
+    it('should handle orphaned events gracefully', async () => {
       const agentPubkey = 'agent123';
       const userPubkey = 'user456';
       
@@ -249,7 +249,7 @@ describe('ThreadedConversationFormatter - Branch Pruning', () => {
       
       const activeBranchIds = new Set(['root']);
       
-      const result = formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
+      const result = await formatter.formatOtherBranches(events, agentPubkey, activeBranchIds);
       
       // Should include child and orphan (as separate root)
       expect(result).toBeTruthy();

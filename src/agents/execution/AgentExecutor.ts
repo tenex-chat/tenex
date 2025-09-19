@@ -172,6 +172,50 @@ export class AgentExecutor {
                 error: formatAnyError(error),
                 success: false,
             });
+
+            // Publish error event to notify the frontend
+            try {
+                const conversation = context.conversationCoordinator.getConversation(
+                    context.conversationId
+                );
+                const eventContext: EventContext = {
+                    triggeringEvent: context.triggeringEvent,
+                    rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+                    conversationId: context.conversationId,
+                    model: context.agent.llmConfig,
+                };
+
+                // Format error message for user visibility
+                let errorMessage = "An error occurred while processing your request.";
+                let errorType = "system";
+
+                if (error instanceof Error) {
+                    // Check for specific AI API errors
+                    if (error.message.includes("AI_APICallError") ||
+                        error.message.includes("Provider returned error")) {
+                        errorType = "ai_api";
+                        errorMessage = `Failed to communicate with AI provider: ${error.message}`;
+                    } else {
+                        errorMessage = `Error: ${error.message}`;
+                    }
+                }
+
+                await agentPublisher.error({
+                    message: errorMessage,
+                    errorType
+                }, eventContext);
+
+                logger.info("Error event published to Nostr", {
+                    agent: context.agent.name,
+                    errorType,
+                });
+            } catch (publishError) {
+                logger.error("Failed to publish error event", {
+                    agent: context.agent.name,
+                    error: formatAnyError(publishError),
+                });
+            }
+
             throw error;
         } finally {
             const conversation = context.conversationCoordinator.getConversation(
@@ -413,8 +457,41 @@ export class AgentExecutor {
             reasoningBuffer = '';
         });
         
-        llmService.on('stream-error', (event) => {
+        llmService.on('stream-error', async (event) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
+
+            // Publish error event to Nostr for visibility
+            try {
+                let errorMessage = "Stream processing encountered an error.";
+                let errorType = "stream";
+
+                if (event.error) {
+                    const errorStr = event.error.toString();
+                    if (errorStr.includes("AI_APICallError") ||
+                        errorStr.includes("Provider returned error")) {
+                        errorType = "ai_api";
+                        errorMessage = "AI provider error during streaming.";
+                    }
+
+                    if (event.error instanceof Error) {
+                        errorMessage = `Stream error: ${event.error.message}`;
+                    }
+                }
+
+                await agentPublisher.error({
+                    message: errorMessage,
+                    errorType
+                }, eventContext);
+
+                logger.info("Stream error event published via stream-error handler", {
+                    agent: context.agent.name,
+                    errorType,
+                });
+            } catch (publishError) {
+                logger.error("Failed to publish stream error event", {
+                    error: formatAnyError(publishError),
+                });
+            }
         });
         
         // Handle session capture - store any session ID from the provider
@@ -501,13 +578,61 @@ export class AgentExecutor {
         try {
             // Register operation with the LLM Operations Registry
             const abortSignal = llmOpsRegistry.registerOperation(context);
-            
+
             // Single LLM call - let it run up to 20 steps
             await llmService.stream(messages, toolsObject, { abortSignal });
+        } catch (streamError) {
+            // Publish error event for stream errors
+            try {
+                // Format error message for AI API errors
+                let errorMessage = "Stream processing failed.";
+                let errorType = "stream";
+
+                if (streamError instanceof Error) {
+                    // Check for specific AI API errors in streaming context
+                    const errorStr = streamError.toString();
+                    if (errorStr.includes("AI_APICallError") ||
+                        errorStr.includes("Provider returned error") ||
+                        errorStr.includes("422") ||
+                        errorStr.includes("openrouter")) {
+                        errorType = "ai_api";
+                        // Extract meaningful error details
+                        const providerMatch = errorStr.match(/provider_name\":\"([^\"]+)\"/);
+                        const provider = providerMatch ? providerMatch[1] : "AI provider";
+                        errorMessage = `Failed to process request with ${provider}. The AI service returned an error.`;
+
+                        // Add raw error details if available
+                        const rawMatch = errorStr.match(/raw\":\"([^\"]+)\"/);
+                        if (rawMatch) {
+                            errorMessage += ` Details: ${rawMatch[1]}`;
+                        }
+                    } else {
+                        errorMessage = `Stream error: ${streamError.message}`;
+                    }
+                }
+
+                await agentPublisher.error({
+                    message: errorMessage,
+                    errorType
+                }, eventContext);
+
+                logger.info("Stream error event published to Nostr", {
+                    agent: context.agent.name,
+                    errorType,
+                });
+            } catch (publishError) {
+                logger.error("Failed to publish stream error event", {
+                    agent: context.agent.name,
+                    error: formatAnyError(publishError),
+                });
+            }
+
+            // Re-throw to let parent handler catch it
+            throw streamError;
         } finally {
             // Complete the operation (handles both success and abort cases)
             llmOpsRegistry.completeOperation(context);
-            
+
             // Clean up event listeners
             llmService.removeAllListeners();
         }
