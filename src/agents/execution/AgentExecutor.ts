@@ -240,18 +240,16 @@ export class AgentExecutor {
         const projectCtx = getProjectContext();
         const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
 
-        // Get stored session ID if using claude_code provider
-        let sessionId: string | undefined;
-        if (context.agent.llmConfig === 'claudeCode' || context.agent.llmConfig.startsWith('claudeCode:')) {
-            const metadataStore = context.agent.createMetadataStore(context.conversationId);
-            sessionId = metadataStore.get<string>('claudeCodeSessionId');
-            if (sessionId) {
-                logger.info("[AgentExecutor] Found existing Claude Code session", {
-                    sessionId,
-                    agent: context.agent.name,
-                    conversationId: context.conversationId.substring(0, 8)
-                });
-            }
+        // Get stored session ID if available (for providers that support session resumption)
+        const metadataStore = context.agent.createMetadataStore(context.conversationId);
+        const sessionId = metadataStore.get<string>('sessionId');
+
+        if (sessionId) {
+            logger.info("[AgentExecutor] ✅ Found existing session to resume", {
+                sessionId,
+                agent: context.agent.name,
+                conversationId: context.conversationId.substring(0, 8)
+            });
         }
 
         // Pass tools context and session ID for providers that need runtime configuration (like Claude Code)
@@ -419,17 +417,15 @@ export class AgentExecutor {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
         });
         
-        // Handle session capture for Claude Code
+        // Handle session capture - store any session ID from the provider
         llmService.on('session-captured', ({ sessionId }) => {
-            if (context.agent.llmConfig === 'claudeCode' || context.agent.llmConfig.startsWith('claudeCode:')) {
-                const metadataStore = context.agent.createMetadataStore(context.conversationId);
-                metadataStore.set('claudeCodeSessionId', sessionId);
-                logger.info("[AgentExecutor] Stored Claude Code session ID", {
-                    sessionId,
-                    agent: context.agent.name,
-                    conversationId: context.conversationId.substring(0, 8)
-                });
-            }
+            const metadataStore = context.agent.createMetadataStore(context.conversationId);
+            metadataStore.set('sessionId', sessionId);
+            logger.info("[AgentExecutor] 💾 Stored session ID from provider", {
+                sessionId,
+                agent: context.agent.name,
+                conversationId: context.conversationId.substring(0, 8)
+            });
         });
 
         // Tool execution tracking - store tool calls with their event IDs
