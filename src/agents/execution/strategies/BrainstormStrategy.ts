@@ -3,10 +3,10 @@ import type { ExecutionContext } from "../types";
 import type { ModelMessage } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
-import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { EventToModelMessage } from "@/conversations/processors/EventToModelMessage";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { NostrKind, NostrTag, TagValue, isBrainstormEvent } from "@/nostr/constants";
+import { isEventFromUser } from "@/nostr/utils";
+import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 
 /**
  * Message generation strategy for brainstorming sessions.
@@ -79,14 +79,18 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         }
         
         const projectCtx = getProjectContext();
-        const systemMessages = await buildSystemPromptMessages(
-            context.agent,
-            projectCtx.workingDirectory,
-            projectCtx.projectInstructions,
-            context.agent.agentRegistry!
-        );
+        const project = projectCtx.project;
         
-        messages.push(...systemMessages);
+        // Build system prompt using PromptBuilder
+        const systemPrompt = PromptBuilder.buildMainPrompt({
+            agent: context.agent,
+            project,
+            availableAgents: Array.from(projectCtx.agents.values()),
+            agentLessons: new Map(),
+            isProjectManager: context.agent.pubkey === projectCtx.getProjectManager().pubkey
+        });
+        
+        messages.push({ role: "system", content: systemPrompt });
     }
     
     /**
@@ -260,18 +264,48 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     }
     
     /**
-     * Transforms a Nostr event into LLM-compatible model messages
+     * Transforms a Nostr event into LLM-compatible model messages.
+     * In brainstorm context, all messages are formatted simply without targeting notation.
      */
     private async processEvent(
         event: NDKEvent,
         agentPubkey: string
     ): Promise<ModelMessage[]> {
-        const result = await EventToModelMessage.transform(
-            event,
-            event.content || "",
-            agentPubkey
-        );
+        const messages: ModelMessage[] = [];
         
-        return Array.isArray(result) ? result : [result];
+        // Check for phase transitions (if used in brainstorms)
+        const phaseTag = event.tagValue(NostrTag.PHASE);
+        const phaseInstructionsTag = event.tagValue(NostrTag.PHASE_INSTRUCTIONS);
+        
+        if (phaseTag) {
+            const phaseContent = PromptBuilder.buildFragment("phase-transition", {
+                phase: phaseTag,
+                phaseInstructions: phaseInstructionsTag
+            });
+            
+            if (phaseContent) {
+                messages.push({ role: "system", content: phaseContent });
+                logger.debug("[BrainstormStrategy] Added phase transition", {
+                    eventId: event.id?.substring(0, 8),
+                    phase: phaseTag
+                });
+            }
+        }
+        
+        // Format main content simply without targeting notation
+        const content = event.content || "";
+        
+        if (event.pubkey === agentPubkey) {
+            // Agent's own message
+            messages.push({ role: "assistant", content });
+        } else if (isEventFromUser(event)) {
+            // User message - always format as simple "user" role in brainstorms
+            messages.push({ role: "user", content });
+        } else {
+            // Another agent's message - format as assistant
+            messages.push({ role: "assistant", content });
+        }
+        
+        return messages;
     }
 }

@@ -280,12 +280,11 @@ export class BrainstormService {
         conversationId: string,
         coordinator: ConversationCoordinator
     ): Promise<BrainstormResponse[]> {
-        // Refresh conversation to get latest events
-        await coordinator.refreshConversation(conversationId);
+        // Get the conversation directly - no refresh method exists
         const conversation = coordinator.getConversation(conversationId);
         
         if (!conversation) {
-            logger.error("[BrainstormService] Failed to refresh conversation");
+            logger.error("[BrainstormService] Conversation not found", { conversationId });
             return [];
         }
 
