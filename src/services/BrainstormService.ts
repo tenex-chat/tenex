@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { BrainstormStrategy } from "@/agents/execution/strategies/BrainstormStrategy";
+import { ThreadWithMemoryStrategy } from "@/agents/execution/strategies/ThreadWithMemoryStrategy";
 import { ConversationCoordinator } from "@/conversations";
 import type { Conversation } from "@/conversations/types";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
@@ -102,7 +103,9 @@ export class BrainstormService {
         const moderationResult = await this.runModeration(
             moderator,
             event.content || "",
-            responses
+            responses,
+            event,
+            conversation
         );
 
         if (!moderationResult) return;
@@ -269,7 +272,9 @@ export class BrainstormService {
     private async runModeration(
         moderator: AgentInstance,
         originalPrompt: string,
-        responses: BrainstormResponse[]
+        responses: BrainstormResponse[],
+        brainstormRoot: NDKEvent,
+        conversation: Conversation
     ): Promise<{ chosenIndex: number; reason: string } | null> {
         try {
             logger.debug("[BrainstormService] Running moderation", {
@@ -277,57 +282,50 @@ export class BrainstormService {
                 responseCount: responses.length
             });
 
-            const prompt = this.buildModerationPrompt(originalPrompt, responses);
-            
-            const llmLogger = this.projectContext.llmLogger.withAgent(moderator.name);
-            const llmService = configService.createLLMService(
-                llmLogger,
-                moderator.llmConfig
+            // Create a fake event that represents the moderation request
+            // This will be the triggering event for the moderator
+            const moderationEvent = this.createModerationEvent(
+                brainstormRoot,
+                responses,
+                moderator
             );
 
-            const result = await llmService.complete([
-                {
-                    role: "system",
-                    content: "You are a moderator choosing the best response. Respond ONLY with valid JSON in the format: {\"chosen_option\": <number>, \"reason\": \"<explanation>\"}"
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ], {});
+            // Execute moderator as a proper agent with full context
+            const coordinator = await this.getConversationCoordinator();
+            const context: ExecutionContext = {
+                agent: moderator,
+                conversationId: conversation.id,
+                projectPath: this.projectContext.agentRegistry.getBasePath(),
+                triggeringEvent: moderationEvent,
+                conversationCoordinator: coordinator,
+            };
 
-            const parsed = safeParseJSON<ModerationResult>(
-                result.text,
-                "moderation result"
-            );
+            // Use ThreadWithMemoryStrategy to get full conversation history
+            const strategy = new ThreadWithMemoryStrategy();
+            const executor = new AgentExecutor(strategy);
+            const moderatorResponse = await executor.execute(context);
 
-            if (!parsed) {
-                logger.warn("[BrainstormService] Failed to parse moderation result", {
-                    rawOutput: result.text.substring(0, 200)
-                });
-                throw new Error("Moderation failed: Invalid JSON response from moderator");
+            if (!moderatorResponse?.content) {
+                logger.error("[BrainstormService] No response from moderator");
+                return null;
             }
 
-            const chosenIndex = parsed.chosen_option - 1; // Convert to 0-based
-            
-            // Validate index
-            if (chosenIndex < 0 || chosenIndex >= responses.length) {
-                logger.warn("[BrainstormService] Invalid chosen index from moderator", {
-                    chosenIndex,
-                    responseCount: responses.length,
-                    rawOption: parsed.chosen_option
+            // Parse the moderator's response to extract the choice
+            const choice = this.parseModerationChoice(moderatorResponse.content, responses);
+
+            if (!choice) {
+                logger.warn("[BrainstormService] Could not parse moderator choice", {
+                    response: moderatorResponse.content.substring(0, 200)
                 });
-                throw new Error(`Invalid moderation choice: ${parsed.chosen_option} out of ${responses.length} options`);
+                return null;
             }
 
             logger.info("[BrainstormService] Moderation complete", {
-                chosenAgent: responses[chosenIndex].agent.name
+                chosenAgent: responses[choice.chosenIndex].agent.name,
+                reason: choice.reason
             });
 
-            return { 
-                chosenIndex, 
-                reason: parsed.reason || "No reason provided" 
-            };
+            return choice;
         } catch (error) {
             logger.error("[BrainstormService] Moderation failed", {
                 error: error instanceof Error ? error.message : String(error)
@@ -639,5 +637,95 @@ export class BrainstormService {
                `Evaluate if this follow-up adds significant value, provides important corrections, ` +
                `or contributes meaningful insights to the discussion. ` +
                `Be selective - only approve truly valuable additions.`;
+    }
+
+    /**
+     * Creates a fake moderation event with the agent responses as content
+     */
+    private createModerationEvent(
+        brainstormRoot: NDKEvent,
+        responses: BrainstormResponse[],
+        moderator: AgentInstance
+    ): NDKEvent {
+        const ndk = getNDK();
+        const moderationEvent = new NDKEvent(ndk);
+
+        // Build the selection prompt with all responses
+        let content = "Please select the BEST response from the following options:\n\n";
+        responses.forEach((response, i) => {
+            content += `<option${i + 1}>\n`;
+            content += `Agent: ${response.agent.name}\n`;
+            content += `Response: ${response.content}\n`;
+            content += `</option${i + 1}>\n\n`;
+        });
+        content += "Choose the option that best addresses the request based on accuracy, completeness, clarity, and relevance. ";
+        content += "Respond with your choice in the format: 'I choose option X because [reason]'";
+
+        moderationEvent.content = content;
+        moderationEvent.kind = NostrKind.TEXT_NOTE;
+        moderationEvent.pubkey = moderator.pubkey;
+        moderationEvent.tags = [
+            [NostrTag.EVENT, brainstormRoot.id],  // Reference the original brainstorm request
+            [NostrTag.ROOT_EVENT, brainstormRoot.tagValue(NostrTag.ROOT_EVENT) || brainstormRoot.id],
+        ];
+
+        // Add p-tags to the moderator
+        moderationEvent.tags.push([NostrTag.PUBKEY, moderator.pubkey]);
+
+        // Generate ID for the event so it can be used as a triggering event
+        moderationEvent.id = moderationEvent.tagId();
+
+        return moderationEvent;
+    }
+
+    /**
+     * Parse the moderator's natural language response to extract their choice
+     */
+    private parseModerationChoice(
+        moderatorResponse: string,
+        responses: BrainstormResponse[]
+    ): { chosenIndex: number; reason: string } | null {
+        // Try to find patterns like "option 1", "option 2", "I choose option 3"
+        const optionMatch = moderatorResponse.match(/option\s*(\d+)/i);
+        if (optionMatch) {
+            const optionNumber = parseInt(optionMatch[1], 10);
+            const chosenIndex = optionNumber - 1;
+
+            if (chosenIndex >= 0 && chosenIndex < responses.length) {
+                // Try to extract the reason
+                const reasonMatch = moderatorResponse.match(/because\s+(.+)/i);
+                const reason = reasonMatch ? reasonMatch[1] : moderatorResponse;
+
+                return { chosenIndex, reason };
+            }
+        }
+
+        // Try to match agent names
+        const lowerResponse = moderatorResponse.toLowerCase();
+        for (let i = 0; i < responses.length; i++) {
+            const agentName = responses[i].agent.name.toLowerCase();
+            if (lowerResponse.includes(agentName)) {
+                // Extract reason if possible
+                const reasonMatch = moderatorResponse.match(/because\s+(.+)/i);
+                const reason = reasonMatch ? reasonMatch[1] : moderatorResponse;
+
+                return { chosenIndex: i, reason };
+            }
+        }
+
+        // If we can't parse it, try JSON as a fallback
+        const parsed = safeParseJSON<ModerationResult>(
+            moderatorResponse,
+            "moderation result"
+        );
+
+        if (parsed && parsed.chosen_option > 0 && parsed.chosen_option <= responses.length) {
+            return {
+                chosenIndex: parsed.chosen_option - 1,
+                reason: parsed.reason || moderatorResponse
+            };
+        }
+
+        return null;
     }
 }
