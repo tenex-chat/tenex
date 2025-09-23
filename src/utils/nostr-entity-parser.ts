@@ -111,3 +111,61 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
     
     return null;
 }
+
+/**
+ * Extract nostr entities from content (moved from NostrEntityProcessor for better organization)
+ * @param content - The content to search for entities
+ * @returns Array of nostr entity strings found
+ */
+export function extractNostrEntities(content: string): string[] {
+    const NOSTR_ENTITY_REGEX = /nostr:(nevent1|naddr1|note1|npub1|nprofile1)\w+/g;
+    const matches = content.match(NOSTR_ENTITY_REGEX);
+    return matches || [];
+}
+
+/**
+ * Resolve nostr entities to system messages with author information
+ * @param content - The content containing nostr entities
+ * @param ndk - NDK instance for fetching events
+ * @param getName - Optional function to get author names
+ * @returns Array of system message content strings
+ */
+export async function resolveNostrEntitiesToSystemMessages(
+    content: string,
+    ndk: NDK,
+    getName?: (pubkey: string) => Promise<string>
+): Promise<string[]> {
+    const messages: string[] = [];
+    const entities = extractNostrEntities(content);
+    
+    if (entities.length === 0) {
+        return messages;
+    }
+
+    for (const entity of entities) {
+        try {
+            const bech32Id = entity.replace("nostr:", "");
+            const event = await ndk.fetchEvent(bech32Id);
+
+            if (event) {
+                // Get author name if getName function provided, otherwise use pubkey
+                const authorName = getName 
+                    ? await getName(event.pubkey)
+                    : event.pubkey.substring(0, 8) + '...';
+                
+                // Format timestamp
+                const timestamp = new Date((event.created_at || 0) * 1000).toISOString();
+                
+                // Create system message with event content
+                const systemContent = `Nostr event ${bech32Id.substring(0, 12)}... published by ${authorName} on ${timestamp}:\n\n${event.content}`;
+                
+                messages.push(systemContent);
+            }
+        } catch (error) {
+            console.debug('Failed to fetch nostr entity:', entity, error);
+            // Skip entity if fetch fails
+        }
+    }
+
+    return messages;
+}

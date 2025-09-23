@@ -117,9 +117,16 @@ describe("ThreadWithMemoryStrategy", () => {
             // Should have system prompt
             expect(messageContents[0]).toContain("Agent 2");
 
+            // Debug: log messages to see what's actually generated
+            console.log('Generated messages:', messages.map((m, i) => 
+                `[${i}] Role: ${m.role}, Content: ${m.content?.substring(0, 100)}...`
+            ).join('\n'));
+
             // Should have memory from first thread (root1)
             const previousThreadIndex = messageContents.findIndex(c =>
-                c.includes("[Previous thread") || c.includes("previous participation")
+                c.includes("You were active in these other related subthreads") || 
+                c.includes("[Previous thread") || 
+                c.includes("previous participation")
             );
             expect(previousThreadIndex).toBeGreaterThan(-1);
 

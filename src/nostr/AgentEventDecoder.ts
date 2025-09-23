@@ -229,13 +229,13 @@ export class AgentEventDecoder {
   }
 
   /**
-   * Get participant pubkeys from a kind:11 brainstorm event
+   * Get participant pubkeys from a brainstorm event
    * Participants are specified in "participant" tags
+   * Works for both kind:11 (initial) and kind:1111 (follow-up) events
    */
   static getParticipants(event: NDKEvent): string[] {
-    if (event.kind !== 11) return [];
-    
-    // Get all participant tags
+    // Get all participant tags regardless of event kind
+    // This supports both initial brainstorm (kind 11) and follow-ups (kind 1111)
     const participantTags = event.tags.filter(tag => tag[0] === "participant");
     return participantTags.map(tag => tag[1]).filter(pubkey => !!pubkey);
   }

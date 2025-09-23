@@ -1,0 +1,78 @@
+/**
+ * Nostr event kinds used in the application
+ */
+export enum NostrKind {
+    // Standard kinds
+    TEXT_NOTE = 1,
+    REACTION = 7,
+    
+    // Custom application kinds
+    BRAINSTORM_REQUEST = 11,
+    GENERIC_REPLY = 1111,
+    ARTICLE = 30023,
+}
+
+/**
+ * Standard Nostr tag names
+ */
+export enum NostrTag {
+    // Standard tags
+    EVENT = "e",
+    PUBKEY = "p",
+    REPLACEABLE = "a",
+    
+    // Extended tags (uppercase convention for root references)
+    ROOT_EVENT = "E",
+    ROOT_KIND = "K",
+    ROOT_PUBKEY = "P",
+    
+    // Application-specific tags
+    MODE = "mode",
+    PARTICIPANT = "participant",
+    PHASE = "phase",
+    PHASE_INSTRUCTIONS = "phase-instructions",
+    BRAINSTORM_SELECTION = "brainstorm-selection",
+    REASON = "reason",
+    TOOL = "tool",
+    NOT_CHOSEN = "not-chosen", // Legacy - to be removed
+}
+
+/**
+ * Tag values for specific application modes
+ */
+export enum TagValue {
+    BRAINSTORM_MODE = "brainstorm",
+    REACTION_POSITIVE = "+",
+    DELEGATE_PHASE = "delegate_phase",
+}
+
+/**
+ * Maximum lengths for various fields
+ */
+export const MAX_REASON_LENGTH = 200;
+
+/**
+ * Type guard to check if an event is a brainstorm event
+ */
+export function isBrainstormEvent(kind: number, tags: string[][]): boolean {
+    return kind === NostrKind.BRAINSTORM_REQUEST && 
+           tags.some(tag => tag[0] === NostrTag.MODE && tag[1] === TagValue.BRAINSTORM_MODE);
+}
+
+/**
+ * Helper to safely get a tag value from an event
+ */
+export function getTagValue(tags: string[][], tagName: string): string | undefined {
+    const tag = tags.find(t => t[0] === tagName);
+    return tag?.[1];
+}
+
+/**
+ * Helper to get all values for a specific tag name
+ */
+export function getTagValues(tags: string[][], tagName: string): string[] {
+    return tags
+        .filter(tag => tag[0] === tagName)
+        .map(tag => tag[1])
+        .filter(value => value !== undefined);
+}

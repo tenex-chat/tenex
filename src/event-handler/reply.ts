@@ -137,30 +137,53 @@ async function handleReplyLogic(
     throw new Error("Project Manager agent not found - required for conversation coordination");
   }
 
-  // 1. Check if this is a brainstorm follow-up
-  const conversationResolver = new ConversationResolver(conversationCoordinator);
-  
-  // First, try to resolve to see if we can find the root
-  const preliminaryResolution = await conversationResolver.resolveConversationForEvent(event);
-  if (preliminaryResolution.conversation) {
-    const rootEvent = preliminaryResolution.conversation.history[0];
-    if (rootEvent && isBrainstormEvent(rootEvent)) {
-      logger.info("Detected brainstorm follow-up, delegating to BrainstormService", {
-        eventId: event.id?.substring(0, 8),
-        rootId: rootEvent.id?.substring(0, 8)
-      });
-      
-      const brainstormService = new BrainstormService(projectCtx);
-      await brainstormService.handleFollowUp(event);
-      return;
+  // 1. Check if this is a brainstorm follow-up BEFORE creating orphaned conversations
+  // Check if the event references a kind:11 event
+  const referencedKind = AgentEventDecoder.getReferencedKind(event);
+  const conversationRoot = AgentEventDecoder.getConversationRoot(event);
+
+  if (referencedKind === "11" && conversationRoot) {
+    // Try to find the root event to check if it's a brainstorm
+    const existingConversation = conversationCoordinator.getConversationByEvent(conversationRoot);
+
+    if (existingConversation) {
+      const rootEvent = existingConversation.history[0];
+      if (rootEvent && isBrainstormEvent(rootEvent)) {
+        logger.info("Detected brainstorm follow-up, delegating to BrainstormService", {
+          eventId: event.id?.substring(0, 8),
+          rootId: rootEvent.id?.substring(0, 8)
+        });
+
+        const brainstormService = new BrainstormService(projectCtx);
+        await brainstormService.handleFollowUp(event);
+        return;
+      }
+    } else {
+      // The root event doesn't exist in our conversation history yet
+      // This might be a reply to a brainstorm that we haven't seen the root for
+      // Check if it has brainstorm participant tags
+      const hasParticipantTags = event.tags.some(tag => tag[0] === "participant");
+      const hasBrainstormModeTags = event.tags.some(tag => tag[0] === "mode" && tag[1] === "brainstorm");
+
+      if (hasParticipantTags || hasBrainstormModeTags) {
+        logger.info("Detected orphaned brainstorm follow-up, delegating to BrainstormService", {
+          eventId: event.id?.substring(0, 8),
+          conversationRoot
+        });
+        // Process through BrainstormService even without existing conversation
+        const brainstormService = new BrainstormService(projectCtx);
+        await brainstormService.handleFollowUp(event);
+        return;
+      }
     }
   }
 
   // 2. Continue with normal resolution if not a brainstorm follow-up
+  const conversationResolver = new ConversationResolver(conversationCoordinator);
   const {
     conversation,
     isNew,
-  } = preliminaryResolution;
+  } = await conversationResolver.resolveConversationForEvent(event);
 
   if (!conversation) {
     logger.error("No conversation found or created for event", {
