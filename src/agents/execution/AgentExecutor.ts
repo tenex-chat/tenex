@@ -163,7 +163,9 @@ export class AgentExecutor {
             // Log execution flow complete
             logger.info(
                 `Agent ${context.agent.name} completed execution successfully`, {
-                    eventId: responseEvent?.id
+                    eventId: responseEvent?.id,
+                    hasResponseEvent: !!responseEvent,
+                    responseContent: responseEvent?.content?.substring(0, 50)
                 }
             );
 
@@ -426,6 +428,11 @@ export class AgentExecutor {
         });
         
         llmService.on('complete', async (event) => {
+            console.log(`[AgentExecutor] COMPLETE EVENT FOR ${context.agent.name}`, {
+                messageLength: event.message?.length,
+                hasMessage: !!event.message,
+                message: event.message
+            });
             logger.debug("[AgentExecutor] LLM complete event received", {
                 agent: context.agent.name,
                 messageLength: event.message?.length,
