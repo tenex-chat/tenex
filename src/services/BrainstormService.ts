@@ -280,29 +280,23 @@ export class BrainstormService {
         conversationId: string,
         coordinator: ConversationCoordinator
     ): Promise<BrainstormResponse[]> {
-        // Wait a bit for events to be processed and added to conversation
-        await this.waitForEventProcessing();
-
         // Get the conversation directly - no refresh method exists
         const conversation = coordinator.getConversation(conversationId);
-
+        
         if (!conversation) {
             logger.error("[BrainstormService] Conversation not found", { conversationId });
             return [];
         }
 
         const responses: BrainstormResponse[] = [];
-
+        
         for (const agent of agents) {
-            // Try to find the response with retries
-            const responseEvent = await this.findResponseWithRetry(
-                conversation,
-                agent,
-                rootEventId,
-                coordinator,
-                conversationId
+            const responseEvent = conversation.history.find(e => 
+                e.kind === NostrKind.GENERIC_REPLY && 
+                e.tagValue(NostrTag.ROOT_EVENT) === rootEventId &&
+                e.pubkey === agent.pubkey
             );
-
+            
             if (responseEvent?.content) {
                 responses.push({
                     agent,
@@ -314,50 +308,8 @@ export class BrainstormService {
                 });
             }
         }
-
+        
         return responses;
-    }
-
-    /**
-     * Waits for event processing to complete
-     */
-    private async waitForEventProcessing(): Promise<void> {
-        // Give event handler time to process published events
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    /**
-     * Finds a response event with retry logic to handle async event processing
-     */
-    private async findResponseWithRetry(
-        conversation: Conversation,
-        agent: AgentInstance,
-        rootEventId: string,
-        coordinator: ConversationCoordinator,
-        conversationId: string,
-        maxRetries: number = 3
-    ): Promise<NDKEvent | undefined> {
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            // Get fresh conversation data
-            const currentConversation = coordinator.getConversation(conversationId) || conversation;
-
-            const responseEvent = currentConversation.history.find(e =>
-                e.kind === NostrKind.GENERIC_REPLY &&
-                e.tagValue(NostrTag.ROOT_EVENT) === rootEventId &&
-                e.pubkey === agent.pubkey
-            );
-
-            if (responseEvent) {
-                return responseEvent;
-            }
-
-            // Wait before retry (except on last attempt)
-            if (attempt < maxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-        }
-
-        return undefined;
     }
 
     /**
