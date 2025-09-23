@@ -581,7 +581,9 @@ export class BrainstormService {
         const moderationResult = await this.runModeration(
             moderator,
             event.content || "",
-            responses
+            responses,
+            rootEvent,  // Use the original brainstorm root event
+            conversation
         );
 
         if (!moderationResult) return;
