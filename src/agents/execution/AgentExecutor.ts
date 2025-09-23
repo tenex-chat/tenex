@@ -645,6 +645,13 @@ export class AgentExecutor {
             llmService.removeAllListeners();
         }
 
+        logger.debug("[AgentExecutor] Returning response event", {
+            agent: context.agent.name,
+            hasEvent: !!finalResponseEvent,
+            eventContent: finalResponseEvent?.content,
+            eventId: finalResponseEvent?.id
+        });
+
         return finalResponseEvent;
     }
 }

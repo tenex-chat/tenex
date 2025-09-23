@@ -255,7 +255,14 @@ export class BrainstormService {
         const executor = new AgentExecutor(strategy);
         const responseEvent = await executor.execute(context);
 
-        if (responseEvent?.content) {
+        logger.debug("[BrainstormService] Participant execution result", {
+            agent: participant.name,
+            hasEvent: !!responseEvent,
+            eventContent: responseEvent?.content,
+            eventId: responseEvent?.id
+        });
+
+        if (responseEvent && responseEvent.content) {
             return {
                 agent: participant,
                 content: responseEvent.content,
