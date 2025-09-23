@@ -10,7 +10,6 @@ interface ScheduledTask {
   id: string;
   schedule: string; // Cron expression
   prompt: string;
-  createdAt: string;
   lastRun?: string;
   nextRun?: string;
   fromPubkey: string; // Who scheduled this task (the scheduler)
@@ -79,7 +78,6 @@ export class SchedulerService {
       id: taskId,
       schedule,
       prompt,
-      createdAt: new Date().toISOString(),
       fromPubkey,
       toPubkey
     };
