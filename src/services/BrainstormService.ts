@@ -14,6 +14,8 @@ import { NostrKind, NostrTag, TagValue, MAX_REASON_LENGTH, isBrainstormEvent } f
 import { logger } from "@/utils/logger";
 import { safeParseJSON } from "@/utils/json-parser";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 interface BrainstormResponse {
     agent: AgentInstance;
@@ -25,6 +27,25 @@ interface ModerationResult {
     chosen_option: number;
     reason: string;
 }
+
+const ModerationResultSchema = z.object({
+    chosenOptionIndex: z.number().min(0).describe("Zero-based index of the chosen response option"),
+    reason: z.string().min(10).max(500).describe("Clear explanation of why this option was selected, focusing on accuracy, completeness, clarity, and relevance"),
+    confidence: z.number().min(0).max(1).describe("Confidence level in this choice (0.0 to 1.0)"),
+    strengths: z.array(z.string()).describe("Key strengths of the chosen response"),
+    weaknesses: z.array(z.string()).optional().describe("Minor weaknesses or areas for improvement in the chosen response")
+});
+
+type StructuredModerationResult = z.infer<typeof ModerationResultSchema>;
+
+const FollowUpEvaluationSchema = z.object({
+    isValuable: z.boolean().describe("Whether the follow-up adds significant value to the discussion"),
+    reason: z.string().min(10).max(300).describe("Clear explanation of why the follow-up is or isn't valuable"),
+    valueType: z.enum(["correction", "enhancement", "clarification", "new_insight", "none"]).describe("Type of value added"),
+    confidence: z.number().min(0).max(1).describe("Confidence level in this evaluation (0.0 to 1.0)")
+});
+
+type FollowUpEvaluation = z.infer<typeof FollowUpEvaluationSchema>;
 
 interface ParsedBrainstormEvent {
     moderator: AgentInstance;
@@ -213,6 +234,7 @@ export class BrainstormService {
         // Extract successful responses and log failures
         const responses: BrainstormResponse[] = [];
         results.forEach((result, index) => {
+            console.log('response received', result);
             if (result.status === 'fulfilled' && result.value) {
                 responses.push(result.value);
             } else if (result.status === 'rejected') {
@@ -274,7 +296,7 @@ export class BrainstormService {
     }
 
     /**
-     * Runs the moderation process to select the best response from participants
+     * Runs the moderation process to select the best response from participants using structured AI generation
      */
     private async runModeration(
         moderator: AgentInstance,
@@ -284,57 +306,51 @@ export class BrainstormService {
         conversation: Conversation
     ): Promise<{ chosenIndex: number; reason: string } | null> {
         try {
-            logger.debug("[BrainstormService] Running moderation", {
+            logger.debug("[BrainstormService] Running structured moderation", {
                 moderator: moderator.name,
                 responseCount: responses.length
             });
 
-            // Create a fake event that represents the moderation request
-            // This will be the triggering event for the moderator
-            const moderationEvent = this.createModerationEvent(
-                brainstormRoot,
-                responses,
-                moderator
+            const llmLogger = this.projectContext.llmLogger.withAgent(moderator.name);
+            const llmService = configService.createLLMService(
+                llmLogger,
+                moderator.llmConfig
             );
 
-            // Execute moderator as a proper agent with full context
-            const coordinator = await this.getConversationCoordinator();
-            const context: ExecutionContext = {
-                agent: moderator,
-                conversationId: conversation.id,
-                projectPath: this.projectContext.agentRegistry.getBasePath(),
-                triggeringEvent: moderationEvent,
-                conversationCoordinator: coordinator,
-            };
+            // Build structured prompt for evaluation
+            const evaluationPrompt = this.buildStructuredModerationPrompt(originalPrompt, responses);
 
-            // Use ThreadWithMemoryStrategy to get full conversation history
-            const strategy = new ThreadWithMemoryStrategy();
-            const executor = new AgentExecutor(strategy);
-            const moderatorResponse = await executor.execute(context);
+            // Use generateObject for structured moderation
+            const result = await generateObject({
+                model: llmService.getModel(),
+                schema: ModerationResultSchema,
+                prompt: evaluationPrompt,
+            });
 
-            if (!moderatorResponse?.content) {
-                logger.error("[BrainstormService] No response from moderator");
-                return null;
-            }
+            const moderationResult = result.object;
 
-            // Parse the moderator's response to extract the choice
-            const choice = this.parseModerationChoice(moderatorResponse.content, responses);
-
-            if (!choice) {
-                logger.warn("[BrainstormService] Could not parse moderator choice", {
-                    response: moderatorResponse.content.substring(0, 200)
+            // Validate the chosen index is within bounds
+            if (moderationResult.chosenOptionIndex < 0 || moderationResult.chosenOptionIndex >= responses.length) {
+                logger.error("[BrainstormService] Invalid choice index from moderator", {
+                    chosenIndex: moderationResult.chosenOptionIndex,
+                    responseCount: responses.length
                 });
                 return null;
             }
 
-            logger.info("[BrainstormService] Moderation complete", {
-                chosenAgent: responses[choice.chosenIndex].agent.name,
-                reason: choice.reason
+            logger.info("[BrainstormService] Structured moderation complete", {
+                chosenAgent: responses[moderationResult.chosenOptionIndex].agent.name,
+                reason: moderationResult.reason,
+                confidence: moderationResult.confidence,
+                strengths: moderationResult.strengths
             });
 
-            return choice;
+            return {
+                chosenIndex: moderationResult.chosenOptionIndex,
+                reason: moderationResult.reason
+            };
         } catch (error) {
-            logger.error("[BrainstormService] Moderation failed", {
+            logger.error("[BrainstormService] Structured moderation failed", {
                 error: error instanceof Error ? error.message : String(error)
             });
             return null;
@@ -493,7 +509,7 @@ export class BrainstormService {
     }
 
     /**
-     * Evaluate if a follow-up adds value
+     * Evaluate if a follow-up adds value using structured AI generation
      */
     private async evaluateFollowUpValue(
         originalPrompt: string,
@@ -502,35 +518,34 @@ export class BrainstormService {
         moderator: AgentInstance
     ): Promise<boolean> {
         try {
-            const prompt = this.buildFollowUpModerationPrompt(
-                originalPrompt,
-                winningResponse,
-                followUp
-            );
-
             const llmLogger = this.projectContext.llmLogger.withAgent(moderator.name);
             const llmService = configService.createLLMService(
                 llmLogger,
                 moderator.llmConfig
             );
 
-            const result = await llmService.complete([
-                {
-                    role: "system",
-                    content: "You are evaluating if a follow-up comment adds value to a brainstorm discussion. Respond ONLY with valid JSON: {\"is_valuable\": true/false, \"reason\": \"<explanation>\"}"
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ], {});
-
-            const parsed = safeParseJSON<{ is_valuable: boolean; reason: string }>(
-                result.text,
-                "follow-up evaluation"
+            const evaluationPrompt = this.buildStructuredFollowUpPrompt(
+                originalPrompt,
+                winningResponse,
+                followUp
             );
 
-            return parsed?.is_valuable === true;
+            const result = await generateObject({
+                model: llmService.getModel(),
+                schema: FollowUpEvaluationSchema,
+                prompt: evaluationPrompt,
+            });
+
+            const evaluation = result.object;
+
+            logger.debug("[BrainstormService] Follow-up evaluation result", {
+                isValuable: evaluation.isValuable,
+                valueType: evaluation.valueType,
+                confidence: evaluation.confidence,
+                reason: evaluation.reason
+            });
+
+            return evaluation.isValuable;
         } catch (error) {
             logger.error("[BrainstormService] Failed to evaluate follow-up", {
                 error: error instanceof Error ? error.message : String(error)
@@ -614,21 +629,44 @@ export class BrainstormService {
         return isBrainstormEvent(event.kind, event.tags);
     }
 
+
     /**
-     * Build moderation prompt for choosing best response
+     * Build structured moderation prompt for AI SDK generateObject
      */
-    private buildModerationPrompt(originalPrompt: string, responses: BrainstormResponse[]): string {
-        let prompt = `Original question/prompt:\n${originalPrompt}\n\n`;
-        prompt += `You have ${responses.length} responses to choose from:\n\n`;
-        
+    private buildStructuredModerationPrompt(originalPrompt: string, responses: BrainstormResponse[]): string {
+        let prompt = `You are a moderator evaluating responses to select the best one. Here is the context:
+
+ORIGINAL REQUEST:
+${originalPrompt}
+
+RESPONSES TO EVALUATE (${responses.length} options):
+`;
+
         responses.forEach((response, i) => {
-            prompt += `Option ${i + 1} (from ${response.agent.name}):\n`;
-            prompt += `${response.content}\n\n`;
+            prompt += `
+OPTION ${i} (from agent: ${response.agent.name}):
+${response.content}
+---
+`;
         });
-        
-        prompt += "Choose the BEST response based on accuracy, completeness, clarity, and relevance. ";
-        prompt += "Respond with JSON only.";
-        
+
+        prompt += `
+EVALUATION CRITERIA:
+- Accuracy: How correct and factual is the response?
+- Completeness: Does it fully address the request?
+- Clarity: Is it well-written and easy to understand?
+- Relevance: How well does it match what was asked?
+- Practical value: How useful is the response?
+
+Your task is to select the single best response by providing:
+1. The zero-based index of your chosen option (0 for the first option, 1 for the second, etc.)
+2. A clear reason explaining your choice
+3. Your confidence level (0.0 to 1.0)
+4. Key strengths of the chosen response
+5. Optional: Minor weaknesses or areas for improvement
+
+Be objective and thorough in your evaluation.`;
+
         return prompt;
     }
 
@@ -649,92 +687,40 @@ export class BrainstormService {
     }
 
     /**
-     * Creates a fake moderation event with the agent responses as content
+     * Build structured follow-up evaluation prompt for AI SDK generateObject
      */
-    private createModerationEvent(
-        brainstormRoot: NDKEvent,
-        responses: BrainstormResponse[],
-        moderator: AgentInstance
-    ): NDKEvent {
-        const ndk = getNDK();
-        const moderationEvent = new NDKEvent(ndk);
+    private buildStructuredFollowUpPrompt(
+        originalPrompt: string,
+        winningResponse: string,
+        followUp: string
+    ): string {
+        return `You are evaluating whether a follow-up comment adds significant value to a brainstorm discussion.
 
-        // Build the selection prompt with all responses
-        let content = "Please select the BEST response from the following options:\n\n";
-        responses.forEach((response, i) => {
-            content += `<option${i + 1}>\n`;
-            content += `Agent: ${response.agent.name}\n`;
-            content += `Response: ${response.content}\n`;
-            content += `</option${i + 1}>\n\n`;
-        });
-        content += "Choose the option that best addresses the request based on accuracy, completeness, clarity, and relevance. ";
-        content += "Respond with your choice in the format: 'I choose option X because [reason]'";
+ORIGINAL BRAINSTORM REQUEST:
+${originalPrompt}
 
-        moderationEvent.content = content;
-        moderationEvent.kind = NostrKind.TEXT_NOTE;
-        moderationEvent.pubkey = moderator.pubkey;
-        moderationEvent.tags = [
-            [NostrTag.EVENT, brainstormRoot.id],  // Reference the original brainstorm request
-            [NostrTag.ROOT_EVENT, brainstormRoot.tagValue(NostrTag.ROOT_EVENT) || brainstormRoot.id],
-        ];
+WINNING RESPONSE (already selected):
+${winningResponse}
 
-        // Add p-tags to the moderator
-        moderationEvent.tags.push([NostrTag.PUBKEY, moderator.pubkey]);
+FOLLOW-UP COMMENT TO EVALUATE:
+${followUp}
 
-        // Generate ID for the event so it can be used as a triggering event
-        moderationEvent.id = moderationEvent.tagId();
+EVALUATION CRITERIA:
+Your task is to determine if this follow-up comment adds significant value by providing:
+- Important corrections to the winning response
+- Meaningful enhancements or additional insights
+- Critical clarifications that improve understanding
+- New perspectives that weren't covered
 
-        return moderationEvent;
+VALUE TYPES:
+- correction: Fixes errors or inaccuracies in the winning response
+- enhancement: Adds useful details or improvements
+- clarification: Makes something clearer or easier to understand
+- new_insight: Provides a fresh perspective or approach
+- none: Doesn't add meaningful value
+
+Be selective and objective. Only approve follow-ups that genuinely improve the discussion. Redundant, obvious, or low-value comments should be marked as not valuable.`;
     }
 
-    /**
-     * Parse the moderator's natural language response to extract their choice
-     */
-    private parseModerationChoice(
-        moderatorResponse: string,
-        responses: BrainstormResponse[]
-    ): { chosenIndex: number; reason: string } | null {
-        // Try to find patterns like "option 1", "option 2", "I choose option 3"
-        const optionMatch = moderatorResponse.match(/option\s*(\d+)/i);
-        if (optionMatch) {
-            const optionNumber = parseInt(optionMatch[1], 10);
-            const chosenIndex = optionNumber - 1;
 
-            if (chosenIndex >= 0 && chosenIndex < responses.length) {
-                // Try to extract the reason
-                const reasonMatch = moderatorResponse.match(/because\s+(.+)/i);
-                const reason = reasonMatch ? reasonMatch[1] : moderatorResponse;
-
-                return { chosenIndex, reason };
-            }
-        }
-
-        // Try to match agent names
-        const lowerResponse = moderatorResponse.toLowerCase();
-        for (let i = 0; i < responses.length; i++) {
-            const agentName = responses[i].agent.name.toLowerCase();
-            if (lowerResponse.includes(agentName)) {
-                // Extract reason if possible
-                const reasonMatch = moderatorResponse.match(/because\s+(.+)/i);
-                const reason = reasonMatch ? reasonMatch[1] : moderatorResponse;
-
-                return { chosenIndex: i, reason };
-            }
-        }
-
-        // If we can't parse it, try JSON as a fallback
-        const parsed = safeParseJSON<ModerationResult>(
-            moderatorResponse,
-            "moderation result"
-        );
-
-        if (parsed && parsed.chosen_option > 0 && parsed.chosen_option <= responses.length) {
-            return {
-                chosenIndex: parsed.chosen_option - 1,
-                reason: parsed.reason || moderatorResponse
-            };
-        }
-
-        return null;
-    }
 }

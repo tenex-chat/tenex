@@ -162,7 +162,9 @@ export class AgentExecutor {
 
             // Log execution flow complete
             logger.info(
-                `Agent ${context.agent.name} completed execution successfully`
+                `Agent ${context.agent.name} completed execution successfully`, {
+                    eventId: responseEvent?.id
+                }
             );
 
             return responseEvent;
@@ -424,6 +426,12 @@ export class AgentExecutor {
         });
         
         llmService.on('complete', async (event) => {
+            logger.debug("[AgentExecutor] LLM complete event received", {
+                agent: context.agent.name,
+                messageLength: event.message?.length,
+                hasMessage: !!event.message,
+                message: event.message?.substring(0, 100)
+            });
             // For non-streaming providers, clear any pending timeout
             if (!supportsStreaming) {
                 if (publishTimeout) {
@@ -449,8 +457,21 @@ export class AgentExecutor {
                     isReasoning
                 }, eventContext);
 
+                logger.debug("[AgentExecutor] Published event from agentPublisher.complete", {
+                    agent: context.agent.name,
+                    hasEvent: !!publishedEvent,
+                    eventId: publishedEvent?.id,
+                    eventContent: publishedEvent?.content,
+                    isReasoning
+                });
+
                 if (!isReasoning) {
                     finalResponseEvent = publishedEvent;
+                    logger.debug("[AgentExecutor] Captured finalResponseEvent", {
+                        agent: context.agent.name,
+                        eventId: finalResponseEvent?.id,
+                        eventContent: finalResponseEvent?.content
+                    });
                 }
 
                 logger.info(`[AgentExecutor] Agent ${context.agent.name} completed`, {

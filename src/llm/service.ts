@@ -493,15 +493,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     startTime,
                 });
 
-                // Capture session ID from provider metadata if using Claude Code
-                logger.info("[LLMService] 🔍 CHECKING FOR CLAUDE CODE SESSION IN METADATA", {
-                    provider: this.provider,
-                    isClaudeCode: this.provider === 'claudeCode',
-                    hasProviderMetadata: !!e.providerMetadata,
-                    providerMetadataKeys: e.providerMetadata ? Object.keys(e.providerMetadata) : [],
-                    claudeCodeMetadata: e.providerMetadata?.['claude-code']
-                });
-
                 if (this.provider === 'claudeCode' && e.providerMetadata?.['claude-code']?.sessionId) {
                     const capturedSessionId = e.providerMetadata['claude-code'].sessionId;
                     logger.info("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
@@ -586,6 +577,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             toolCallId,
             result,
         });
+    }
+
+    /**
+     * Get the language model for use with AI SDK's generateObject and other functions
+     */
+    getModel(): LanguageModel {
+        return this.getLanguageModel();
     }
 
 }
