@@ -63,7 +63,9 @@ describe("LLMService Stream Simulation", () => {
           warnings: [],
           rawResponse: {},
         }),
-      } as any)
+      } as any),
+      undefined, // No session ID
+      "test-agent" // Agent slug for test
     );
 
     const contentEvents: string[] = [];
@@ -108,7 +110,10 @@ describe("LLMService Stream Simulation", () => {
       "openai",
       "gpt-4",
       undefined,
-      undefined
+      undefined,
+      undefined, // No Claude Code provider function
+      undefined, // No session ID
+      "test-agent" // Agent slug for test
     );
 
     // Spy on the private simulateStream method
@@ -170,7 +175,9 @@ describe("LLMService Stream Simulation", () => {
           warnings: [],
           rawResponse: {},
         }),
-      } as any)
+      } as any),
+      undefined, // No session ID
+      "test-agent" // Agent slug for test
     );
 
     // Mock the complete method to return tool calls

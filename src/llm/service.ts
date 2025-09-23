@@ -56,6 +56,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private previousChunkType?: string;
     private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel; // Claude Code provider function
     private readonly sessionId?: string; // Session ID for resuming claude_code conversations
+    private readonly agentSlug?: string; // Agent identifier for logging
 
     constructor(
         private readonly llmLogger: LLMLogger,
@@ -65,7 +66,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         temperature?: number,
         maxTokens?: number,
         claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel, // Claude Code provider function
-        sessionId?: string // Session ID for resuming claude_code conversations
+        sessionId?: string, // Session ID for resuming claude_code conversations
+        agentSlug?: string // Agent identifier for logging
     ) {
         super();
         this.provider = provider;
@@ -74,6 +76,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         this.maxTokens = maxTokens;
         this.claudeCodeProviderFunction = claudeCodeProviderFunction;
         this.sessionId = sessionId;
+        this.agentSlug = agentSlug;
 
         // Validate that we have either a registry or Claude Code provider
         if (!registry && !claudeCodeProviderFunction) {
@@ -520,6 +523,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     model: this.model,
                     startTime,
                     finishReason: e.finishReason,
+                    agentSlug: this.agentSlug,
                 });
 
                 this.emit("complete", {

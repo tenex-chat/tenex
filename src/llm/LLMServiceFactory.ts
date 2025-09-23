@@ -153,6 +153,11 @@ export class LLMServiceFactory {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }
 
+        // Convert agent name to slug format for logging
+        const agentSlug = context?.agentName
+            ? context.agentName.toLowerCase().replace(/\s+/g, '-')
+            : undefined;
+
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
 
@@ -172,6 +177,7 @@ export class LLMServiceFactory {
 
             logger.info("[LLMServiceFactory] 🚀 CREATING CLAUDE CODE PROVIDER", {
                 agent: context?.agentName,
+                agentSlug,
                 sessionId: context?.sessionId || 'NONE',
                 hasSessionId: !!context?.sessionId,
                 regularTools,
@@ -237,7 +243,8 @@ export class LLMServiceFactory {
                 config.temperature,
                 config.maxTokens,
                 providerFunction,
-                context?.sessionId // Pass session ID if available
+                context?.sessionId, // Pass session ID if available
+                agentSlug // Pass agent slug for logging
             );
         }
 
@@ -261,7 +268,10 @@ export class LLMServiceFactory {
             actualProvider,
             config.model,
             config.temperature,
-            config.maxTokens
+            config.maxTokens,
+            undefined, // No Claude Code provider function
+            undefined, // No session ID
+            agentSlug // Pass agent slug for logging
         );
     }
 

@@ -198,60 +198,43 @@ export class BrainstormService {
         });
 
         const coordinator = await this.getConversationCoordinator();
-        
-        // Execute all participants in parallel
+
+        // Execute all participants in parallel and get their responses directly
         const results = await Promise.allSettled(
-            participants.map(participant => 
+            participants.map(participant =>
                 this.executeParticipant(participant, event, conversation, coordinator)
             )
         );
 
-        // Extract successful participants and log failures
-        const successfulAgents = this.extractSuccessfulParticipants(results, participants);
-
-        if (successfulAgents.length === 0) return [];
-
-        // Fetch response events
-        return await this.fetchResponseEvents(
-            successfulAgents,
-            event.id,
-            conversation.id,
-            coordinator
-        );
-    }
-
-    /**
-     * Extracts successful participants from execution results and logs failures
-     */
-    private extractSuccessfulParticipants(
-        results: PromiseSettledResult<AgentInstance>[],
-        participants: AgentInstance[]
-    ): AgentInstance[] {
-        const successful: AgentInstance[] = [];
-        
+        // Extract successful responses and log failures
+        const responses: BrainstormResponse[] = [];
         results.forEach((result, index) => {
             if (result.status === 'fulfilled' && result.value) {
-                successful.push(result.value);
+                responses.push(result.value);
             } else if (result.status === 'rejected') {
                 logger.error("[BrainstormService] Participant execution failed", {
                     participant: participants[index].name,
                     error: result.reason
                 });
+            } else {
+                logger.debug("[BrainstormService] Participant produced no response", {
+                    participant: participants[index].name
+                });
             }
         });
-        
-        return successful;
+
+        return responses;
     }
 
     /**
-     * Executes a single participant agent and returns it on success
+     * Executes a single participant agent and returns it with response on success
      */
     private async executeParticipant(
         participant: AgentInstance,
         event: NDKEvent,
         conversation: Conversation,
         coordinator: ConversationCoordinator
-    ): Promise<AgentInstance> {
+    ): Promise<BrainstormResponse | null> {
         logger.debug("[BrainstormService] Executing participant", {
             name: participant.name
         });
@@ -266,50 +249,16 @@ export class BrainstormService {
 
         const strategy = new BrainstormStrategy();
         const executor = new AgentExecutor(strategy);
-        await executor.execute(context);
-        
-        return participant;
-    }
+        const responseContent = await executor.execute(context);
 
-    /**
-     * Fetches the actual response events published by participants from conversation history
-     */
-    private async fetchResponseEvents(
-        agents: AgentInstance[],
-        rootEventId: string,
-        conversationId: string,
-        coordinator: ConversationCoordinator
-    ): Promise<BrainstormResponse[]> {
-        // Get the conversation directly - no refresh method exists
-        const conversation = coordinator.getConversation(conversationId);
-        
-        if (!conversation) {
-            logger.error("[BrainstormService] Conversation not found", { conversationId });
-            return [];
+        if (responseContent) {
+            return {
+                agent: participant,
+                content: responseContent
+            };
         }
 
-        const responses: BrainstormResponse[] = [];
-        
-        for (const agent of agents) {
-            const responseEvent = conversation.history.find(e => 
-                e.kind === NostrKind.GENERIC_REPLY && 
-                e.tagValue(NostrTag.ROOT_EVENT) === rootEventId &&
-                e.pubkey === agent.pubkey
-            );
-            
-            if (responseEvent?.content) {
-                responses.push({
-                    agent,
-                    content: responseEvent.content
-                });
-            } else {
-                logger.debug("[BrainstormService] No response found for agent", {
-                    agent: agent.name
-                });
-            }
-        }
-        
-        return responses;
+        return null;
     }
 
     /**
