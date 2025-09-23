@@ -221,11 +221,11 @@ export class SchedulerService {
     try {
       const data = await fs.readFile(this.taskFilePath, 'utf-8');
       const tasks = JSON.parse(data) as ScheduledTask[];
-      
+
       for (const task of tasks) {
         this.taskMetadata.set(task.id, task);
       }
-      
+
       logger.info(`Loaded ${tasks.length} scheduled tasks from disk`);
     } catch (error: any) {
       if (error.code === 'ENOENT') {

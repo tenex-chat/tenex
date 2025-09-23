@@ -30,7 +30,7 @@ export function createScheduleTaskTool(context: ExecutionContext) {
         const schedulerService = SchedulerService.getInstance();
 
         // Resolve target agent to pubkey if specified
-        let agentPubkey: string | undefined;
+        let toPubkey: string;
         if (targetAgent) {
           const resolved = resolveRecipientToPubkey(targetAgent);
           if (!resolved) {
@@ -39,14 +39,17 @@ export function createScheduleTaskTool(context: ExecutionContext) {
               error: `Could not resolve target agent: ${targetAgent}. Use agent slug (e.g., 'architect'), name, npub, or hex pubkey.`,
             };
           }
-          agentPubkey = resolved;
+          toPubkey = resolved;
         } else {
-          // Use the current agent's pubkey
-          agentPubkey = context.agent.pubkey;
+          // Default to self if no target specified
+          toPubkey = context.agent.pubkey;
         }
 
-        // Add task to scheduler
-        const taskId = await schedulerService.addTask(schedule, prompt, agentPubkey);
+        // The agent scheduling the task is always the current agent
+        const fromPubkey = context.agent.pubkey;
+
+        // Add task to scheduler with both pubkeys
+        const taskId = await schedulerService.addTask(schedule, prompt, fromPubkey, toPubkey);
 
         logger.info(`Successfully created scheduled task ${taskId} with cron schedule: ${schedule}`);
 
