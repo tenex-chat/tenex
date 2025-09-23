@@ -3,7 +3,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { logger } from '../utils/logger';
 import { ConfigService } from './ConfigService';
-import NDK, { NDKEvent } from '@nostr-dev-kit/ndk';
+import NDK, { NDKEvent, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk';
+import { getProjectContext } from './ProjectContext';
 
 interface ScheduledTask {
   id: string;
@@ -73,7 +74,7 @@ export class SchedulerService {
       schedule,
       prompt,
       createdAt: new Date().toISOString(),
-      agentPubkey: agentPubkey || ConfigService.getInstance().getConfig().systemAgentPubkeys?.[0]
+      agentPubkey: agentPubkey || ConfigService.getInstance().getConfig().whitelistedPubkeys?.[0]
     };
 
     this.taskMetadata.set(taskId, task);
@@ -162,19 +163,16 @@ export class SchedulerService {
     event.kind = 11; // Agent request event
     event.content = task.prompt;
 
-    const config = ConfigService.getInstance().getConfig();
-    const projectRef = `${config.projectPubkey || config.userPubkey}:tenex:${this.projectPath?.split('/').pop() || 'default'}`;
+    const projectCtx = await getProjectContext();
 
     // Build tags
     const tags: string[][] = [
-      ['a', projectRef], // Project reference
+      ['a', projectCtx.project.tagId()], // Project reference
     ];
 
     // Add p-tag for the agent that created this task
     if (task.agentPubkey) {
-      tags.push(['p', task.agentPubkey]);
-    } else if (config.systemAgentPubkeys?.length > 0) {
-      tags.push(['p', config.systemAgentPubkeys[0]]);
+      tags.push(['p', task.agentPubkey]); // THIS MUST ALWAYS P-TAG THE TARGET AGENT
     }
 
     // Add metadata about the scheduled task
@@ -183,11 +181,42 @@ export class SchedulerService {
 
     event.tags = tags;
 
-    // If the task has an agent pubkey, sign with that agent's key
-    // Otherwise use the default signing
+    // Get the signer for this scheduled task
+    // Priority: 1) Agent that created the task, 2) PM, 3) Backend key
+    let signer: NDKPrivateKeySigner;
+
+    if (task.agentPubkey) {
+      // Try to get the agent that created this task
+      const agent = projectCtx.getAgentByPubkey(task.agentPubkey);
+      if (agent?.signer) {
+        signer = agent.signer;
+      } else {
+        // If agent not found, try PM
+        const pmAgent = projectCtx.projectManager;
+        if (pmAgent?.signer) {
+          signer = pmAgent.signer;
+        } else {
+          // Fall back to backend key
+          const privateKey = await ConfigService.getInstance().ensureBackendPrivateKey();
+          signer = new NDKPrivateKeySigner(privateKey);
+        }
+      }
+    } else {
+      // No agent pubkey specified, use PM or backend key
+      const pmAgent = projectCtx.projectManager;
+      if (pmAgent?.signer) {
+        signer = pmAgent.signer;
+      } else {
+        const privateKey = await ConfigService.getInstance().ensureBackendPrivateKey();
+        signer = new NDKPrivateKeySigner(privateKey);
+      }
+    }
+
+    // Sign and publish the event
+    await event.sign(signer);
     await event.publish();
 
-    logger.info(`Published kind:11 event for scheduled task ${task.id}`);
+    logger.info(`Published kind:11 event for scheduled task ${task.id} signed by ${signer.pubkey}`);
   }
 
   private async loadTasks(): Promise<void> {
