@@ -115,7 +115,7 @@ async function executeClaudeCode(
     // Track execution state
     let lastAssistantMessage = "";
     let planResult: string | null = null;
-    let totalCost = 0;
+    const totalCost = 0;
     let messageCount = 0;
     let capturedSessionId: string | undefined;
 

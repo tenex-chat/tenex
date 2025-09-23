@@ -605,7 +605,7 @@ export class AgentRegistry {
    */
   private normalizeAgentTools(requestedTools: string[], agent: { phases?: Record<string, string> }): string[] {
     // Filter out delegation and phase management tools - they should never be in configuration
-    let toolNames = requestedTools.filter(tool =>
+    const toolNames = requestedTools.filter(tool =>
       !DELEGATE_TOOLS.includes(tool) &&
       !PHASE_MANAGEMENT_TOOLS.includes(tool)
     );
@@ -844,7 +844,7 @@ export class AgentRegistry {
       agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
     
     // Normalize tools according to business rules (delegation tools, core tools, etc.)
-    let toolNames = this.normalizeAgentTools(requestedTools, agent);
+    const toolNames = this.normalizeAgentTools(requestedTools, agent);
 
     // Validate tool names - we now store tool names as strings, not instances
     const validToolNames: string[] = [];

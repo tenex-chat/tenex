@@ -265,24 +265,24 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     
     /**
      * Transforms a Nostr event into LLM-compatible model messages.
-     * In brainstorm context, all messages are formatted simply without targeting notation.
+     * In brainstorm context, messages include speaker identification without targeting notation.
      */
     private async processEvent(
         event: NDKEvent,
         agentPubkey: string
     ): Promise<ModelMessage[]> {
         const messages: ModelMessage[] = [];
-        
+
         // Check for phase transitions (if used in brainstorms)
         const phaseTag = event.tagValue(NostrTag.PHASE);
         const phaseInstructionsTag = event.tagValue(NostrTag.PHASE_INSTRUCTIONS);
-        
+
         if (phaseTag) {
             const phaseContent = PromptBuilder.buildFragment("phase-transition", {
                 phase: phaseTag,
                 phaseInstructions: phaseInstructionsTag
             });
-            
+
             if (phaseContent) {
                 messages.push({ role: "system", content: phaseContent });
                 logger.debug("[BrainstormStrategy] Added phase transition", {
@@ -291,10 +291,10 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
                 });
             }
         }
-        
-        // Format main content simply without targeting notation
+
+        // Format main content with speaker identification
         const content = event.content || "";
-        
+
         if (event.pubkey === agentPubkey) {
             // Agent's own message
             messages.push({ role: "assistant", content });
@@ -302,10 +302,25 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             // User message - always format as simple "user" role in brainstorms
             messages.push({ role: "user", content });
         } else {
-            // Another agent's message - format as assistant
-            messages.push({ role: "assistant", content });
+            // Another agent's message - include agent name for differentiation
+            const agentName = await this.getAgentName(event.pubkey);
+            const formattedContent = agentName ? `${agentName}: ${content}` : content;
+            messages.push({ role: "assistant", content: formattedContent });
         }
-        
+
         return messages;
+    }
+
+    /**
+     * Gets the agent name from their public key using the project context
+     */
+    private async getAgentName(pubkey: string): Promise<string | undefined> {
+        if (!isProjectContextInitialized()) {
+            return undefined;
+        }
+
+        const projectCtx = getProjectContext();
+        const agent = projectCtx.agents.get(pubkey);
+        return agent?.name;
     }
 }
