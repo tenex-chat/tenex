@@ -112,7 +112,7 @@ export class AgentExecutor {
     /**
      * Execute an agent's assignment for a conversation with streaming
      */
-    async execute(context: ExecutionContext): Promise<string | undefined> {
+    async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
         // Build messages using the strategy
         const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
 
@@ -158,14 +158,14 @@ export class AgentExecutor {
             };
             await agentPublisher.typing({ state: "start" }, eventContext);
 
-            const responseContent = await this.executeWithStreaming(fullContext, messages);
+            const responseEvent = await this.executeWithStreaming(fullContext, messages);
 
             // Log execution flow complete
             logger.info(
                 `Agent ${context.agent.name} completed execution successfully`
             );
 
-            return responseContent;
+            return responseEvent;
         } catch (error) {
             // Log execution flow failure
             logger.error(`Agent ${context.agent.name} execution failed`, {
@@ -273,7 +273,7 @@ export class AgentExecutor {
     private async executeWithStreaming(
         context: ExecutionContext,
         messages: ModelMessage[]
-    ): Promise<string | undefined> {
+    ): Promise<NDKEvent | undefined> {
         // Get tools for response processing
         // Tools are already properly configured in AgentRegistry.buildAgentInstance
         const toolNames = context.agent.tools || [];
@@ -324,7 +324,7 @@ export class AgentExecutor {
         // Separate buffers for content and reasoning
         let contentBuffer = '';
         let reasoningBuffer = '';
-        let finalResponseContent: string | undefined;
+        let finalResponseEvent: NDKEvent | undefined;
 
         // Helper to flush accumulated content
         const flushContentBuffer = async (): Promise<void> => {
@@ -442,16 +442,16 @@ export class AgentExecutor {
             if (event.message.trim()) {
                 const isReasoning = hadReasoning && !hadContent;
 
-                // Capture the final response content (non-reasoning only)
-                if (!isReasoning) {
-                    finalResponseContent = event.message;
-                }
-
-                await agentPublisher.complete({
+                // Capture the final response event (non-reasoning only)
+                const publishedEvent = await agentPublisher.complete({
                     content: event.message,
                     usage: event.usage,
                     isReasoning
                 }, eventContext);
+
+                if (!isReasoning) {
+                    finalResponseEvent = publishedEvent;
+                }
 
                 logger.info(`[AgentExecutor] Agent ${context.agent.name} completed`, {
                     charCount: event.message.length,
@@ -645,6 +645,6 @@ export class AgentExecutor {
             llmService.removeAllListeners();
         }
 
-        return finalResponseContent;
+        return finalResponseEvent;
     }
 }

@@ -17,6 +17,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 interface BrainstormResponse {
     agent: AgentInstance;
     content: string;
+    event: NDKEvent;
 }
 
 interface ModerationResult {
@@ -249,12 +250,13 @@ export class BrainstormService {
 
         const strategy = new BrainstormStrategy();
         const executor = new AgentExecutor(strategy);
-        const responseContent = await executor.execute(context);
+        const responseEvent = await executor.execute(context);
 
-        if (responseContent) {
+        if (responseEvent?.content) {
             return {
                 agent: participant,
-                content: responseContent
+                content: responseEvent.content,
+                event: responseEvent
             };
         }
 
@@ -345,32 +347,10 @@ export class BrainstormService {
         reason: string
     ): Promise<void> {
         try {
-            // Wait a bit for response events to be added to conversation history
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Find the actual response event
-            const coordinator = await this.getConversationCoordinator();
-            const conversation = coordinator.getConversation(conversationId);
-
-            if (!conversation) {
-                logger.error("[BrainstormService] Conversation not found for selection");
-                return;
-            }
-
-            const responseEvent = conversation.history.find(e =>
-                e.kind === NostrKind.GENERIC_REPLY &&
-                e.tagValue(NostrTag.ROOT_EVENT) === brainstormRoot.id &&
-                e.pubkey === chosenResponse.agent.pubkey
-            );
-
-            if (!responseEvent) {
-                logger.warn("[BrainstormService] Response event not found for selection, skipping selection event");
-                return;
-            }
-
+            // We already have the response event directly from the executor
             await this.publishSelection(
                 brainstormRoot,
-                responseEvent,
+                chosenResponse.event,
                 chosenResponse.agent,
                 moderator,
                 conversationId,
