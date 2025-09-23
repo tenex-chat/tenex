@@ -2,8 +2,9 @@ import * as path from "node:path";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
 import { ProjectManager } from "../../daemon/ProjectManager";
-import { getNDK, initNDK, shutdownNDK } from "../../nostr/ndkClient";
+import { getNDK, initNDK, shutdownNDK, getTenexAnnouncementService } from "../../nostr/ndkClient";
 import { handleCliError } from "../../utils/cli-error";
+import { nip19 } from "nostr-tools";
 
 export const projectInitCommand = new Command("init")
   .description("Initialize a new TENEX project")
@@ -21,6 +22,31 @@ export const projectInitCommand = new Command("init")
 
       const projectManager = new ProjectManager();
       const projectData = await projectManager.initializeProject(resolvedPath, naddr, ndk);
+
+      // Add project to TENEX announcement service
+      const announcementService = getTenexAnnouncementService();
+      if (announcementService) {
+        try {
+          // Decode naddr to get kind:pubkey:identifier format for 'a' tag
+          const decoded = nip19.decode(naddr);
+          if (decoded.type !== 'naddr') {
+            logger.error(`Invalid naddr provided: ${naddr}`);
+          } else {
+            const { kind, pubkey, identifier } = decoded.data;
+            const formattedId = `${kind}:${pubkey}:${identifier}`;
+            const projectTag = ['a', formattedId];
+            const changed = announcementService.addTag(projectTag);
+            
+            if (changed) {
+              await announcementService.publish();
+              logger.debug(`Published project announcement for ${formattedId}`);
+            }
+          }
+        } catch (error) {
+          logger.error("Failed to publish project announcement", error);
+          // Don't fail the project creation if announcement fails
+        }
+      }
 
       // Shutdown NDK
       await shutdownNDK();

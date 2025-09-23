@@ -44,6 +44,25 @@ describe("LLMService Stream Simulation", () => {
           },
           providerMetadata: {},
         }),
+        // Add doStream method for middleware compatibility
+        doStream: vi.fn().mockResolvedValue({
+          stream: new ReadableStream({
+            async start(controller) {
+              controller.enqueue({
+                type: "text-delta",
+                delta: "This is a complete response from Claude Code",
+              });
+              controller.enqueue({
+                type: "finish",
+                finishReason: "stop",
+                usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+              });
+              controller.close();
+            },
+          }),
+          warnings: [],
+          rawResponse: {},
+        }),
       } as any)
     );
 
@@ -120,6 +139,37 @@ describe("LLMService Stream Simulation", () => {
       undefined,
       () => ({
         doGenerate: vi.fn(),
+        // Add doStream method for middleware compatibility
+        doStream: vi.fn().mockResolvedValue({
+          stream: new ReadableStream({
+            async start(controller) {
+              controller.enqueue({
+                type: "text-delta",
+                delta: "I'll help you with that.",
+              });
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: "tool-1",
+                toolName: "test-tool",
+                input: { foo: "bar" },
+              });
+              controller.enqueue({
+                type: "tool-result",
+                toolCallId: "tool-1",
+                toolName: "test-tool",
+                output: { success: true },
+              });
+              controller.enqueue({
+                type: "finish",
+                finishReason: "stop",
+                usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+              });
+              controller.close();
+            },
+          }),
+          warnings: [],
+          rawResponse: {},
+        }),
       } as any)
     );
 

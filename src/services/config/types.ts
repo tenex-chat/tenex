@@ -12,6 +12,7 @@ import { z } from "zod";
 export interface TenexConfig {
   // Global fields
   whitelistedPubkeys?: string[];
+  tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
 
   // Project fields (optional for global config)
   description?: string;
@@ -24,6 +25,7 @@ export interface TenexConfig {
 
 export const TenexConfigSchema = z.object({
   whitelistedPubkeys: z.array(z.string()).optional(),
+  tenexPrivateKey: z.string().optional(),
   description: z.string().optional(),
   repoUrl: z.string().optional(),
   projectNaddr: z.string().optional(),

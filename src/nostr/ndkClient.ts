@@ -4,8 +4,12 @@ import { getRelayUrls } from "@/utils/relays";
  * Manages a single NDK instance for the CLI
  */
 import NDK from "@nostr-dev-kit/ndk";
+import { ReplaceableEventService } from "@/services/replaceable-event";
+import { configService } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 
 let ndk: NDK | undefined;
+let tenexAnnouncementService: ReplaceableEventService | undefined;
 
 export async function initNDK(): Promise<void> {
   if (ndk) {
@@ -27,6 +31,17 @@ export async function initNDK(): Promise<void> {
   });
 
   await ndk.connect();
+
+  // Initialize TENEX announcement service
+  try {
+    const privateKey = await configService.ensureBackendPrivateKey();
+    tenexAnnouncementService = new ReplaceableEventService(ndk, privateKey, 14199);
+    await tenexAnnouncementService.initialize();
+    logger.debug(`TENEX announcement service initialized with pubkey: ${tenexAnnouncementService.getPubkey()}`);
+  } catch (error) {
+    logger.error("Failed to initialize TENEX announcement service", error);
+    // Don't fail the entire NDK initialization if announcement service fails
+  }
 }
 
 export function getNDK(): NDK {
@@ -38,6 +53,10 @@ export function getNDK(): NDK {
   return ndk;
 }
 
+export function getTenexAnnouncementService(): ReplaceableEventService | undefined {
+  return tenexAnnouncementService;
+}
+
 export async function shutdownNDK(): Promise<void> {
   if (ndk) {
     // Disconnect all relays
@@ -47,5 +66,6 @@ export async function shutdownNDK(): Promise<void> {
       }
     }
     ndk = undefined;
+    tenexAnnouncementService = undefined;
   }
 }

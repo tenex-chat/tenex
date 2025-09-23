@@ -23,6 +23,7 @@ import {
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { z } from "zod";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * Centralized configuration service for TENEX
@@ -62,6 +63,16 @@ export class ConfigService {
   // =====================================================================================
   // COMPLETE CONFIGURATION LOADING
   // =====================================================================================
+
+  /**
+   * Get the currently loaded config
+   */
+  getConfig(): TenexConfig {
+    if (!this.loadedConfig) {
+      throw new Error("Config not loaded. Call loadConfig() first.");
+    }
+    return this.loadedConfig.config;
+  }
 
   async loadConfig(projectPath?: string): Promise<LoadedConfig> {
     const globalPath = this.getGlobalPath();
@@ -277,6 +288,27 @@ export class ConfigService {
   // =====================================================================================
   // BUSINESS LOGIC METHODS
   // =====================================================================================
+
+  /**
+   * Ensures that a backend private key exists for TENEX
+   * Generates a new one if not present
+   */
+  async ensureBackendPrivateKey(): Promise<string> {
+    const globalPath = this.getGlobalPath();
+    const config = await this.loadTenexConfig(globalPath);
+    
+    if (!config.tenexPrivateKey) {
+      // Generate new private key
+      const signer = NDKPrivateKeySigner.generate();
+      config.tenexPrivateKey = signer.privateKey;
+      
+      // Save config with new key
+      await this.saveGlobalConfig(config);
+      logger.info("Generated new TENEX backend private key");
+    }
+    
+    return config.tenexPrivateKey;
+  }
 
   /**
    * Get whitelisted pubkeys with CLI override support

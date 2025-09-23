@@ -6,6 +6,7 @@ import { logger } from "@/utils/logger";
 import { isValidSlug } from "@/utils/validation";
 import { confirm, input } from "@inquirer/prompts";
 import { Command } from "commander";
+import { initNDK, getTenexAnnouncementService, shutdownNDK } from "@/nostr/ndkClient";
 
 interface AddOptions {
   project?: boolean;
@@ -109,6 +110,27 @@ export const agentAddCommand = new Command("add")
 
       // Use AgentRegistry to ensure agent (this handles all file operations and Nostr publishing)
       const agent = await registry.ensureAgent(name, agentConfig);
+
+      // Add agent to TENEX announcement service
+      // Initialize NDK to get the announcement service
+      await initNDK();
+      const announcementService = getTenexAnnouncementService();
+      if (announcementService) {
+        try {
+          // Use 'g' tag for agents (as specified in the plan)
+          const agentTag = ['g', agent.pubkey];
+          const changed = announcementService.addTag(agentTag);
+          
+          if (changed) {
+            await announcementService.publish();
+            logger.debug(`Published agent announcement for ${agent.pubkey}`);
+          }
+        } catch (error) {
+          logger.error("Failed to publish agent announcement", error);
+          // Don't fail the agent creation if announcement fails
+        }
+      }
+      await shutdownNDK();
 
       const location = formatConfigScope(scope);
       logger.info(`✅ Local agent "${name}" created successfully in ${location}`);

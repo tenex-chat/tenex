@@ -1,6 +1,7 @@
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
+import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "./utils/claudeCodePromptCompiler";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import {
     type LanguageModelUsage,
@@ -101,33 +102,40 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         if (this.claudeCodeProviderFunction) {
             // Claude Code provider
-            const systemPrompt = messages?.find(m => m.role === 'system')?.content;
+            const options: ClaudeCodeSettings = {};
 
-            // Call provider function with model, system prompt, and session ID if available
-            const options: ClaudeCodeSettings = {
-                customSystemPrompt: systemPrompt
-            };
-            
             if (this.sessionId) {
+                // When resuming, only pass the resume option
                 options.resume = this.sessionId;
                 logger.info("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
                     sessionId: this.sessionId,
                     model: this.model,
                     optionsKeys: Object.keys(options)
                 });
-            } else {
+            } else if (messages) {
+                // When NOT resuming, compile all messages
+                const { customSystemPrompt, appendSystemPrompt } = compileMessagesForClaudeCode(messages);
+
+                options.customSystemPrompt = customSystemPrompt;
+                if (appendSystemPrompt) {
+                    options.appendSystemPrompt = appendSystemPrompt;
+                }
+
                 logger.info("[LLMService] 🆕 NEW CLAUDE CODE SESSION (no resume)", {
                     model: this.model,
+                    hasCustomPrompt: !!customSystemPrompt,
+                    hasAppendPrompt: !!appendSystemPrompt,
+                    appendPromptLength: appendSystemPrompt?.length || 0,
                     optionsKeys: Object.keys(options)
                 });
             }
-            
+
             baseModel = this.claudeCodeProviderFunction(this.model, options);
 
             logger.info("[LLMService] 🎯 CREATED CLAUDE CODE MODEL", {
                 model: this.model,
-                hasSystemPrompt: !!systemPrompt,
-                systemPromptLength: systemPrompt?.length || 0,
+                hasCustomSystemPrompt: !!options.customSystemPrompt,
+                hasAppendSystemPrompt: !!options.appendSystemPrompt,
                 resumeSessionId: options.resume || 'NONE',
                 hasResume: 'resume' in options
             });
@@ -190,9 +198,15 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     ): Promise<unknown> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();
-        
+
+        // Convert system messages for Claude Code resume sessions
+        let processedMessages = messages;
+        if (this.provider === 'claudeCode' && this.sessionId) {
+            processedMessages = convertSystemMessagesForResume(messages);
+        }
+
         // Add provider-specific cache control
-        const processedMessages = this.addCacheControl(messages);
+        processedMessages = this.addCacheControl(processedMessages);
 
         // Log the request
         this.llmLogger
@@ -291,8 +305,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
 
+        // Convert system messages for Claude Code resume sessions
+        let processedMessages = messages;
+        if (this.provider === 'claudeCode' && this.sessionId) {
+            processedMessages = convertSystemMessagesForResume(messages);
+        }
+
         // Add provider-specific cache control
-        const processedMessages = this.addCacheControl(messages);
+        processedMessages = this.addCacheControl(processedMessages);
 
         // Log the request
         this.llmLogger
@@ -383,7 +403,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         switch (chunk.type) {
             case "text-delta":
-                if ('text' in chunk && chunk.text) {
+                // AI SDK uses 'delta' for text-delta chunks, not 'text'
+                if ('delta' in chunk && chunk.delta) {
+                    this.handleTextDelta(chunk.delta);
+                } else if ('text' in chunk && chunk.text) {
+                    // Fallback for compatibility
                     this.handleTextDelta(chunk.text);
                 }
                 break;

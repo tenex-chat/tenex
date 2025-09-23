@@ -13,7 +13,8 @@ interface ScheduledTask {
   createdAt: string;
   lastRun?: string;
   nextRun?: string;
-  agentPubkey?: string; // The agent that created this task
+  fromPubkey: string; // Who scheduled this task (the scheduler)
+  toPubkey: string; // Target agent that should execute the task
 }
 
 export class SchedulerService {
@@ -60,7 +61,12 @@ export class SchedulerService {
     logger.info(`SchedulerService initialized with ${this.taskMetadata.size} tasks`);
   }
 
-  public async addTask(schedule: string, prompt: string, agentPubkey?: string): Promise<string> {
+  public async addTask(
+    schedule: string,
+    prompt: string,
+    fromPubkey: string,
+    toPubkey: string
+  ): Promise<string> {
     // Validate cron expression
     if (!cron.validate(schedule)) {
       throw new Error(`Invalid cron expression: ${schedule}`);
@@ -74,7 +80,8 @@ export class SchedulerService {
       schedule,
       prompt,
       createdAt: new Date().toISOString(),
-      agentPubkey: agentPubkey || ConfigService.getInstance().getConfig().whitelistedPubkeys?.[0]
+      fromPubkey,
+      toPubkey
     };
 
     this.taskMetadata.set(taskId, task);
@@ -168,12 +175,8 @@ export class SchedulerService {
     // Build tags
     const tags: string[][] = [
       ['a', projectCtx.project.tagId()], // Project reference
+      ['p', task.toPubkey], // Target agent that should handle this task
     ];
-
-    // Add p-tag for the agent that created this task
-    if (task.agentPubkey) {
-      tags.push(['p', task.agentPubkey]); // THIS MUST ALWAYS P-TAG THE TARGET AGENT
-    }
 
     // Add metadata about the scheduled task
     tags.push(['scheduled-task-id', task.id]);
@@ -181,34 +184,29 @@ export class SchedulerService {
 
     event.tags = tags;
 
-    // Get the signer for this scheduled task
-    // Priority: 1) Agent that created the task, 2) PM, 3) Backend key
+    // Get the signer for the agent that scheduled this task (fromPubkey)
     let signer: NDKPrivateKeySigner;
 
-    if (task.agentPubkey) {
-      // Try to get the agent that created this task
-      const agent = projectCtx.getAgentByPubkey(task.agentPubkey);
-      if (agent?.signer) {
-        signer = agent.signer;
-      } else {
-        // If agent not found, try PM
-        const pmAgent = projectCtx.projectManager;
-        if (pmAgent?.signer) {
-          signer = pmAgent.signer;
-        } else {
-          // Fall back to backend key
-          const privateKey = await ConfigService.getInstance().ensureBackendPrivateKey();
-          signer = new NDKPrivateKeySigner(privateKey);
-        }
-      }
+    // Try to get the agent that scheduled this task
+    const schedulerAgent = projectCtx.getAgentByPubkey(task.fromPubkey);
+    if (schedulerAgent?.signer) {
+      signer = schedulerAgent.signer;
     } else {
-      // No agent pubkey specified, use PM or backend key
+      // If scheduler agent not found, try PM
       const pmAgent = projectCtx.projectManager;
-      if (pmAgent?.signer) {
+      if (pmAgent?.signer && pmAgent.pubkey === task.fromPubkey) {
         signer = pmAgent.signer;
       } else {
+        // Fall back to backend key if fromPubkey matches backend
         const privateKey = await ConfigService.getInstance().ensureBackendPrivateKey();
-        signer = new NDKPrivateKeySigner(privateKey);
+        const backendSigner = new NDKPrivateKeySigner(privateKey);
+        if (backendSigner.pubkey === task.fromPubkey) {
+          signer = backendSigner;
+        } else {
+          // If we can't find the original signer, log warning and use backend key
+          logger.warn(`Could not find signer for fromPubkey ${task.fromPubkey}, using backend key`);
+          signer = backendSigner;
+        }
       }
     }
 
@@ -216,7 +214,7 @@ export class SchedulerService {
     await event.sign(signer);
     await event.publish();
 
-    logger.info(`Published kind:11 event for scheduled task ${task.id} signed by ${signer.pubkey}`);
+    logger.info(`Published kind:11 event for scheduled task ${task.id} from ${signer.pubkey} to ${task.toPubkey}`);
   }
 
   private async loadTasks(): Promise<void> {

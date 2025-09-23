@@ -10,9 +10,7 @@ mock.module("../ConfigService", () => ({
   ConfigService: {
     getInstance: () => ({
       getConfig: () => ({
-        userPubkey: "test-user-pubkey",
-        projectPubkey: "test-project-pubkey",
-        systemAgentPubkeys: ["test-agent-pubkey"]
+        whitelistedPubkeys: ["test-agent-pubkey"]
       })
     })
   }
@@ -61,9 +59,10 @@ describe("SchedulerService", () => {
   it("should add a scheduled task locally without Nostr event", async () => {
     const schedule = "0 9 * * *"; // Daily at 9am
     const prompt = "Send daily report";
-    const agentPubkey = "test-agent-pubkey";
+    const fromPubkey = "scheduler-agent-pubkey";
+    const toPubkey = "target-agent-pubkey";
 
-    const taskId = await service.addTask(schedule, prompt, agentPubkey);
+    const taskId = await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     expect(taskId).toBeDefined();
     expect(taskId).toContain("task-");
@@ -73,15 +72,18 @@ describe("SchedulerService", () => {
     expect(tasks.length).toBe(1);
     expect(tasks[0].prompt).toBe(prompt);
     expect(tasks[0].schedule).toBe(schedule);
-    expect(tasks[0].agentPubkey).toBe(agentPubkey);
+    expect(tasks[0].fromPubkey).toBe(fromPubkey);
+    expect(tasks[0].toPubkey).toBe(toPubkey);
   });
 
   it("should handle single-run cron expressions", async () => {
     // Use a specific date/time cron expression that runs once
     const schedule = "30 15 25 12 *"; // December 25th at 3:30 PM
     const prompt = "Christmas reminder";
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
 
-    const taskId = await service.addTask(schedule, prompt);
+    const taskId = await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     expect(taskId).toBeDefined();
 
@@ -93,8 +95,10 @@ describe("SchedulerService", () => {
   it("should remove a scheduled task locally", async () => {
     const schedule = "*/5 * * * *"; // Every 5 minutes
     const prompt = "Check status";
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
 
-    const taskId = await service.addTask(schedule, prompt);
+    const taskId = await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     // Verify task was added
     let tasks = await service.getTasks();
@@ -111,9 +115,11 @@ describe("SchedulerService", () => {
 
   it("should list all local tasks", async () => {
     // Add multiple tasks
-    await service.addTask("0 9 * * *", "Task 1");
-    await service.addTask("0 10 * * *", "Task 2");
-    await service.addTask("0 0 * * 0", "Task 3"); // Weekly on Sunday
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
+    await service.addTask("0 9 * * *", "Task 1", fromPubkey, toPubkey);
+    await service.addTask("0 10 * * *", "Task 2", fromPubkey, toPubkey);
+    await service.addTask("0 0 * * 0", "Task 3", fromPubkey, toPubkey); // Weekly on Sunday
 
     const tasks = await service.getTasks();
     expect(tasks).toHaveLength(3);
@@ -125,8 +131,10 @@ describe("SchedulerService", () => {
   it("should persist tasks to disk", async () => {
     const schedule = "0 12 * * *";
     const prompt = "Lunch reminder";
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
 
-    await service.addTask(schedule, prompt);
+    await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     // Verify the file was created
     const fileContent = await fs.readFile(testTasksPath, 'utf-8');
@@ -141,7 +149,9 @@ describe("SchedulerService", () => {
     // Add a task and shut down
     const schedule = "0 8 * * *";
     const prompt = "Morning standup";
-    const taskId = await service.addTask(schedule, prompt);
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
+    const taskId = await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     // Get initial tasks
     const initialTasks = await service.getTasks();
@@ -165,9 +175,11 @@ describe("SchedulerService", () => {
   it("should reject invalid cron expressions", async () => {
     const invalidSchedule = "invalid cron";
     const prompt = "Test task";
+    const fromPubkey = "scheduler-pubkey";
+    const toPubkey = "target-pubkey";
 
     try {
-      await service.addTask(invalidSchedule, prompt);
+      await service.addTask(invalidSchedule, prompt, fromPubkey, toPubkey);
       expect(true).toBe(false); // Should not reach here
     } catch (error: any) {
       expect(error.message).toContain("Invalid cron expression");
@@ -180,25 +192,16 @@ describe("SchedulerService", () => {
     // in an integration test suite with real NDK instances
   });
 
-  it("should include agent pubkey in scheduled task", async () => {
+  it("should track from and to pubkeys in scheduled task", async () => {
     const schedule = "0 15 * * *";
     const prompt = "Afternoon task";
-    const agentPubkey = "specific-agent-pubkey";
+    const fromPubkey = "scheduler-agent-pubkey";
+    const toPubkey = "target-agent-pubkey";
 
-    const taskId = await service.addTask(schedule, prompt, agentPubkey);
-
-    const tasks = await service.getTasks();
-    expect(tasks[0].agentPubkey).toBe(agentPubkey);
-  });
-
-  it("should use default agent pubkey when not specified", async () => {
-    const schedule = "0 16 * * *";
-    const prompt = "Default agent task";
-
-    const taskId = await service.addTask(schedule, prompt);
+    const taskId = await service.addTask(schedule, prompt, fromPubkey, toPubkey);
 
     const tasks = await service.getTasks();
-    // Should use the first system agent pubkey from config
-    expect(tasks[0].agentPubkey).toBe("test-agent-pubkey");
+    expect(tasks[0].fromPubkey).toBe(fromPubkey);
+    expect(tasks[0].toPubkey).toBe(toPubkey);
   });
 });
