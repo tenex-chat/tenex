@@ -330,6 +330,9 @@ export class AgentExecutor {
         let reasoningBuffer = '';
         let finalResponseEvent: NDKEvent | undefined;
 
+        // Promise to track when the complete event is handled
+        let completeEventPromise: Promise<void> | undefined;
+
         // Helper to flush accumulated content
         const flushContentBuffer = async (): Promise<void> => {
             if (contentBuffer.trim().length > 0) {
@@ -427,18 +430,20 @@ export class AgentExecutor {
             await flushReasoningBuffer();
         });
         
-        llmService.on('complete', async (event) => {
-            console.log(`[AgentExecutor] COMPLETE EVENT FOR ${context.agent.name}`, {
-                messageLength: event.message?.length,
-                hasMessage: !!event.message,
-                message: event.message
-            });
-            logger.debug("[AgentExecutor] LLM complete event received", {
-                agent: context.agent.name,
-                messageLength: event.message?.length,
-                hasMessage: !!event.message,
-                message: event.message?.substring(0, 100)
-            });
+        llmService.on('complete', (event) => {
+            // Create a promise to track completion
+            completeEventPromise = (async () => {
+                console.log(`[AgentExecutor] COMPLETE EVENT FOR ${context.agent.name}`, {
+                    messageLength: event.message?.length,
+                    hasMessage: !!event.message,
+                    message: event.message
+                });
+                logger.debug("[AgentExecutor] LLM complete event received", {
+                    agent: context.agent.name,
+                    messageLength: event.message?.length,
+                    hasMessage: !!event.message,
+                    message: event.message?.substring(0, 100)
+                });
             // For non-streaming providers, clear any pending timeout
             if (!supportsStreaming) {
                 if (publishTimeout) {
@@ -504,9 +509,10 @@ export class AgentExecutor {
                 });
             }
 
-            // Clear buffers
-            contentBuffer = '';
-            reasoningBuffer = '';
+                // Clear buffers
+                contentBuffer = '';
+                reasoningBuffer = '';
+            })(); // Execute the async function immediately
         });
         
         llmService.on('stream-error', async (event) => {
@@ -687,6 +693,13 @@ export class AgentExecutor {
 
             // Clean up event listeners
             llmService.removeAllListeners();
+        }
+
+        // Wait for the complete event handler to finish if it was triggered
+        if (completeEventPromise) {
+            console.log(`[AgentExecutor] Waiting for complete event handler to finish`);
+            await completeEventPromise;
+            console.log(`[AgentExecutor] Complete event handler finished`);
         }
 
         console.log(`[AgentExecutor] RETURNING finalResponseEvent`, {
