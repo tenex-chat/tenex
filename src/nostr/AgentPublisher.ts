@@ -2,6 +2,7 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { EVENT_KINDS } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { agentsRegistryService } from "@/services/AgentsRegistryService";
 import { logger } from "@/utils/logger";
 import {
   NDKEvent,
@@ -574,6 +575,14 @@ export class AgentPublisher {
 
       // Properly tag the project event (creates an "a" tag for kind:31933)
       profileEvent.tag(projectEvent.tagReference());
+      
+      // Add "a" tags for all projects this agent belongs to
+      const projectTags = await agentsRegistryService.getProjectsForAgent(signer.pubkey);
+      projectTags.forEach(tag => {
+        // Add "a" tag for each project (format: "a:31933:pubkey:d-tag")
+        const projectPubkey = projectEvent.pubkey; // Get the project pubkey
+        profileEvent.tag(["a", `31933:${projectPubkey}:${tag}`]);
+      });
 
       // Add e-tag for the agent definition event if it exists and is valid
       if (agentDefinitionEventId) {
@@ -601,7 +610,13 @@ export class AgentPublisher {
       }
 
       await profileEvent.sign(signer, { pTags: false });
-      profileEvent.publish();
+      await profileEvent.publish();
+      
+      // Update agent registry after successful profile publish
+      const projectTag = projectEvent.id ?? projectEvent.tagValue("d");
+      if (projectTag) {
+        await agentsRegistryService.addAgent(projectTag, signer.pubkey);
+      }
     } catch (error) {
       logger.error("Failed to publish agent profile", {
         error,

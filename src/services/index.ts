@@ -3,6 +3,7 @@
  */
 
 export { ConfigService, configService } from "./ConfigService";
+export { AgentsRegistryService, agentsRegistryService } from "./AgentsRegistryService";
 export { DelegationRegistry } from "./DelegationRegistry";
 export { DynamicToolService, dynamicToolService } from "./DynamicToolService";
 export {
