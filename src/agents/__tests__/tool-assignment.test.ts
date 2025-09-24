@@ -14,7 +14,6 @@ describe("Tool assignment", () => {
       expect(tools).toContain("read_path");
       expect(tools).toContain("lesson_learn");
       expect(tools).toContain("claude_code");
-      expect(tools).toContain("write_context_file");
       expect(tools).toContain("shell");
       // Delegate tools are NOT in defaults, they're added by getDelegateToolsForAgent
       expect(tools).not.toContain("delegate");

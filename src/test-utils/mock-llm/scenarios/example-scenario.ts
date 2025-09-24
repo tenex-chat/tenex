@@ -25,13 +25,13 @@ export const exampleScenario: MockLLMScenario = {
                 agentName: "project-manager",  // Only matches for specific agent
             },
             response: {
-                content: "I'll create that file for you.",
+                content: "I'll delegate this to the appropriate agent for implementation.",
                 toolCalls: [
                     {
-                        function: "write_context_file",
+                        function: "delegate_phase",
                         args: JSON.stringify({
-                            path: "example.md",
-                            content: "# Example File\nCreated by mock LLM"
+                            phase: "execute",
+                            reason: "File creation needs to be implemented"
                         })
                     }
                 ],

@@ -25,7 +25,6 @@ import "./fragments/24-retrieved-lessons"; // Shared
 
 // Priority 30 - Project context
 import "./fragments/30-project-inventory"; // Shared
-import "./fragments/30-project-md"; // Conditional (project-manager)
 
 // Priority 90+ - Special purpose
 import "./fragments/90-inventory-generation"; // Internal LLM prompts

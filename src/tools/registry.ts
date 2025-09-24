@@ -8,7 +8,6 @@ import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import { createReadPathTool } from "./implementations/read_path";
-import { createWriteContextFileTool } from "./implementations/write_context_file";
 import { createGenerateInventoryTool } from "./implementations/generate_inventory";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
@@ -46,7 +45,6 @@ import { createCodebaseSearchTool } from "./implementations/codebase_search";
 export type ToolName =
   | "read_path"
   | "codebase_search"
-  | "write_context_file"
   | "generate_inventory"
   | "lesson_learn"
   | "lesson_get"
@@ -145,7 +143,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   schedule_tasks_list: createListScheduledTasksTool,
   
   shell: createShellTool,
-  write_context_file: createWriteContextFileTool,
   
   // Dynamic tool creation
   create_dynamic_tool: createCreateDynamicToolTool,
