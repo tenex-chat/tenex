@@ -433,11 +433,6 @@ export class AgentExecutor {
         llmService.on('complete', (event) => {
             // Create a promise to track completion
             completeEventPromise = (async () => {
-                console.log(`[AgentExecutor] COMPLETE EVENT FOR ${context.agent.name}`, {
-                    messageLength: event.message?.length,
-                    hasMessage: !!event.message,
-                    message: event.message
-                });
                 logger.debug("[AgentExecutor] LLM complete event received", {
                     agent: context.agent.name,
                     messageLength: event.message?.length,
@@ -469,16 +464,6 @@ export class AgentExecutor {
                     isReasoning
                 }, eventContext);
 
-                console.log(`[AgentExecutor] PUBLISHED EVENT FROM complete()`, {
-                    agent: context.agent.name,
-                    hasEvent: !!publishedEvent,
-                    eventId: publishedEvent?.id,
-                    eventContent: publishedEvent?.content,
-                    isReasoning,
-                    eventType: typeof publishedEvent,
-                    eventKeys: publishedEvent ? Object.keys(publishedEvent) : []
-                });
-
                 logger.debug("[AgentExecutor] Published event from agentPublisher.complete", {
                     agent: context.agent.name,
                     hasEvent: !!publishedEvent,
@@ -489,12 +474,6 @@ export class AgentExecutor {
 
                 if (!isReasoning) {
                     finalResponseEvent = publishedEvent;
-                    console.log(`[AgentExecutor] CAPTURED finalResponseEvent`, {
-                        agent: context.agent.name,
-                        eventId: finalResponseEvent?.id,
-                        eventContent: finalResponseEvent?.content,
-                        hasEvent: !!finalResponseEvent
-                    });
                     logger.debug("[AgentExecutor] Captured finalResponseEvent", {
                         agent: context.agent.name,
                         eventId: finalResponseEvent?.id,
@@ -697,17 +676,10 @@ export class AgentExecutor {
 
         // Wait for the complete event handler to finish if it was triggered
         if (completeEventPromise) {
-            console.log(`[AgentExecutor] Waiting for complete event handler to finish`);
+            logger.debug(`[AgentExecutor] Waiting for complete event handler to finish`);
             await completeEventPromise;
-            console.log(`[AgentExecutor] Complete event handler finished`);
+            logger.debug(`[AgentExecutor] Complete event handler finished`);
         }
-
-        console.log(`[AgentExecutor] RETURNING finalResponseEvent`, {
-            agent: context.agent.name,
-            hasEvent: !!finalResponseEvent,
-            eventContent: finalResponseEvent?.content,
-            eventId: finalResponseEvent?.id
-        });
 
         logger.debug("[AgentExecutor] Returning response event", {
             agent: context.agent.name,
