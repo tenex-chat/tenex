@@ -33,6 +33,15 @@ export class AgentPublisher {
   private encoder: AgentEventEncoder;
   private streamSequence = 0;
 
+  // Streaming buffer configuration
+  private streamingBuffer = '';
+  private reasoningBuffer = '';
+  private lastStreamPublishTime = 0;
+  private streamPublishTimer: NodeJS.Timeout | null = null;
+  private currentStreamContext: EventContext | null = null;
+  private static readonly STREAM_PUBLISH_INTERVAL_MS = 1000; // 1 second minimum between events
+  private static readonly STREAM_BUFFER_TIMEOUT_MS = 1500; // Force flush after 1.5s of inactivity
+
   constructor(agent: AgentInstance) {
     this.agent = agent;
     this.encoder = new AgentEventEncoder();
@@ -356,21 +365,107 @@ export class AgentPublisher {
 
   /**
    * Handle content streaming from LLMService.
-   * Adds content to buffer and publishes streaming events.
+   * Adds content to buffer and publishes streaming events with rate limiting.
+   * Ensures we don't publish more than 1 streaming event per second.
    */
   async handleContent(
     event: { delta: string },
     context: EventContext,
     isReasoning = false
   ): Promise<void> {
-    // Stream the delta directly
-    const streamingIntent: StreamingIntent = {
-      content: event.delta,
-      sequence: ++this.streamSequence,
-      isReasoning,
-    };
-    
-    await this.streaming(streamingIntent, context);
+    // Store context for later use
+    this.currentStreamContext = context;
+
+    // Add delta to appropriate buffer
+    if (isReasoning) {
+      this.reasoningBuffer += event.delta;
+    } else {
+      this.streamingBuffer += event.delta;
+    }
+
+    // Clear any existing timer
+    if (this.streamPublishTimer) {
+      clearTimeout(this.streamPublishTimer);
+    }
+
+    // Check if enough time has passed since last publish
+    const now = Date.now();
+    const timeSinceLastPublish = now - this.lastStreamPublishTime;
+
+    // Only flush immediately if we've actually published before and enough time has passed
+    if (this.lastStreamPublishTime > 0 && timeSinceLastPublish >= AgentPublisher.STREAM_PUBLISH_INTERVAL_MS) {
+      // Publish immediately if enough time has passed
+      await this.flushStreamingBuffers();
+    } else {
+      // Schedule publish after the minimum interval, ensuring never negative
+      const remainingTime = this.lastStreamPublishTime === 0
+        ? AgentPublisher.STREAM_PUBLISH_INTERVAL_MS
+        : Math.max(0, AgentPublisher.STREAM_PUBLISH_INTERVAL_MS - timeSinceLastPublish);
+
+      this.streamPublishTimer = setTimeout(async () => {
+        await this.flushStreamingBuffers();
+      }, Math.min(remainingTime, AgentPublisher.STREAM_BUFFER_TIMEOUT_MS));
+    }
+  }
+
+  /**
+   * Flush accumulated streaming buffers and publish as streaming events.
+   */
+  private async flushStreamingBuffers(): Promise<void> {
+    if (!this.currentStreamContext) return;
+
+    // Publish reasoning buffer if it has content
+    if (this.reasoningBuffer.length > 0) {
+      const streamingIntent: StreamingIntent = {
+        content: this.reasoningBuffer,
+        sequence: ++this.streamSequence,
+        isReasoning: true,
+      };
+
+      await this.streaming(streamingIntent, this.currentStreamContext);
+      this.reasoningBuffer = '';
+    }
+
+    // Publish regular content buffer if it has content
+    if (this.streamingBuffer.length > 0) {
+      const streamingIntent: StreamingIntent = {
+        content: this.streamingBuffer,
+        sequence: ++this.streamSequence,
+        isReasoning: false,
+      };
+
+      await this.streaming(streamingIntent, this.currentStreamContext);
+      this.streamingBuffer = '';
+    }
+
+    // Update last publish time
+    this.lastStreamPublishTime = Date.now();
+
+    // Clear timer
+    if (this.streamPublishTimer) {
+      clearTimeout(this.streamPublishTimer);
+      this.streamPublishTimer = null;
+    }
+  }
+
+  /**
+   * Force flush any remaining streaming buffers.
+   * Should be called when streaming is complete.
+   */
+  async forceFlushStreamingBuffers(): Promise<void> {
+    // Cancel any pending timer
+    if (this.streamPublishTimer) {
+      clearTimeout(this.streamPublishTimer);
+      this.streamPublishTimer = null;
+    }
+
+    // Flush any remaining content
+    if ((this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) && this.currentStreamContext) {
+      await this.flushStreamingBuffers();
+    }
+
+    // Reset state
+    this.currentStreamContext = null;
   }
 
 

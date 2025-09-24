@@ -7,6 +7,7 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { NostrKind, NostrTag, TagValue, isBrainstormEvent } from "@/nostr/constants";
 import { isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 
 /**
  * Message generation strategy for brainstorming sessions.
@@ -80,17 +81,25 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         
         const projectCtx = getProjectContext();
         const project = projectCtx.project;
-        
-        // Build system prompt using PromptBuilder
-        const systemPrompt = PromptBuilder.buildMainPrompt({
+
+        // Get conversation from context
+        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+
+        // Build system prompt messages
+        const systemMessages = buildSystemPromptMessages({
             agent: context.agent,
             project,
             availableAgents: Array.from(projectCtx.agents.values()),
+            conversation,
             agentLessons: new Map(),
-            isProjectManager: context.agent.pubkey === projectCtx.getProjectManager().pubkey
+            isProjectManager: context.agent.pubkey === projectCtx.getProjectManager().pubkey,
+            projectManagerPubkey: projectCtx.getProjectManager().pubkey
         });
-        
-        messages.push({ role: "system", content: systemPrompt });
+
+        // Add all system messages
+        for (const systemMsg of systemMessages) {
+            messages.push(systemMsg.message);
+        }
     }
     
     /**
@@ -304,8 +313,8 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         } else {
             // Another agent's message - include agent name for differentiation
             const agentName = await this.getAgentName(event.pubkey);
-            const formattedContent = agentName ? `${agentName}: ${content}` : content;
-            messages.push({ role: "assistant", content: formattedContent });
+            const formattedContent = agentName ? `[${agentName}]: ${content}` : content;
+            messages.push({ role: "system", content: formattedContent });
         }
 
         return messages;

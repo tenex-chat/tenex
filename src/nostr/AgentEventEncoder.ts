@@ -145,7 +145,17 @@ export class AgentEventEncoder {
             replyToEventId = eTagValue // reply inside the same parent
         }
 
-        event.tag(["e", replyToEventId]);
+        // Only add the e-tag if we have a valid event ID
+        if (replyToEventId && replyToEventId.length > 0) {
+            event.tag(["e", replyToEventId]);
+        } else {
+            // Fallback to root event if we have it
+            if (rootEvent.id && rootEvent.id.length > 0) {
+                event.tag(["e", rootEvent.id]);
+            }
+            // If neither is available, skip the e-tag entirely
+            // rather than creating an invalid one
+        }
     }
 
     /**

@@ -50,10 +50,15 @@ describe("AgentExecutor", () => {
         },
         llmLogger: {
           withAgent: () => ({
+            debug: () => {},
+            info: () => {},
+            error: () => {},
             logRequest: () => {},
             logResponse: () => {},
           }),
         },
+        agents: new Map(),
+        getLessonsForAgent: () => [],
         project: {
           tags: [
             ["title", "Test Project"],
@@ -268,6 +273,10 @@ describe("AgentExecutor", () => {
         tags: [],
         created_at: Math.floor(Date.now() / 1000),
         sig: "test-sig",
+        tagValue: mock((tagName: string) => {
+          const tag = [].find((t: string[]) => t[0] === tagName);
+          return tag?.[1];
+        }),
       } as any,
       agentPublisher: {
         typing: mock(async () => {}),
@@ -466,6 +475,286 @@ describe("AgentExecutor", () => {
         content: "Tools loaded",
         toolCalls: [],
       });
+    });
+  });
+
+  describe("executeBrainstormModeration", () => {
+    it("should handle multiple response selection", async () => {
+      // Mock the LLM service for moderation
+      const mockModerationLLM = createMockLLMService();
+      mockModerationLLM.complete = mock(async () => ({
+        text: JSON.stringify({
+          selectedAgents: ["agent1", "agent2"],
+          reasoning: "Both responses provide valuable insights"
+        }),
+        usage: { promptTokens: 100, completionTokens: 50 }
+      }));
+
+      // Mock configService separately
+      const mockConfigService = {
+        createLLMService: mock(() => mockModerationLLM)
+      };
+
+      mock.module("@/services", () => ({
+        configService: mockConfigService,
+        isProjectContextInitialized: () => true,
+        getProjectContext: () => ({
+          projectPath: "/test/project",
+          configService: {
+            getProjectPath: () => "/test/project",
+            createLLMService: () => mockModerationLLM,
+          },
+          llmLogger: {
+            withAgent: () => ({
+              debug: () => {},
+              info: () => {},
+              error: () => {}
+            })
+          },
+          agents: new Map(),
+          getLessonsForAgent: () => [],
+          getProjectManager: () => ({ inventory: {} })
+        }),
+      }));
+
+      const executor = new AgentExecutor();
+
+      // Mock the message strategy to avoid threadService dependency
+      executor.messageStrategy = {
+        buildMessages: mock(async () => [
+          { role: "system", content: "You are the Test Moderator agent." },
+          { role: "system", content: "Instructions: Select the best responses." }
+        ])
+      } as any;
+
+      const mockResponses = [
+        {
+          agent: { pubkey: "agent1", name: "Expert 1" },
+          content: "First expert response",
+          event: { content: "First expert response" } as any
+        },
+        {
+          agent: { pubkey: "agent2", name: "Expert 2" },
+          content: "Second expert response",
+          event: { content: "Second expert response" } as any
+        },
+        {
+          agent: { pubkey: "agent3", name: "Expert 3" },
+          content: "Third expert response",
+          event: { content: "Third expert response" } as any
+        }
+      ];
+
+      const result = await executor.executeBrainstormModeration(
+        mockContext,
+        mockResponses
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.selectedAgents).toEqual(["agent1", "agent2"]);
+      expect(result?.reasoning).toBe("Both responses provide valuable insights");
+      expect(mockModerationLLM.complete).toHaveBeenCalled();
+    });
+
+    it("should handle single selection", async () => {
+      const mockModerationLLM = createMockLLMService();
+      mockModerationLLM.complete = mock(async () => ({
+        text: JSON.stringify({
+          selectedAgents: ["agent2"],
+          reasoning: "This response is most comprehensive"
+        }),
+        usage: { promptTokens: 100, completionTokens: 50 }
+      }));
+
+      // Mock configService separately
+      const mockConfigService = {
+        createLLMService: mock(() => mockModerationLLM)
+      };
+
+      mock.module("@/services", () => ({
+        configService: mockConfigService,
+        isProjectContextInitialized: () => true,
+        getProjectContext: () => ({
+          projectPath: "/test/project",
+          configService: {
+            getProjectPath: () => "/test/project",
+            createLLMService: () => mockModerationLLM,
+          },
+          llmLogger: {
+            withAgent: () => ({
+              debug: () => {},
+              info: () => {},
+              error: () => {}
+            })
+          },
+          agents: new Map(),
+          getLessonsForAgent: () => [],
+          getProjectManager: () => ({ inventory: {} })
+        }),
+      }));
+
+      const executor = new AgentExecutor();
+
+      // Mock the message strategy to avoid threadService dependency
+      executor.messageStrategy = {
+        buildMessages: mock(async () => [
+          { role: "system", content: "You are the Test Moderator agent." },
+          { role: "system", content: "Instructions: Select the best responses." }
+        ])
+      } as any;
+
+      const mockResponses = [
+        {
+          agent: { pubkey: "agent1", name: "Expert 1" },
+          content: "First response",
+          event: { content: "First response" } as any
+        },
+        {
+          agent: { pubkey: "agent2", name: "Expert 2" },
+          content: "Second response",
+          event: { content: "Second response" } as any
+        }
+      ];
+
+      const result = await executor.executeBrainstormModeration(
+        mockContext,
+        mockResponses
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.selectedAgents).toEqual(["agent2"]);
+      expect(result?.selectedAgents.length).toBe(1);
+    });
+
+    it("should handle empty selection (fallback case)", async () => {
+      const mockModerationLLM = createMockLLMService();
+      mockModerationLLM.complete = mock(async () => ({
+        text: JSON.stringify({
+          selectedAgents: [],
+          reasoning: "Unable to determine best responses"
+        }),
+        usage: { promptTokens: 100, completionTokens: 50 }
+      }));
+
+      // Mock configService separately
+      const mockConfigService = {
+        createLLMService: mock(() => mockModerationLLM)
+      };
+
+      mock.module("@/services", () => ({
+        configService: mockConfigService,
+        isProjectContextInitialized: () => true,
+        getProjectContext: () => ({
+          projectPath: "/test/project",
+          configService: {
+            getProjectPath: () => "/test/project",
+            createLLMService: () => mockModerationLLM,
+          },
+          llmLogger: {
+            withAgent: () => ({
+              debug: () => {},
+              info: () => {},
+              error: () => {}
+            })
+          },
+          agents: new Map(),
+          getLessonsForAgent: () => [],
+          getProjectManager: () => ({ inventory: {} })
+        }),
+      }));
+
+      const executor = new AgentExecutor();
+
+      // Mock the message strategy to avoid threadService dependency
+      executor.messageStrategy = {
+        buildMessages: mock(async () => [
+          { role: "system", content: "You are the Test Moderator agent." },
+          { role: "system", content: "Instructions: Select the best responses." }
+        ])
+      } as any;
+
+      const mockResponses = [
+        {
+          agent: { pubkey: "agent1", name: "Expert 1" },
+          content: "Response 1",
+          event: { content: "Response 1" } as any
+        },
+        {
+          agent: { pubkey: "agent2", name: "Expert 2" },
+          content: "Response 2",
+          event: { content: "Response 2" } as any
+        }
+      ];
+
+      const result = await executor.executeBrainstormModeration(
+        mockContext,
+        mockResponses
+      );
+
+      expect(result).toBeDefined();
+      // When no agents are selected, should fallback to all agents
+      expect(result?.selectedAgents).toEqual(["agent1", "agent2"]);
+      expect(result?.reasoning).toBe("Unable to determine best responses");
+    });
+
+    it("should handle malformed LLM response gracefully", async () => {
+      const mockModerationLLM = createMockLLMService();
+      mockModerationLLM.complete = mock(async () => ({
+        text: "Not valid JSON",
+        usage: { promptTokens: 100, completionTokens: 50 }
+      }));
+
+      // Mock configService separately
+      const mockConfigService = {
+        createLLMService: mock(() => mockModerationLLM)
+      };
+
+      mock.module("@/services", () => ({
+        configService: mockConfigService,
+        isProjectContextInitialized: () => true,
+        getProjectContext: () => ({
+          projectPath: "/test/project",
+          configService: {
+            getProjectPath: () => "/test/project",
+            createLLMService: () => mockModerationLLM,
+          },
+          llmLogger: {
+            withAgent: () => ({
+              debug: () => {},
+              info: () => {},
+              error: () => {}
+            })
+          },
+          agents: new Map(),
+          getLessonsForAgent: () => [],
+          getProjectManager: () => ({ inventory: {} })
+        }),
+      }));
+
+      const executor = new AgentExecutor();
+
+      // Mock the message strategy to avoid threadService dependency
+      executor.messageStrategy = {
+        buildMessages: mock(async () => [
+          { role: "system", content: "You are the Test Moderator agent." },
+          { role: "system", content: "Instructions: Select the best responses." }
+        ])
+      } as any;
+
+      const mockResponses = [
+        {
+          agent: { pubkey: "agent1", name: "Expert 1" },
+          content: "Response",
+          event: { content: "Response" } as any
+        }
+      ];
+
+      const result = await executor.executeBrainstormModeration(
+        mockContext,
+        mockResponses
+      );
+
+      expect(result).toBeNull();
     });
   });
 });

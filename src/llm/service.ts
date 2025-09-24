@@ -9,15 +9,19 @@ import {
     type StepResult,
     type TextStreamPart,
     type ProviderRegistry,
+    type GenerateTextResult,
     generateText,
+    generateObject,
     stepCountIs,
     streamText,
+    streamObject,
     wrapLanguageModel,
     extractReasoningMiddleware,
 } from "ai";
 import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 import type { LanguageModelUsageWithCostUsd } from "./types";
+import type { z } from "zod";
 
 // Define the event types for LLMService
 interface LLMServiceEvents {
@@ -198,7 +202,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             temperature?: number;
             maxTokens?: number;
         }
-    ): Promise<unknown> {
+    ): Promise<GenerateTextResult<Record<string, AISdkTool>>> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();
 
@@ -232,6 +236,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
             });
+
+            console.log('complete result', result);
             
             // Capture session ID from provider metadata if using Claude Code
             if (this.provider === 'claudeCode' && result.providerMetadata?.['claude-code']?.sessionId) {
@@ -584,6 +590,102 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      */
     getModel(): LanguageModel {
         return this.getLanguageModel();
+    }
+
+    /**
+     * Generate a structured object using AI SDK's generateObject
+     * @param messages - The messages to send to the model
+     * @param schema - Zod schema defining the expected structure
+     * @param tools - Optional tools for the model to use
+     * @returns The generated object matching the schema
+     */
+    async generateObject<T>(
+        messages: ModelMessage[],
+        schema: z.ZodSchema<T>,
+        tools?: Record<string, AISdkTool>
+    ): Promise<{ object: T; usage: LanguageModelUsageWithCostUsd }> {
+        const startTime = Date.now();
+
+        try {
+            logger.debug("[LLMService] Generating structured object", {
+                provider: this.provider,
+                model: this.model,
+                messagesCount: messages.length
+            });
+
+            // For generateObject, don't pass messages to getLanguageModel
+            // since we're passing them directly to generateObject
+            const languageModel = this.getLanguageModel();
+
+            // Build the generateObject parameters
+            const generateParams: any = {
+                model: languageModel,
+                messages,
+                schema,
+                temperature: this.temperature,
+                maxTokens: this.maxTokens,
+            };
+
+            // Only add tools if they are provided
+            if (tools && Object.keys(tools).length > 0) {
+                generateParams.tools = tools;
+            }
+
+            const result = await generateObject(generateParams);
+
+            const duration = Date.now() - startTime;
+
+            // Log the structured generation
+            await this.llmLogger.logLLMRequest({
+                request: {
+                    messages,
+                    model: `${this.provider}:${this.model}`,
+                },
+                timestamp: startTime,
+            });
+
+            await this.llmLogger.logLLMResponse({
+                response: {
+                    content: JSON.stringify(result.object),
+                    usage: result.usage,
+                },
+                endTime: Date.now(),
+                startTime,
+            });
+
+            logger.debug("[LLMService] Structured object generated", {
+                provider: this.provider,
+                model: this.model,
+                duration,
+                usage: result.usage
+            });
+
+            return {
+                object: result.object,
+                usage: {
+                    ...result.usage,
+                    costUsd: this.calculateCostUsd(result.usage)
+                }
+            };
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error("[LLMService] Failed to generate structured object", {
+                provider: this.provider,
+                model: this.model,
+                duration,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate cost in USD for token usage
+     */
+    private calculateCostUsd(usage: LanguageModelUsage): number {
+        // TODO: Implement actual cost calculation based on provider/model
+        // For now, return 0
+        return 0;
     }
 
 }

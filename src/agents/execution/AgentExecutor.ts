@@ -17,6 +17,7 @@ import {
 } from "./strategies";
 import { getProjectContext } from "@/services";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
+import { z } from "zod";
 
 /**
  * Format MCP tool names for human readability
@@ -439,6 +440,12 @@ export class AgentExecutor {
                     hasMessage: !!event.message,
                     message: event.message?.substring(0, 100)
                 });
+
+            // Flush any remaining streaming buffers before processing complete event
+            if (supportsStreaming) {
+                await agentPublisher.forceFlushStreamingBuffers();
+            }
+
             // For non-streaming providers, clear any pending timeout
             if (!supportsStreaming) {
                 if (publishTimeout) {
@@ -496,6 +503,11 @@ export class AgentExecutor {
         
         llmService.on('stream-error', async (event) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
+
+            // Flush any remaining streaming buffers on error
+            if (supportsStreaming) {
+                await agentPublisher.forceFlushStreamingBuffers();
+            }
 
             // Publish error event to Nostr for visibility
             try {
@@ -689,5 +701,185 @@ export class AgentExecutor {
         });
 
         return finalResponseEvent;
+    }
+
+    /**
+     * Execute brainstorm moderation to select the best response(s)
+     * @param context - Execution context with moderator agent
+     * @param responses - Array of brainstorm responses to choose from
+     * @returns The selected agents' pubkeys and optional reasoning
+     */
+    async executeBrainstormModeration(
+        context: ExecutionContext,
+        responses: Array<{ agent: { pubkey: string; name: string }; content: string; event: NDKEvent }>
+    ): Promise<{ selectedAgents: string[]; reasoning?: string } | null> {
+        try {
+            // Build messages using the BrainstormStrategy to get the moderator's full identity
+            const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
+
+            // Now restructure the conversation to make it clear this is a moderation task
+            // Remove any direct user messages that might confuse the moderator
+            const moderationMessages: ModelMessage[] = [];
+
+            // Keep system messages (agent identity, instructions, etc)
+            for (const msg of messages) {
+                if (msg.role === "system") {
+                    moderationMessages.push(msg);
+                }
+            }
+
+            // Add a clear user message that frames this as a moderation task
+            moderationMessages.push({
+                role: "user",
+                content: `A brainstorming session was initiated with this request: "${context.triggeringEvent.content}"
+
+The following agents have responded:`
+            });
+
+            // Add each response as context
+            for (const response of responses) {
+                moderationMessages.push({
+                    role: "assistant",
+                    content: `${response.agent.name} (${response.agent.pubkey}): ${response.content}`
+                });
+            }
+
+            // Ask for moderation - let the agent decide how to judge
+            moderationMessages.push({
+                role: "user",
+                content: `Please moderate these responses. Select at least one response (or multiple if appropriate).
+Return a JSON object with your selection(s):
+{"selectedAgents": ["pubkey1", "pubkey2", ...], "reasoning": "your explanation"}
+
+If you believe none of the responses are suitable, you may return an empty array, and all responses will be included by default.`
+            });
+
+            // Get LLM service
+            const projectCtx = getProjectContext();
+            const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
+
+            logger.debug("[AgentExecutor] Executing brainstorm moderation", {
+                moderator: context.agent.name,
+                responseCount: responses.length,
+                agents: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey })),
+                messageCount: moderationMessages.length
+            });
+
+            // Use regular text generation instead of generateObject
+            // since Claude via OpenRouter doesn't support it well
+            const response = await this.generateTextResponse(moderationMessages, context);
+
+            if (!response) {
+                logger.error("[AgentExecutor] No response from moderator");
+                return null;
+            }
+
+            // Parse JSON from response
+            let parsed: { selectedAgents: string[]; reasoning?: string };
+            try {
+                // Clean the response - remove markdown code blocks if present
+                const cleaned = response
+                    .replace(/```json\n?/g, '')
+                    .replace(/```\n?/g, '')
+                    .trim();
+
+                parsed = JSON.parse(cleaned);
+            } catch (parseError) {
+                logger.error("[AgentExecutor] Failed to parse moderation response as JSON", {
+                    response: response.substring(0, 200),
+                    error: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+                return null;
+            }
+
+            // Handle both single and multiple selections
+            const selectedPubkeys = Array.isArray(parsed.selectedAgents)
+                ? parsed.selectedAgents
+                : [parsed.selectedAgents];
+
+            if (selectedPubkeys.length === 0) {
+                logger.info("[AgentExecutor] No agents selected by moderator - defaulting to all responses");
+                // Return all agent pubkeys
+                return {
+                    selectedAgents: responses.map(r => r.agent.pubkey),
+                    reasoning: parsed.reasoning || "Moderator did not select specific responses - including all"
+                };
+            }
+
+            // Validate all selected agents exist and map to their pubkeys
+            const validatedPubkeys: string[] = [];
+            for (const selection of selectedPubkeys) {
+                const matchingResponse = responses.find(r =>
+                    r.agent.pubkey === selection ||
+                    r.agent.name === selection
+                );
+
+                if (matchingResponse) {
+                    validatedPubkeys.push(matchingResponse.agent.pubkey);
+                } else {
+                    logger.warn("[AgentExecutor] Selected agent not found", {
+                        selected: selection,
+                        available: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey }))
+                    });
+                }
+            }
+
+            if (validatedPubkeys.length === 0) {
+                logger.error("[AgentExecutor] No valid agents in selection");
+                return null;
+            }
+
+            logger.info("[AgentExecutor] Moderation complete", {
+                moderator: context.agent.name,
+                selectedCount: validatedPubkeys.length,
+                selectedAgents: validatedPubkeys,
+                reasoning: parsed.reasoning?.substring(0, 100)
+            });
+
+            return {
+                selectedAgents: validatedPubkeys,
+                reasoning: parsed.reasoning
+            };
+
+        } catch (error) {
+            logger.error("[AgentExecutor] Brainstorm moderation failed", {
+                error: error instanceof Error ? error.message : String(error),
+                moderator: context.agent.name
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Generate a text response using the LLM service
+     */
+    private async generateTextResponse(
+        messages: ModelMessage[],
+        context: ExecutionContext
+    ): Promise<string | null> {
+        try {
+            const projectCtx = getProjectContext();
+            const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
+            const llmService = configService.createLLMService(
+                llmLogger,
+                context.agent.llmConfig,
+                {
+                    agentName: context.agent.name
+                }
+            );
+
+            // Use complete() since we don't need streaming
+            const result = await llmService.complete(
+                messages,
+                {}  // no tools needed for moderation
+            );
+
+            return result.text?.trim() || null;
+        } catch (error) {
+            logger.error("[AgentExecutor] Failed to generate text response", {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
     }
 }
