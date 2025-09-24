@@ -29,7 +29,6 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
     "lesson_learn", 
     "codebase_search",
     "claude_code",
-    "write_context_file",
     "shell",
     "discover_capabilities",
     "agents_hire",

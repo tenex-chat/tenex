@@ -26,7 +26,7 @@ export interface ConversationMetadata {
   summary?: string; // Current understanding/summary
   requirements?: string; // Captured requirements
   plan?: string; // Approved plan
-  readFiles?: string[]; // Files read during this conversation (for write_context_file security)
+  readFiles?: string[]; // Files read during this conversation
   projectPath?: string; // Project path for debug commands
   last_user_message?: string; // Last message from the user
   referencedArticle?: {
