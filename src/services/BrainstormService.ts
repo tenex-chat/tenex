@@ -234,7 +234,13 @@ export class BrainstormService {
         // Extract successful responses and log failures
         const responses: BrainstormResponse[] = [];
         results.forEach((result, index) => {
-            console.log('response received', result);
+            logger.debug("[BrainstormService] Response received", {
+                participant: participants[index].name,
+                status: result.status,
+                hasValue: result.status === 'fulfilled' && !!result.value,
+                responseContent: result.status === 'fulfilled' && result.value ?
+                    result.value.content?.substring(0, 100) : null
+            });
             if (result.status === 'fulfilled' && result.value) {
                 responses.push(result.value);
             } else if (result.status === 'rejected') {
@@ -276,13 +282,6 @@ export class BrainstormService {
         const strategy = new BrainstormStrategy();
         const executor = new AgentExecutor(strategy);
         const responseEvent = await executor.execute(context);
-
-        logger.debug("[BrainstormService] Participant execution result", {
-            agent: participant.name,
-            hasEvent: !!responseEvent,
-            eventContent: responseEvent?.content,
-            eventId: responseEvent?.id
-        });
 
         if (responseEvent && responseEvent.content) {
             return {
