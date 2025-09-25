@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-const PhaseSchema = z.string(); // Any string is a valid phase now
-
 export const ConversationMetadataSchema = z.record(z.string(), z.unknown());
 
 const ExecutionTimeSchema = z.object({

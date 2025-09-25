@@ -708,9 +708,6 @@ export class AgentRegistry {
     ndkProject?: NDKProject
   ): Promise<void> {
     try {
-      let projectTitle: string;
-      let projectEvent: NDKProject;
-
       // Require NDKProject to be passed
       if (!ndkProject) {
         logger.warn(
@@ -718,9 +715,9 @@ export class AgentRegistry {
         );
         return;
       }
-      
-      projectTitle = ndkProject.tagValue("title") || "Unknown Project";
-      projectEvent = ndkProject;
+
+      const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+      const projectEvent = ndkProject;
 
       // Publish agent profile (kind:0) and request event using static method
       // The publishAgentCreation method now handles passing metadata for agents without eventId
@@ -1023,14 +1020,24 @@ export class AgentRegistry {
    * This is called when the project boots to ensure agents are discoverable
    */
   async republishAllAgentProfiles(ndkProject: NDKProject): Promise<void> {
-    let projectTitle: string;
-    let projectEvent: NDKProject;
-
     // NDKProject is required
-    projectTitle = ndkProject.tagValue("title") || "Unknown Project";
-    projectEvent = ndkProject;
+    const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
+    const projectEvent = ndkProject;
 
-    // Republish kind:0 for each agent
+    // Collect all agent pubkeys in this project
+    const projectAgentPubkeys: string[] = [];
+    for (const agent of this.agents.values()) {
+      projectAgentPubkeys.push(agent.pubkey);
+    }
+
+    // Load whitelisted pubkeys from config
+    const { config } = await configService.loadConfig(this.getBasePath());
+    const whitelistedPubkeys = config.whitelistedPubkeys || [];
+
+    // Combine project agents and whitelisted pubkeys for contact list
+    const contactList = [...new Set([...projectAgentPubkeys, ...whitelistedPubkeys])];
+
+    // Republish kind:0 and kind:3 for each agent
     for (const [slug, agent] of Array.from(this.agents.entries())) {
       try {
         // Prepare metadata for agents without NDKAgentDefinition
@@ -1050,8 +1057,21 @@ export class AgentRegistry {
           agent.eventId,
           agentMetadata
         );
+
+        // Publish contact list so agent follows all project agents and whitelisted pubkeys
+        // Filter out the agent's own pubkey from the contact list
+        const agentContactList = contactList.filter(pubkey => pubkey !== agent.pubkey);
+        await AgentPublisher.publishContactList(
+          agent.signer,
+          agentContactList
+        );
+
+        logger.info(`Agent ${agent.name} now following ${agentContactList.length} contacts`, {
+          agentPubkey: agent.pubkey.substring(0, 8),
+          followingCount: agentContactList.length,
+        });
       } catch (error) {
-        logger.error(`Failed to republish kind:0 for agent: ${slug}`, {
+        logger.error(`Failed to republish events for agent: ${slug}`, {
           error,
           agentName: agent.name,
         });

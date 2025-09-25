@@ -17,6 +17,7 @@ import { BrainstormService } from "../services/BrainstormService";
 
 const IGNORED_EVENT_KINDS = [
   NDKKind.Metadata,
+  NDKKind.Contacts,
   EVENT_KINDS.PROJECT_STATUS as NDKKind,
   EVENT_KINDS.STREAMING_RESPONSE as NDKKind,
   EVENT_KINDS.TYPING_INDICATOR as NDKKind,

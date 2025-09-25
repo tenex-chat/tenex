@@ -37,6 +37,11 @@ import { createCreateDynamicToolTool } from "./implementations/create_dynamic_to
 import { createAskTool } from "./implementations/ask";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createCodebaseSearchTool } from "./implementations/codebase_search";
+import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
+import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
+import { createRAGQueryTool } from "./implementations/rag_query";
+import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
+import { createRAGListCollectionsTool } from "./implementations/rag_list_collections";
 
 /**
  * Tool names available in the system
@@ -71,7 +76,12 @@ export type ToolName =
   | "schedule_tasks_list"
   | "schedule_task_cancel"
   | "create_dynamic_tool"
-  | "upload_blob";
+  | "upload_blob"
+  | "rag_create_collection"
+  | "rag_add_documents"
+  | "rag_query"
+  | "rag_delete_collection"
+  | "rag_list_collections";
 
 /**
  * AI SDK Tool type - tools with optional human-readable content generation
@@ -146,6 +156,13 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   
   // Upload tools
   upload_blob: createUploadBlobTool,
+  
+  // RAG tools
+  rag_create_collection: createRAGCreateCollectionTool,
+  rag_add_documents: createRAGAddDocumentsTool,
+  rag_query: createRAGQueryTool,
+  rag_delete_collection: createRAGDeleteCollectionTool,
+  rag_list_collections: createRAGListCollectionsTool,
 };
 
 /**

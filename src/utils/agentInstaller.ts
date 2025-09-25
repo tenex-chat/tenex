@@ -23,12 +23,13 @@ export interface AgentInstallResult {
 /**
  * Installs an agent from a Nostr event into a project.
  * This is the shared business logic for adding agents from definition events.
- * 
+ *
  * @param eventId - The event ID of the agent definition (can include "nostr:" prefix)
  * @param projectPath - The path to the project
  * @param ndkProject - Optional NDK project for publishing events
  * @param customSlug - Optional custom slug for the agent
  * @param ndk - Optional NDK instance (will use default if not provided)
+ * @param agentRegistry - Optional AgentRegistry to use (will create new if not provided)
  * @returns Result of the installation
  */
 export async function installAgentFromEvent(
@@ -36,7 +37,8 @@ export async function installAgentFromEvent(
   projectPath: string,
   ndkProject?: NDKProject,
   customSlug?: string,
-  ndk?: NDK
+  ndk?: NDK,
+  agentRegistry?: AgentRegistry
 ): Promise<AgentInstallResult> {
   try {
     // Use provided NDK or get default
@@ -46,13 +48,30 @@ export async function installAgentFromEvent(
     const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
     
     // Fetch the full event to get access to tags
+    logger.debug(`Fetching agent event ${cleanEventId} from Nostr relays`);
     const agentEvent = await ndkInstance.fetchEvent(cleanEventId, { groupable: false });
-    
+
     if (!agentEvent) {
-      return {
-        success: false,
-        error: `Agent event not found: ${eventId}`,
-      };
+      // Check if we have a local copy already
+      const agentsDir = path.join(projectPath, ".tenex", "agents");
+      const localFilePath = path.join(agentsDir, `${cleanEventId}.json`);
+
+      try {
+        await fs.access(localFilePath);
+        logger.warn(`Agent event ${cleanEventId} not found on Nostr relays, but local copy exists`);
+        // We have a local copy, but can't verify/update it without the event
+        // This is a warning condition - the agent might be out of date
+        return {
+          success: false,
+          error: `Agent event ${cleanEventId} not found on Nostr relays. Local copy exists but cannot be verified. Check your relay configuration.`,
+        };
+      } catch {
+        // No local copy either
+        return {
+          success: false,
+          error: `Agent event ${cleanEventId} not found on Nostr relays and no local copy exists. The event may not have been published yet or your relays may not have it.`,
+        };
+      }
     }
 
     // Parse agent definition from the event
@@ -68,9 +87,11 @@ export async function installAgentFromEvent(
     // Generate slug from name if not provided
     const slug = customSlug || toKebabCase(agentDef.title);
 
-    // Load agent registry
-    const registry = new AgentRegistry(projectPath, false);
-    await registry.loadFromProject();
+    // Use provided registry or create new one
+    const registry = agentRegistry || new AgentRegistry(projectPath, false);
+    if (!agentRegistry) {
+      await registry.loadFromProject();
+    }
 
     // Check if agent already exists
     const existingAgent = registry.getAgent(slug);
@@ -159,22 +180,87 @@ export async function installAgentFromEvent(
 }
 
 /**
+ * Load agent from local file when Nostr event is not available
+ * This is a fallback for when the network is down or the event isn't on relays
+ */
+export async function loadAgentFromLocalFile(
+  eventId: string,
+  projectPath: string,
+  agentRegistry: AgentRegistry
+): Promise<AgentInstallResult> {
+  try {
+    const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
+    const agentsDir = path.join(projectPath, ".tenex", "agents");
+    const localFilePath = path.join(agentsDir, `${cleanEventId}.json`);
+
+    // Check if local file exists
+    const fileContent = await fs.readFile(localFilePath, 'utf-8');
+    const agentData = JSON.parse(fileContent);
+
+    // Generate slug from name
+    const slug = toKebabCase(agentData.name);
+
+    // Check if agent already exists in registry
+    const existingAgent = agentRegistry.getAgent(slug);
+    if (existingAgent && existingAgent.eventId === cleanEventId) {
+      return {
+        success: true,
+        alreadyExists: true,
+        message: `Agent "${agentData.name}" already loaded from local file`,
+        agent: existingAgent,
+        slug,
+      };
+    }
+
+    // Create agent configuration from local data
+    const agentConfig = {
+      name: agentData.name,
+      role: agentData.role,
+      description: agentData.description,
+      instructions: agentData.instructions,
+      useCriteria: agentData.useCriteria,
+      tools: agentData.tools || [],
+      eventId: cleanEventId,
+      ...(agentData.phases && { phases: agentData.phases }),
+    };
+
+    // Register the agent
+    const agent = await agentRegistry.ensureAgent(slug, agentConfig);
+    logger.info("Loaded agent from local file", { slug, name: agentData.name, eventId: cleanEventId });
+
+    return {
+      success: true,
+      agent,
+      slug,
+      message: `Successfully loaded agent "${agentData.name}" from local file (Nostr sync unavailable)`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to load agent from local file: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
  * Installs multiple agents from events in parallel
- * 
+ *
  * @param eventIds - Array of event IDs to install
  * @param projectPath - The path to the project
  * @param ndkProject - Optional NDK project for publishing events
  * @param ndk - Optional NDK instance
+ * @param agentRegistry - Optional AgentRegistry to use
  * @returns Array of installation results
  */
 export async function installAgentsFromEvents(
   eventIds: string[],
   projectPath: string,
   ndkProject?: NDKProject,
-  ndk?: NDK
+  ndk?: NDK,
+  agentRegistry?: AgentRegistry
 ): Promise<AgentInstallResult[]> {
   const results = await Promise.all(
-    eventIds.map(eventId => installAgentFromEvent(eventId, projectPath, ndkProject, undefined, ndk))
+    eventIds.map(eventId => installAgentFromEvent(eventId, projectPath, ndkProject, undefined, ndk, agentRegistry))
   );
   
   const successCount = results.filter(r => r.success).length;

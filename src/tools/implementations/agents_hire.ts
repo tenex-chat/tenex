@@ -79,7 +79,8 @@ async function executeAgentsHire(
     projectPath,
     projectContext.project,
     slug,
-    ndk
+    ndk,
+    projectContext.agentRegistry
   );
 
   if (!result.success) {

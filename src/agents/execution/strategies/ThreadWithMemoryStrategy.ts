@@ -173,8 +173,8 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
      */
     private async enhanceFormattedContent(
         formattedContent: string,
-        agentPubkey: string,
-        agentName: string
+        _agentPubkey: string,
+        _agentName: string
     ): Promise<string> {
         // This is a simplified version - in the future we could parse
         // the formatted content and replace pubkeys with names

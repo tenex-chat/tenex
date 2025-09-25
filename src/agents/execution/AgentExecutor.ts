@@ -17,7 +17,6 @@ import {
 } from "./strategies";
 import { getProjectContext } from "@/services";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
-import { z } from "zod";
 
 /**
  * Format MCP tool names for human readability
@@ -753,10 +752,6 @@ Return a JSON object with your selection(s):
 
 If you believe none of the responses are suitable, you may return an empty array, and all responses will be included by default.`
             });
-
-            // Get LLM service
-            const projectCtx = getProjectContext();
-            const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
 
             logger.debug("[AgentExecutor] Executing brainstorm moderation", {
                 moderator: context.agent.name,

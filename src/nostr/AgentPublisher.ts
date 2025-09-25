@@ -367,7 +367,7 @@ export class AgentPublisher {
   /**
    * Handle content streaming from LLMService.
    * Adds content to buffer and publishes streaming events with rate limiting.
-   * Ensures we don't publish more than 1 streaming event per second.
+   * Uses throttling: publishes 1 second after the FIRST chunk, not the last.
    */
   async handleContent(
     event: { delta: string },
@@ -384,29 +384,34 @@ export class AgentPublisher {
       this.streamingBuffer += event.delta;
     }
 
-    // Clear any existing timer
-    if (this.streamPublishTimer) {
-      clearTimeout(this.streamPublishTimer);
-    }
-
     // Check if enough time has passed since last publish
     const now = Date.now();
     const timeSinceLastPublish = now - this.lastStreamPublishTime;
 
-    // Only flush immediately if we've actually published before and enough time has passed
+    // If enough time has passed since last publish, flush immediately
     if (this.lastStreamPublishTime > 0 && timeSinceLastPublish >= AgentPublisher.STREAM_PUBLISH_INTERVAL_MS) {
       // Publish immediately if enough time has passed
       await this.flushStreamingBuffers();
-    } else {
-      // Schedule publish after the minimum interval, ensuring never negative
-      const remainingTime = this.lastStreamPublishTime === 0
+    } else if (!this.streamPublishTimer) {
+      // Only set a timer if we don't already have one (throttle, not debounce)
+      // This ensures we flush 1 second after the FIRST chunk, not the last
+      const delay = this.lastStreamPublishTime === 0
         ? AgentPublisher.STREAM_PUBLISH_INTERVAL_MS
         : Math.max(0, AgentPublisher.STREAM_PUBLISH_INTERVAL_MS - timeSinceLastPublish);
 
       this.streamPublishTimer = setTimeout(async () => {
         await this.flushStreamingBuffers();
-      }, Math.min(remainingTime, AgentPublisher.STREAM_BUFFER_TIMEOUT_MS));
+
+        // After flushing, if there's more content that came in while we were flushing,
+        // schedule another flush
+        if ((this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) && !this.streamPublishTimer) {
+          this.streamPublishTimer = setTimeout(async () => {
+            await this.flushStreamingBuffers();
+          }, AgentPublisher.STREAM_PUBLISH_INTERVAL_MS);
+        }
+      }, delay);
     }
+    // If timer already exists, don't reset it (throttle behavior)
   }
 
   /**
@@ -415,38 +420,42 @@ export class AgentPublisher {
   private async flushStreamingBuffers(): Promise<void> {
     if (!this.currentStreamContext) return;
 
+    // Capture buffer contents and clear immediately to prevent duplicates
+    const reasoningContent = this.reasoningBuffer;
+    const streamingContent = this.streamingBuffer;
+    this.reasoningBuffer = '';
+    this.streamingBuffer = '';
+
+    // Clear timer first
+    if (this.streamPublishTimer) {
+      clearTimeout(this.streamPublishTimer);
+      this.streamPublishTimer = null;
+    }
+
     // Publish reasoning buffer if it has content
-    if (this.reasoningBuffer.length > 0) {
+    if (reasoningContent.length > 0) {
       const streamingIntent: StreamingIntent = {
-        content: this.reasoningBuffer,
+        content: reasoningContent,
         sequence: ++this.streamSequence,
         isReasoning: true,
       };
 
       await this.streaming(streamingIntent, this.currentStreamContext);
-      this.reasoningBuffer = '';
     }
 
     // Publish regular content buffer if it has content
-    if (this.streamingBuffer.length > 0) {
+    if (streamingContent.length > 0) {
       const streamingIntent: StreamingIntent = {
-        content: this.streamingBuffer,
+        content: streamingContent,
         sequence: ++this.streamSequence,
         isReasoning: false,
       };
 
       await this.streaming(streamingIntent, this.currentStreamContext);
-      this.streamingBuffer = '';
     }
 
     // Update last publish time
     this.lastStreamPublishTime = Date.now();
-
-    // Clear timer
-    if (this.streamPublishTimer) {
-      clearTimeout(this.streamPublishTimer);
-      this.streamPublishTimer = null;
-    }
   }
 
   /**
@@ -467,6 +476,8 @@ export class AgentPublisher {
 
     // Reset state
     this.currentStreamContext = null;
+    // Reset sequence counter for next streaming session
+    this.streamSequence = 0;
   }
 
 
@@ -556,8 +567,11 @@ export class AgentPublisher {
     let profileEvent: NDKEvent;
 
     try {
-      // Generate random dicebear avatar
-      const avatarStyle = "lorelei"; // Using bottts style for agents
+      // Deterministically select avatar family based on pubkey
+      const avatarFamilies = ["lorelei", "miniavs", "dylan", "pixel-art", "rings", "avataaars"];
+      // Use first few chars of pubkey to select family deterministically
+      const familyIndex = parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
+      const avatarStyle = avatarFamilies[familyIndex];
       const seed = signer.pubkey; // Use pubkey as seed for consistent avatar
       const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/svg?seed=${seed}`;
 
@@ -716,5 +730,46 @@ export class AgentPublisher {
 
     // Publish request event
     await AgentPublisher.publishAgentRequest(signer, agentConfig, projectEvent, ndkAgentEventId);
+  }
+
+  /**
+   * Publishes a kind:3 contact list for an agent
+   * This allows agents to follow other agents in the project and whitelisted pubkeys
+   */
+  static async publishContactList(
+    signer: NDKPrivateKeySigner,
+    contactPubkeys: string[]
+  ): Promise<void> {
+    try {
+      // Create a kind:3 event (contact list)
+      const contactListEvent = new NDKEvent(getNDK(), {
+        kind: 3,
+        pubkey: signer.pubkey,
+        content: "", // Contact list content is usually empty
+        tags: [],
+      });
+
+      // Add p-tags for each contact
+      for (const pubkey of contactPubkeys) {
+        if (pubkey && pubkey !== signer.pubkey) { // Don't follow self
+          contactListEvent.tags.push(["p", pubkey]);
+        }
+      }
+
+      // Sign and publish the contact list
+      await contactListEvent.sign(signer, { pTags: false });
+      await contactListEvent.publish();
+
+      logger.info("Published contact list for agent", {
+        agentPubkey: signer.pubkey.substring(0, 8),
+        followingCount: contactPubkeys.length,
+      });
+    } catch (error) {
+      logger.error("Failed to publish contact list", {
+        error,
+        agentPubkey: signer.pubkey.substring(0, 8),
+      });
+      // Don't throw - contact list is not critical
+    }
   }
 }
