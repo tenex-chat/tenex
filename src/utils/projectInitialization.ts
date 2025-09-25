@@ -12,7 +12,6 @@ import { logger } from "@/utils/logger";
  * - tenex project run
  * - tenex debug chat
  * - tenex debug system-prompt
- * - tenex inventory generate
  */
 export async function ensureProjectInitialized(projectPath: string): Promise<void> {
   if (isProjectContextInitialized()) {

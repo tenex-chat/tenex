@@ -59,7 +59,7 @@ function formatMCPToolsAsMarkdown(tools: MCPToolInfo[]): string {
   lines.push("# MCP Tool Discovery Results");
   lines.push(`\nFound **${tools.length}** available tool${tools.length === 1 ? "" : "s"}:\n`);
 
-  tools.forEach((tool, index) => {
+  for (const [index, tool] of tools.entries()) {
     lines.push(`## ${index + 1}. ${tool.name}`);
     lines.push("");
 
@@ -89,7 +89,7 @@ function formatMCPToolsAsMarkdown(tools: MCPToolInfo[]): string {
 
     lines.push("---");
     lines.push("");
-  });
+  }
 
   // Add installation instructions at the end
   lines.push("## Installation Instructions");
@@ -652,7 +652,7 @@ export const serverCommand = new Command("server")
             const onlineAgentsByProject = new Map<string, Record<string, string>>();
 
             // Process status events to find online agents
-            Array.from(statusEvents).forEach((event) => {
+            for (const event of Array.from(statusEvents)) {
               // Get the project reference from the "a" tag (this identifies which project the status is for)
               const projectTagId = event.tagValue("a");
               if (projectTagId) {
@@ -660,7 +660,7 @@ export const serverCommand = new Command("server")
                 const agentTags = event.tags.filter((tag) => tag[0] === "agent");
                 const agents: Record<string, string> = {};
 
-                agentTags.forEach((tag) => {
+                for (const tag of agentTags) {
                   // agent tag format: ["agent", "<pubkey>", "<slug>"]
                   if (tag.length >= 3) {
                     const [, agentPubkey, agentSlug] = tag;
@@ -668,14 +668,14 @@ export const serverCommand = new Command("server")
                     const agentUser = new NDKUser({ pubkey: agentPubkey });
                     agents[agentSlug] = agentUser.npub;
                   }
-                });
+                }
 
                 // Store agents for this specific project using its tagId as the key
                 if (Object.keys(agents).length > 0) {
                   onlineAgentsByProject.set(projectTagId, agents);
                 }
               }
-            });
+            }
 
             // Once we have the list of projects, fetch spec documents that tag them
             interface SpecArticle {

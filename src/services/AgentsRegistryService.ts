@@ -68,16 +68,18 @@ export class AgentsRegistryService {
     
     const ev = new NDKEvent(ndk, {
       kind: 14199,
-      content: "",
-      tags: [],
     });
 
     // whitelisted pubs from config (no CLI override here)
     const whitelisted = configService.getWhitelistedPubkeys(undefined, configService.getConfig());
-    whitelisted.forEach(pk => ev.tag(["p", pk]));
+    for (const pk of whitelisted) {
+      ev.tag(["p", pk]);
+    }
 
     // agent tags
-    agents.forEach(a => ev.tag(["agent", a.pubkey]));
+    for (const a of agents) {
+      ev.tag(["agent", a.pubkey]);
+    }
 
     // also tag the project itself (optional – useful for downstream filters)
     ev.tag(["project", projectTag]);

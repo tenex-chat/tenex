@@ -15,8 +15,6 @@ import { availableAgentsFragment } from "./15-available-agents";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
-import { inventoryContextFragment } from "./30-project-inventory";
-import { mainInventoryPromptFragment } from "./90-inventory-generation";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -44,9 +42,6 @@ export function registerAllFragments(): void {
   // Context and learning
   fragmentRegistry.register(retrievedLessonsFragment);
   
-  // Project-specific
-  fragmentRegistry.register(inventoryContextFragment);
-  fragmentRegistry.register(mainInventoryPromptFragment);
 }
 
 // Auto-register all fragments on import

@@ -210,7 +210,7 @@ export class BrainstormService {
 
         // Extract successful responses and log failures
         const responses: BrainstormResponse[] = [];
-        results.forEach((result, index) => {
+        for (const [index, result] of results.entries()) {
             if (result.status === 'fulfilled' && result.value) {
                 responses.push(result.value);
             } else if (result.status === 'rejected') {
@@ -223,7 +223,7 @@ export class BrainstormService {
                     participant: participants[index].name
                 });
             }
-        });
+        }
 
         return responses;
     }
@@ -624,10 +624,10 @@ export class BrainstormService {
         let prompt = `Original question/prompt:\n${originalPrompt}\n\n`;
         prompt += `You have ${responses.length} responses to choose from:\n\n`;
         
-        responses.forEach((response, i) => {
+        for (const [i, response] of responses.entries()) {
             prompt += `Option ${i + 1} (from ${response.agent.name}):\n`;
             prompt += `${response.content}\n\n`;
-        });
+        }
         
         prompt += "Choose the BEST response based on accuracy, completeness, clarity, and relevance. ";
         prompt += "Respond with JSON only.";

@@ -95,9 +95,9 @@ export class ProviderConfigUI {
     if (providers.length === 0) {
       console.log(chalk.gray("  None configured"));
     } else {
-      providers.forEach(p => {
+      for (const p of providers) {
         console.log(chalk.green(`  ✓ ${this.getProviderDisplayName(p)}`));
-      });
+      }
     }
     
     console.log(chalk.bold("\nConfigurations:"));
@@ -105,13 +105,13 @@ export class ProviderConfigUI {
     if (configNames.length === 0) {
       console.log(chalk.gray("  None"));
     } else {
-      configNames.forEach(name => {
+      for (const name of configNames) {
         const config = llmsConfig.configurations[name];
         const isDefault = name === llmsConfig.default;
         const marker = isDefault ? chalk.cyan('• ') : '  ';
         const defaultTag = isDefault ? chalk.gray(' (default)') : '';
         console.log(`  ${marker}${name}${defaultTag}: ${config.provider}:${config.model}`);
-      });
+      }
     }
   }
 }

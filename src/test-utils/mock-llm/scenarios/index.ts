@@ -1,6 +1,5 @@
 export * from "./concurrency-workflow";
 export * from "./error-handling";
-export * from "./inventory-generation";
 export * from "./network-resilience";
 export * from "./performance-testing";
 export * from "./state-persistence";
@@ -9,7 +8,6 @@ export * from "./threading-workflow";
 import type { MockLLMScenario } from "../types";
 import { concurrencyWorkflowScenarios } from "./concurrency-workflow";
 import { errorHandlingScenario } from "./error-handling";
-import { inventoryGenerationScenario } from "./inventory-generation";
 import { networkResilienceScenario } from "./network-resilience";
 import { performanceTestingScenario } from "./performance-testing";
 import { statePersistenceScenario } from "./state-persistence";
@@ -22,7 +20,6 @@ export const allScenarios: MockLLMScenario[] = [
   errorHandlingScenario,
   statePersistenceScenario,
   performanceTestingScenario,
-  inventoryGenerationScenario,
   networkResilienceScenario,
   threadingWorkflow,
 ];

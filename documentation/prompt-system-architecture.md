@@ -1120,9 +1120,7 @@ const agentContext = createAgentExecutionContext(parentContext, agentName);
 
 3. **Fragment ID Uniqueness**: There's no enforcement preventing duplicate fragment IDs. Later registrations would override earlier ones. Is this intentional?
 
-4. **Generate Inventory Special Case**: Why does `generate_inventory` bypass validation? Is this a design decision or technical debt?
-
-5. **Fragment Side Effects**: While the design discourages side effects, there's no enforcement. Should there be?
+4. **Fragment Side Effects**: While the design discourages side effects, there's no enforcement. Should there be?
 
 ### Performance Questions
 

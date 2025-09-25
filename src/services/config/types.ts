@@ -18,9 +18,6 @@ export interface TenexConfig {
   description?: string;
   repoUrl?: string;
   projectNaddr?: string;
-  paths?: {
-    inventory?: string;
-  };
 }
 
 export const TenexConfigSchema = z.object({
@@ -29,11 +26,6 @@ export const TenexConfigSchema = z.object({
   description: z.string().optional(),
   repoUrl: z.string().optional(),
   projectNaddr: z.string().optional(),
-  paths: z
-    .object({
-      inventory: z.string().optional(),
-    })
-    .optional(),
 });
 
 // =====================================================================================

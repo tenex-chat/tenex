@@ -175,7 +175,9 @@ class LLMOperationsRegistry {
   }
   
   private notifyChange(): void {
-    this.changeListeners.forEach(listener => listener());
+    for (const listener of this.changeListeners) {
+      listener();
+    }
   }
   
   private indexOperation(operationId: string, eventId: string): void {

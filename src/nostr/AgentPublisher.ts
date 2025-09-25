@@ -553,9 +553,11 @@ export class AgentPublisher {
       phases?: Record<string, string>;
     }
   ): Promise<void> {
+    let profileEvent: NDKEvent;
+
     try {
       // Generate random dicebear avatar
-      const avatarStyle = "bottts"; // Using bottts style for agents
+      const avatarStyle = "lorelei"; // Using bottts style for agents
       const seed = signer.pubkey; // Use pubkey as seed for consistent avatar
       const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/svg?seed=${seed}`;
 
@@ -563,10 +565,9 @@ export class AgentPublisher {
         name: agentName,
         description: `${agentRole} agent for ${projectTitle}`,
         picture: avatarUrl,
-        project: projectTitle,
       };
 
-      const profileEvent = new NDKEvent(getNDK(), {
+      profileEvent = new NDKEvent(getNDK(), {
         kind: 0,
         pubkey: signer.pubkey,
         content: JSON.stringify(profile),
@@ -578,11 +579,9 @@ export class AgentPublisher {
       
       // Add "a" tags for all projects this agent belongs to
       const projectTags = await agentsRegistryService.getProjectsForAgent(signer.pubkey);
-      projectTags.forEach(tag => {
-        // Add "a" tag for each project (format: "a:31933:pubkey:d-tag")
-        const projectPubkey = projectEvent.pubkey; // Get the project pubkey
-        profileEvent.tag(["a", `31933:${projectPubkey}:${tag}`]);
-      });
+      for (const tag of projectTags) {
+        profileEvent.tag(["a", tag]);
+      }
 
       // Add e-tag for the agent definition event if it exists and is valid
       if (agentDefinitionEventId) {
@@ -613,7 +612,7 @@ export class AgentPublisher {
       await profileEvent.publish();
       
       // Update agent registry after successful profile publish
-      const projectTag = projectEvent.id ?? projectEvent.tagValue("d");
+      const projectTag = projectEvent.tagId();
       if (projectTag) {
         await agentsRegistryService.addAgent(projectTag, signer.pubkey);
       }
@@ -621,6 +620,7 @@ export class AgentPublisher {
       logger.error("Failed to publish agent profile", {
         error,
         agentName,
+        event: profileEvent.inspect
       });
       throw error;
     }

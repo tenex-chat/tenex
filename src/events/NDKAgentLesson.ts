@@ -109,8 +109,8 @@ export class NDKAgentLesson extends NDKEvent {
 
   set hashtags(values: string[]) {
     this.tags = this.tags.filter((tag) => tag[0] !== "t");
-    values.forEach((hashtag) => {
+    for (const hashtag of values) {
       this.tags.push(["t", hashtag]);
-    });
+    }
   }
 }

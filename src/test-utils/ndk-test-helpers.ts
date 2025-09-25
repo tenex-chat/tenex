@@ -157,7 +157,9 @@ export class TENEXTestFixture extends TestFixture {
    */
   cleanup(): void {
     // Reset all mock relays
-    this.relayMocks.forEach(relay => relay.reset());
+    for (const relay of this.relayMocks.values()) {
+      relay.reset();
+    }
     this.relayMocks.clear();
   }
 }

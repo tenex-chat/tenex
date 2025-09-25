@@ -19,11 +19,13 @@ The fundamental shift is from traditional coding in a text editor to managing an
     5.  **VERIFICATION:** Functional testing from an end-user perspective.
     6.  **CHORES:** Cleanup, documentation, and maintenance.
     7.  **REFLECTION:** Agents learn from the completed task to improve future performance.
+*   **IMAGE_GENERATION:** Generate an image based on the user's prompt. It is crucial that the `marketing-lead` agent, when delegated to this phase, generates only one image per request, even when explicitly instructed. This prevents redundant work and resource consumption.
 *   **Conversation Restart:** When a conversation reaches its natural conclusion (the `END` phase), it is not permanently closed. If the user provides a new message, a new conversation is automatically started from the `CHAT` phase, preserving the full history and context. This ensures a seamless and continuous user experience.
 *   **Continuous Learning:** Agents are designed to learn from every interaction, building a persistent knowledge base that improves their effectiveness over time.
 *   **Nostr-Native:** Built on the Nostr protocol, ensuring communication is decentralized, secure, and censorship-resistant.
 *   **LLM Agnostic:** Supports multiple Large Language Model providers, including OpenAI, Anthropic, and Google.
-*   **Agent Presence & Identification (User-defined requirement):**
+*   **Agent Presence & Identification:**
+    *   **Agent Registry:** Agents will register their pubkeys in a `~/.tenex/agents-registry.json` file. This registry will map project D-tags to a list of registered agents within that project.
     *   **Online Status:** Agent online status must be determined by querying for `kind:24010` status events with a `since` filter of one minute ago. The `a` tag of the status event must be compared with the project's tag ID to ensure the status applies to the correct project. **The 'a' tag must include the project owner's pubkey.**
     *   **Agent ID Format:** When returning agent information, the agent's `npub` must be used instead of their public key.
     *   **Agent Self-Knowledge:** Agents must be explicitly informed of their own `npub` as part of their core identity prompt.

@@ -68,15 +68,15 @@ async function executeCreateProject(
       
       // Add any additional tags
       if (tags && tags.length > 0) {
-        tags.forEach(tag => {
+        for (const tag of tags) {
           // Add as generic "t" tags for categorization
           project.tags.push(["t", tag]);
-        });
+        }
       }
 
       // Add agent event IDs
       if (agents && agents.length > 0) {
-        agents.forEach(agentEventId => {
+        for (const agentEventId of agents) {
           // Normalize the event ID (handles nostr: prefix and validates format)
           const cleanEventId = normalizeNostrIdentifier(agentEventId);
           if (cleanEventId) {
@@ -84,12 +84,12 @@ async function executeCreateProject(
           } else {
             logger.warn(`Invalid agent event ID format: ${agentEventId}`);
           }
-        });
+        }
       }
 
       // Add MCP server event IDs
       if (mcpServers && mcpServers.length > 0) {
-        mcpServers.forEach(mcpEventId => {
+        for (const mcpEventId of mcpServers) {
           // Normalize the event ID (handles nostr: prefix and validates format)
           const cleanEventId = normalizeNostrIdentifier(mcpEventId);
           if (cleanEventId) {
@@ -97,7 +97,7 @@ async function executeCreateProject(
           } else {
             logger.warn(`Invalid MCP event ID format: ${mcpEventId}`);
           }
-        });
+        }
       }
 
       // The project will be published with the agent's pubkey as the author

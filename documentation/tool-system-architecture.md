@@ -88,8 +88,6 @@ The executor handles the actual tool invocation with several responsibilities:
 4. **Metadata Extraction**: Preserves tool-provided metadata for UI/logging
 5. **Duration Tracking**: Measures execution time for performance monitoring
 
-Special handling exists for certain tools:
-- `generate_inventory`: Bypasses validation for dynamic schema generation
 
 ### 4. Tool Registry (`src/tools/registry.ts`)
 
@@ -124,8 +122,6 @@ The registry provides:
 
 #### Execution Tools
 - **shell**: Command execution (restricted to project-manager agent)
-- **generate_inventory**: Creates project inventory dynamically
-
 #### Special Tool: Learn (`src/tools/implementations/learn.ts`)
 The learn tool demonstrates sophisticated tool design:
 - Includes metacognition checks in prompt fragments

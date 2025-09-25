@@ -67,7 +67,6 @@ describe("Tool Registry", () => {
       expect(toolNames).toContain("read_path");
       expect(toolNames).toContain("shell");
       expect(toolNames).toContain("analyze");
-      expect(toolNames).toContain("generate_inventory");
       expect(toolNames).toContain("delegate");
     });
 

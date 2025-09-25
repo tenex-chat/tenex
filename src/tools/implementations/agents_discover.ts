@@ -36,14 +36,14 @@ function formatAgentsAsMarkdown(
   lines.push("# Agent Discovery Results");
   lines.push(`\nFound **${agents.length}** available agent${agents.length === 1 ? "" : "s"}:\n`);
 
-  agents.forEach((agent, index) => {
+  for (const [index, agent] of agents.entries()) {
     lines.push(`## ${index + 1}. ${agent.title}`);
     lines.push(`nostr:${agent.id}`);
     lines.push("");
 
     lines.push("---");
     lines.push("");
-  });
+  }
 
   return lines.join("\n");
 }

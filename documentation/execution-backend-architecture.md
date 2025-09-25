@@ -364,6 +364,5 @@ The system implements comprehensive error handling at multiple levels:
 - What's the memory impact of storing all tool results in state?
 
 ### 6. Tool Execution
-- Why is the generate_inventory tool exempt from validation?
 - How are tool timeout scenarios handled?
 - What happens if a tool modifies the execution context?

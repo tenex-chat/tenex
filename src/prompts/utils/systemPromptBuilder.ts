@@ -95,36 +95,11 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
     },
   });
 
-  // Add PROJECT.md as separate cacheable message for project manager
-  if (options.isProjectManager) {
-    const projectMdContent = buildProjectMdContent(options);
-    if (projectMdContent) {
-      messages.push({
-        message: { role: "system", content: projectMdContent },
-        metadata: {
-          description: "PROJECT.md content",
-        },
-      });
-    }
-  }
-
-  // Add project inventory as separate cacheable message for all agents
-  // XXX TEMPORARILY DISABLED! RESTORE ASAP!
-  // const inventoryContent = buildProjectInventoryContent();
-  // if (inventoryContent) {
-  //   messages.push({
-  //     message: { role: "system", content: inventoryContent },
-  //     metadata: {
-  //       description: "Project inventory",
-  //     },
-  //   });
-  // }
-
   return messages;
 }
 
 /**
- * Builds the main system prompt content (without PROJECT.md and inventory)
+ * Builds the main system prompt content
  */
 function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   const {
@@ -165,28 +140,6 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
 
   return systemPromptBuilder.build();
 }
-
-/**
- * Builds PROJECT.md content as a separate message
- */
-function buildProjectMdContent(options: BuildSystemPromptOptions): string | null {
-  const content = PromptBuilder.buildFragment("project-md", {
-    projectPath: process.cwd(),
-    currentAgent: options.agent,
-  });
-  return content.trim() ? content : null;
-}
-
-/**
- * Builds project inventory content as a separate message
- */
-// Temporarily disabled - will be restored later
-// function buildProjectInventoryContent(): string | null {
-//   const builder = new PromptBuilder();
-//   builder.add("project-inventory-context", {});
-//   const content = builder.build();
-//   return content.trim() ? content : null;
-// }
 
 /**
  * Builds system prompt messages for standalone agents (without project context).

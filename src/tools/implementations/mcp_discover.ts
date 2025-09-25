@@ -136,14 +136,14 @@ function formatToolsAsMarkdown(
   lines.push("# MCP Tool Discovery Results");
   lines.push(`\nFound **${tools.length}** available tool${tools.length === 1 ? "" : "s"}:\n`);
 
-  tools.forEach((tool, index) => {
+  for (const [index, tool] of tools.entries()) {
     lines.push(`## ${index + 1}. ${tool.name}`);
     lines.push(`nostr:${tool.id}`);
     lines.push("");
 
     lines.push("---");
     lines.push("");
-  });
+  }
 
   return lines.join("\n");
 }

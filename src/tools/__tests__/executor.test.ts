@@ -127,30 +127,6 @@ describe("ToolExecutor", () => {
       expect(result.error?.message).toBe("Unexpected error");
     });
 
-    it("should skip validation for generate_inventory tool", async () => {
-      const mockTool: Tool<any, string> = {
-        name: "generate_inventory",
-        description: "Generate inventory tool",
-        parameters: {
-          validate: () => ({
-            ok: false,
-            error: {
-              kind: "validation" as const,
-              message: "Should not validate",
-            },
-          }),
-        },
-        execute: async () => ({
-          ok: true,
-          value: "Inventory generated",
-        }),
-      };
-
-      const result = await executor.execute(mockTool, { any: "input" });
-
-      expect(result.success).toBe(true);
-      expect(result.output).toBe("Inventory generated");
-    });
 
     it("should pass through metadata from tool execution", async () => {
       const mockTool: Tool<{ message: string }, string> = {

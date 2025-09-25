@@ -8,7 +8,6 @@ import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import { createReadPathTool } from "./implementations/read_path";
-import { createGenerateInventoryTool } from "./implementations/generate_inventory";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createShellTool } from "./implementations/shell";
@@ -45,7 +44,6 @@ import { createCodebaseSearchTool } from "./implementations/codebase_search";
 export type ToolName =
   | "read_path"
   | "codebase_search"
-  | "generate_inventory"
   | "lesson_learn"
   | "lesson_get"
   | "shell"
@@ -119,7 +117,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   delegate: createDelegateTool,
 
   discover_capabilities: createMcpDiscoverTool,
-  generate_inventory: createGenerateInventoryTool,
 
   // Lesson tools
   lesson_get: createLessonGetTool,

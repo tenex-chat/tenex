@@ -195,13 +195,12 @@ export class ConversationalLogger {
           const message = `${formattedAgent}: "Analyzing project structure in ${args.paths?.join(", ") || "current directory"}"`;
           console.log(this.formatLogLine(agentName, "📋", timeStamp, message));
         } catch {
-          const message = `${formattedAgent}: "Generating project inventory..."`;
+          const message = `${formattedAgent}: "Analyzing project structure..."`;
           console.log(this.formatLogLine(agentName, "📋", timeStamp, message));
         }
         break;
 
       case "writeFile":
-      case "writeContextFile":
         try {
           const args =
             typeof toolCall.function === "string"

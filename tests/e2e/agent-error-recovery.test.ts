@@ -56,9 +56,10 @@ describe("E2E: Agent Error Recovery", () => {
                         id: "1",
                         type: "function",
                         function: {
-                            name: "generateInventory",
+                            name: "shell",
                             arguments: JSON.stringify({
-                                paths: ["/nonexistent/path"]
+                                command: "ls /nonexistent/path",
+                                expectError: false
                             })
                         }
                     }]
@@ -71,10 +72,10 @@ describe("E2E: Agent Error Recovery", () => {
                 trigger: {
                     agentName: "planner",
                     phase: "plan",
-                    previousToolCalls: ["generateInventory"]
+                    previousToolCalls: ["shell"]
                 },
                 response: {
-                    content: "The inventory generation failed. Let me try a different approach and create a simple plan.",
+                    content: "The command failed. Let me try a different approach and create a simple plan.",
                     toolCalls: [{
                         id: "2",
                         type: "function",
@@ -225,7 +226,7 @@ describe("E2E: Agent Error Recovery", () => {
         assertAgentSequence(trace, ["planner", "executor", "orchestrator"]);
         assertPhaseTransitions(trace, ["plan", "execute"]);
         assertToolCalls(trace, [
-            "generateInventory",  // Failed tool
+            "shell",  // Failed command
             "complete",          // Planner recovery
             "shell",            // Failed command
             "shell",            // Successful command

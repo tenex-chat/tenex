@@ -6,7 +6,6 @@ import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
 import { runDebugSystemPrompt } from "./commands/debug/index";
-import { inventoryCommand } from "./commands/inventory/index";
 import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
 import { setupCommand } from "./commands/setup/index";
@@ -21,7 +20,6 @@ program.addCommand(agentCommand);
 program.addCommand(daemonCommand);
 program.addCommand(projectCommand);
 program.addCommand(setupCommand);
-program.addCommand(inventoryCommand);
 program.addCommand(mcpCommand);
 
 // Add debug command

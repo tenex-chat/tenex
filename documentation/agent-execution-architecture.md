@@ -297,7 +297,6 @@ async execute(tool, input) {
 
 **Special Cases**:
 
-- **generate_inventory**: Skips validation for dynamic schemas
 - **Error Handling**: Wraps all errors in typed format
 - **Metadata Propagation**: Preserves tool-provided metadata
 
@@ -789,7 +788,6 @@ Root Context
 - Zod schema validation
 - Type checking
 - Boundary validation
-- Special case handling (generate_inventory)
 
 ### Output Sanitization
 

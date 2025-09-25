@@ -106,7 +106,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
   const onlineAgentsByProject = new Map<string, Record<string, string>>();
 
   // Process status events to find online agents
-  Array.from(statusEvents).forEach((event) => {
+  for (const event of Array.from(statusEvents)) {
     // Convert to NDKProjectStatus for type safety
     const statusEvent = NDKProjectStatus.from(event);
 
@@ -117,18 +117,18 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
       const agents = statusEvent.agents;
       const agentsMap: Record<string, string> = {};
 
-      agents.forEach(({ pubkey, slug }) => {
+      for (const { pubkey, slug } of agents) {
         // Convert pubkey to npub format
         const agentUser = new NDKUser({ pubkey });
         agentsMap[slug] = agentUser.npub;
-      });
+      }
 
       // Store agents for this specific project using its tagId as the key
       if (Object.keys(agentsMap).length > 0) {
         onlineAgentsByProject.set(projectTagId, agentsMap);
       }
     }
-  });
+  }
 
   // Once we have the list of projects, fetch spec documents that tag them
   interface SpecArticle {

@@ -277,10 +277,10 @@ export class ThreadedConversationFormatter {
     if (node.children.length > 0 && (!options.maxDepth || node.depth < options.maxDepth)) {
       const childPrefix = prefix + this.treeRenderer.getChildPrefix(options.treeStyle, isLast);
       
-      node.children.forEach((child, index) => {
+      for (const [index, child] of node.children.entries()) {
         const isLastChild = index === node.children.length - 1;
         lines.push(this.renderNode(child, options, childPrefix, isLastChild));
-      });
+      }
     }
     
     return lines.join('\n');
