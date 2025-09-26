@@ -5,6 +5,7 @@ import type { AISdkTool } from '@/tools/registry';
 import { writeFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { logger } from '@/utils/logger';
+import { getProjectContext } from '@/services/ProjectContext';
 
 const createDynamicToolSchema = z.object({
     name: z.string().regex(/^[a-z0-9_]+$/).describe('Tool name (lowercase, alphanumeric and underscores only)'),
@@ -78,7 +79,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
 export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
             // Determine the file path
-            const dynamicToolsDir = join(context.projectPath, 'src/tools/dynamic');
+            const dynamicToolsDir = join(context.projectPath, '.tenex/tools');
             const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
             
@@ -94,6 +95,27 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                 file: fileName,
                 path: filePath
             });
+            
+            // Update the agent's tool list to include the new tool
+            // Get the agent's current tool list from the execution context
+            const currentTools = context.agent.tools || [];
+            
+            // Add the new tool's name to the list
+            const updatedTools = [...currentTools, name];
+            
+            // Save the updated tool list to the agent's persistent configuration
+            try {
+                const projectContext = getProjectContext();
+                const agentRegistry = projectContext.agentRegistry;
+                await agentRegistry.updateAgentTools(context.agent.pubkey, updatedTools);
+                logger.info(`[CreateDynamicTool] Added tool '${name}' to agent '${context.agent.name}'`);
+            } catch (error) {
+                logger.error(`Failed to persist updated tool list for agent ${context.agent.name}:`, {
+                    agentPubkey: context.agent.pubkey,
+                    toolName: name,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
             
             // Publish status
             if (context.agentPublisher && context.triggeringEvent) {

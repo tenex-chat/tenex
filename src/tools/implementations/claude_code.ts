@@ -289,6 +289,18 @@ async function executeClaudeCode(
       content: prompt
     });
 
+    logger.info("[claude_code] 📩 MESSAGES TO SEND", {
+      messageCount: messages.length,
+      messageRoles: messages.map(m => m.role),
+      promptLength: prompt.length,
+      promptPreview: prompt.substring(0, 500),
+      sessionMode: existingSessionId ? 'RESUME' : 'NEW',
+      existingSessionId: existingSessionId || 'NONE',
+      EXPLANATION: existingSessionId
+        ? "Session already has context, only sending new user message"
+        : "New session, sending complete prompt",
+    });
+
     try {
       // Execute stream with LLMService, passing abort signal from registry
       // Claude Code provider handles its own tools internally based on mode

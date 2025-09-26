@@ -17,7 +17,7 @@ export type DynamicToolFactory = (context: ExecutionContext) => AISdkTool;
  */
 export class DynamicToolService {
     private static instance: DynamicToolService;
-    private readonly dynamicToolsPath = join(process.cwd(), 'src/tools/dynamic');
+    private readonly dynamicToolsPath = join(process.cwd(), '.tenex/tools');
     private dynamicTools = new Map<string, DynamicToolFactory>();
     private watcher: any = null;
     private fileHashes = new Map<string, string>();
