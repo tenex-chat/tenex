@@ -460,10 +460,9 @@ The orchestrator learns from routing mistakes:
 ### Unified Execution Pattern
 
 ```typescript
-// AgentExecutor uses a single unified backend for all agents
-private getBackend(): ReasonActLoop {
-    return new ReasonActLoop(this.llmService);
-}
+// AgentExecutor uses a single unified execution model for all agents
+// All agents execute through ReasonActLoop
+const executor = new ReasonActLoop(this.llmService);
 ```
 
 ### Stream Processing Pattern

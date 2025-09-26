@@ -56,14 +56,6 @@ Comprehensive debug logging has been added throughout the metadata preservation 
     - Shows: total tags, metadata tag count
   - `[NostrPublisher] No metadata to add` (if none)
 
-### 7. **ClaudeBackend** (`ClaudeBackend.ts`)
-- **Location**: Throughout the Claude execution flow
-- **Logs**:
-  - `[ClaudeBackend] Getting unpublished event from handleAgentCompletion`
-  - `[ClaudeBackend] Adding Claude metadata to event`
-    - Shows: model, cost, prompt lengths
-  - `[ClaudeBackend] ✅ Published completion with metadata`
-    - Shows: event ID, cost, message count, duration, session ID
 
 ## Log Flow Example
 

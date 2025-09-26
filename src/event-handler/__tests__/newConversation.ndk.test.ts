@@ -27,7 +27,6 @@ describe("handleNewConversation with NDK utilities", () => {
         slug,
         systemPrompt: `You are the ${slug} agent`,
         tools: ["analyze"],
-        backend: "claude",
       })),
       getDefaultAgent: mock(() => ({
         id: "agent-coordinator",
@@ -35,7 +34,6 @@ describe("handleNewConversation with NDK utilities", () => {
         slug: "coordinator",
         systemPrompt: "You are the coordinator agent",
         tools: [],
-        backend: "routing",
       })),
     };
 
@@ -81,7 +79,6 @@ describe("handleNewConversation with NDK utilities", () => {
               pubkey: "coordinator-pubkey",
               systemPrompt: "You are the coordinator agent",
               tools: [],
-              backend: "routing",
             },
           ],
           [
@@ -93,7 +90,6 @@ describe("handleNewConversation with NDK utilities", () => {
               pubkey: "planner-pubkey",
               systemPrompt: "You are the planner agent",
               tools: ["analyze"],
-              backend: "claude",
             },
           ],
         ]),

@@ -998,9 +998,6 @@ export class AgentRegistry {
       throw new Error("Agent description must be a string");
     }
 
-    if (def.backend !== undefined && def.backend !== null && typeof def.backend !== "string") {
-      throw new Error("Agent backend must be a string");
-    }
 
     if (def.tools !== undefined && def.tools !== null && !Array.isArray(def.tools)) {
       throw new Error("Agent tools must be an array");

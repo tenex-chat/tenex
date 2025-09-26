@@ -91,37 +91,6 @@ export async function setupMockModules(scenarios: string[] = [], defaultResponse
         }
     }));
     
-    // Mock ClaudeBackend to prevent launching actual Claude Code process
-    mock.module("@/agents/execution/ClaudeBackend", () => ({
-        ClaudeBackend: class {
-            async execute(messages: any[], tools: any[], context: any, publisher: any) {
-                // Use the mock LLM instead of launching Claude Code
-                const response = await mockLLM.complete({
-                    messages,
-                    options: {
-                        configName: context.agent.llmConfig || context.agent.name,
-                        agentName: context.agent.name
-                    }
-                });
-                
-                // Simulate Claude Code execution
-                // 1. Publish the response content
-                if (response.content) {
-                    await publisher.publishResponse(response.content, null, false);
-                }
-                
-                // 2. Handle tool calls if present
-                if (response.toolCalls && response.toolCalls.length > 0) {
-                    for (const toolCall of response.toolCalls) {
-                        // Add tool handlers as needed
-                        // toolCall.function.name and toolCall.function.arguments are available if needed
-                    }
-                }
-                
-                return Promise.resolve();
-            }
-        }
-    }));
     
     // Mock logging
     mock.module("@/logging/ExecutionLogger", () => ({

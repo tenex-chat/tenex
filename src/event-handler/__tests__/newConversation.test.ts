@@ -27,7 +27,6 @@ describe("handleNewConversation", () => {
         slug,
         systemPrompt: `You are the ${slug} agent`,
         tools: ["analyze"],
-        backend: "claude",
       })),
       getDefaultAgent: mock(() => ({
         id: "agent-orchestrator",
@@ -35,7 +34,6 @@ describe("handleNewConversation", () => {
         slug: "orchestrator",
         systemPrompt: "You are the orchestrator agent",
         tools: [],
-        backend: "routing",
       })),
     };
 
@@ -81,7 +79,6 @@ describe("handleNewConversation", () => {
               pubkey: "orchestrator-pubkey",
               systemPrompt: "You are the orchestrator agent",
               tools: [],
-              backend: "routing",
               
             },
           ],
@@ -94,7 +91,6 @@ describe("handleNewConversation", () => {
               pubkey: "planner-pubkey",
               systemPrompt: "You are the planner agent",
               tools: ["analyze"],
-              backend: "claude",
             },
           ],
         ]),
@@ -105,7 +101,6 @@ describe("handleNewConversation", () => {
           pubkey: "orchestrator-pubkey",
           systemPrompt: "You are the orchestrator agent",
           tools: [],
-          backend: "routing",
           
         }),
       }),

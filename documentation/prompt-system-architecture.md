@@ -477,7 +477,7 @@ const toolsByServer = tools.reduce((acc, tool) => {
 │ AgentExecutor.execute() (src/agents/execution/AgentExecutor.ts) │
 │ • Validates context                                             │
 │ • Builds messages array                                         │
-│ • Selects execution backend                                     │
+│ • Initializes execution                                         │
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          ▼
@@ -509,7 +509,7 @@ const toolsByServer = tools.reduce((acc, tool) => {
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ Execution Backend (ReasonActLoop/Routing)                       │
+│ Execution (ReasonActLoop)                                       │
 │ • Sends prompt to LLM                                          │
 │ • Streams response                                              │
 │ • Processes tool calls                                          │

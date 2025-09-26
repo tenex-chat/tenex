@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `src/llm` module provides an abstraction layer for interacting with various Large Language Models (LLMs). It handles model selection, configuration, and the routing of requests to the appropriate LLM backend. This module is essential for the agent execution loop, as it provides the interface for the agents to communicate with the LLMs.
+The `src/llm` module provides an abstraction layer for interacting with various Large Language Models (LLMs). It handles model selection, configuration, and the routing of requests to the appropriate LLM provider. This module is essential for the agent execution loop, as it provides the interface for the agents to communicate with the LLMs.
 
 ## Key Components
 

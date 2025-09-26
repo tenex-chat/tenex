@@ -102,7 +102,6 @@ export function createMockAgent(overrides: Partial<AgentInstance> = {}): Partial
     slug: "test-agent",
     pubkey: "test-agent-pubkey",
     role: "Test role",
-    backend: "reason-act-loop",
     tools: [],
     ...overrides,
   };

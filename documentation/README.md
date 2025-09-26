@@ -33,40 +33,37 @@ Complete routing system design and implementation plan. Details the core princip
 
 ### Execution Infrastructure
 
-#### 8. [Execution Backend Architecture](./execution-backend-architecture.md)
-The unified backend system that implements the ReasonActLoop execution strategy for all agents. Handles LLM interactions, streaming, tool execution, and termination enforcement with consistent behavior across the system.
-
-#### 9. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
+#### 8. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
 Critical component handling real-time LLM response streaming, tool execution coordination, and state consistency during agent interactions. Ensures reliable, low-latency communication.
 
 ### Tool and Integration Systems
 
-#### 10. [Tool System Architecture](./tool-system-architecture.md)
+#### 9. [Tool System Architecture](./tool-system-architecture.md)
 Type-safe, composable infrastructure for agent capabilities. Bridges agent intentions with concrete actions through comprehensive tools and MCP integration with validation and error handling.
 
-#### 11. [MCP Integration Architecture](./mcp-integration-architecture.md)
+#### 10. [MCP Integration Architecture](./mcp-integration-architecture.md)
 Model Context Protocol integration enabling dynamic tool loading from external servers. Provides seamless adapter layer between MCP tools and TENEX's internal tool system.
 
 ### Infrastructure Components
 
-#### 12. [Event-Driven Architecture](./event-driven-architecture.md)
+#### 11. [Event-Driven Architecture](./event-driven-architecture.md)
 The Nostr-based event system that forms the communication backbone. Handles event routing, subscription management, and distributed state synchronization across the system.
 
-#### 13. [Daemon Process Management Architecture](./daemon-process-management-architecture.md)
+#### 12. [Daemon Process Management Architecture](./daemon-process-management-architecture.md)
 Process lifecycle management for long-running services. Handles daemon spawning, monitoring, graceful shutdown, and crash recovery for system stability.
 
-#### 14. [LLM Routing Architecture](./llm-routing-architecture.md)
+#### 13. [LLM Routing Architecture](./llm-routing-architecture.md)
 Intelligent model selection and request routing system. Manages multiple LLM providers, handles failover, rate limiting, and optimizes model selection based on task requirements.
 
 ### Support Systems
 
-#### 15. [Prompt System Architecture](./prompt-system-architecture.md)
+#### 14. [Prompt System Architecture](./prompt-system-architecture.md)
 Sophisticated compositional engine for constructing context-aware system prompts. Uses fragment-based approach with priority ordering, conditional inclusion, and runtime composition for consistent agent behavior.
 
-#### 16. [Learning System Internals](./learning-system-internals.md)
+#### 15. [Learning System Internals](./learning-system-internals.md)
 Comprehensive analysis of the distributed learning infrastructure. Enables agents to capture, store, retrieve, and apply lessons learned across conversations for continuous improvement.
 
-#### 17. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
+#### 16. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
 Comprehensive execution flow tracking, debugging capabilities, and structured logging. Implements hierarchical context propagation for detailed insight into system behavior and performance.
 
 #### 18. [Execution Queue Mutex System](./execution-queue-mutex-system.md)

@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Agent Execution Architecture forms the core runtime engine of TENEX, implementing a sophisticated streaming-based execution model that powers all agent interactions. This system manages the complete lifecycle of agent execution through a multi-layered architecture comprising execution backends, stream processing, tool handling, and termination enforcement. The architecture uniquely combines direct LLM streaming with type-safe tool execution, state management, and automatic recovery mechanisms to ensure reliable and consistent agent behavior across diverse execution contexts.
+The Agent Execution Architecture forms the core runtime engine of TENEX, implementing a sophisticated streaming-based execution model that powers all agent interactions. This system manages the complete lifecycle of agent execution through a multi-layered architecture comprising stream processing, tool handling, and termination enforcement. The architecture uniquely combines direct LLM streaming with type-safe tool execution, state management, and automatic recovery mechanisms to ensure reliable and consistent agent behavior across diverse execution contexts.
 
 ## Core Architecture
 
@@ -27,7 +27,7 @@ The execution system implements a layered, streaming-based architecture:
                       │
 ┌─────────────────────▼───────────────────────────────────┐
 │                  ReasonActLoop                           │
-│         (Single unified execution backend)               │
+│         (Unified execution implementation)               │
 │         • Tool-based reasoning and action                │
 │         • Streaming response handling                    │
 └──────────────────────┬──────────────────────────────────┘
@@ -66,16 +66,9 @@ The top-level orchestrator for agent execution, responsible for:
 - **Session Management**: Maintains Claude session continuity across executions
 - **Execution Coordination**: Manages the complete execution lifecycle
 - **Time Tracking**: Records execution duration for performance monitoring
-- **Unified Backend**: Uses ReasonActLoop as the single execution backend for all agents
+- **Unified Execution**: Uses ReasonActLoop for consistent agent execution
 
-**Backend Implementation**:
-```typescript
-private getBackend(): ReasonActLoop {
-    return new ReasonActLoop(this.llmService);
-}
-```
-
-All agents now use the unified ReasonActLoop backend which handles tool-based reasoning and action execution.
+All agents use the unified ReasonActLoop which handles tool-based reasoning and action execution.
 
 **Message Building Strategy**:
 
@@ -95,7 +88,7 @@ Claude sessions are maintained through:
 ### 2. ReasonActLoop
 **Location**: `src/agents/execution/ReasonActLoop.ts`
 
-The primary execution backend implementing the core streaming loop:
+The primary execution implementation with the core streaming loop:
 
 **Architecture**:
 
@@ -362,7 +355,7 @@ When an agent execution begins:
 3. Retrieve Claude session ID
 4. Initialize publisher
 5. Start execution timing
-6. Select appropriate backend
+6. Initialize execution
 7. Begin streaming execution
 ```
 
@@ -730,7 +723,7 @@ stateManager.markThinkingBlockLogged(content);
 2. Tool execution with errors
 3. Termination retry mechanism
 4. Session continuity
-5. Multi-backend execution
+5. Multi-agent execution
 
 **Test Patterns**:
 ```typescript
@@ -867,7 +860,6 @@ Root Context
 
 5. **Message Building Cost**: Full message history is built for each execution. Should use incremental updates for efficiency?
 
-6. **Backend Selection**: Backend type is string-based with fallback. Should use enum or registry pattern?
 
 7. **Typing Indicator Race**: Brief delay (100ms) for missing tool_start might not be sufficient. Optimal timing?
 
@@ -881,7 +873,7 @@ The architecture excels at:
 - **Streaming Performance**: Real-time content delivery with minimal latency
 - **Type Safety**: Full type checking from tool definition to execution
 - **Reliability**: Automatic retry and recovery mechanisms
-- **Flexibility**: Pluggable backends for different agent types
+- **Flexibility**: Unified execution model for all agent types
 - **Observability**: Comprehensive logging and tracing
 - **User Experience**: Typing indicators and progressive updates
 

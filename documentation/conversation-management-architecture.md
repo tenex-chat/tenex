@@ -626,7 +626,7 @@ async updateAgentState(
 
 ### Session Continuity
 
-The system maintains session continuity for stateful backends via AgentMetadataStore:
+The system maintains session continuity for stateful agents via AgentMetadataStore:
 
 ```typescript
 // Session management is now decoupled from conversation state

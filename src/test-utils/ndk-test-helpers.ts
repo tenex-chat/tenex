@@ -199,7 +199,6 @@ interface MockAgentConfig {
   name?: string;
   slug?: string;
   role?: string;
-  backend?: string;
   tools?: string[];
   capabilities?: {
     canRead?: boolean;
@@ -218,7 +217,6 @@ export function createMockAgentConfig(overrides: MockAgentConfig = {}): MockAgen
     name: overrides.name || "TestAgent",
     slug: overrides.slug || "test-agent",
     role: overrides.role || "Test agent for unit testing",
-    backend: overrides.backend || "reason-act-loop",
     tools: overrides.tools || ["test-tool"],
     capabilities: overrides.capabilities || {
       canRead: true,
