@@ -24,10 +24,10 @@ export class RAGDatabaseManager {
 
     constructor(dataDir?: string) {
         // Use provided directory or environment variable, fallback to default
-        this.dataDir = dataDir || 
-                      process.env.LANCEDB_DATA_DIR || 
-                      path.join(process.cwd(), 'data', 'lancedb');
-        
+        this.dataDir = dataDir ||
+                      process.env.LANCEDB_DATA_DIR ||
+                      path.join(process.cwd(), '.tenex', 'data', 'lancedb');
+
         logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
     }
 

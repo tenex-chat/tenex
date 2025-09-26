@@ -3,6 +3,7 @@ import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { RAGService } from '@/services/rag/RAGService';
 
 const lessonLearnSchema = z.object({
   title: z.string().describe("Brief title/description of what this lesson is about"),
@@ -88,6 +89,47 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
   } catch (error) {
     // Don't fail the tool if we can't publish the status
     console.warn("Failed to publish learn status:", error);
+  }
+
+  // Add lesson to RAG collection for semantic search
+  try {
+    const ragService = RAGService.getInstance();
+    
+    // Ensure the lessons collection exists
+    try {
+      await ragService.createCollection('lessons');
+    } catch (error) {
+      // Collection might already exist, which is fine
+      logger.debug('Lessons collection might already exist', { error });
+    }
+    
+    // Add the lesson to the RAG collection
+    const lessonContent = detailed || lesson;
+    await ragService.addDocuments('lessons', [
+      {
+        id: lessonEvent.encode(),
+        content: lessonContent,
+        metadata: {
+          title,
+          category: category || undefined,
+          hashtags: hashtags || undefined,
+          agentPubkey: context.agent.pubkey,
+          agentName: context.agent.name,
+          timestamp: Date.now(),
+          hasDetailed: !!detailed,
+          type: 'lesson'
+        }
+      }
+    ]);
+    
+    logger.info('✅ Lesson added to RAG collection', {
+      title,
+      eventId: lessonEvent.encode(),
+      agentName: context.agent.name
+    });
+  } catch (error) {
+    // Don't fail the tool if RAG integration fails
+    logger.warn('Failed to add lesson to RAG collection', { error, title });
   }
 
   const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;

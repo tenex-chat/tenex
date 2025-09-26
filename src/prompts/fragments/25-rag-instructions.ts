@@ -1,4 +1,13 @@
-# RAG (Retrieval-Augmented Generation) System
+import { fragmentRegistry } from "../core/FragmentRegistry";
+import type { PromptFragment } from "../core/types";
+
+/**
+ * RAG (Retrieval-Augmented Generation) system instructions fragment
+ */
+export const ragInstructionsFragment: PromptFragment = {
+  id: "rag-instructions",
+  priority: 25,
+  template: () => `# RAG (Retrieval-Augmented Generation) System
 
 The RAG system provides semantic search and vector-based retrieval capabilities for enhanced agent memory and context management.
 
@@ -16,13 +25,13 @@ The RAG system follows clean architecture principles with clear separation of co
 
 Configure your preferred embedding model using the CLI:
 
-```bash
+\`\`\`bash
 # Global configuration (applies to all projects)
 tenex setup embed
 
 # Project-specific configuration
 tenex setup embed --project
-```
+\`\`\`
 
 The system supports:
 - **Local Transformers**: Run models directly on your machine (no API key required)
@@ -38,19 +47,19 @@ The system supports:
 ### 1. rag_create_collection
 Create a new vector database collection for storing embeddings.
 
-```typescript
+\`\`\`typescript
 rag_create_collection({
   name: "project_knowledge",  // Alphanumeric with underscores only
   schema: {                    // Optional custom schema
     category: "string"
   }
 })
-```
+\`\`\`
 
 ### 2. rag_add_documents
 Add documents to a collection with automatic embedding generation.
 
-```typescript
+\`\`\`typescript
 rag_add_documents({
   collection: "project_knowledge",
   documents: [
@@ -66,50 +75,50 @@ rag_add_documents({
     }
   ]
 })
-```
+\`\`\`
 
 ### 3. rag_query
 Perform semantic search on a collection.
 
-```typescript
+\`\`\`typescript
 rag_query({
   collection: "project_knowledge",
   query_text: "How does authentication work?",
   top_k: 5,  // Number of results (1-100)
   include_metadata: true  // Include document metadata
 })
-```
+\`\`\`
 
 ### 4. rag_delete_collection
 Remove a collection and all its documents.
 
-```typescript
+\`\`\`typescript
 rag_delete_collection({
   name: "project_knowledge",
   confirm: true  // Required safety flag
 })
-```
+\`\`\`
 
 ### 5. rag_list_collections
 List all available collections.
 
-```typescript
+\`\`\`typescript
 rag_list_collections({
   include_stats: false  // Stats feature planned for future
 })
-```
+\`\`\`
 
 ## Best Practices
 
 ### Collection Design
 - **Single Purpose**: Create focused collections for specific domains
 - **Naming Convention**: Use descriptive lowercase names with underscores
-  - ✅ `agent_memory`, `code_snippets`, `user_preferences`
-  - ❌ `MyCollection`, `data-store`, `collection#1`
+  - ✅ \`agent_memory\`, \`code_snippets\`, \`user_preferences\`
+  - ❌ \`MyCollection\`, \`data-store\`, \`collection#1\`
 
 ### Document Management
 - **Metadata Strategy**: Always include relevant metadata for filtering
-  ```typescript
+  \`\`\`typescript
   metadata: {
     type: "code" | "documentation" | "conversation",
     language?: string,
@@ -117,7 +126,7 @@ rag_list_collections({
     tags?: string[],
     source?: string
   }
-  ```
+  \`\`\`
 - **Content Size**: Keep individual documents under 1MB for optimal performance
 - **Batch Operations**: Add multiple documents in a single call for efficiency
 
@@ -125,25 +134,25 @@ rag_list_collections({
 - **Natural Language**: Use conversational queries for best results
   - ✅ "How to implement user authentication with JWT tokens"
   - ❌ "auth jwt impl func"
-- **Result Limits**: Use appropriate `top_k` values (5-10 for most cases)
+- **Result Limits**: Use appropriate \`top_k\` values (5-10 for most cases)
 - **Relevance Scores**: Results include scores (0-1) indicating similarity
 
 ### Error Handling
 All tools use standardized error responses:
-```json
+\`\`\`json
 {
   "success": false,
   "error": "Descriptive error message",
   "toolName": "rag_query"
 }
-```
+\`\`\`
 
 ## Use Cases
 
 ### 1. Agent Self-Reflection
 Build persistent memory across conversations:
 
-```typescript
+\`\`\`typescript
 // Store insights and decisions
 rag_create_collection({ name: "agent_insights" })
 
@@ -164,12 +173,12 @@ rag_query({
   collection: "agent_insights",
   query_text: "What are the user's programming language preferences?"
 })
-```
+\`\`\`
 
 ### 2. Project Knowledge Base
 Index project documentation and code:
 
-```typescript
+\`\`\`typescript
 rag_create_collection({ name: "project_docs" })
 
 // Index all markdown files
@@ -187,12 +196,12 @@ rag_query({
   collection: "project_docs",
   query_text: "API authentication methods"
 })
-```
+\`\`\`
 
 ### 3. Enhanced Lesson Learning
 Combine with lesson_learn for semantic retrieval:
 
-```typescript
+\`\`\`typescript
 // After learning a lesson
 lesson_learn({
   title: "Async error handling",
@@ -217,12 +226,12 @@ rag_query({
   collection: "lessons",
   query_text: "How to handle promise rejections"
 })
-```
+\`\`\`
 
 ### 4. Code Pattern Recognition
 Store and retrieve code patterns:
 
-```typescript
+\`\`\`typescript
 rag_create_collection({ name: "code_patterns" })
 
 rag_add_documents({
@@ -242,13 +251,13 @@ rag_query({
   collection: "code_patterns",
   query_text: "authentication hook implementation"
 })
-```
+\`\`\`
 
 ## Integration with Other Tools
 
 ### With codebase_search
 Index search results for faster future retrieval:
-```typescript
+\`\`\`typescript
 // After codebase_search finds relevant files
 rag_add_documents({
   collection: "indexed_code",
@@ -257,21 +266,21 @@ rag_add_documents({
     metadata: { type: result.type }
   }))
 })
-```
+\`\`\`
 
 ### With delegate
 Share collections between agents:
-```typescript
+\`\`\`typescript
 delegate({
   task: "Analyze the project documentation",
   tools: ["rag_query"],
   context: "Use collection 'project_docs' for analysis"
 })
-```
+\`\`\`
 
 ### With report_write
 Store reports for easy retrieval:
-```typescript
+\`\`\`typescript
 report_write({ title: "Performance Analysis", content: "..." })
 
 rag_add_documents({
@@ -285,7 +294,7 @@ rag_add_documents({
     }
   }]
 })
-```
+\`\`\`
 
 ## Performance Considerations
 
@@ -313,8 +322,12 @@ rag_add_documents({
    - Use cloud-based embeddings for better performance
 
 4. **Configuration Not Found**
-   - Run `tenex setup embed` to configure
-   - Check `.tenex/embed.json` exists
+   - Run \`tenex setup embed\` to configure
+   - Check \`.tenex/embed.json\` exists
    - Verify environment variables for API keys
 
-Remember: RAG empowers agents with persistent, searchable knowledge that enhances capabilities across conversations!
+Remember: RAG empowers agents with persistent, searchable knowledge that enhances capabilities across conversations!`,
+};
+
+// Register the fragment
+fragmentRegistry.register(ragInstructionsFragment);

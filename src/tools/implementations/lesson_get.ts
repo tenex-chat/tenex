@@ -3,6 +3,7 @@ import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { RAGService } from '@/services/rag/RAGService';
 
 const lessonGetSchema = z.object({
   title: z.string().describe("Title of the lesson to retrieve"),
@@ -29,7 +30,41 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
     conversationId: context.conversationId,
   });
 
-  // Get the project context to access in-memory lessons
+  // First, try to use RAG for semantic search
+  try {
+    const ragService = RAGService.getInstance();
+    
+    // Query the lessons collection using semantic search
+    const searchResults = await ragService.query('lessons', title, 3);
+    
+    if (searchResults && searchResults.length > 0) {
+      // Use the best matching result
+      const bestMatch = searchResults[0];
+      
+      logger.info("✅ Found lesson via RAG semantic search", {
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        title: bestMatch.metadata?.title || title,
+        similarity: bestMatch.similarity,
+        conversationId: context.conversationId,
+      });
+      
+      // Extract lesson data from metadata
+      const metadata = bestMatch.metadata || {};
+      return {
+        title: metadata.title || title,
+        lesson: bestMatch.content,
+        detailed: metadata.hasDetailed ? bestMatch.content : undefined,
+        category: metadata.category,
+        hashtags: metadata.hashtags,
+        hasDetailed: !!metadata.hasDetailed,
+      };
+    }
+  } catch (error) {
+    logger.debug("RAG search failed or no results, falling back to in-memory search", { error });
+  }
+
+  // Fallback to in-memory search if RAG fails or returns no results
   const projectContext = getProjectContext();
   
   // Get lessons for this agent from memory
