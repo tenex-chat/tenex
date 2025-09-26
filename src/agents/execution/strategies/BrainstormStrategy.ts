@@ -20,7 +20,8 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
      */
     async buildMessages(
         context: ExecutionContext,
-        triggeringEvent: NDKEvent
+        triggeringEvent: NDKEvent,
+        eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
         
@@ -29,17 +30,29 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         }
         
         const messages: ModelMessage[] = [];
-        
+
         // Add system prompt
         await this.addSystemPrompt(messages, context);
-        
+
+        // Apply event filter if provided
+        let history = conversation.history;
+        if (eventFilter) {
+            const originalLength = history.length;
+            history = history.filter(eventFilter);
+            logger.info("[BrainstormStrategy] Applied event filter to conversation history", {
+                originalLength,
+                filteredLength: history.length,
+                eventsRemoved: originalLength - history.length
+            });
+        }
+
         // Process brainstorm rounds
-        const brainstormRoots = this.findBrainstormRoots(conversation.history);
+        const brainstormRoots = this.findBrainstormRoots(history);
         
         for (const root of brainstormRoots) {
             await this.processBrainstormRound(
                 root,
-                conversation.history,
+                history,
                 messages,
                 context.agent.pubkey
             );

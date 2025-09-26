@@ -432,6 +432,14 @@ export class AgentPublisher {
       this.streamPublishTimer = null;
     }
 
+    // Log why we're flushing
+    logger.debug("Flushing streaming buffers (1s interval)", {
+      reasoningBufferLength: reasoningContent.length,
+      streamingBufferLength: streamingContent.length,
+      timeSinceLastPublish: Date.now() - this.lastStreamPublishTime,
+      sequence: this.streamSequence + 1,
+    });
+
     // Publish reasoning buffer if it has content
     if (reasoningContent.length > 0) {
       const streamingIntent: StreamingIntent = {
@@ -439,6 +447,11 @@ export class AgentPublisher {
         sequence: ++this.streamSequence,
         isReasoning: true,
       };
+
+      logger.info("Publishing streaming event (21111) for reasoning content due to 1s buffer flush", {
+        contentLength: reasoningContent.length,
+        sequence: streamingIntent.sequence,
+      });
 
       await this.streaming(streamingIntent, this.currentStreamContext);
     }
@@ -451,6 +464,11 @@ export class AgentPublisher {
         isReasoning: false,
       };
 
+      logger.info("Publishing streaming event (21111) for streaming content due to 1s buffer flush", {
+        contentLength: streamingContent.length,
+        sequence: streamingIntent.sequence,
+      });
+
       await this.streaming(streamingIntent, this.currentStreamContext);
     }
 
@@ -460,13 +478,22 @@ export class AgentPublisher {
 
   /**
    * Force flush any remaining streaming buffers.
-   * Should be called when streaming is complete.
+   * Should be called when streaming is complete or chunk type changes.
    */
   async forceFlushStreamingBuffers(): Promise<void> {
     // Cancel any pending timer
     if (this.streamPublishTimer) {
       clearTimeout(this.streamPublishTimer);
       this.streamPublishTimer = null;
+    }
+
+    // Log force flush reason
+    if (this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) {
+      logger.info("Force flushing buffers (chunk type change or stream complete)", {
+        reasoningBufferLength: this.reasoningBuffer.length,
+        streamingBufferLength: this.streamingBuffer.length,
+        hadTimer: !!this.streamPublishTimer,
+      });
     }
 
     // Flush any remaining content

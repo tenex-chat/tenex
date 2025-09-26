@@ -3,6 +3,7 @@ import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "./utils/claudeCodePromptCompiler";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
+import type { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import {
     type LanguageModelUsage,
     type LanguageModel,
@@ -58,20 +59,22 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly temperature?: number;
     private readonly maxTokens?: number;
     private previousChunkType?: string;
-    private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel; // Claude Code provider function
-    private readonly sessionId?: string; // Session ID for resuming claude_code conversations
-    private readonly agentSlug?: string; // Agent identifier for logging
+    private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel;
+    private readonly sessionId?: string;
+    private readonly agentSlug?: string;
+    private readonly progressMonitor?: ProgressMonitor;
 
     constructor(
         private readonly llmLogger: LLMLogger,
-        private readonly registry: ProviderRegistry | null, // Null for Claude Code
+        private readonly registry: ProviderRegistry | null,
         provider: string,
         model: string,
         temperature?: number,
         maxTokens?: number,
-        claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel, // Claude Code provider function
-        sessionId?: string, // Session ID for resuming claude_code conversations
-        agentSlug?: string // Agent identifier for logging
+        claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
+        sessionId?: string,
+        agentSlug?: string,
+        progressMonitor?: ProgressMonitor
     ) {
         super();
         this.provider = provider;
@@ -81,8 +84,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         this.claudeCodeProviderFunction = claudeCodeProviderFunction;
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
+        this.progressMonitor = progressMonitor;
 
-        // Validate that we have either a registry or Claude Code provider
         if (!registry && !claudeCodeProviderFunction) {
             throw new Error("LLMService requires either a registry or Claude Code provider function");
         }
@@ -117,7 +120,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.info("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
                     sessionId: this.sessionId,
                     model: this.model,
-                    optionsKeys: Object.keys(options)
+                    optionsKeys: Object.keys(options),
+                    messagesProvided: messages?.length || 0,
+                    messageRoles: messages?.map(m => m.role),
                 });
             } else if (messages) {
                 // When NOT resuming, compile all messages
@@ -310,14 +315,30 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
+            stopWhen?: (options: { steps: any[] }) => Promise<boolean> | boolean;
         }
     ): Promise<void> {
+        logger.info("[LLMService] 🚀 STARTING STREAM", {
+            provider: this.provider,
+            model: this.model,
+            messageCount: messages.length,
+            messageRoles: messages.map(m => m.role),
+            sessionId: this.sessionId || 'NONE',
+            toolCount: Object.keys(tools).length,
+        });
+
         const model = this.getLanguageModel(messages);
 
         // Convert system messages for Claude Code resume sessions
         let processedMessages = messages;
         if (this.provider === 'claudeCode' && this.sessionId) {
+            logger.info("[LLMService] 🎯 CLAUDE CODE RESUME MODE", {
+                sessionId: this.sessionId,
+                originalMessageCount: messages.length,
+                IMPORTANT: "Session already contains conversation history, only sending new messages",
+            });
             processedMessages = convertSystemMessagesForResume(messages);
+            console.log("processed messages for claude resume", processedMessages);
         }
 
         // Add provider-specific cache control
@@ -345,7 +366,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             tools: tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
-            stopWhen: stepCountIs(50),
+            stopWhen: options?.stopWhen ?? stepCountIs(100),
             abortSignal: options?.abortSignal,
             providerOptions: {
                 openrouter: {
@@ -402,13 +423,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
 
-        // Emit chunk-type-change event if the type changed
+        // Emit chunk-type-change event BEFORE processing the new chunk
+        // This allows listeners to flush buffers before new content of a different type arrives
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
             this.emit("chunk-type-change", {
                 from: this.previousChunkType,
                 to: chunk.type
             });
         }
+
+        // Update previousChunkType AFTER emitting the change event
+        this.previousChunkType = chunk.type;
 
         switch (chunk.type) {
             case "text-delta":
@@ -474,9 +499,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     chunk
                 });
         }
-
-        // Update previous chunk type
-        this.previousChunkType = chunk.type;
     }
 
     private createFinishHandler(startTime: number) {

@@ -28,7 +28,8 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
      */
     async buildMessages(
         context: ExecutionContext,
-        triggeringEvent: NDKEvent
+        triggeringEvent: NDKEvent,
+        eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
         const { threadService } = context.conversationCoordinator;
         const conversation = context.conversationCoordinator.getConversation(context.conversationId);
@@ -42,6 +43,12 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // Add system prompt
         await this.addSystemPrompt(messages, context);
 
+        logger.info("[ThreadWithMemoryStrategy] Added system prompt", {
+            systemPromptLength: messages[0]?.content.length || 0,
+            systemPromptPreview: messages[0]?.content.substring(0, 200),
+            hasEventFilter: !!eventFilter
+        });
+
         // 1. Get current thread (from root to triggering event)
         logger.debug("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
             triggeringEventId: triggeringEvent.id.substring(0, 8),
@@ -50,10 +57,31 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             historySize: conversation.history.length
         });
 
-        const currentThread = threadService.getThreadToEvent(
+        let currentThread = threadService.getThreadToEvent(
             triggeringEvent.id,
             conversation.history
         );
+
+        // Apply event filter if provided (e.g., for Claude Code session resumption)
+        if (eventFilter) {
+            const originalLength = currentThread.length;
+            const originalEvents = currentThread.map(e => ({
+                id: e.id.substring(0, 8),
+                content: e.content?.substring(0, 30)
+            }));
+            currentThread = currentThread.filter(eventFilter);
+            const remainingEvents = currentThread.map(e => ({
+                id: e.id.substring(0, 8),
+                content: e.content?.substring(0, 30)
+            }));
+            logger.info("[ThreadWithMemoryStrategy] Applied event filter to current thread", {
+                originalLength,
+                filteredLength: currentThread.length,
+                eventsRemoved: originalLength - currentThread.length,
+                originalEvents,
+                remainingEvents
+            });
+        }
 
         logger.debug("[ThreadWithMemoryStrategy] Current thread retrieved", {
             conversationId: context.conversationId.substring(0, 8),
@@ -76,7 +104,19 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         });
 
         // 3. Get ALL events in the conversation and format other branches
-        const allEvents = conversation.history;
+        let allEvents = conversation.history;
+
+        // Apply event filter to all events if provided
+        if (eventFilter) {
+            const originalLength = allEvents.length;
+            allEvents = allEvents.filter(eventFilter);
+            logger.info("[ThreadWithMemoryStrategy] Applied event filter to all events for other branches", {
+                originalLength,
+                filteredLength: allEvents.length,
+                eventsRemoved: originalLength - allEvents.length
+            });
+        }
+
         const formatter = new ThreadedConversationFormatter();
         const otherBranchesFormatted = await formatter.formatOtherBranches(
             allEvents,

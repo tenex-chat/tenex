@@ -17,6 +17,7 @@ import {
 } from "./strategies";
 import { getProjectContext } from "@/services";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
+import { buildBrainstormModerationPrompt } from "@/prompts/fragments/brainstorm-moderation";
 
 /**
  * Format MCP tool names for human readability
@@ -113,9 +114,6 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
-        // Build messages using the strategy
-        const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
-
         // Create AgentPublisher first so we can include it in context
         const agentPublisher = new AgentPublisher(
             context.agent
@@ -158,7 +156,7 @@ export class AgentExecutor {
             };
             await agentPublisher.typing({ state: "start" }, eventContext);
 
-            const responseEvent = await this.executeWithStreaming(fullContext, messages);
+            const responseEvent = await this.executeWithStreaming(fullContext);
 
             // Log execution flow complete
             logger.info(
@@ -275,8 +273,7 @@ export class AgentExecutor {
      * Execute with streaming support
      */
     private async executeWithStreaming(
-        context: ExecutionContext,
-        messages: ModelMessage[]
+        context: ExecutionContext
     ): Promise<NDKEvent | undefined> {
         // Get tools for response processing
         // Tools are already properly configured in AgentRegistry.buildAgentInstance
@@ -290,17 +287,80 @@ export class AgentExecutor {
         const projectCtx = getProjectContext();
         const llmLogger = projectCtx.llmLogger.withAgent(context.agent.name);
 
-        // Get stored session ID if available (for providers that support session resumption)
+        // Get stored session ID and last sent event ID if available (for providers that support session resumption)
         const metadataStore = context.agent.createMetadataStore(context.conversationId);
         const sessionId = metadataStore.get<string>('sessionId');
+        const lastSentEventId = metadataStore.get<string>('lastSentEventId');
 
         if (sessionId) {
             logger.info("[AgentExecutor] ✅ Found existing session to resume", {
                 sessionId,
                 agent: context.agent.name,
-                conversationId: context.conversationId.substring(0, 8)
+                conversationId: context.conversationId.substring(0, 8),
+                lastSentEventId: lastSentEventId || 'NONE'
             });
         }
+
+        // Create event filter for Claude Code sessions
+        let eventFilter: ((event: NDKEvent) => boolean) | undefined;
+        if (sessionId && lastSentEventId) {
+            let foundLastSent = false;
+            eventFilter = (event: NDKEvent) => {
+                const result = (() => {
+                    // Skip events until we find the last sent one
+                    if (!foundLastSent) {
+                        if (event.id === lastSentEventId) {
+                            foundLastSent = true;
+                            logger.debug("[AgentExecutor] 🎯 Found last sent event, excluding it", {
+                                eventId: event.id.substring(0, 8),
+                                content: event.content?.substring(0, 50)
+                            });
+                            return false; // Exclude the lastSentEventId itself
+                        }
+                        logger.debug("[AgentExecutor] ⏭️ Skipping event (before last sent)", {
+                            eventId: event.id.substring(0, 8),
+                            content: event.content?.substring(0, 50),
+                            lookingFor: lastSentEventId.substring(0, 8)
+                        });
+                        return false; // Exclude all events before lastSentEventId
+                    }
+                    logger.debug("[AgentExecutor] ✅ Including event (after last sent)", {
+                        eventId: event.id.substring(0, 8),
+                        content: event.content?.substring(0, 50)
+                    });
+                    return true; // Include events after lastSentEventId
+                })();
+
+                return result;
+            };
+
+            logger.info("[AgentExecutor] 📋 Created event filter for resumed session", {
+                lastSentEventId: lastSentEventId.substring(0, 8),
+                willFilterEvents: true
+            });
+        }
+
+        // Build messages using the strategy, with optional filter for resumed sessions
+        const messages = await this.messageStrategy.buildMessages(
+            context,
+            context.triggeringEvent,
+            eventFilter
+        );
+
+        logger.info("[AgentExecutor] 📝 Built messages for execution", {
+            messageCount: messages.length,
+            hasFilter: !!eventFilter,
+            sessionId: sessionId || 'NONE',
+            messageTypes: messages.map((msg, i) => {
+                const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                return {
+                    index: i,
+                    role: msg.role,
+                    contentLength: contentStr.length,
+                    contentPreview: contentStr.substring(0, 100)
+                };
+            })
+        });
 
         // Pass tools context and session ID for providers that need runtime configuration (like Claude Code)
         const llmService = configService.createLLMService(
@@ -494,6 +554,18 @@ export class AgentExecutor {
                 });
             }
 
+                // Store lastSentEventId for new Claude Code sessions
+                // This ensures that even new sessions track what's been sent
+                if (!sessionId && context.agent.llmConfig.provider === 'claudeCode') {
+                    const metadataStore = context.agent.createMetadataStore(context.conversationId);
+                    metadataStore.set('lastSentEventId', context.triggeringEvent.id);
+                    logger.info("[AgentExecutor] 📝 Stored lastSentEventId for new Claude Code session", {
+                        lastSentEventId: context.triggeringEvent.id.substring(0, 8),
+                        agent: context.agent.name,
+                        conversationId: context.conversationId.substring(0, 8)
+                    });
+                }
+
                 // Clear buffers
                 contentBuffer = '';
                 reasoningBuffer = '';
@@ -546,8 +618,11 @@ export class AgentExecutor {
         llmService.on('session-captured', ({ sessionId }) => {
             const metadataStore = context.agent.createMetadataStore(context.conversationId);
             metadataStore.set('sessionId', sessionId);
-            logger.info("[AgentExecutor] 💾 Stored session ID from provider", {
+            // Also store the current triggering event as the last sent event
+            metadataStore.set('lastSentEventId', context.triggeringEvent.id);
+            logger.info("[AgentExecutor] 💾 Stored session ID and last sent event from provider", {
                 sessionId,
+                lastSentEventId: context.triggeringEvent.id.substring(0, 8),
                 agent: context.agent.name,
                 conversationId: context.conversationId.substring(0, 8)
             });
@@ -627,7 +702,6 @@ export class AgentExecutor {
             // Register operation with the LLM Operations Registry
             const abortSignal = llmOpsRegistry.registerOperation(context);
 
-            // Single LLM call - let it run up to 20 steps
             await llmService.stream(messages, toolsObject, { abortSignal });
         } catch (streamError) {
             // Publish error event for stream errors
@@ -713,45 +787,22 @@ export class AgentExecutor {
         responses: Array<{ agent: { pubkey: string; name: string }; content: string; event: NDKEvent }>
     ): Promise<{ selectedAgents: string[]; reasoning?: string } | null> {
         try {
-            // Build messages using the BrainstormStrategy to get the moderator's full identity
+            // Build messages using the strategy to get the moderator's full identity
             const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
 
-            // Now restructure the conversation to make it clear this is a moderation task
-            // Remove any direct user messages that might confuse the moderator
-            const moderationMessages: ModelMessage[] = [];
+            // Keep only system messages (agent identity, instructions, etc)
+            const moderationMessages: ModelMessage[] = messages.filter(msg => msg.role === "system");
 
-            // Keep system messages (agent identity, instructions, etc)
-            for (const msg of messages) {
-                if (msg.role === "system") {
-                    moderationMessages.push(msg);
-                }
-            }
-
-            // Add a clear user message that frames this as a moderation task
-            moderationMessages.push({
-                role: "user",
-                content: `A brainstorming session was initiated with this request: "${context.triggeringEvent.content}"
-
-The following agents have responded:`
-            });
-
-            // Add each response as context
-            for (const response of responses) {
-                moderationMessages.push({
-                    role: "assistant",
-                    content: `${response.agent.name} (${response.agent.pubkey}): ${response.content}`
-                });
-            }
-
-            // Ask for moderation - let the agent decide how to judge
-            moderationMessages.push({
-                role: "user",
-                content: `Please moderate these responses. Select at least one response (or multiple if appropriate).
-Return a JSON object with your selection(s):
-{"selectedAgents": ["pubkey1", "pubkey2", ...], "reasoning": "your explanation"}
-
-If you believe none of the responses are suitable, you may return an empty array, and all responses will be included by default.`
-            });
+            // Add the moderation prompt messages
+            const promptMessages = buildBrainstormModerationPrompt(
+                context.triggeringEvent.content,
+                responses.map(r => ({
+                    name: r.agent.name,
+                    pubkey: r.agent.pubkey,
+                    content: r.content
+                }))
+            );
+            moderationMessages.push(...promptMessages);
 
             logger.debug("[AgentExecutor] Executing brainstorm moderation", {
                 moderator: context.agent.name,
@@ -794,7 +845,6 @@ If you believe none of the responses are suitable, you may return an empty array
 
             if (selectedPubkeys.length === 0) {
                 logger.info("[AgentExecutor] No agents selected by moderator - defaulting to all responses");
-                // Return all agent pubkeys
                 return {
                     selectedAgents: responses.map(r => r.agent.pubkey),
                     reasoning: parsed.reasoning || "Moderator did not select specific responses - including all"
