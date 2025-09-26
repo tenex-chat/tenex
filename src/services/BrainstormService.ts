@@ -13,6 +13,8 @@ import { NostrKind, NostrTag, TagValue, MAX_REASON_LENGTH, isBrainstormEvent } f
 import { logger } from "@/utils/logger";
 import { safeParseJSON } from "@/utils/json-parser";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { LLMReviewer } from "@/llm/reviewer";
+import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 
 interface BrainstormResponse {
     agent: AgentInstance;
@@ -250,7 +252,15 @@ export class BrainstormService {
         };
 
         const strategy = new BrainstormStrategy();
-        const executor = new AgentExecutor(undefined, strategy);
+        const llmLogger = this.projectContext.llmLogger.withAgent('reviewer');
+        const llmService = configService.createLLMService(
+            llmLogger,
+            'default',
+            { agentName: 'reviewer' }
+        );
+        const llmReviewer = new LLMReviewer(llmService);
+        const progressMonitor = new ProgressMonitor(llmReviewer);
+        const executor = new AgentExecutor(progressMonitor, undefined, strategy);
         const responseEvent = await executor.execute(context);
 
         if (responseEvent?.content) {
@@ -293,7 +303,15 @@ export class BrainstormService {
             // Use BrainstormStrategy for proper context building
             const { BrainstormStrategy } = await import("@/agents/execution/strategies/BrainstormStrategy");
             const strategy = new BrainstormStrategy();
-            const executor = new AgentExecutor(undefined, strategy);
+            const llmLogger = this.projectContext.llmLogger.withAgent('reviewer');
+            const llmService = configService.createLLMService(
+                llmLogger,
+                'default',
+                { agentName: 'reviewer' }
+            );
+            const llmReviewer = new LLMReviewer(llmService);
+            const progressMonitor = new ProgressMonitor(llmReviewer);
+            const executor = new AgentExecutor(progressMonitor, undefined, strategy);
 
             // Execute moderation to get structured selection
             const moderationResult = await executor.executeBrainstormModeration(context, responses);
