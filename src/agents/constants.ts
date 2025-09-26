@@ -12,6 +12,12 @@ export const CORE_AGENT_TOOLS = [
     "codebase_search", // All agents need file system access
     "reports_list", // All agents should see available reports
     "report_read", // All agents should read reports
+    // RAG tools for enhanced memory and knowledge management
+    "rag_query", // All agents should be able to query RAG collections
+    "rag_add_documents", // All agents should be able to add to RAG collections
+    "rag_create_collection", // All agents should be able to create collections
+    "rag_delete_collection", // All agents should be able to delete collections
+    "rag_list_collections", // All agents should be able to list collections
 ] as const;
 
 /**
@@ -55,6 +61,9 @@ export const PHASE_MANAGEMENT_TOOLS = ['phase_add', 'phase_remove'] as const;
  */
 export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): string[] {
   const tools: string[] = [];
+
+  // All agents get ask tool
+  tools.push('ask');
 
   // Check if agent has phases defined
   const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
