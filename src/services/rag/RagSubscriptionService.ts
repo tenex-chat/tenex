@@ -176,10 +176,10 @@ export class RagSubscriptionService {
     const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
 
     // Create listener for this resource
-    const listener = async (notification: { uri: string }): Promise<void> => {
+    const listener = async (notification: { uri: string; content?: string }): Promise<void> => {
       await this.handleResourceUpdate(subscription, {
         method: 'notifications/resources/updated',
-        params: { uri: notification.uri }
+        params: notification
       });
     };
 
@@ -199,22 +199,42 @@ export class RagSubscriptionService {
       // Import mcpManager dynamically to avoid circular dependency
       const { mcpManager } = await import('../mcp/MCPManager');
 
-      // Register notification handler
-      mcpManager.onResourceNotification(subscription.mcpServerId, listener);
+      // Try to subscribe to resource updates
+      let subscriptionSupported = true;
+      try {
+        // Register notification handler
+        mcpManager.onResourceNotification(subscription.mcpServerId, listener);
 
-      // Subscribe to resource updates
-      await mcpManager.subscribeToResource(
-        subscription.mcpServerId,
-        subscription.resourceUri
-      );
+        // Subscribe to resource updates
+        await mcpManager.subscribeToResource(
+          subscription.mcpServerId,
+          subscription.resourceUri
+        );
 
-      // Store listener reference for cleanup
-      this.resourceListeners.set(listenerKey, listener as unknown as (notification: Notification) => void);
+        // Store listener reference for cleanup
+        this.resourceListeners.set(listenerKey, listener as unknown as (notification: Notification) => void);
 
-      logger.info(
-        `RAG subscription '${subscription.subscriptionId}' active. ` +
-        `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
-      );
+        logger.info(
+          `RAG subscription '${subscription.subscriptionId}' active with push notifications. ` +
+          `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('does not support resource subscriptions')) {
+          // Server doesn't support subscriptions, use polling instead
+          subscriptionSupported = false;
+          logger.warn(
+            `Server '${subscription.mcpServerId}' does not support resource subscriptions. ` +
+            `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
+            `Call pollResource() manually or set up a polling interval.`
+          );
+        } else {
+          throw error;
+        }
+      }
+
+      if (!subscriptionSupported) {
+        subscription.lastError = 'Server does not support subscriptions - use polling mode';
+      }
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
       subscription.lastError = error instanceof Error ? error.message : 'Unknown error';
