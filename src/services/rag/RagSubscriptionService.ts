@@ -5,16 +5,17 @@ import * as fs from 'fs/promises';
 import { RAGService } from './RAGService';
 
 /**
- * NOTE: MCP resource subscriptions are now implemented in the AI SDK!
- * The experimental_createMCPClient supports:
- * - subscribeResource(uri): Subscribe to resource updates
- * - unsubscribeResource(uri): Unsubscribe from updates
- * - onResourceUpdated(handler): Register notification handlers
+ * RagSubscriptionService - Manages persistent RAG subscriptions to MCP resources
  *
- * See examples/mcp-resource-subscriptions.ts for usage.
+ * This service enables automatic ingestion of MCP resource updates into RAG collections.
+ * When a resource is updated, the MCP server sends a notification, which is automatically
+ * processed and added to the configured RAG collection.
  *
- * This service can be integrated with the AI SDK's subscription support
- * or continue to work with polling as a fallback.
+ * Features:
+ * - Persistent subscriptions across restarts
+ * - Automatic reconnection on initialization
+ * - Error tracking and metrics
+ * - Fallback polling support for servers without subscription capabilities
  */
 
 type Notification = {
@@ -158,48 +159,48 @@ export class RagSubscriptionService {
 
   /**
    * Setup MCP resource subscription and listener
-   *
-   * NOTE: MCP resource subscriptions (resources/subscribe) are not yet implemented
-   * in the TypeScript SDK. Python SDK has it, but TypeScript is still pending:
-   * - Python: https://github.com/modelcontextprotocol/python-sdk/blob/f676f6c0f0a19c0d3f652a59b6eb668cfbfa025f/src/mcp/client/session.py#L249
-   * - TypeScript tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/558
-   *
-   * This method sets up the infrastructure for subscriptions but will use polling
-   * (via pollResource) or manual triggers (via manualResourceUpdate) until SDK support is available.
    */
   private async setupResourceSubscription(subscription: RagSubscription): Promise<void> {
     const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
 
     // Create listener for this resource
-    const listener = async (notification: Notification): Promise<void> => {
-      await this.handleResourceUpdate(subscription, notification);
+    const listener = async (notification: { uri: string }): Promise<void> => {
+      await this.handleResourceUpdate(subscription, {
+        method: 'notifications/resources/updated',
+        params: { uri: notification.uri }
+      });
     };
 
-    // Subscribe to the MCP resource
     try {
-      // Store listener reference for when SDK supports subscriptions
-      this.resourceListeners.set(listenerKey, listener);
+      // Validate that resourceUri looks like an actual URI, not a tool name
+      if (subscription.resourceUri.includes('resource_template_') ||
+          subscription.resourceUri.includes('mcp__')) {
+        throw new Error(
+          `Invalid resourceUri: "${subscription.resourceUri}". ` +
+          `This appears to be a tool name, not an MCP resource URI. ` +
+          `Resource URIs should be in format like "nostr://feed/pubkey/kinds" or "file:///path". ` +
+          `If you want to subscribe to a resource template, you must first expand it with parameters to get the actual URI.`
+        );
+      }
 
-      // TODO: Implement when TypeScript SDK supports resources/subscribe (similar to Python SDK)
-      // const { mcpManager } = await import('../mcp/MCPManager');
-      // await mcpManager.subscribeToResource(
-      //   subscription.mcpServerId,
-      //   subscription.resourceUri
-      // );
-      //
-      // Then set up notification handler:
-      // mcpManager.onResourceNotification(
-      //   subscription.mcpServerId,
-      //   subscription.resourceUri,
-      //   listener
-      // );
+      // Import mcpManager dynamically to avoid circular dependency
+      const { mcpManager } = await import('../mcp/MCPManager');
+
+      // Register notification handler
+      mcpManager.onResourceNotification(subscription.mcpServerId, listener);
+
+      // Subscribe to resource updates
+      await mcpManager.subscribeToResource(
+        subscription.mcpServerId,
+        subscription.resourceUri
+      );
+
+      // Store listener reference for cleanup
+      this.resourceListeners.set(listenerKey, listener as unknown as (notification: Notification) => void);
 
       logger.info(
-        `RAG subscription '${subscription.subscriptionId}' created. ` +
-        `Resource monitoring will be available when TypeScript SDK implements resources/subscribe ` +
-        `(Python SDK has this: subscribeResource/unsubscribeResource). ` +
-        `Use pollResource() or manualResourceUpdate() as workarounds. ` +
-        `Tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/558`
+        `RAG subscription '${subscription.subscriptionId}' active. ` +
+        `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
       );
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
@@ -303,7 +304,7 @@ export class RagSubscriptionService {
    */
   public async deleteSubscription(subscriptionId: string, agentPubkey: string): Promise<boolean> {
     const subscription = this.subscriptions.get(subscriptionId);
-    
+
     if (!subscription || subscription.agentPubkey !== agentPubkey) {
       return false;
     }
@@ -314,17 +315,14 @@ export class RagSubscriptionService {
       const listener = this.resourceListeners.get(listenerKey);
 
       if (listener) {
-        // TODO: Implement when TypeScript SDK supports resources/subscribe (similar to Python SDK)
-        // const { mcpManager } = await import('../mcp/MCPManager');
-        // await mcpManager.unsubscribeFromResource(
-        //   subscription.mcpServerId,
-        //   subscription.resourceUri
-        // );
-        // mcpManager.removeResourceListener(
-        //   subscription.mcpServerId,
-        //   subscription.resourceUri,
-        //   listener
-        // );
+        const { mcpManager } = await import('../mcp/MCPManager');
+
+        // Unsubscribe from the resource
+        await mcpManager.unsubscribeFromResource(
+          subscription.mcpServerId,
+          subscription.resourceUri
+        );
+
         this.resourceListeners.delete(listenerKey);
       }
 

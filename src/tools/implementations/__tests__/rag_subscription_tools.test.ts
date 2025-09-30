@@ -5,7 +5,7 @@ import { createRAGSubscriptionCreateTool } from '../rag_subscription_create';
 import { createRAGSubscriptionListTool } from '../rag_subscription_list';
 import { createRAGSubscriptionGetTool } from '../rag_subscription_get';
 import { createRAGSubscriptionDeleteTool } from '../rag_subscription_delete';
-import { RagSubscriptionService } from '@/services/RagSubscriptionService';
+import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
 import { RAGService } from '@/services/rag/RAGService';
 import type { ExecutionContext } from '@/agents/execution/types';
 
@@ -14,25 +14,35 @@ describe('RAG Subscription Tools', () => {
   const originalCwd = process.cwd();
   
   const mockContext: ExecutionContext = {
-    agentIdentity: {
+    agent: {
       name: 'test-agent',
       slug: 'test-agent',
       pubkey: 'test-agent-pubkey',
-    },
-    workingDirectory: testDir,
-    executeToolCallback: async () => ({ success: true }),
-    isRecursiveCall: false,
+    } as any,
+    conversationId: 'test-conversation',
+    projectPath: testDir,
+    triggeringEvent: {} as any,
+    conversationCoordinator: {} as any,
+    agentPublisher: {} as any,
   };
   
   beforeEach(async () => {
+    // Reset singleton
+    RagSubscriptionService.resetInstance();
+
     // Create test directory
     await fs.mkdir(testDir, { recursive: true });
+    await fs.mkdir(path.join(testDir, '.tenex'), { recursive: true });
     process.chdir(testDir);
-    
+
+    // Initialize service
+    const service = RagSubscriptionService.getInstance();
+    await service.initialize();
+
     // Mock RAG service
     const ragService = RAGService.getInstance();
     const listSpy = spyOn(ragService, 'listCollections');
-    listSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+    listSpy.mockResolvedValue(['test-collection']);
     const addSpy = spyOn(ragService, 'addDocuments');
     addSpy.mockResolvedValue();
   });
@@ -41,21 +51,23 @@ describe('RAG Subscription Tools', () => {
     // Cleanup
     process.chdir(originalCwd);
     await fs.rm(testDir, { recursive: true, force: true });
+    RagSubscriptionService.resetInstance();
     mock.restore();
   });
   
   describe('rag_subscription_create', () => {
     test('should create a subscription successfully', async () => {
       const tool = createRAGSubscriptionCreateTool(mockContext);
-      
-      const result = await tool.execute({
+
+      const resultStr = await tool.execute({
         subscriptionId: 'test-subscription',
         mcpServerId: 'test-mcp-server',
         resourceUri: 'test-resource',
         ragCollection: 'test-collection',
         description: 'Test subscription for unit tests'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(true);
       expect(result.message).toContain('Successfully created subscription');
       expect(result.subscription).toBeDefined();
@@ -79,14 +91,15 @@ describe('RAG Subscription Tools', () => {
       });
       
       // Try to create duplicate
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'duplicate-test',
         mcpServerId: 'server2',
         resourceUri: 'resource2',
         ragCollection: 'test-collection',
         description: 'Duplicate subscription'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();
       expect(result.error).toContain("already exists");
@@ -95,14 +108,15 @@ describe('RAG Subscription Tools', () => {
     test('should handle non-existent RAG collection', async () => {
       const tool = createRAGSubscriptionCreateTool(mockContext);
       
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'test-sub',
         mcpServerId: 'test-server',
         resourceUri: 'test-resource',
         ragCollection: 'non-existent-collection',
         description: 'Test subscription'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();
       expect(result.error).toContain("does not exist");
@@ -135,7 +149,9 @@ describe('RAG Subscription Tools', () => {
       
       // List subscriptions
       const tool = createRAGSubscriptionListTool(mockContext);
-      const result = await tool.execute({});
+      const resultStr = await tool.execute({});
+      
+      const result = JSON.parse(resultStr as string);
       
       expect(result.success).toBe(true);
       expect(result.subscriptions).toHaveLength(2);
@@ -147,7 +163,9 @@ describe('RAG Subscription Tools', () => {
     
     test('should return empty list when no subscriptions exist', async () => {
       const tool = createRAGSubscriptionListTool(mockContext);
-      const result = await tool.execute({});
+      const resultStr = await tool.execute({});
+      
+      const result = JSON.parse(resultStr as string);
       
       expect(result.success).toBe(true);
       expect(result.subscriptions).toHaveLength(0);
@@ -172,10 +190,11 @@ describe('RAG Subscription Tools', () => {
       
       // Get subscription
       const tool = createRAGSubscriptionGetTool(mockContext);
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'test-sub-get'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(true);
       expect(result.subscription).toBeDefined();
       expect(result.subscription.id).toBe('test-sub-get');
@@ -187,10 +206,11 @@ describe('RAG Subscription Tools', () => {
     
     test('should handle non-existent subscription', async () => {
       const tool = createRAGSubscriptionGetTool(mockContext);
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'non-existent'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(false);
       expect(result.error).toBe('SUBSCRIPTION_NOT_FOUND');
       expect(result.message).toContain('not found');
@@ -214,10 +234,11 @@ describe('RAG Subscription Tools', () => {
       
       // Delete subscription
       const tool = createRAGSubscriptionDeleteTool(mockContext);
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'test-sub-delete'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(true);
       expect(result.message).toContain('Successfully deleted');
       expect(result.subscriptionId).toBe('test-sub-delete');
@@ -229,10 +250,11 @@ describe('RAG Subscription Tools', () => {
     
     test('should handle non-existent subscription', async () => {
       const tool = createRAGSubscriptionDeleteTool(mockContext);
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'non-existent'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(false);
       expect(result.error).toBe('SUBSCRIPTION_NOT_FOUND');
       expect(result.message).toContain('not found');
@@ -254,10 +276,11 @@ describe('RAG Subscription Tools', () => {
       
       // Try to delete with different agent context
       const tool = createRAGSubscriptionDeleteTool(mockContext);
-      const result = await tool.execute({
+      const resultStr = await tool.execute({
         subscriptionId: 'other-agent-sub'
       });
-      
+
+      const result = JSON.parse(resultStr as string);
       expect(result.success).toBe(false);
       expect(result.message).toContain("don't have permission");
     });
@@ -271,36 +294,41 @@ describe('RAG Subscription Tools', () => {
       const deleteTool = createRAGSubscriptionDeleteTool(mockContext);
       
       // Create
-      const createResult = await createTool.execute({
+      const createResultStr = await createTool.execute({
         subscriptionId: 'integration-test',
         mcpServerId: 'test-server',
         resourceUri: 'test-resource',
         ragCollection: 'test-collection',
         description: 'Integration test subscription'
       });
+      const createResult = JSON.parse(createResultStr as string);
       expect(createResult.success).toBe(true);
       
       // List
-      const listResult = await listTool.execute({});
+      const listResultStr = await listTool.execute({});
+      const listResult = JSON.parse(listResultStr as string);
       expect(listResult.success).toBe(true);
       expect(listResult.subscriptions).toHaveLength(1);
       expect(listResult.subscriptions[0].id).toBe('integration-test');
       
       // Get
-      const getResult = await getTool.execute({
+      const getResultStr = await getTool.execute({
         subscriptionId: 'integration-test'
       });
+      const getResult = JSON.parse(getResultStr as string);
       expect(getResult.success).toBe(true);
       expect(getResult.subscription.description).toBe('Integration test subscription');
       
       // Delete
-      const deleteResult = await deleteTool.execute({
+      const deleteResultStr = await deleteTool.execute({
         subscriptionId: 'integration-test'
       });
+      const deleteResult = JSON.parse(deleteResultStr as string);
       expect(deleteResult.success).toBe(true);
       
       // Verify deletion
-      const finalListResult = await listTool.execute({});
+      const finalListResultStr = await listTool.execute({});
+      const finalListResult = JSON.parse(finalListResultStr as string);
       expect(finalListResult.subscriptions).toHaveLength(0);
     });
   });

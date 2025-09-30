@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { RagSubscriptionService, SubscriptionStatus } from '@/services/RagSubscriptionService';
+import { RagSubscriptionService, SubscriptionStatus } from '@/services/rag/RagSubscriptionService';
 import { RAGService } from '@/services/rag/RAGService';
 import type { ExecutionContext } from '@/agents/execution/types';
 import { createRAGSubscriptionCreateTool } from '../rag_subscription_create';
@@ -14,20 +14,25 @@ describe('RAG Subscription Integration Tests', () => {
   const originalCwd = process.cwd();
   
   const validContext: ExecutionContext = {
-    agentIdentity: {
+    agent: {
       name: 'test-agent',
       slug: 'test-agent',
       pubkey: 'test-agent-pubkey-valid',
-    },
-    workingDirectory: testDir,
-    executeToolCallback: async () => ({ success: true }),
-    isRecursiveCall: false,
+    } as any,
+    conversationId: 'test-conversation',
+    projectPath: testDir,
+    triggeringEvent: {} as any,
+    conversationCoordinator: {} as any,
+    agentPublisher: {} as any,
   };
 
   const invalidContext: ExecutionContext = {
-    workingDirectory: testDir,
-    executeToolCallback: async () => ({ success: true }),
-    isRecursiveCall: false,
+    agent: undefined as any,
+    conversationId: 'test-conversation',
+    projectPath: testDir,
+    triggeringEvent: {} as any,
+    conversationCoordinator: {} as any,
+    agentPublisher: {} as any,
   };
   
   beforeEach(async () => {
@@ -58,7 +63,7 @@ describe('RAG Subscription Integration Tests', () => {
       // Mock RAG service
       const ragService = RAGService.getInstance();
       const listSpy = spyOn(ragService, 'listCollections');
-      listSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listSpy.mockResolvedValue(['test-collection']);
       
       const resultStr = await tool.execute({
         subscriptionId: 'test-sub',
@@ -118,7 +123,7 @@ describe('RAG Subscription Integration Tests', () => {
       // Mock RAG service
       const ragService = RAGService.getInstance();
       const listSpy = spyOn(ragService, 'listCollections');
-      listSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listSpy.mockResolvedValue(['test-collection']);
       
       // Mock the service method
       const createSpy = spyOn(service, 'createSubscription');
@@ -183,7 +188,7 @@ describe('RAG Subscription Integration Tests', () => {
       
       // Mock RAG service methods
       const listCollectionsSpy = spyOn(ragService, 'listCollections');
-      listCollectionsSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listCollectionsSpy.mockResolvedValue(['test-collection']);
       
       const addDocumentsSpy = spyOn(ragService, 'addDocuments');
       addDocumentsSpy.mockResolvedValue(undefined);
@@ -236,7 +241,7 @@ describe('RAG Subscription Integration Tests', () => {
       
       // Mock RAG service methods
       const listCollectionsSpy = spyOn(ragService, 'listCollections');
-      listCollectionsSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listCollectionsSpy.mockResolvedValue(['test-collection']);
       
       const addDocumentsSpy = spyOn(ragService, 'addDocuments');
       addDocumentsSpy.mockImplementation(() => Promise.reject(new Error('RAG service error')));
@@ -278,7 +283,7 @@ describe('RAG Subscription Integration Tests', () => {
       
       // Mock RAG service methods
       const listCollectionsSpy = spyOn(ragService, 'listCollections');
-      listCollectionsSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listCollectionsSpy.mockResolvedValue(['test-collection']);
       
       const addDocumentsSpy = spyOn(ragService, 'addDocuments');
       addDocumentsSpy.mockResolvedValue(undefined);
@@ -328,7 +333,7 @@ describe('RAG Subscription Integration Tests', () => {
       
       // Mock RAG service
       const listCollectionsSpy = spyOn(ragService, 'listCollections');
-      listCollectionsSpy.mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+      listCollectionsSpy.mockResolvedValue(['test-collection']);
       
       // Create multiple subscriptions with different states
       await service.createSubscription('sub1', 'test-agent-pubkey-valid', 'server1', 'res1', 'test-collection', 'Sub 1');

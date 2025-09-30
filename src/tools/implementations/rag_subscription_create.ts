@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
 import type { AISdkTool } from '@/tools/registry';
-import { RagSubscriptionService } from '@/services/RagSubscriptionService';
+import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
 import { executeToolWithErrorHandling, type ToolResponse } from '@/tools/utils';
 
 /**
@@ -16,7 +16,9 @@ const ragSubscriptionCreateSchema = z.object({
     'The ID of the installed MCP tool/server providing the resource (e.g., "nostr-provider")'
   ),
   resourceUri: z.string().describe(
-    'The resource identifier that the specified MCP server understands (e.g., "changelog", "events")'
+    'The MCP resource URI to subscribe to (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ' +
+    'This must be an actual resource URI, NOT a tool name. If using a resource template, ' +
+    'you must first expand it with parameters to get the actual URI.'
   ),
   ragCollection: z.string().describe(
     'Name of the RAG collection where data will be stored'

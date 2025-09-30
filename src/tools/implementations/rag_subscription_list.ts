@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import type { ExecutionContext } from '@/agents/execution/types';
 import type { AISdkTool } from '@/tools/registry';
-import { RagSubscriptionService } from '@/services/RagSubscriptionService';
+import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
 import { executeToolWithErrorHandling, type ToolResponse } from '@/tools/utils';
 
 /**

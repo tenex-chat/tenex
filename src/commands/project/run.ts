@@ -7,7 +7,7 @@ import { shutdownNDK, getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, dynamicToolService } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { SchedulerService } from "@/services/SchedulerService";
-import { RagSubscriptionService } from "@/services/RagSubscriptionService";
+import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import { StatusPublisher } from "@/services/status";
 import { handleCliError } from "@/utils/cli-error";
 import { formatAnyError } from "@/utils/error-formatter";

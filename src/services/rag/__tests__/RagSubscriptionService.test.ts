@@ -1,31 +1,49 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { RagSubscriptionService, SubscriptionStatus } from '../RagSubscriptionService';
-import { RAGService } from '../rag/RAGService';
+import { RAGService } from '../RAGService';
+
+// Mock MCP Manager
+const mockMCPManager = {
+  subscribeToResource: mock(async () => {}),
+  unsubscribeFromResource: mock(async () => {}),
+  onResourceNotification: mock(() => {})
+};
+
+// Mock the dynamic import of MCPManager
+mock.module('../../mcp/MCPManager', () => ({
+  mcpManager: mockMCPManager,
+  mcpService: mockMCPManager
+}));
 
 describe('RagSubscriptionService', () => {
   let service: RagSubscriptionService;
   const testDir = path.join(process.cwd(), '.tenex-test');
   const originalCwd = process.cwd();
-  
+
   beforeEach(async () => {
     // Reset singleton for clean state
     RagSubscriptionService.resetInstance();
-    
+
     // Create test directory
     await fs.mkdir(testDir, { recursive: true });
     process.chdir(testDir);
-    
+
+    // Reset mocks
+    mockMCPManager.subscribeToResource.mockClear();
+    mockMCPManager.unsubscribeFromResource.mockClear();
+    mockMCPManager.onResourceNotification.mockClear();
+
     // Initialize service
     service = RagSubscriptionService.getInstance();
   });
-  
+
   afterEach(async () => {
     // Cleanup
     process.chdir(originalCwd);
     await fs.rm(testDir, { recursive: true, force: true });
-    
+
     // Reset singleton
     RagSubscriptionService.resetInstance();
   });
@@ -35,7 +53,7 @@ describe('RagSubscriptionService', () => {
       // Mock RAG service
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -64,7 +82,7 @@ describe('RagSubscriptionService', () => {
     test('should reject duplicate subscription IDs', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -117,7 +135,7 @@ describe('RagSubscriptionService', () => {
     test('should list subscriptions for a specific agent', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -171,7 +189,7 @@ describe('RagSubscriptionService', () => {
     test('should get subscription by ID for correct agent', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -205,7 +223,7 @@ describe('RagSubscriptionService', () => {
     test('should delete subscription for correct agent', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -232,7 +250,7 @@ describe('RagSubscriptionService', () => {
     test('should not delete subscription for wrong agent', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -261,7 +279,7 @@ describe('RagSubscriptionService', () => {
     test('should return correct statistics', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       await service.initialize();
       
@@ -304,7 +322,7 @@ describe('RagSubscriptionService', () => {
     test('should persist subscriptions to disk and reload on initialization', async () => {
       const ragService = RAGService.getInstance();
       const listCollectionsSpy = spyOn(ragService, 'listCollections')
-        .mockResolvedValue([{ name: 'test-collection', document_count: 0 }]);
+        .mockResolvedValue(['test-collection']);
       
       // Create first service instance
       await service.initialize();

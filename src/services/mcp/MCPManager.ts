@@ -451,6 +451,64 @@ export class MCPManager {
 
     return contents.join('\n\n---\n\n');
   }
+
+  /**
+   * Subscribe to resource updates from an MCP server
+   * @param serverName - Name of the MCP server
+   * @param resourceUri - URI of the resource to subscribe to
+   */
+  async subscribeToResource(serverName: string, resourceUri: string): Promise<void> {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found or not running`);
+    }
+
+    try {
+      await entry.client.subscribeResource(resourceUri);
+      logger.debug(`Subscribed to resource '${resourceUri}' from server '${serverName}'`);
+    } catch (error) {
+      logger.error(`Failed to subscribe to resource '${resourceUri}' from '${serverName}':`, formatAnyError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Unsubscribe from resource updates
+   * @param serverName - Name of the MCP server
+   * @param resourceUri - URI of the resource to unsubscribe from
+   */
+  async unsubscribeFromResource(serverName: string, resourceUri: string): Promise<void> {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found or not running`);
+    }
+
+    try {
+      await entry.client.unsubscribeResource(resourceUri);
+      logger.debug(`Unsubscribed from resource '${resourceUri}' from server '${serverName}'`);
+    } catch (error) {
+      logger.error(`Failed to unsubscribe from resource '${resourceUri}' from '${serverName}':`, formatAnyError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Register a handler for resource update notifications
+   * @param serverName - Name of the MCP server
+   * @param handler - Callback to handle resource updates
+   */
+  onResourceNotification(
+    serverName: string,
+    handler: (notification: { uri: string }) => void | Promise<void>
+  ): void {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found or not running`);
+    }
+
+    entry.client.onResourceUpdated(handler);
+    logger.debug(`Registered resource update handler for server '${serverName}'`);
+  }
 }
 
 export const mcpManager = MCPManager.getInstance();
