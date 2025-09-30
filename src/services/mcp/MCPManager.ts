@@ -5,7 +5,13 @@
  */
 
 import * as path from "node:path";
-import { experimental_createMCPClient, type experimental_MCPClient } from 'ai';
+import {
+  experimental_createMCPClient,
+  type experimental_MCPClient,
+  type experimental_MCPResource,
+  type experimental_MCPResourceTemplate,
+  type experimental_MCPReadResourceResult,
+} from 'ai';
 import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio';
 import type { CoreTool } from 'ai';
 import { configService } from "@/services/ConfigService";
@@ -27,6 +33,7 @@ export class MCPManager {
   private isInitialized = false;
   private projectPath?: string;
   private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
+  private includeResourcesInTools = false;
 
   private constructor() {}
 
@@ -165,25 +172,28 @@ export class MCPManager {
 
     for (const [serverName, entry] of this.clients) {
       try {
-        const serverTools = await entry.client.tools();
-        
+        const serverTools = await entry.client.tools({
+          includeResources: this.includeResourcesInTools
+        });
+
         // Namespace the tools with server name
         for (const [toolName, tool] of Object.entries(serverTools)) {
           const namespacedName = `mcp__${serverName}__${toolName}`;
-          
+
           // The tools from experimental_MCPClient are already CoreTool instances
           // We just need to ensure they have the correct structure
           // CoreTool should have: description, parameters (as zod schema), and execute function
-          
+
           // Store the tool directly - it's already a proper CoreTool
           tools[namespacedName] = tool;
-          
+
           // Log the tool structure for debugging
           logger.debug(`MCP tool '${namespacedName}' registered`, {
             hasDescription: !!tool.description,
             hasParameters: !!tool.parameters,
             hasExecute: typeof tool.execute === 'function',
-            parametersType: tool.parameters ? typeof tool.parameters : 'undefined'
+            parametersType: tool.parameters ? typeof tool.parameters : 'undefined',
+            isResourceTool: toolName.startsWith('resource_')
           });
         }
 
@@ -195,6 +205,21 @@ export class MCPManager {
 
     this.cachedTools = tools;
     logger.info(`Cached ${Object.keys(tools).length} MCP tools from ${this.clients.size} servers`);
+  }
+
+  /**
+   * Set whether to include MCP resources as tools
+   * @param include - Whether to include resources as tools
+   */
+  setIncludeResourcesInTools(include: boolean): void {
+    this.includeResourcesInTools = include;
+  }
+
+  /**
+   * Refresh the tool cache with current includeResources setting
+   */
+  async refreshTools(): Promise<void> {
+    await this.refreshToolCache();
   }
 
   /**
@@ -291,6 +316,135 @@ export class MCPManager {
       runningServers: this.getRunningServers(),
       availableTools: Object.keys(this.cachedTools).length,
     });
+  }
+
+  /**
+   * List resources from a specific MCP server
+   * @param serverName - Name of the MCP server
+   * @returns Array of resources from that server
+   */
+  async listResources(serverName: string): Promise<experimental_MCPResource[]> {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found`);
+    }
+
+    try {
+      const result = await entry.client.listResources();
+      return result.resources;
+    } catch (error) {
+      logger.error(`Failed to list resources from '${serverName}':`, formatAnyError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * List all resources from all connected MCP servers
+   * @returns Map of server names to their resources
+   */
+  async listAllResources(): Promise<Map<string, experimental_MCPResource[]>> {
+    const resourcesMap = new Map<string, experimental_MCPResource[]>();
+
+    for (const [serverName] of this.clients) {
+      try {
+        const resources = await this.listResources(serverName);
+        resourcesMap.set(serverName, resources);
+      } catch (error) {
+        logger.error(`Failed to list resources from '${serverName}':`, formatAnyError(error));
+        // Continue with other servers
+      }
+    }
+
+    return resourcesMap;
+  }
+
+  /**
+   * List resource templates from a specific MCP server
+   * @param serverName - Name of the MCP server
+   * @returns Array of resource templates from that server
+   */
+  async listResourceTemplates(serverName: string): Promise<experimental_MCPResourceTemplate[]> {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found`);
+    }
+
+    try {
+      const result = await entry.client.listResourceTemplates();
+      return result.resourceTemplates;
+    } catch (error) {
+      logger.error(`Failed to list resource templates from '${serverName}':`, formatAnyError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * List all resource templates from all connected MCP servers
+   * @returns Map of server names to their resource templates
+   */
+  async listAllResourceTemplates(): Promise<Map<string, experimental_MCPResourceTemplate[]>> {
+    const templatesMap = new Map<string, experimental_MCPResourceTemplate[]>();
+
+    for (const [serverName] of this.clients) {
+      try {
+        const templates = await this.listResourceTemplates(serverName);
+        templatesMap.set(serverName, templates);
+      } catch (error) {
+        logger.error(`Failed to list resource templates from '${serverName}':`, formatAnyError(error));
+        // Continue with other servers
+      }
+    }
+
+    return templatesMap;
+  }
+
+  /**
+   * Read a resource from a specific MCP server
+   * @param serverName - Name of the MCP server
+   * @param uri - URI of the resource to read
+   * @returns Resource content
+   */
+  async readResource(serverName: string, uri: string): Promise<experimental_MCPReadResourceResult> {
+    const entry = this.clients.get(serverName);
+    if (!entry) {
+      throw new Error(`MCP server '${serverName}' not found`);
+    }
+
+    try {
+      return await entry.client.readResource(uri);
+    } catch (error) {
+      logger.error(`Failed to read resource '${uri}' from '${serverName}':`, formatAnyError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Get resource context as a formatted string for RAG pattern
+   * @param serverName - Name of the MCP server
+   * @param resourceUris - Array of resource URIs to fetch
+   * @returns Formatted context string
+   */
+  async getResourceContext(serverName: string, resourceUris: string[]): Promise<string> {
+    const contents: string[] = [];
+
+    for (const uri of resourceUris) {
+      try {
+        const result = await this.readResource(serverName, uri);
+
+        for (const content of result.contents) {
+          if ('text' in content) {
+            contents.push(`Resource: ${uri}\n${content.text}`);
+          } else if ('blob' in content) {
+            contents.push(`Resource: ${uri}\n[Binary content: ${content.blob.length} bytes]`);
+          }
+        }
+      } catch (error) {
+        logger.error(`Failed to read resource '${uri}':`, formatAnyError(error));
+        // Continue with other resources
+      }
+    }
+
+    return contents.join('\n\n---\n\n');
   }
 }
 
