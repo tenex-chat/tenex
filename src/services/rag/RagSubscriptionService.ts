@@ -19,7 +19,7 @@ import { RAGService } from './RAGService';
 
 type Notification = {
   method: string;
-  params: any;
+  params: Record<string, unknown>;
 };
 
 export enum SubscriptionStatus {
@@ -68,7 +68,7 @@ export class RagSubscriptionService {
    * Reset the singleton instance (for testing purposes)
    */
   public static resetInstance(): void {
-    RagSubscriptionService.instance = null as any;
+    RagSubscriptionService.instance = undefined as unknown as RagSubscriptionService;
   }
 
   /**
@@ -171,7 +171,7 @@ export class RagSubscriptionService {
     const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
 
     // Create listener for this resource
-    const listener = async (notification: Notification) => {
+    const listener = async (notification: Notification): Promise<void> => {
       await this.handleResourceUpdate(subscription, notification);
     };
 

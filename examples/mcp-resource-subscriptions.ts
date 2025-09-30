@@ -46,7 +46,7 @@ async function subscribeToResourceUpdates() {
       description: `Auto-updated collection from ${serverName} MCP server`,
     });
     console.log(`Created RAG collection: ${collectionName}\n`);
-  } catch (error) {
+  } catch {
     console.log(`Collection ${collectionName} already exists\n`);
   }
 
