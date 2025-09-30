@@ -119,6 +119,18 @@ export class RagSubscriptionService {
       throw new Error(`Subscription with ID '${subscriptionId}' already exists`);
     }
 
+    // Validate resourceUri is a proper URI format
+    try {
+      new URL(resourceUri);
+    } catch {
+      throw new Error(
+        `Invalid resourceUri: "${resourceUri}". ` +
+        `Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ` +
+        `This appears to be a tool name or invalid format. ` +
+        `If you're using a resource template, you must first expand it with parameters to get the actual URI.`
+      );
+    }
+
     // Verify the RAG collection exists
     const collections = await this.ragService.listCollections();
     if (!collections.includes(ragCollection)) {
@@ -172,14 +184,15 @@ export class RagSubscriptionService {
     };
 
     try {
-      // Validate that resourceUri looks like an actual URI, not a tool name
-      if (subscription.resourceUri.includes('resource_template_') ||
-          subscription.resourceUri.includes('mcp__')) {
+      // Validate that resourceUri is a proper URI format
+      try {
+        new URL(subscription.resourceUri);
+      } catch {
         throw new Error(
           `Invalid resourceUri: "${subscription.resourceUri}". ` +
-          `This appears to be a tool name, not an MCP resource URI. ` +
-          `Resource URIs should be in format like "nostr://feed/pubkey/kinds" or "file:///path". ` +
-          `If you want to subscribe to a resource template, you must first expand it with parameters to get the actual URI.`
+          `Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ` +
+          `This appears to be a tool name or invalid format. ` +
+          `If you're using a resource template, you must first expand it with parameters to get the actual URI.`
         );
       }
 
