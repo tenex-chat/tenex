@@ -58,9 +58,14 @@ export class MCPManager {
         return;
       }
 
+      // Enable resources as tools globally
+      this.includeResourcesInTools = true;
+
       await this.startServers(config.mcp);
       await this.refreshToolCache();
       this.isInitialized = true;
+
+      logger.info("MCP manager initialized with resources as tools enabled");
     } catch (error) {
       logger.error("Failed to initialize MCP manager:", error);
       // Don't throw - allow the system to continue without MCP
