@@ -1,8 +1,8 @@
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import { logger } from "@/utils/logger";
-import { MockLanguageModelV2 } from "ai/test";
-import type { LanguageModelV2 } from "@ai-sdk/provider";
+import { MockLanguageModelV3 } from "ai/test";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { Provider } from "ai";
 
 /**
@@ -13,10 +13,10 @@ export function createMockProvider(config?: MockLLMConfig): Provider {
     const mockService = new MockLLMService(config);
     
     // Create a factory function that returns a language model
-    const createLanguageModel = (modelId: string): LanguageModelV2 => {
+    const createLanguageModel = (modelId: string): LanguageModelV3 => {
         logger.info(`[MockProvider] Creating language model for: ${modelId}`);
-        
-        return new MockLanguageModelV2({
+
+        return new MockLanguageModelV3({
             provider: "mock",
             modelId: modelId || "mock-model",
             

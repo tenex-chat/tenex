@@ -36,52 +36,17 @@ async function buildAll() {
   try {
     console.log("🏗️  Building TENEX CLI...");
 
-    // Build all TypeScript files without bundling
-    await build({
-      ...sharedConfig,
-      entryPoints: ["src/**/*.ts"],
-      outdir: "dist",
-    });
+    const { execSync } = await import("child_process");
+    const { existsSync, mkdirSync } = await import("fs");
 
-    // Build CLI executable with bundling
-    await build({
-      entryPoints: ["src/cli.ts"],
-      bundle: true,
-      minify: false,
-      sourcemap: true,
-      target: "node18",
-      format: "esm",
-      platform: "node",
-      outfile: "dist/cli.js",
-      tsconfig: "tsconfig.build.json",
-      logLevel: "info",
-      plugins: [aliasPlugin],
-      banner: {
-        js: "#!/usr/bin/env node",
-      },
-      // Mark all Node built-ins as external
-      external: [
-        ...external,
-        "node:*",
-        "fs",
-        "path",
-        "http",
-        "https",
-        "stream",
-        "util",
-        "url",
-        "child_process",
-        "crypto",
-        "os",
-        "tty",
-        "net",
-        "events",
-        "buffer",
-        "querystring",
-        "zlib",
-        "assert",
-      ],
-    });
+    // Ensure dist directory exists
+    if (!existsSync("dist")) {
+      mkdirSync("dist", { recursive: true });
+    }
+
+    // Use bun to transpile all TypeScript files
+    console.log("📦 Transpiling TypeScript files...");
+    execSync("bun build src --outdir dist --target node --format esm", { stdio: "inherit" });
 
     console.log("✅ Build completed successfully!");
   } catch (error) {

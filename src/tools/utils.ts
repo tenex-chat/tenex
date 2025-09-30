@@ -4,17 +4,6 @@ import { logger } from "@/utils/logger";
 import { handleError } from "@/utils/error-handler";
 import type { z } from "zod";
 
-/**
- * LanceDB query result structure
- */
-export interface LanceDBResult {
-  id?: string;
-  content?: string;
-  metadata?: string | Record<string, unknown>;
-  timestamp?: number;
-  source?: string;
-  _distance?: number;
-}
 
 /**
  * Resolves and validates a file path to ensure it stays within the project boundaries.
@@ -178,7 +167,7 @@ export type JsonArray = JsonValue[];
 /**
  * Document metadata with known common fields and extensibility
  */
-export interface DocumentMetadata extends JsonObject {
+export interface DocumentMetadata {
   language?: string;
   type?: string;
   category?: string;
@@ -186,7 +175,7 @@ export interface DocumentMetadata extends JsonObject {
   author?: string;
   title?: string;
   uri?: string;
-  [key: string]: JsonValue;
+  [key: string]: JsonValue | undefined;
 }
 
 /**
@@ -205,11 +194,11 @@ export interface LanceDBStoredDocument {
  * LanceDB query result structure (what comes back from queries)
  */
 export interface LanceDBResult {
-  id: string;
-  content: string;
-  metadata?: string;
-  timestamp: number;
-  source: string;
+  id: string | undefined;
+  content: string | undefined;
+  metadata?: string | Record<string, unknown>;
+  timestamp: number | undefined;
+  source: string | undefined;
   vector?: number[];
   _distance?: number;
 }
@@ -291,11 +280,11 @@ export function parseDocumentMetadata(
  */
 export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocument {
   return {
-    id: result.id,
-    content: result.content,
+    id: result.id ?? '',
+    content: result.content ?? '',
     metadata: parseDocumentMetadata(result.metadata),
-    timestamp: result.timestamp,
-    source: result.source
+    timestamp: result.timestamp ?? Date.now(),
+    source: result.source ?? 'unknown'
   };
 }
 
