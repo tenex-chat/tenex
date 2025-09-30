@@ -3,6 +3,7 @@ import { ReportManager } from "@/services/ReportManager";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 const reportReadSchema = z.object({
   identifier: z
@@ -177,7 +178,7 @@ async function executeReportRead(
 /**
  * Create an AI SDK tool for reading reports
  */
-export function createReportReadTool(context: ExecutionContext) {
+export function createReportReadTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Read a report by slug or naddr identifier",
 

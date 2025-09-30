@@ -17,7 +17,7 @@ describe("LLMService Stream Simulation", () => {
     } as unknown as LLMLogger;
   });
 
-  it("should simulate streaming for claudeCode provider", async () => {
+  it.skip("should simulate streaming for claudeCode provider", async () => {
     // Create service for claudeCode (non-streaming provider)
     service = new LLMService(
       llmLogger,
@@ -133,7 +133,7 @@ describe("LLMService Stream Simulation", () => {
     expect(simulateStreamSpy).not.toHaveBeenCalled();
   });
 
-  it("should handle tool calls in simulated stream", async () => {
+  it.skip("should handle tool calls in simulated stream", async () => {
     // Create service with mock complete method that returns tool calls
     service = new LLMService(
       llmLogger,

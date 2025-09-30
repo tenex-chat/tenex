@@ -5,6 +5,7 @@ import { ExecutionConfig } from "@/agents/execution/constants";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 const execAsync = promisify(exec);
 
@@ -89,7 +90,7 @@ async function executeShell(
 /**
  * Create an AI SDK tool for executing shell commands
  */
-export function createShellTool(context: ExecutionContext) {
+export function createShellTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
       "Execute shell commands in the project directory. Use for system operations like git, npm, build tools, etc. NEVER use for file operations - use read_path/write_path instead. NEVER use for code modifications - edit files directly. Restricted to project-manager agent only. Commands run with timeout (default 2 minutes). Always prefer specialized tools over shell commands when available.",

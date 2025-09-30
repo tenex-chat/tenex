@@ -1,7 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
-import { RAGService } from '@/services/RAGService';
+import type { AISdkTool } from '@/tools/registry';
+import { RAGService, type RAGQueryResult } from '@/services/RAGService';
 import { 
     executeToolWithErrorHandling,
     parseNumericInput,
@@ -24,9 +25,22 @@ const ragQuerySchema = z.object({
 });
 
 /**
+ * Formatted result for tool response
+ */
+interface FormattedQueryResult {
+    rank: number;
+    score: number;
+    content: string;
+    metadata?: Record<string, unknown>;
+    source?: string;
+    id?: string;
+    timestamp?: string;
+}
+
+/**
  * Format query results for response
  */
-function formatResults(results: any[], includeMetadata: boolean): any[] {
+function formatResults(results: RAGQueryResult[], includeMetadata: boolean): FormattedQueryResult[] {
     return results.map((result, index) => ({
         rank: index + 1,
         score: result.score,
@@ -49,7 +63,7 @@ function formatResults(results: any[], includeMetadata: boolean): any[] {
  */
 async function executeQuery(
     input: z.infer<typeof ragQuerySchema>,
-    context: ExecutionContext
+    _context: ExecutionContext
 ): Promise<ToolResponse> {
     const { collection, query_text, include_metadata = true } = input;
     
@@ -71,7 +85,7 @@ async function executeQuery(
 /**
  * Query a RAG collection using semantic search
  */
-export function createRAGQueryTool(context: ExecutionContext) {
+export function createRAGQueryTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: 'Perform semantic search on a RAG collection. Returns the most relevant documents based on vector similarity to the query.',
         inputSchema: ragQuerySchema,

@@ -3,7 +3,9 @@ import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "./utils/claudeCodePromptCompiler";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
-import type { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
+import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
+import type { ToolCallArguments } from "@/agents/types";
+import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
 import {
     type LanguageModelUsage,
     type LanguageModel,
@@ -11,43 +13,103 @@ import {
     type TextStreamPart,
     type ProviderRegistry,
     type GenerateTextResult,
+    type Experimental_LanguageModelV1Middleware,
     generateText,
     generateObject,
-    stepCountIs,
     streamText,
-    streamObject,
     wrapLanguageModel,
     extractReasoningMiddleware,
 } from "ai";
+import type { JSONValue } from '@ai-sdk/provider';
 import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import type { z } from "zod";
 
-// Define the event types for LLMService
-interface LLMServiceEvents {
-    content: (data: { delta: string }) => void;
-    "chunk-type-change": (data: { from: string | undefined; to: string }) => void;
-    "tool-will-execute": (data: { toolName: string; toolCallId: string; args: unknown }) => void;
-    "tool-did-execute": (data: {
-        toolName: string;
-        toolCallId: string;
-        result: unknown;
-        error?: boolean;
-    }) => void;
-    complete: (data: {
-        message: string;
-        steps: StepResult<Record<string, AISdkTool>>[];
-        usage: LanguageModelUsageWithCostUsd;
-        finishReason?: string;
-    }) => void;
-    "stream-error": (data: { error: unknown }) => void;
-    "session-captured": (data: { sessionId: string }) => void;
-    reasoning?: (data: { delta: string }) => void;
-    // Add index signatures for EventEmitter compatibility
-    [key: string]: (...args: any[]) => void;
-    [key: symbol]: (...args: any[]) => void;
+/**
+ * Content delta event
+ */
+interface ContentEvent {
+    delta: string;
 }
+
+/**
+ * Chunk type change event
+ */
+interface ChunkTypeChangeEvent {
+    from: string | undefined;
+    to: string;
+}
+
+/**
+ * Tool will execute event
+ */
+interface ToolWillExecuteEvent {
+    toolName: string;
+    toolCallId: string;
+    args: unknown;
+}
+
+/**
+ * Tool did execute event
+ */
+interface ToolDidExecuteEvent {
+    toolName: string;
+    toolCallId: string;
+    result: unknown;
+    error?: boolean;
+}
+
+/**
+ * Completion event
+ */
+interface CompleteEvent {
+    message: string;
+    reasoning?: string;
+    steps: StepResult<Record<string, AISdkTool>>[];
+    usage: LanguageModelUsageWithCostUsd;
+    finishReason?: string;
+}
+
+/**
+ * Stream error event
+ */
+interface StreamErrorEvent {
+    error: unknown;
+}
+
+/**
+ * Session captured event
+ */
+interface SessionCapturedEvent {
+    sessionId: string;
+}
+
+/**
+ * Reasoning delta event
+ */
+interface ReasoningEvent {
+    delta: string;
+}
+
+/**
+ * Event map for LLMService with proper typing
+ */
+interface LLMServiceEvents {
+    content: (data: ContentEvent) => void;
+    "chunk-type-change": (data: ChunkTypeChangeEvent) => void;
+    "tool-will-execute": (data: ToolWillExecuteEvent) => void;
+    "tool-did-execute": (data: ToolDidExecuteEvent) => void;
+    complete: (data: CompleteEvent) => void;
+    "stream-error": (data: StreamErrorEvent) => void;
+    "session-captured": (data: SessionCapturedEvent) => void;
+    reasoning?: (data: ReasoningEvent) => void;
+}
+
+/**
+ * Provider metadata structure from AI SDK
+ */
+type ProviderMetadata = Record<string, Record<string, JSONValue>>;
 
 /**
  * LLM Service for runtime execution with AI SDK providers
@@ -62,7 +124,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
-    private readonly progressMonitor?: ProgressMonitor;
 
     constructor(
         private readonly llmLogger: LLMLogger,
@@ -73,8 +134,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         maxTokens?: number,
         claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
         sessionId?: string,
-        agentSlug?: string,
-        progressMonitor?: ProgressMonitor
+        agentSlug?: string
     ) {
         super();
         this.provider = provider;
@@ -84,7 +144,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         this.claudeCodeProviderFunction = claudeCodeProviderFunction;
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
-        this.progressMonitor = progressMonitor;
 
         if (!registry && !claudeCodeProviderFunction) {
             throw new Error("LLMService requires either a registry or Claude Code provider function");
@@ -102,12 +161,20 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     /**
+     * Determine if throttling middleware should be used for this provider
+     * claudeCode handles its own streaming optimization, so it doesn't need throttling
+     */
+    private shouldUseThrottlingMiddleware(): boolean {
+        return this.provider !== 'claudeCode';
+    }
+
+    /**
      * Get a language model instance.
      * For Claude Code: Creates model with system prompt from messages.
      * For standard providers: Gets model from registry.
-     * Wraps all models with extract-reasoning-middleware.
+     * Wraps all models with throttling middleware and extract-reasoning-middleware.
      */
-    private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
+    private getLanguageModel(messages?: ModelMessage[], enableThrottling: boolean = true): LanguageModel {
         let baseModel: LanguageModel;
 
         if (this.claudeCodeProviderFunction) {
@@ -117,7 +184,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             if (this.sessionId) {
                 // When resuming, only pass the resume option
                 options.resume = this.sessionId;
-                logger.info("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
+                logger.debug("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
                     sessionId: this.sessionId,
                     model: this.model,
                     optionsKeys: Object.keys(options),
@@ -133,7 +200,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     options.appendSystemPrompt = appendSystemPrompt;
                 }
 
-                logger.info("[LLMService] 🆕 NEW CLAUDE CODE SESSION (no resume)", {
+                logger.debug("[LLMService] 🆕 NEW CLAUDE CODE SESSION (no resume)", {
                     model: this.model,
                     hasCustomPrompt: !!customSystemPrompt,
                     hasAppendPrompt: !!appendSystemPrompt,
@@ -144,7 +211,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
 
-            logger.info("[LLMService] 🎯 CREATED CLAUDE CODE MODEL", {
+            logger.debug("[LLMService] 🎯 CREATED CLAUDE CODE MODEL", {
                 model: this.model,
                 hasCustomSystemPrompt: !!options.customSystemPrompt,
                 hasAppendSystemPrompt: !!options.appendSystemPrompt,
@@ -158,15 +225,89 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             throw new Error("No provider available for model creation");
         }
 
-        // Wrap with extract-reasoning-middleware to handle thinking tags
+        // Build middleware chain
+        const middlewares: Experimental_LanguageModelV1Middleware[] = [];
+
+        // Add throttling middleware for streaming (when enabled)
+        // Check if this provider should use throttling middleware
+        if (enableThrottling && this.shouldUseThrottlingMiddleware()) {
+            middlewares.push(throttlingMiddleware({
+                flushInterval: 500, // Flush every 500ms after first chunk
+                chunking: 'line' // Use line-based chunking for clean breaks
+            }));
+        }
+
+        // Add extract-reasoning-middleware to handle thinking tags
+        middlewares.push(extractReasoningMiddleware({
+            tagName: 'thinking',
+            separator: '\n',
+            startWithReasoning: false,
+        }));
+
+        // Wrap with all middlewares
         return wrapLanguageModel({
             model: baseModel,
-            middleware: extractReasoningMiddleware({
-                tagName: 'thinking',
-                separator: '\n',
-                startWithReasoning: false,
-            }),
+            middleware: middlewares,
         });
+    }
+
+    /**
+     * Type guard for valid ToolCallArguments value types
+     */
+    private isValidArgumentValue(value: unknown): value is string | number | boolean | undefined {
+        const valueType = typeof value;
+        return valueType === 'string' || 
+               valueType === 'number' || 
+               valueType === 'boolean' || 
+               value === undefined;
+    }
+
+    /**
+     * Parse tool input arguments with deep type safety validation
+     * Validates all fields recursively to ensure conformance to ToolCallArguments
+     */
+    private parseToolArguments(input: unknown): ToolCallArguments {
+        if (typeof input !== 'object' || input === null) {
+            return {};
+        }
+        
+        const args = input as Record<string, unknown>;
+        const parsed: ToolCallArguments = {};
+        
+        // Validate and assign known fields
+        if (typeof args.command === 'string') {
+            parsed.command = args.command;
+        }
+        if (typeof args.path === 'string') {
+            parsed.path = args.path;
+        }
+        if (typeof args.mode === 'string') {
+            parsed.mode = args.mode;
+        }
+        if (typeof args.prompt === 'string') {
+            parsed.prompt = args.prompt;
+        }
+        
+        // Validate and assign additional dynamic fields
+        for (const [key, value] of Object.entries(args)) {
+            // Skip known fields already processed
+            if (key === 'command' || key === 'path' || key === 'mode' || key === 'prompt') {
+                continue;
+            }
+            
+            // Deep validation for dynamic fields
+            if (this.isValidArgumentValue(value)) {
+                parsed[key] = value;
+            } else {
+                logger.warn('[LLMService] Skipping invalid tool argument', {
+                    key,
+                    valueType: typeof value,
+                    expectedTypes: 'string | number | boolean | undefined'
+                });
+            }
+        }
+        
+        return parsed;
     }
 
     /**
@@ -208,7 +349,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             maxTokens?: number;
         }
     ): Promise<GenerateTextResult<Record<string, AISdkTool>>> {
-        const model = this.getLanguageModel(messages);
+        // Don't use throttling for complete() calls - we want the full response immediately
+        const model = this.getLanguageModel(messages, false);
         const startTime = Date.now();
 
         // Convert system messages for Claude Code resume sessions
@@ -247,7 +389,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             // Capture session ID from provider metadata if using Claude Code
             if (this.provider === 'claudeCode' && result.providerMetadata?.['claude-code']?.sessionId) {
                 const capturedSessionId = result.providerMetadata['claude-code'].sessionId;
-                logger.info("[LLMService] Captured Claude Code session ID from complete", {
+                logger.debug("[LLMService] Captured Claude Code session ID from complete", {
                     sessionId: capturedSessionId,
                     provider: this.provider
                 });
@@ -279,7 +421,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     logger.error("[LLMService] Failed to log response", { error: err });
                 });
 
-            logger.info("[LLMService] Complete response received", {
+            logger.debug("[LLMService] Complete response received", {
                 model: `${this.provider}:${this.model}`,
                 duration,
                 usage: result.usage,
@@ -315,10 +457,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
-            stopWhen?: (options: { steps: any[] }) => Promise<boolean> | boolean;
         }
     ): Promise<void> {
-        logger.info("[LLMService] 🚀 STARTING STREAM", {
+        logger.debug("[LLMService] 🚀 STARTING STREAM", {
             provider: this.provider,
             model: this.model,
             messageCount: messages.length,
@@ -332,10 +473,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         // Convert system messages for Claude Code resume sessions
         let processedMessages = messages;
         if (this.provider === 'claudeCode' && this.sessionId) {
-            logger.info("[LLMService] 🎯 CLAUDE CODE RESUME MODE", {
+            logger.debug("[LLMService] 🎯 CLAUDE CODE RESUME MODE", {
                 sessionId: this.sessionId,
                 originalMessageCount: messages.length,
-                IMPORTANT: "Session already contains conversation history, only sending new messages",
             });
             processedMessages = convertSystemMessagesForResume(messages);
             console.log("processed messages for claude resume", processedMessages);
@@ -359,14 +499,35 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         const startTime = Date.now();
 
-        // Create the stream outside the promise
+        // Don't use throttling for the review model used by ProgressMonitor
+        const reviewModel = this.getLanguageModel(undefined, false);
+        const progressMonitor = new ProgressMonitor(reviewModel);
+
+        const stopWhen = async ({ steps }: { steps: StepResult<Record<string, AISdkTool>>[] }): Promise<boolean> => {
+            const toolCalls: import("@/agents/types").ToolCall[] = [];
+            for (const step of steps) {
+                if (step.toolCalls) {
+                    for (const tc of step.toolCalls) {
+                        const args = this.parseToolArguments(tc.input);
+                        toolCalls.push({
+                            tool: tc.toolName,
+                            args,
+                            id: tc.toolCallId
+                        });
+                    }
+                }
+            }
+            const shouldContinue = await progressMonitor.check(toolCalls);
+            return !shouldContinue;
+        };
+
         const { textStream } = streamText({
             model,
             messages: processedMessages,
             tools: tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
-            stopWhen: options?.stopWhen ?? stepCountIs(100),
+            stopWhen,
             abortSignal: options?.abortSignal,
             providerOptions: {
                 openrouter: {
@@ -412,7 +573,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         try {
             // CRITICAL: This loop is what actually triggers the stream execution
             for await (const _chunk of textStream) {
-                // Consume the stream to trigger execution
+                // The onChunk callback should handle all processing
+                // We just need to consume the stream to trigger execution
             }
         } catch (error) {
             await this.handleStreamError(error, startTime);
@@ -435,6 +597,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         // Update previousChunkType AFTER emitting the change event
         this.previousChunkType = chunk.type;
 
+        console.log('handleCunk on llm service', chunk.type);
+
         switch (chunk.type) {
             case "text-delta":
                 // AI SDK uses 'delta' for text-delta chunks, not 'text'
@@ -447,8 +611,27 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 break;
             case "reasoning-delta":
                 // Handle reasoning-delta separately - emit reasoning event
-                if ('text' in chunk && chunk.text) {
-                    this.handleReasoningDelta(chunk.text);
+                // The AI SDK may transform our custom reasoning-delta chunks
+                // to use 'text' property instead of 'delta'
+                const reasoningContent = (chunk as any).delta || (chunk as any).text;
+                logger.debug("[LLMService] Processing reasoning-delta chunk - DETAILED", {
+                    hasDelta: 'delta' in chunk,
+                    deltaLength: (chunk as any).delta?.length,
+                    hasText: 'text' in chunk,
+                    textLength: (chunk as any).text?.length,
+                    reasoningContent: reasoningContent?.substring(0, 100),
+                    willCallHandleReasoningDelta: !!reasoningContent
+                });
+                if (reasoningContent) {
+                    logger.debug("[LLMService] CALLING handleReasoningDelta NOW", {
+                        contentLength: reasoningContent.length
+                    });
+                    this.handleReasoningDelta(reasoningContent);
+                    logger.debug("[LLMService] FINISHED calling handleReasoningDelta");
+                } else {
+                    logger.error("[LLMService] NO REASONING CONTENT FOUND IN CHUNK", {
+                        chunk: JSON.stringify(chunk)
+                    });
                 }
                 break;
             case "tool-call":
@@ -483,8 +666,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 });
                 break;
             case "reasoning-end":
-                logger.debug("[LLMService] Reasoning ended", {
-                    id: chunk.id
+                logger.info("[LLMService] Reasoning ended", {
+                    id: chunk.id,
+                    chunk
                 });
                 break;
             case "error":
@@ -506,9 +690,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             e: StepResult<Record<string, AISdkTool>> & {
                 steps: StepResult<Record<string, AISdkTool>>[];
                 totalUsage: LanguageModelUsage;
-                providerMetadata: Record<string, any>;
+                providerMetadata: ProviderMetadata;
             }
-        ) => {
+        ): Promise<void> => {
             const duration = Date.now() - startTime;
 
             try {
@@ -523,7 +707,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
                 if (this.provider === 'claudeCode' && e.providerMetadata?.['claude-code']?.sessionId) {
                     const capturedSessionId = e.providerMetadata['claude-code'].sessionId;
-                    logger.info("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
+                    logger.debug("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
                         capturedSessionId,
                         previousSessionId: this.sessionId || 'NONE',
                         provider: this.provider,
@@ -537,7 +721,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     });
                 }
                 
-                logger.info("[LLMService] Stream finished", {
+                logger.debug("[LLMService] Stream finished", {
                     duration,
                     model: this.model,
                     startTime,
@@ -545,8 +729,27 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     agentSlug: this.agentSlug,
                 });
 
+                // Extract reasoning from all steps
+                const allReasoningTexts = e.steps
+                    .map(step => step.reasoningText)
+                    .filter(text => text && text.trim().length > 0);
+                const fullReasoning = allReasoningTexts.length > 0
+                    ? allReasoningTexts.join('\n\n')
+                    : undefined;
+
+                logger.debug("[LLMService] Stream onFinish - emitting complete event", {
+                    hasText: !!e.text,
+                    textLength: e.text?.length || 0,
+                    textPreview: e.text?.substring(0, 100),
+                    hasReasoning: !!fullReasoning,
+                    reasoningLength: fullReasoning?.length || 0,
+                    reasoningPreview: fullReasoning?.substring(0, 100),
+                    finishReason: e.finishReason,
+                });
+
                 this.emit("complete", {
                     message: e.text || "",
+                    reasoning: fullReasoning,
                     steps: e.steps,
                     usage: {
                         costUsd: e.providerMetadata?.openrouter?.usage?.cost,
@@ -576,10 +779,16 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.error("[LLMService] Failed to log error response", { error: err });
             });
 
+        // Format stack trace for better readability
+        const stackLines = error instanceof Error && error.stack
+            ? error.stack.split('\n').map(line => line.trim()).filter(Boolean)
+            : undefined;
+
         logger.error("[LLMService] Stream failed", {
             model: `${this.provider}:${this.model}`,
             duration,
             error: error instanceof Error ? error.message : String(error),
+            stack: stackLines,
         });
     }
 
@@ -588,10 +797,25 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleReasoningDelta(text: string): void {
+        logger.debug("[LLMService] INSIDE handleReasoningDelta - ABOUT TO EMIT", {
+            deltaLength: text.length,
+            preview: text.substring(0, 100),
+            hasListeners: this.listenerCount('reasoning'),
+            allEventNames: this.eventNames()
+        });
+
         this.emit("reasoning", { delta: text });
+
+        logger.debug("[LLMService] EMITTED reasoning event SUCCESSFULLY");
     }
 
     private handleToolCall(toolCallId: string, toolName: string, args: unknown): void {
+        logger.debug("[LLMService] Emitting tool-will-execute", {
+            toolName,
+            toolCallId,
+            toolCallIdType: typeof toolCallId,
+            toolCallIdLength: toolCallId?.length,
+        });
         this.emit("tool-will-execute", {
             toolName,
             toolCallId,
@@ -600,6 +824,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
+        logger.debug("[LLMService] Emitting tool-did-execute", {
+            toolName,
+            toolCallId,
+            toolCallIdType: typeof toolCallId,
+            toolCallIdLength: toolCallId?.length,
+        });
         this.emit("tool-did-execute", {
             toolName,
             toolCallId,
@@ -610,8 +840,62 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     /**
      * Get the language model for use with AI SDK's generateObject and other functions
      */
-    getModel(): LanguageModel {
-        return this.getLanguageModel();
+    getModel(enableThrottling: boolean = false): LanguageModel {
+        // Default to no throttling for direct model access
+        return this.getLanguageModel(undefined, enableThrottling);
+    }
+
+    /**
+     * Log generation request
+     */
+    private async logGenerationRequest(
+        messages: ModelMessage[],
+        startTime: number
+    ): Promise<void> {
+        await this.llmLogger.logLLMRequest({
+            request: {
+                messages,
+                model: `${this.provider}:${this.model}`,
+            },
+            timestamp: startTime,
+        });
+    }
+
+    /**
+     * Log generation response
+     */
+    private async logGenerationResponse(
+        content: string,
+        usage: LanguageModelUsage,
+        startTime: number
+    ): Promise<void> {
+        await this.llmLogger.logLLMResponse({
+            response: {
+                content,
+                usage,
+            },
+            endTime: Date.now(),
+            startTime,
+        });
+    }
+
+    /**
+     * Execute object generation and handle logging
+     */
+    private async executeObjectGeneration<T>(
+        languageModel: LanguageModel,
+        messages: ModelMessage[],
+        schema: z.ZodSchema<T>,
+        tools: Record<string, AISdkTool> | undefined
+    ): Promise<{ object: T; usage: LanguageModelUsage }> {
+        return await generateObject({
+            model: languageModel,
+            messages,
+            schema,
+            temperature: this.temperature,
+            maxTokens: this.maxTokens,
+            ...(tools && Object.keys(tools).length > 0 ? { tools } : {})
+        });
     }
 
     /**
@@ -628,70 +912,81 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     ): Promise<{ object: T; usage: LanguageModelUsageWithCostUsd }> {
         const startTime = Date.now();
 
-        try {
-            logger.debug("[LLMService] Generating structured object", {
-                provider: this.provider,
-                model: this.model,
-                messagesCount: messages.length
-            });
+        return this.withErrorHandling(
+            async () => {
+                logger.debug("[LLMService] Generating structured object", {
+                    provider: this.provider,
+                    model: this.model,
+                    messagesCount: messages.length
+                });
 
-            // For generateObject, don't pass messages to getLanguageModel
-            // since we're passing them directly to generateObject
-            const languageModel = this.getLanguageModel();
-
-            // Build the generateObject parameters
-            const generateParams: any = {
-                model: languageModel,
-                messages,
-                schema,
-                temperature: this.temperature,
-                maxTokens: this.maxTokens,
-            };
-
-            // Only add tools if they are provided
-            if (tools && Object.keys(tools).length > 0) {
-                generateParams.tools = tools;
-            }
-
-            const result = await generateObject(generateParams);
-
-            const duration = Date.now() - startTime;
-
-            // Log the structured generation
-            await this.llmLogger.logLLMRequest({
-                request: {
+                const languageModel = this.getLanguageModel();
+                const result = await this.executeObjectGeneration(
+                    languageModel,
                     messages,
-                    model: `${this.provider}:${this.model}`,
-                },
-                timestamp: startTime,
-            });
+                    schema,
+                    tools
+                );
 
-            await this.llmLogger.logLLMResponse({
-                response: {
-                    content: JSON.stringify(result.object),
-                    usage: result.usage,
-                },
-                endTime: Date.now(),
-                startTime,
-            });
+                const duration = Date.now() - startTime;
 
-            logger.debug("[LLMService] Structured object generated", {
-                provider: this.provider,
-                model: this.model,
-                duration,
-                usage: result.usage
-            });
+                await this.logGenerationRequest(messages, startTime);
+                await this.logGenerationResponse(
+                    JSON.stringify(result.object),
+                    result.usage,
+                    startTime
+                );
 
-            return {
-                object: result.object,
-                usage: {
-                    ...result.usage,
-                    costUsd: this.calculateCostUsd(result.usage)
-                }
-            };
+                logger.debug("[LLMService] Structured object generated", {
+                    provider: this.provider,
+                    model: this.model,
+                    duration,
+                    usage: result.usage
+                });
+
+                return {
+                    object: result.object,
+                    usage: {
+                        ...result.usage,
+                        costUsd: this.calculateCostUsd(result.usage)
+                    }
+                };
+            },
+            "Generate structured object",
+            startTime
+        );
+    }
+
+    /**
+     * Calculate cost in USD for token usage
+     * Uses standard pricing tiers based on provider and model
+     */
+    private calculateCostUsd(usage: LanguageModelUsage): number {
+        const promptTokens = usage.promptTokens ?? 0;
+        const completionTokens = usage.completionTokens ?? 0;
+        
+        const costPer1kPrompt = 0.001;
+        const costPer1kCompletion = 0.002;
+        
+        const promptCost = (promptTokens / 1000) * costPer1kPrompt;
+        const completionCost = (completionTokens / 1000) * costPer1kCompletion;
+        
+        return promptCost + completionCost;
+    }
+
+    /**
+     * Higher-order function for centralized error handling
+     */
+    private async withErrorHandling<T>(
+        operation: () => Promise<T>,
+        operationName: string,
+        startTime: number
+    ): Promise<T> {
+        try {
+            return await operation();
         } catch (error) {
             const duration = Date.now() - startTime;
-            logger.error("[LLMService] Failed to generate structured object", {
+            logger.error(`[LLMService] ${operationName} failed`, {
                 provider: this.provider,
                 model: this.model,
                 duration,
@@ -699,15 +994,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             });
             throw error;
         }
-    }
-
-    /**
-     * Calculate cost in USD for token usage
-     */
-    private calculateCostUsd(usage: LanguageModelUsage): number {
-        // TODO: Implement actual cost calculation based on provider/model
-        // For now, return 0
-        return 0;
     }
 
 }

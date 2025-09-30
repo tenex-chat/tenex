@@ -1,4 +1,4 @@
-import { tool, type CoreTool } from 'ai';
+import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
 import type { AISdkTool } from '@/tools/registry';

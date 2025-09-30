@@ -1,4 +1,4 @@
-import { tool, type SdkMcpServer } from 'ai-sdk-provider-claude-code';
+import { tool, type SdkMcpServer, createSdkMcpServer } from 'ai-sdk-provider-claude-code';
 import type { AISdkTool } from '@/tools/registry';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
@@ -72,9 +72,7 @@ export class TenexToolsAdapter {
         });
 
         // Create and return the SDK MCP server
-        // Import is conditional to avoid issues if ai-sdk-provider-claude-code is not available
         try {
-            const { createSdkMcpServer } = require('ai-sdk-provider-claude-code');
             return createSdkMcpServer({
                 name: 'tenex',
                 tools: sdkTools

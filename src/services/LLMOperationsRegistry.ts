@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 
 // Store essential operation metadata
-interface LLMOperation {
+export interface LLMOperation {
   id: string;
   abortController: AbortController;
   eventId: string;        // The event being processed
@@ -145,27 +145,39 @@ class LLMOperationsRegistry {
     return this.operations.size;
   }
   
-  // Get operations grouped by event ID for publishing
+  /**
+   * Get operations grouped by event ID for publishing.
+   * Each operation appears under both its triggering event ID and conversation root ID.
+   */
   getOperationsByEvent(): Map<string, LLMOperation[]> {
     const byEvent = new Map<string, LLMOperation[]>();
     
     for (const operation of this.operations.values()) {
-      // Group by triggering event
-      if (!byEvent.has(operation.eventId)) {
-        byEvent.set(operation.eventId, []);
-      }
-      byEvent.get(operation.eventId)!.push(operation);
+      this.addOperationToEventMap(byEvent, operation.eventId, operation);
       
-      // Also group by conversation/root event if different
       if (operation.conversationId !== operation.eventId) {
-        if (!byEvent.has(operation.conversationId)) {
-          byEvent.set(operation.conversationId, []);
-        }
-        byEvent.get(operation.conversationId)!.push(operation);
+        this.addOperationToEventMap(byEvent, operation.conversationId, operation);
       }
     }
     
     return byEvent;
+  }
+  
+  /**
+   * Helper to add an operation to the event map.
+   * Creates the array if it doesn't exist, then appends the operation.
+   */
+  private addOperationToEventMap(
+    map: Map<string, LLMOperation[]>,
+    eventId: string,
+    operation: LLMOperation
+  ): void {
+    let operations = map.get(eventId);
+    if (!operations) {
+      operations = [];
+      map.set(eventId, operations);
+    }
+    operations.push(operation);
   }
   
   // Subscribe to changes
@@ -180,11 +192,17 @@ class LLMOperationsRegistry {
     }
   }
   
+  /**
+   * Index an operation by event ID for fast lookup.
+   * Creates the Set if it doesn't exist, then adds the operation ID.
+   */
   private indexOperation(operationId: string, eventId: string): void {
-    if (!this.byEvent.has(eventId)) {
-      this.byEvent.set(eventId, new Set());
+    let eventOperations = this.byEvent.get(eventId);
+    if (!eventOperations) {
+      eventOperations = new Set();
+      this.byEvent.set(eventId, eventOperations);
     }
-    this.byEvent.get(eventId)!.add(operationId);
+    eventOperations.add(operationId);
   }
   
   private unindexOperation(operationId: string, eventId: string): void {

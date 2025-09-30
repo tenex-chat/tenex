@@ -1,4 +1,4 @@
-import { tool, type CoreTool } from 'ai';
+import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
 import type { AISdkTool } from '@/tools/registry';
@@ -60,7 +60,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
         // Execute function - the main tool logic
         execute: async (input: ToolInput) => {
             // Access context properties if needed
-            const { agent, projectPath, conversationId, agentPublisher } = context;
+            const { agent, conversationId, agentPublisher } = context;
             
             // TODO: Implement your tool logic here
             // You can:

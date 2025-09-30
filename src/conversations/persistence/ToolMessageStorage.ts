@@ -19,12 +19,12 @@ export class ToolMessageStorage {
     toolCall: {
       toolCallId: string;
       toolName: string;
-      input: any;
+      input: unknown;
     },
     toolResult: {
       toolCallId: string;
       toolName: string;
-      output: any;
+      output: unknown;
       error?: boolean;
     },
     agentPubkey: string

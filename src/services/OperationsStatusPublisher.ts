@@ -5,7 +5,7 @@ import type { ProjectContext } from "@/services/ProjectContext";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { LLMOperationsRegistry } from "./LLMOperationsRegistry";
+import type { LLMOperationsRegistry, LLMOperation } from "./LLMOperationsRegistry";
 
 /**
  * OperationsStatusPublisher handles publishing of LLM operation status events to Nostr.
@@ -139,7 +139,7 @@ export class OperationsStatusPublisher {
     });
   }
   
-  private hasOperationsChanged(eventId: string, operations: any[]): boolean {
+  private hasOperationsChanged(eventId: string, operations: LLMOperation[]): boolean {
     const lastState = this.lastPublishedState.get(eventId);
     if (!lastState) return true;
     
@@ -155,7 +155,7 @@ export class OperationsStatusPublisher {
   
   private async publishEventStatus(
     eventId: string, 
-    operations: any[], // Using any to avoid circular dependency with LLMOperation type
+    operations: LLMOperation[],
     projectCtx: ProjectContext
   ): Promise<void> {
     const event = new NDKEvent(getNDK());

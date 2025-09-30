@@ -1,10 +1,10 @@
 import { tool } from 'ai';
-import type { Tool } from 'ai';
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
 
@@ -136,7 +136,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
 }
 
 // AI SDK tool factory
-export function createDelegatePhaseTool(context: ExecutionContext) {
+export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Switch conversation phase and delegate a question or task to one or more agents. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
@@ -148,6 +148,9 @@ export function createDelegatePhaseTool(context: ExecutionContext) {
 
     Object.defineProperty(aiTool, 'getHumanReadableContent', {
         value: ({ phase, recipients }: DelegatePhaseInput) => {
+            if (!recipients || recipients.length === 0) {
+                return `Switching to ${phase.toUpperCase()} phase`;
+            }
             return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.join(', ')}`;
         },
         enumerable: false,

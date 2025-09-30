@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
 import type { AISdkTool } from '@/tools/registry';
 import { writeFile, mkdir } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { logger } from '@/utils/logger';
 import { getProjectContext } from '@/services/ProjectContext';
 

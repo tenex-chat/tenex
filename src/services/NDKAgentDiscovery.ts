@@ -2,6 +2,7 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKFilter } from "@nostr-dev-kit/ndk";
+import { shouldUseDefinitionForPhase } from "@/conversations/utils/phaseUtils";
 
 /**
  * Options for discovering NDKAgentDefinition events
@@ -106,8 +107,6 @@ export class NDKAgentDiscovery {
    * @returns Filtered agents
    */
   private filterByPhase(agents: NDKAgentDefinition[], phase: string): NDKAgentDefinition[] {
-    const { shouldUseDefinitionForPhase } = require("@/conversations/utils/phaseUtils");
-    
     return agents.filter(agent => {
       // Get phase from agent definition
       const agentPhase = agent.phase;

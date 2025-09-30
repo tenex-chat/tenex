@@ -1,7 +1,9 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
+import type { AISdkTool } from '@/tools/registry';
 import { logger } from '@/utils/logger';
+import type { NDKEvent } from '@nostr-dev-kit/ndk';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -30,7 +32,7 @@ interface UploadBlobOutput {
 }
 
 interface BlossomConfig {
-  serverUrl?: string;
+  serverUrl: string;
 }
 
 /**
@@ -44,7 +46,7 @@ async function getBlossomConfig(): Promise<BlossomConfig> {
     return {
       serverUrl: config.blossomServerUrl || 'https://blossom.primal.net'
     };
-  } catch (error) {
+  } catch {
     // Return default configuration if file doesn't exist or has errors
     return {
       serverUrl: 'https://blossom.primal.net'
@@ -189,7 +191,7 @@ async function createAuthEvent(
   sha256Hash: string,
   description: string,
   context: ExecutionContext
-): Promise<any> {
+): Promise<NDKEvent> {
   const { NDKEvent } = await import('@nostr-dev-kit/ndk');
   
   const event = new NDKEvent();
@@ -215,7 +217,7 @@ async function uploadToBlossomServer(
   serverUrl: string,
   data: Buffer,
   mimeType: string,
-  authEvent: any
+  authEvent: NDKEvent
 ): Promise<UploadBlobOutput> {
   // Encode the auth event as base64 for the header
   const authHeader = `Nostr ${Buffer.from(JSON.stringify(authEvent.rawEvent())).toString('base64')}`;
@@ -279,7 +281,7 @@ async function executeUploadBlob(
 
   // Get Blossom server configuration
   const config = await getBlossomConfig();
-  const serverUrl = config.serverUrl!;
+  const serverUrl = config.serverUrl;
   
   logger.info('[upload_blob] Using Blossom server', { serverUrl });
 
@@ -321,7 +323,7 @@ async function executeUploadBlob(
     // Check if file exists
     try {
       await fs.access(filePath);
-    } catch (error) {
+    } catch {
       throw new Error(`File not found: ${filePath}`);
     }
     
@@ -367,7 +369,7 @@ async function executeUploadBlob(
 /**
  * Create the upload_blob tool for AI SDK
  */
-export function createUploadBlobTool(context: ExecutionContext) {
+export function createUploadBlobTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: `Upload files, URLs, or base64 blobs to a Blossom server.
 

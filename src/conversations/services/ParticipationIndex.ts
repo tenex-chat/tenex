@@ -17,7 +17,8 @@ export class ParticipationIndex {
             this.index.set(conversationId, new Map());
         }
 
-        const convIndex = this.index.get(conversationId)!;
+        const convIndex = this.index.get(conversationId);
+        if (!convIndex) return;
 
         // Clear and rebuild to ensure consistency
         convIndex.clear();
@@ -30,7 +31,10 @@ export class ParticipationIndex {
                 convIndex.set(event.pubkey, new Set());
             }
 
-            convIndex.get(event.pubkey)!.add(event.id);
+            const eventSet = convIndex.get(event.pubkey);
+            if (eventSet) {
+                eventSet.add(event.id);
+            }
         }
 
         logger.debug("[ParticipationIndex] Built index", {

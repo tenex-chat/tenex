@@ -6,9 +6,8 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
-import { createProviderRegistry, generateText, streamText, type Provider, type ProviderRegistry } from "ai";
+import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
-import { createMockProvider } from "./providers/MockProvider";
 import { createClaudeCode, type ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { PermissionMode } from "@anthropic-ai/claude-code";
 import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
@@ -25,7 +24,7 @@ export class LLMServiceFactory {
     /**
      * Initialize providers from configuration
      */
-    initializeProviders(providerConfigs: Record<string, { apiKey: string }>): void {
+    async initializeProviders(providerConfigs: Record<string, { apiKey: string }>): Promise<void> {
         this.providers.clear();
         this.claudeCodeApiKey = null;
 
@@ -33,9 +32,14 @@ export class LLMServiceFactory {
         if (process.env.USE_MOCK_LLM === 'true') {
             logger.debug("[LLMServiceFactory] Mock LLM mode enabled via USE_MOCK_LLM environment variable");
 
-            // Mock scenarios loading is not yet implemented
-            // For now, just use default mock provider
-            this.providers.set("mock", createMockProvider());
+            // Dynamically import MockProvider only when needed to avoid loading test dependencies
+            try {
+                const { createMockProvider } = await import("./providers/MockProvider");
+                this.providers.set("mock", createMockProvider());
+            } catch (error) {
+                logger.error("[LLMServiceFactory] Failed to load MockProvider:", error);
+                throw new Error("Mock mode is enabled but MockProvider could not be loaded. Make sure test dependencies are installed.");
+            }
 
             // In mock mode, we only use the mock provider
             // Other providers can still be initialized but won't be used by default
@@ -146,7 +150,7 @@ export class LLMServiceFactory {
         context?: {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
-            sessionId?: string; // Session ID for resuming claude_code conversations
+            sessionId?: string;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -214,37 +218,21 @@ export class LLMServiceFactory {
             };
 
             // Create the provider function that can accept resume parameter
-            const providerFunction = (model: string, options?: ClaudeCodeSettings) => {
+            const providerFunction = (model: string, options?: ClaudeCodeSettings): ReturnType<ReturnType<typeof createClaudeCode>> => {
                 return createClaudeCode(claudeCodeConfig)(model, options);
             };
 
-            logger.info("[LLMServiceFactory] ✅ CREATED CLAUDE CODE PROVIDER FUNCTION", {
-                agent: context?.agentName,
-                sessionId: context?.sessionId || 'NONE',
-                hasSessionId: !!context?.sessionId,
-                mcpServers: Object.keys(mcpServersConfig),
-                allowedTools,
-                toolCount: allowedTools.length
-            });
-
-            // Return LLMService with Claude Code provider function and session ID
-            logger.info("[LLMServiceFactory] 📦 RETURNING LLMSERVICE WITH SESSION", {
-                sessionId: context?.sessionId || 'NONE',
-                hasSessionId: !!context?.sessionId,
-                provider: 'claudeCode',
-                model: config.model
-            });
-
             return new LLMService(
                 llmLogger,
-                null, // No registry for Claude Code
+                null,
                 'claudeCode',
                 config.model,
                 config.temperature,
                 config.maxTokens,
                 providerFunction,
-                context?.sessionId, // Pass session ID if available
-                agentSlug // Pass agent slug for logging
+                context?.sessionId,
+                agentSlug,
+                context?.progressMonitor
             );
         }
 
@@ -269,9 +257,10 @@ export class LLMServiceFactory {
             config.model,
             config.temperature,
             config.maxTokens,
-            undefined, // No Claude Code provider function
-            undefined, // No session ID
-            agentSlug // Pass agent slug for logging
+            undefined,
+            undefined,
+            agentSlug,
+            context?.progressMonitor
         );
     }
 

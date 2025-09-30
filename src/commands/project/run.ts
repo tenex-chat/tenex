@@ -7,6 +7,7 @@ import { shutdownNDK, getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, dynamicToolService } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { SchedulerService } from "@/services/SchedulerService";
+import { RagSubscriptionService } from "@/services/RagSubscriptionService";
 import { StatusPublisher } from "@/services/status";
 import { handleCliError } from "@/utils/cli-error";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -31,6 +32,10 @@ export const projectRunCommand = new Command("run")
       // Initialize scheduler service
       const schedulerService = SchedulerService.getInstance();
       await schedulerService.initialize(getNDK(), projectPath);
+      
+      // Initialize RAG subscription service
+      const ragSubscriptionService = RagSubscriptionService.getInstance();
+      await ragSubscriptionService.initialize();
       
       // Initialize dynamic tool service
       await dynamicToolService.initialize();
@@ -124,6 +129,9 @@ async function runProjectListener(projectPath: string): Promise<void> {
 
       // Shutdown scheduler service
       SchedulerService.getInstance().shutdown();
+      
+      // Note: RagSubscriptionService doesn't have a shutdown method yet
+      // It would be good to add one to properly clean up listeners
       
       // Shutdown dynamic tool service
       dynamicToolService.shutdown();

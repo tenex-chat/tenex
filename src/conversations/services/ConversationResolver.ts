@@ -59,7 +59,7 @@ export class ConversationResolver {
   }
 
   /**
-   * Handle orphaned replies by creating a new conversation
+   * Handle orphaned replies by fetching the thread from the network
    */
   private async handleOrphanedReply(
     event: NDKEvent,
@@ -78,32 +78,55 @@ export class ConversationResolver {
       return undefined;
     }
 
-    const convRoot = AgentEventDecoder.getConversationRoot(event);
+    const rootEventId = event.tagValue("E");
+    if (!rootEventId) {
+      logger.warn(chalk.yellow("Orphaned reply has no E tag, cannot fetch thread"));
+      return undefined;
+    }
+
     logger.info(
       chalk.yellow(
-        `Creating new conversation for orphaned kTag 11 reply to conversation root: ${convRoot}`
+        `Fetching conversation thread for orphaned reply, root event: ${rootEventId}`
       )
     );
 
-    // Create a synthetic root event based on the reply
-    // Use NDKEvent constructor to maintain proper prototype chain
     const { getNDK } = await import("@/nostr/ndkClient");
     const ndk = getNDK();
-    const syntheticRootEvent = new NDKEvent(ndk);
 
-    // Copy properties from the original event
-    syntheticRootEvent.id = convRoot || event.id; // Use conversation root if available, otherwise use the reply's ID
-    syntheticRootEvent.content = `[Orphaned conversation - original root not found]\n\n${event.content}`;
-    syntheticRootEvent.tags = event.tags.filter((tag) => tag[0] !== "E" && tag[0] !== "e"); // Remove reply tags
-    syntheticRootEvent.kind = event.kind;
-    syntheticRootEvent.pubkey = event.pubkey;
-    syntheticRootEvent.created_at = event.created_at;
-    syntheticRootEvent.sig = event.sig;
+    const events = await ndk.fetchEvents([
+      { ids: [rootEventId] },
+      { "#E": [rootEventId] },
+      { "#e": [rootEventId] },
+    ]);
 
-    const conversation = await this.conversationCoordinator.createConversation(syntheticRootEvent);
+    const eventsArray = Array.from(events);
+    const rootEvent = eventsArray.find(e => e.id === rootEventId);
 
-    // Add the actual reply event to the conversation history
-    if (conversation && event.id !== conversation.id) {
+    if (!rootEvent) {
+      logger.warn(chalk.yellow(`Could not fetch root event ${rootEventId} from network`));
+      return undefined;
+    }
+
+    const replies = eventsArray.filter(e => e.id !== rootEventId);
+
+    logger.info(
+      chalk.green(
+        `Fetched root event and ${replies.length} replies`
+      )
+    );
+
+    const conversation = await this.conversationCoordinator.createConversation(rootEvent);
+    if (!conversation) {
+      return undefined;
+    }
+
+    replies.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+    for (const reply of replies) {
+      await this.conversationCoordinator.addEvent(conversation.id, reply);
+    }
+
+    if (event.id !== rootEvent.id && !replies.some(r => r.id === event.id)) {
       await this.conversationCoordinator.addEvent(conversation.id, event);
     }
 

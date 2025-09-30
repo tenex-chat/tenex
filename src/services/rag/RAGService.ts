@@ -11,11 +11,14 @@ import { logger } from '@/utils/logger';
  */
 export class RAGService {
     private static instance: RAGService | null = null;
-    private dbManager: RAGDatabaseManager | null = null;
-    private operations: RAGOperations | null = null;
-    private embeddingProvider: EmbeddingProvider | null = null;
+    private dbManager: RAGDatabaseManager;
+    private operations: RAGOperations;
+    private embeddingProvider: EmbeddingProvider;
+    private initializationPromise: Promise<void>;
 
-    private constructor() {}
+    private constructor() {
+        this.initializationPromise = this.initialize();
+    }
 
     /**
      * Get singleton instance
@@ -28,37 +31,34 @@ export class RAGService {
     }
 
     /**
-     * Initialize the service with dependencies
+     * Ensure the service has completed initialization.
+     * This must be called before any operations to guarantee all components are ready.
      */
     private async ensureInitialized(): Promise<void> {
-        if (!this.dbManager || !this.operations || !this.embeddingProvider) {
-            await this.initialize();
-        }
+        await this.initializationPromise;
     }
 
     /**
-     * Initialize service components
+     * Initialize service components.
+     * This happens automatically during construction to ensure components are never null.
      */
-    private async initialize(
-        dataDir?: string,
-        embeddingProvider?: EmbeddingProvider
-    ): Promise<void> {
-        logger.debug('Initializing RAGService components');
-        
-        // Initialize database manager
-        this.dbManager = new RAGDatabaseManager(dataDir);
-        
-        // Initialize or use provided embedding provider
-        this.embeddingProvider = embeddingProvider || 
-            await EmbeddingProviderFactory.create();
-        
-        // Initialize operations with dependencies
-        this.operations = new RAGOperations(
-            this.dbManager,
-            this.embeddingProvider
-        );
-        
-        logger.info('RAGService initialized successfully');
+    private async initialize(): Promise<void> {
+        try {
+            logger.debug('Initializing RAGService components');
+            
+            this.dbManager = new RAGDatabaseManager();
+            this.embeddingProvider = await EmbeddingProviderFactory.create();
+            this.operations = new RAGOperations(
+                this.dbManager,
+                this.embeddingProvider
+            );
+            
+            logger.info('RAGService initialized successfully');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error('RAGService initialization failed', { error: message });
+            throw new Error(`Failed to initialize RAGService: ${message}`);
+        }
     }
 
     /**
@@ -69,7 +69,7 @@ export class RAGService {
         schema?: Record<string, any>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
-        return this.operations!.createCollection(name, schema);
+        return this.operations.createCollection(name, schema);
     }
 
     /**
@@ -80,7 +80,7 @@ export class RAGService {
         documents: RAGDocument[]
     ): Promise<void> {
         await this.ensureInitialized();
-        return this.operations!.addDocuments(collectionName, documents);
+        return this.operations.addDocuments(collectionName, documents);
     }
 
     /**
@@ -92,7 +92,7 @@ export class RAGService {
         topK: number = 5
     ): Promise<RAGQueryResult[]> {
         await this.ensureInitialized();
-        return this.operations!.performSemanticSearch(collectionName, queryText, topK);
+        return this.operations.performSemanticSearch(collectionName, queryText, topK);
     }
 
     /**
@@ -100,7 +100,7 @@ export class RAGService {
      */
     public async deleteCollection(name: string): Promise<void> {
         await this.ensureInitialized();
-        return this.operations!.deleteCollection(name);
+        return this.operations.deleteCollection(name);
     }
 
     /**
@@ -108,19 +108,19 @@ export class RAGService {
      */
     public async listCollections(): Promise<string[]> {
         await this.ensureInitialized();
-        return this.operations!.listCollections();
+        return this.operations.listCollections();
     }
 
     /**
-     * Set a custom embedding provider
+     * Set a custom embedding provider.
+     * This recreates the operations instance with the new provider.
      */
     public async setEmbeddingProvider(provider: EmbeddingProvider): Promise<void> {
         await this.ensureInitialized();
-        this.embeddingProvider = provider;
         
-        // Recreate operations with new provider
+        this.embeddingProvider = provider;
         this.operations = new RAGOperations(
-            this.dbManager!,
+            this.dbManager,
             provider
         );
         
@@ -132,21 +132,15 @@ export class RAGService {
      */
     public async getEmbeddingProviderInfo(): Promise<string> {
         await this.ensureInitialized();
-        return this.embeddingProvider!.getModelId();
+        return this.embeddingProvider.getModelId();
     }
 
     /**
      * Clean up and close connections
      */
     public async close(): Promise<void> {
-        if (this.dbManager) {
-            await this.dbManager.close();
-        }
-        
-        this.dbManager = null;
-        this.operations = null;
-        this.embeddingProvider = null;
-        
+        await this.ensureInitialized();
+        await this.dbManager.close();
         logger.debug('RAGService closed');
     }
 

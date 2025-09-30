@@ -3,14 +3,13 @@ import { readdir, stat } from 'fs/promises';
 import { join, basename } from 'path';
 import { logger } from '@/utils/logger';
 import type { ExecutionContext } from '@/agents/execution/types';
-import type { CoreTool } from 'ai';
 import type { AISdkTool } from '@/tools/registry';
 import { debounce } from 'lodash';
 
 /**
  * Type for dynamic tool factory functions
  */
-export type DynamicToolFactory = (context: ExecutionContext) => AISdkTool;
+export type DynamicToolFactory = (context: ExecutionContext) => AISdkTool<unknown, unknown>;
 
 /**
  * Service for managing dynamically created tools
@@ -19,7 +18,7 @@ export class DynamicToolService {
     private static instance: DynamicToolService;
     private readonly dynamicToolsPath = join(process.cwd(), '.tenex/tools');
     private dynamicTools = new Map<string, DynamicToolFactory>();
-    private watcher: any = null;
+    private watcher: ReturnType<typeof watch> | null = null;
     private fileHashes = new Map<string, string>();
     
     private constructor() {
@@ -47,7 +46,7 @@ export class DynamicToolService {
         // Ensure the dynamic tools directory exists
         try {
             await stat(this.dynamicToolsPath);
-        } catch (error) {
+        } catch {
             // Directory doesn't exist, create it
             const { mkdir } = await import('fs/promises');
             await mkdir(this.dynamicToolsPath, { recursive: true });
@@ -103,7 +102,7 @@ export class DynamicToolService {
                 await stat(filePath);
                 // File exists, reload it
                 await this.loadTool(filePath);
-            } catch (error) {
+            } catch {
                 // File was deleted
                 await this.unloadTool(filePath);
             }
@@ -151,15 +150,15 @@ export class DynamicToolService {
             const toolName = this.extractToolName(filename);
             
             // Test that the factory function works
-            // We'll need a minimal context to validate it returns a CoreTool
-            const testContext: any = {
+            // We'll need a minimal context to validate it returns a valid tool
+            const testContext = {
                 agent: { name: 'test' },
                 projectPath: process.cwd(),
                 conversationId: 'test',
-                triggeringEvent: {} as any,
-                conversationCoordinator: {} as any,
-                agentPublisher: {} as any
-            };
+                triggeringEvent: {} as ExecutionContext['triggeringEvent'],
+                conversationCoordinator: {} as ExecutionContext['conversationCoordinator'],
+                agentPublisher: {} as ExecutionContext['agentPublisher']
+            } as ExecutionContext;
             
             const testTool = module.default(testContext);
             if (!testTool || typeof testTool.execute !== 'function') {
@@ -224,8 +223,8 @@ export class DynamicToolService {
     /**
      * Get dynamic tools as an object for a specific context
      */
-    public getDynamicToolsObject(context: ExecutionContext): Record<string, CoreTool<any, any>> {
-        const tools: Record<string, CoreTool<any, any>> = {};
+    public getDynamicToolsObject(context: ExecutionContext): Record<string, AISdkTool<unknown, unknown>> {
+        const tools: Record<string, AISdkTool<unknown, unknown>> = {};
         
         for (const [name, factory] of this.dynamicTools) {
             try {

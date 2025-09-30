@@ -5,16 +5,26 @@ import { Database } from "bun:sqlite";
 import { ConversationCoordinator } from "@/conversations";
 import { ConversationMessageRepository } from "@/conversations/ConversationMessageRepository";
 import { AgentRegistry } from "@/agents/AgentRegistry";
+import type { AgentInstance } from "@/agents/types";
 import { ProjectContext } from "@/services/ProjectContext";
 import { setupMockModules, createTestAgents } from "./e2e-mocks";
-import type { E2ETestContext } from "./e2e-types";
+import type { E2ETestContext, TestEnvironmentCleanupResult } from "./e2e-types";
+import {
+    createProjectTagAccessor,
+    createSignerPrivateKeyAccessor,
+    createProjectOwnershipChecker,
+    createProjectManagerAccessor,
+    createPhaseSpecialistChecker,
+    createPhaseSpecialistAccessor,
+    createAgentIdentifierResolver
+} from "./e2e-helpers";
 
 /**
  * Setup E2E test environment
  */
 export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: string): Promise<E2ETestContext> {
     // Setup mock modules
-    const { tempDir, projectPath, mockLLM, mockFiles } = await setupMockModules(scenarios, defaultResponse);
+    const { tempDir, projectPath, mockLLM } = await setupMockModules(scenarios, defaultResponse);
     
     // Create test agents
     const testAgents = createTestAgents();
@@ -27,11 +37,19 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         ["planner", plannerAgent]
     ]);
     
+    const getProjectTagValue = createProjectTagAccessor("Test Project");
+    const getSignerPrivateKey = createSignerPrivateKeyAccessor("test-key");
+    const checkIsProjectOwner = createProjectOwnershipChecker(true);
+    const getProjectManager = createProjectManagerAccessor(pmAgent);
+    const checkHasPhaseSpecialist = createPhaseSpecialistChecker();
+    const getPhaseSpecialist = createPhaseSpecialistAccessor();
+    const getAgentByIdentifier = createAgentIdentifierResolver(agentsMap);
+    
     const mockProjectContext = {
         project: { 
             id: "test-project", 
             pubkey: "test-pubkey",
-            tagValue: (tag: string) => tag === "title" ? "Test Project" : null,
+            tagValue: getProjectTagValue,
             tags: [
                 ["title", "Test Project"],
                 ["agent", "test-pm-event-id"],    // First agent tag - becomes PM
@@ -39,22 +57,24 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
                 ["agent", "planner-event-id"]
             ]
         },
-        signer: { privateKey: () => "test-key" },
+        signer: { privateKey: getSignerPrivateKey },
         pubkey: "test-pubkey",
         orchestrator: null,
         agents: agentsMap,
         projectPath,
-        isProjectOwner: () => true,
-        getProjectManager: () => pmAgent,  // First agent is PM
-        hasPhaseSpecialist: (phase: string) => false,
-        getPhaseSpecialist: (phase: string) => null,
-        getAgent: (identifier: string) => agentsMap.get(identifier) || null
+        isProjectOwner: checkIsProjectOwner,
+        getProjectManager: getProjectManager,
+        hasPhaseSpecialist: checkHasPhaseSpecialist,
+        getPhaseSpecialist: getPhaseSpecialist,
+        getAgent: getAgentByIdentifier
     } as unknown as ProjectContext;
     
     mock.module("@/services/ProjectContext", () => ({
         ProjectContext: class {
             constructor() {}
-            static async create() { return mockProjectContext; }
+            static async create(): Promise<typeof mockProjectContext> { 
+                return mockProjectContext; 
+            }
             static instance = mockProjectContext;
         }
     }));
@@ -83,7 +103,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
     }
     
     // Add orchestrator
-    const orchestratorAgent = {
+    const orchestratorAgent: AgentInstance = {
         name: "orchestrator",
         slug: "orchestrator",
         pubkey: "orchestrator-pubkey",
@@ -105,16 +125,41 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         mockProjectContext
     );
     
-    // Cleanup function
-    const cleanup = async () => {
+    async function cleanupTestEnvironment(): Promise<TestEnvironmentCleanupResult> {
+        const result: TestEnvironmentCleanupResult = {
+            mocksRestored: false,
+            databaseClosed: false,
+            tempDirectoryRemoved: false,
+            errors: []
+        };
+
         try {
             mock.restore();
-            db.close();
-            await fs.remove(tempDir);
+            result.mocksRestored = true;
         } catch (error) {
-            console.error("Cleanup error:", error);
+            result.errors?.push(error instanceof Error ? error : new Error(String(error)));
         }
-    };
+
+        try {
+            db.close();
+            result.databaseClosed = true;
+        } catch (error) {
+            result.errors?.push(error instanceof Error ? error : new Error(String(error)));
+        }
+
+        try {
+            await fs.remove(tempDir);
+            result.tempDirectoryRemoved = true;
+        } catch (error) {
+            result.errors?.push(error instanceof Error ? error : new Error(String(error)));
+        }
+
+        if (result.errors && result.errors.length > 0) {
+            console.error("Cleanup errors:", result.errors);
+        }
+
+        return result;
+    }
     
     return {
         mockLLM,
@@ -123,15 +168,21 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
         agentRegistry,
         projectContext: mockProjectContext,
         testAgents,
-        cleanup
+        cleanup: async (): Promise<void> => {
+            await cleanupTestEnvironment();
+        }
     };
 }
 
-/**
- * Cleanup E2E test environment
- */
-export async function cleanupE2ETest(context: E2ETestContext | undefined): Promise<void> {
-    if (context?.cleanup) {
-        await context.cleanup();
+export async function cleanupE2ETestEnvironment(context: E2ETestContext | undefined): Promise<TestEnvironmentCleanupResult | undefined> {
+    if (!context?.cleanup) {
+        return undefined;
     }
+    
+    await context.cleanup();
+    return {
+        mocksRestored: true,
+        databaseClosed: true,
+        tempDirectoryRemoved: true
+    };
 }

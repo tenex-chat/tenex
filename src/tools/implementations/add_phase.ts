@@ -1,10 +1,10 @@
 import { tool } from 'ai';
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
 import * as path from "node:path";
-import { getProjectContext } from "@/services";
 
 const addPhaseSchema = z.object({
   phaseName: z
@@ -55,10 +55,6 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
   try {
     const projectPath = process.cwd();
     const agentsDir = path.join(projectPath, ".tenex", "agents");
-
-    // Find the agent's file
-    const projectContext = getProjectContext();
-    const agentRegistry = projectContext.agentRegistry;
 
     // Get the agent's file name from registry
     const registryPath = path.join(projectPath, ".tenex", "agents.json");
@@ -117,7 +113,7 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
 }
 
 // AI SDK tool factory
-export function createAddPhaseTool(context: ExecutionContext) {
+export function createAddPhaseTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
       "Add a new phase definition to your agent configuration. This allows you to define new phases that you can switch to using delegate_phase. Each phase has a name and detailed instructions for what should be accomplished.",

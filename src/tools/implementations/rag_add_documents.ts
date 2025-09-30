@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
+import type { AISdkTool } from '@/tools/registry';
 import { RAGService, type RAGDocument } from '@/services/RAGService';
 import { 
     executeToolWithErrorHandling,
@@ -40,14 +41,14 @@ const ragAddDocumentsSchema = z.object({
         z.object({
             content: z.string().optional().describe('Text content of the document'),
             file_path: z.string().optional().describe('Path to file to read content from'),
-            metadata: z.record(z.any()).optional().describe('Optional metadata for the document'),
+            metadata: z.record(z.unknown()).optional().describe('Optional metadata for the document'),
             source: z.string().optional().describe('Source identifier for the document'),
             id: z.string().optional().describe('Optional unique identifier for the document'),
         }),
         // Option 2: URI-based
         z.object({
             uri: z.string().describe('URI to fetch content from (file://, https://, etc.)'),
-            metadata: z.record(z.any()).optional().describe('Optional metadata for the document'),
+            metadata: z.record(z.unknown()).optional().describe('Optional metadata for the document'),
             source: z.string().optional().describe('Source identifier for the document'),
             id: z.string().optional().describe('Optional unique identifier for the document'),
         })
@@ -99,7 +100,7 @@ function validateSize(sizeInBytes: number, sourceName: string): void {
  * Rationale: Consistent error messages across protocol handlers
  * make debugging easier and provide better user experience.
  */
-function handleFetchError(error: any, protocol: string): never {
+function handleFetchError(error: unknown, protocol: string): never {
     if (error.name === 'AbortError') {
         throw new Error(`Request timeout after ${HTTP_TIMEOUT_MS / 1000} seconds`);
     }
@@ -109,12 +110,24 @@ function handleFetchError(error: any, protocol: string): never {
 }
 
 /**
+ * Type for document input - represents the union of possible document shapes
+ */
+type DocumentInput = {
+    content?: string;
+    file_path?: string;
+    uri?: string;
+    metadata?: Record<string, unknown>;
+    source?: string;
+    id?: string;
+};
+
+/**
  * Generate consistent source field based on input type
  * 
  * Rationale: Consistent source identification helps with debugging
  * and tracking document origins across different input methods.
  */
-function generateSourceField(doc: any, resolvedPath?: string): string | undefined {
+function generateSourceField(doc: DocumentInput, resolvedPath?: string): string | undefined {
     // Explicit source takes precedence
     if (doc.source) {
         return doc.source;
@@ -290,7 +303,7 @@ async function fetchFromURI(uri: string, workingDirectory: string): Promise<stri
  * providing a consistent interface for document processing.
  */
 async function extractDocumentContentFromSource(
-    doc: any,
+    doc: DocumentInput,
     workingDirectory: string
 ): Promise<{ content: string; source: string | undefined }> {
     let content = '';
@@ -408,7 +421,7 @@ async function executeAddDocuments(
  * - URI validation provides early error detection
  * - Content validation ensures meaningful documents
  */
-export function createRAGAddDocumentsTool(context: ExecutionContext) {
+export function createRAGAddDocumentsTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: 'Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).',
         inputSchema: ragAddDocumentsSchema,

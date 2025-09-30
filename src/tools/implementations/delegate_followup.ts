@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 
@@ -93,7 +94,7 @@ async function executeDelegateFollowup(
 }
 
 // AI SDK tool factory
-export function createDelegateFollowupTool(context: ExecutionContext) {
+export function createDelegateFollowupTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Send a follow-up question to an agent you previously delegated to. Use after delegate or delegate_phase to ask clarifying questions about their response. The tool will wait for their response before continuing.",
     inputSchema: delegateFollowupSchema,

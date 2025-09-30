@@ -34,15 +34,6 @@ export class AgentPublisher {
   private encoder: AgentEventEncoder;
   private streamSequence = 0;
 
-  // Streaming buffer configuration
-  private streamingBuffer = '';
-  private reasoningBuffer = '';
-  private lastStreamPublishTime = 0;
-  private streamPublishTimer: NodeJS.Timeout | null = null;
-  private currentStreamContext: EventContext | null = null;
-  private static readonly STREAM_PUBLISH_INTERVAL_MS = 1000; // 1 second minimum between events
-  private static readonly STREAM_BUFFER_TIMEOUT_MS = 1500; // Force flush after 1.5s of inactivity
-
   constructor(agent: AgentInstance) {
     this.agent = agent;
     this.encoder = new AgentEventEncoder();
@@ -313,6 +304,14 @@ export class AgentPublisher {
     await this.agent.sign(event);
     await event.publish();
 
+    logger.info("[AgentPublisher] Streaming event published", {
+      eventId: event.id?.substring(0, 8),
+      kind: event.kind,
+      contentLength: intent.content.length,
+      isReasoning: intent.isReasoning,
+      sequence: intent.sequence
+    });
+
     return event;
   }
 
@@ -365,145 +364,38 @@ export class AgentPublisher {
   }
 
   /**
-   * Handle content streaming from LLMService.
-   * Adds content to buffer and publishes streaming events with rate limiting.
-   * Uses throttling: publishes 1 second after the FIRST chunk, not the last.
+   * Publish streaming delta from LLMService.
+   * Content is already throttled by the middleware, so we publish immediately as kind:21111.
    */
-  async handleContent(
-    event: { delta: string },
+  async publishStreamingDelta(
+    delta: string,
     context: EventContext,
     isReasoning = false
   ): Promise<void> {
-    // Store context for later use
-    this.currentStreamContext = context;
+    // Content is already buffered/throttled by the middleware
+    // Just publish it immediately as a streaming event
+    const streamingIntent: StreamingIntent = {
+      content: delta,
+      sequence: ++this.streamSequence,
+      isReasoning,
+    };
 
-    // Add delta to appropriate buffer
-    if (isReasoning) {
-      this.reasoningBuffer += event.delta;
-    } else {
-      this.streamingBuffer += event.delta;
-    }
-
-    // Check if enough time has passed since last publish
-    const now = Date.now();
-    const timeSinceLastPublish = now - this.lastStreamPublishTime;
-
-    // If enough time has passed since last publish, flush immediately
-    if (this.lastStreamPublishTime > 0 && timeSinceLastPublish >= AgentPublisher.STREAM_PUBLISH_INTERVAL_MS) {
-      // Publish immediately if enough time has passed
-      await this.flushStreamingBuffers();
-    } else if (!this.streamPublishTimer) {
-      // Only set a timer if we don't already have one (throttle, not debounce)
-      // This ensures we flush 1 second after the FIRST chunk, not the last
-      const delay = this.lastStreamPublishTime === 0
-        ? AgentPublisher.STREAM_PUBLISH_INTERVAL_MS
-        : Math.max(0, AgentPublisher.STREAM_PUBLISH_INTERVAL_MS - timeSinceLastPublish);
-
-      this.streamPublishTimer = setTimeout(async () => {
-        await this.flushStreamingBuffers();
-
-        // After flushing, if there's more content that came in while we were flushing,
-        // schedule another flush
-        if ((this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) && !this.streamPublishTimer) {
-          this.streamPublishTimer = setTimeout(async () => {
-            await this.flushStreamingBuffers();
-          }, AgentPublisher.STREAM_PUBLISH_INTERVAL_MS);
-        }
-      }, delay);
-    }
-    // If timer already exists, don't reset it (throttle behavior)
-  }
-
-  /**
-   * Flush accumulated streaming buffers and publish as streaming events.
-   */
-  private async flushStreamingBuffers(): Promise<void> {
-    if (!this.currentStreamContext) return;
-
-    // Capture buffer contents and clear immediately to prevent duplicates
-    const reasoningContent = this.reasoningBuffer;
-    const streamingContent = this.streamingBuffer;
-    this.reasoningBuffer = '';
-    this.streamingBuffer = '';
-
-    // Clear timer first
-    if (this.streamPublishTimer) {
-      clearTimeout(this.streamPublishTimer);
-      this.streamPublishTimer = null;
-    }
-
-    // Log why we're flushing
-    logger.debug("Flushing streaming buffers (1s interval)", {
-      reasoningBufferLength: reasoningContent.length,
-      streamingBufferLength: streamingContent.length,
-      timeSinceLastPublish: Date.now() - this.lastStreamPublishTime,
-      sequence: this.streamSequence + 1,
+    logger.info("[AgentPublisher] Publishing streaming event (21111) for pre-buffered content", {
+      contentLength: delta.length,
+      sequence: streamingIntent.sequence,
+      isReasoning,
+      contentPreview: delta.substring(0, 50) + (delta.length > 50 ? "..." : ""),
+      agentName: this.agent.name
     });
 
-    // Publish reasoning buffer if it has content
-    if (reasoningContent.length > 0) {
-      const streamingIntent: StreamingIntent = {
-        content: reasoningContent,
-        sequence: ++this.streamSequence,
-        isReasoning: true,
-      };
-
-      logger.info("Publishing streaming event (21111) for reasoning content due to 1s buffer flush", {
-        contentLength: reasoningContent.length,
-        sequence: streamingIntent.sequence,
-      });
-
-      await this.streaming(streamingIntent, this.currentStreamContext);
-    }
-
-    // Publish regular content buffer if it has content
-    if (streamingContent.length > 0) {
-      const streamingIntent: StreamingIntent = {
-        content: streamingContent,
-        sequence: ++this.streamSequence,
-        isReasoning: false,
-      };
-
-      logger.info("Publishing streaming event (21111) for streaming content due to 1s buffer flush", {
-        contentLength: streamingContent.length,
-        sequence: streamingIntent.sequence,
-      });
-
-      await this.streaming(streamingIntent, this.currentStreamContext);
-    }
-
-    // Update last publish time
-    this.lastStreamPublishTime = Date.now();
+    await this.streaming(streamingIntent, context);
   }
 
   /**
-   * Force flush any remaining streaming buffers.
-   * Should be called when streaming is complete or chunk type changes.
+   * Reset streaming sequence counter.
+   * Should be called when streaming is complete.
    */
-  async forceFlushStreamingBuffers(): Promise<void> {
-    // Cancel any pending timer
-    if (this.streamPublishTimer) {
-      clearTimeout(this.streamPublishTimer);
-      this.streamPublishTimer = null;
-    }
-
-    // Log force flush reason
-    if (this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) {
-      logger.info("Force flushing buffers (chunk type change or stream complete)", {
-        reasoningBufferLength: this.reasoningBuffer.length,
-        streamingBufferLength: this.streamingBuffer.length,
-        hadTimer: !!this.streamPublishTimer,
-      });
-    }
-
-    // Flush any remaining content
-    if ((this.streamingBuffer.length > 0 || this.reasoningBuffer.length > 0) && this.currentStreamContext) {
-      await this.flushStreamingBuffers();
-    }
-
-    // Reset state
-    this.currentStreamContext = null;
-    // Reset sequence counter for next streaming session
+  resetStreamingSequence(): void {
     this.streamSequence = 0;
   }
 
@@ -785,12 +677,7 @@ export class AgentPublisher {
 
       // Sign and publish the contact list
       await contactListEvent.sign(signer, { pTags: false });
-      await contactListEvent.publish();
-
-      logger.info("Published contact list for agent", {
-        agentPubkey: signer.pubkey.substring(0, 8),
-        followingCount: contactPubkeys.length,
-      });
+      contactListEvent.publish();
     } catch (error) {
       logger.error("Failed to publish contact list", {
         error,

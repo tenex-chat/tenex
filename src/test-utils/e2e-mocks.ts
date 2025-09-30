@@ -4,24 +4,26 @@ import { createTempDir } from "@/lib/fs";
 import { createMockLLMService } from "@/llm/__tests__/MockLLMService";
 import { createMockNDKEvent } from "@/test-utils/mock-factories";
 import type { AgentInstance } from "@/agents/types";
-import type { E2ETestContext } from "./e2e-types";
+import type {
+    MockFileSystemOperations,
+    MockNDKInstance,
+    MockLLMRouter,
+    MockAgentPublisher,
+    MockExecutionLogger,
+    MockModuleSetupResult
+} from "./e2e-types";
 
 /**
  * Create mock NDK event for testing
  */
-export function createE2EMockEvent(overrides: Partial<any> = {}): any {
+export function createE2EMockEvent(overrides: Partial<unknown> = {}): unknown {
     return createMockNDKEvent(overrides);
 }
 
 /**
  * Setup mock modules for E2E testing
  */
-export async function setupMockModules(scenarios: string[] = [], defaultResponse?: string): Promise<{
-    tempDir: string;
-    projectPath: string;
-    mockLLM: any;
-    mockFiles: Map<string, string>;
-}> {
+export async function setupMockModules(scenarios: string[] = [], defaultResponse?: string): Promise<MockModuleSetupResult> {
     // Create temp directory
     const tempDir = await createTempDir("tenex-e2e-");
     const projectPath = path.join(tempDir, "test-project");
@@ -33,22 +35,30 @@ export async function setupMockModules(scenarios: string[] = [], defaultResponse
         version: "1.0.0"
     }));
     
-    mock.module("@/lib/fs", () => ({
-        fileExists: mock((filePath: string) => mockFiles.has(filePath)),
-        readFile: mock((filePath: string) => {
+    const mockFileSystemOperations: MockFileSystemOperations = {
+        fileExists: (filePath: string): boolean => mockFiles.has(filePath),
+        readFile: (filePath: string): string => {
             const content = mockFiles.get(filePath);
             if (!content) throw new Error(`File not found: ${filePath}`);
             return content;
-        }),
-        writeFile: mock((filePath: string, content: string) => {
+        },
+        writeFile: (filePath: string, content: string): Promise<void> => {
             mockFiles.set(filePath, content);
             return Promise.resolve();
-        }),
-        writeJsonFile: mock((filePath: string, data: any) => {
+        },
+        writeJsonFile: (filePath: string, data: unknown): Promise<void> => {
             mockFiles.set(filePath, JSON.stringify(data, null, 2));
             return Promise.resolve();
-        }),
-        ensureDirectory: mock(() => Promise.resolve())
+        },
+        ensureDirectory: (): Promise<void> => Promise.resolve()
+    };
+
+    mock.module("@/lib/fs", () => ({
+        fileExists: mock(mockFileSystemOperations.fileExists),
+        readFile: mock(mockFileSystemOperations.readFile),
+        writeFile: mock(mockFileSystemOperations.writeFile),
+        writeJsonFile: mock(mockFileSystemOperations.writeJsonFile),
+        ensureDirectory: mock(mockFileSystemOperations.ensureDirectory)
     }));
     
     // Initialize mock LLM
@@ -57,63 +67,84 @@ export async function setupMockModules(scenarios: string[] = [], defaultResponse
         defaultResponse: defaultResponse || { content: "Mock LLM: No matching response found" }
     });
     
-    // Mock LLM router
+    const createMockLLMRouterClass = (): { new(): MockLLMRouter } => {
+        return class {
+            getService(): unknown { 
+                return mockLLM; 
+            }
+            validateModel(): boolean { 
+                return true; 
+            }
+        };
+    };
+
     mock.module("@/llm/router", () => ({
         getLLMService: () => mockLLM,
-        LLMRouter: class {
-            constructor() {}
-            getService() { return mockLLM; }
-            validateModel() { return true; }
-        }
+        LLMRouter: createMockLLMRouterClass()
     }));
     
-    // Mock Nostr publisher
-    mock.module("@/nostr", () => ({
-        getNDK: () => ({
-            connect: async () => {},
-            signer: { privateKey: () => "mock-private-key" },
-            pool: {
-                connectedRelays: () => [],
-                relaySet: new Set(),
-                addRelay: () => {}
-            },
-            publish: async () => {},
-            calculateRelaySetFromEvent: () => ({ relays: [] })
-        })
-    }));
-    
-    // Mock AgentPublisher to prevent publishing during tests
-    mock.module("@/agents/AgentPublisher", () => ({
-        AgentPublisher: class {
-            async publishProfile() { return Promise.resolve(); }
-            async publishEvents() { return Promise.resolve(); }
-            async publishAgentCreation() { return Promise.resolve(); }
-        }
-    }));
-    
-    
-    // Mock logging
-    mock.module("@/logging/ExecutionLogger", () => ({
-        ExecutionLogger: class {
-            logToolCall() {}
-            logToolResult() {}
-            logStream() {}
-            logComplete() {}
-            logError() {}
-            logEvent() {}
-            routingDecision() {}
-            agentThinking() {}
+    const createMockNDKInstance = (): MockNDKInstance => ({
+        connect: async (): Promise<void> => {},
+        signer: { privateKey: (): string => "mock-private-key" },
+        pool: {
+            connectedRelays: (): unknown[] => [],
+            relaySet: new Set(),
+            addRelay: (): void => {}
         },
-        createExecutionLogger: () => ({
-            logToolCall: () => {},
-            logToolResult: () => {},
-            logStream: () => {},
-            logComplete: () => {},
-            logError: () => {},
-            logEvent: () => {},
-            routingDecision: () => {},
-            agentThinking: () => {}
-        })
+        publish: async (): Promise<void> => {},
+        calculateRelaySetFromEvent: (): { relays: unknown[] } => ({ relays: [] })
+    });
+
+    mock.module("@/nostr", () => ({
+        getNDK: () => createMockNDKInstance()
+    }));
+    
+    const createMockAgentPublisherClass = (): { new(): MockAgentPublisher } => {
+        return class {
+            async publishProfile(): Promise<void> { 
+                return Promise.resolve(); 
+            }
+            async publishEvents(): Promise<void> { 
+                return Promise.resolve(); 
+            }
+            async publishAgentCreation(): Promise<void> { 
+                return Promise.resolve(); 
+            }
+        };
+    };
+
+    mock.module("@/agents/AgentPublisher", () => ({
+        AgentPublisher: createMockAgentPublisherClass()
+    }));
+    
+    
+    const createMockExecutionLoggerInstance = (): MockExecutionLogger => ({
+        logToolCall: (): void => {},
+        logToolResult: (): void => {},
+        logStream: (): void => {},
+        logComplete: (): void => {},
+        logError: (): void => {},
+        logEvent: (): void => {},
+        routingDecision: (): void => {},
+        agentThinking: (): void => {}
+    });
+
+    const createMockExecutionLoggerClass = (): { new(): MockExecutionLogger } => {
+        return class {
+            logToolCall(): void {}
+            logToolResult(): void {}
+            logStream(): void {}
+            logComplete(): void {}
+            logError(): void {}
+            logEvent(): void {}
+            routingDecision(): void {}
+            agentThinking(): void {}
+        };
+    };
+
+    mock.module("@/logging/ExecutionLogger", () => ({
+        ExecutionLogger: createMockExecutionLoggerClass(),
+        createExecutionLogger: () => createMockExecutionLoggerInstance()
     }));
     
     return { tempDir, projectPath, mockLLM, mockFiles };

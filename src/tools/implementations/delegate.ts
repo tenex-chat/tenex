@@ -4,6 +4,7 @@ import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 const delegateSchema = z.object({
   recipients: z
@@ -82,7 +83,7 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
 }
 
 // AI SDK tool factory
-export function createDelegateTool(context: ExecutionContext) {
+export function createDelegateTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Delegate a task or question to one or more agents and wait for their responses. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys. Responses are returned synchronously - the tool waits for all agents to complete.",
     inputSchema: delegateSchema,

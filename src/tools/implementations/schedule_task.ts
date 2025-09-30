@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { SchedulerService } from "@/services/SchedulerService";
 import { logger } from "@/utils/logger";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
@@ -9,7 +10,7 @@ import * as cron from 'node-cron';
 /**
  * Creates a tool for scheduling tasks using cron notation
  */
-export function createScheduleTaskTool(context: ExecutionContext) {
+export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Schedule a task using cron notation (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes)",
     inputSchema: z.object({

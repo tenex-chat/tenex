@@ -9,12 +9,56 @@ import inquirer from "inquirer";
 const EMBED_CONFIG_FILE = "embed.json";
 
 /**
+ * Raw configuration as it may appear in JSON files
+ * Supports both old format (string or partial object) and new format (full object)
+ */
+type RawEmbedConfig = 
+    | string // Old format: just model name
+    | { model: string; provider?: never } // Old format: object with just model
+    | { provider: 'local' | 'openai'; model: string; apiKey?: string }; // New format
+
+function isRawEmbedConfig(value: unknown): value is RawEmbedConfig {
+    if (typeof value === 'string') {
+        return true;
+    }
+    
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+    
+    const obj = value as Record<string, unknown>;
+    
+    // Must have a model
+    if (!('model' in obj) || typeof obj.model !== 'string') {
+        return false;
+    }
+    
+    // If provider is present, must be valid
+    if ('provider' in obj) {
+        if (obj.provider !== 'local' && obj.provider !== 'openai') {
+            return false;
+        }
+    }
+    
+    // If apiKey is present, must be string
+    if ('apiKey' in obj && typeof obj.apiKey !== 'string') {
+        return false;
+    }
+    
+    return true;
+}
+
+/**
  * Load existing embedding configuration
  */
 async function loadEmbedConfig(dir: string): Promise<EmbeddingConfig | null> {
     const filePath = path.join(dir, EMBED_CONFIG_FILE);
     if (await fileSystem.fileExists(filePath)) {
-        const config = await fileSystem.readJsonFile<any>(filePath);
+        const config = await fileSystem.readJsonFile<unknown>(filePath);
+        if (!isRawEmbedConfig(config)) {
+            logger.warn(`Invalid embed config at ${filePath}, ignoring`);
+            return null;
+        }
         return parseEmbedConfig(config);
     }
     return null;
@@ -23,7 +67,7 @@ async function loadEmbedConfig(dir: string): Promise<EmbeddingConfig | null> {
 /**
  * Parse raw config into EmbeddingConfig
  */
-function parseEmbedConfig(raw: any): EmbeddingConfig {
+function parseEmbedConfig(raw: RawEmbedConfig): EmbeddingConfig {
     // Support both old format (just model string) and new format
     if (typeof raw === 'string') {
         return {

@@ -3,6 +3,7 @@ import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { RAGService } from '@/services/rag/RAGService';
 
 const lessonGetSchema = z.object({
@@ -108,7 +109,7 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
 }
 
 // AI SDK tool factory
-export function createLessonGetTool(context: ExecutionContext) {
+export function createLessonGetTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",
     inputSchema: lessonGetSchema,

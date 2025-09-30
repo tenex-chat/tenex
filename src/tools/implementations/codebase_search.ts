@@ -1,11 +1,11 @@
 import { tool } from 'ai';
 import { z } from "zod";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve, relative, join, extname } from "node:path";
-import { resolveAndValidatePath } from "../utils";
+import { join, extname } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 
 const execAsync = promisify(exec);
@@ -168,7 +168,7 @@ async function searchByFilename(
         });
       }
     }
-  } catch (error) {
+  } catch {
     // Fall back to recursive directory search if find command fails
     await recursiveFileSearch(projectPath, query, fileType, results, maxResults);
   }
@@ -332,7 +332,7 @@ async function searchByContent(
 /**
  * Create the codebase_search tool for AI SDK
  */
-export function createCodebaseSearchTool(context: ExecutionContext) {
+export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
   const toolInstance = tool({
     description:
       "Searches the project codebase for files, directories, or content matching specified criteria. Supports searching by file name patterns, content keywords, or file types. Returns a list of matching paths with optional snippets. Paths are relative to project root. Safe and sandboxed to project directory.",

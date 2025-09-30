@@ -1,4 +1,4 @@
-import type { NDK, NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDK } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 

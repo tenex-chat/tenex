@@ -1,4 +1,3 @@
-import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 

@@ -7,7 +7,7 @@ import { logger } from '@/utils/logger';
  * Each agent in each conversation gets its own isolated metadata store.
  */
 export class AgentMetadataStore {
-  private data = new Map<string, any>();
+  private data = new Map<string, unknown>();
   private filePath: string;
 
   constructor(
@@ -19,11 +19,11 @@ export class AgentMetadataStore {
     this.load();
   }
 
-  get<T = any>(key: string): T | undefined {
+  get<T = unknown>(key: string): T | undefined {
     return this.data.get(key);
   }
 
-  set(key: string, value: any): void {
+  set(key: string, value: unknown): void {
     this.data.set(key, value);
     this.save();
   }

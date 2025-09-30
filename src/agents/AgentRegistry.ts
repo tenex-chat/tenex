@@ -19,6 +19,8 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateToolsForAgent, PHASE_MANAGEMENT_TOOLS } from "./constants";
 import { isValidToolName } from "@/tools/registry";
 import { mcpService } from "@/services/mcp/MCPManager";
+import { normalizePhase } from "@/conversations/utils/phaseUtils";
+import { AgentMetadataStore } from '@/conversations/services/AgentMetadataStore';
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -323,7 +325,6 @@ export class AgentRegistry {
     }
     
     // Return agents matching the phase or universal agents
-    const { normalizePhase } = require("@/conversations/utils/phaseUtils");
     const normalizedPhase = normalizePhase(phase);
     
     return agents.filter(agent => {
@@ -825,7 +826,6 @@ export class AgentRegistry {
       phase: agentDefinition.phase,
       phases: agentDefinition.phases,
       createMetadataStore: (conversationId: string) => {
-        const { AgentMetadataStore } = require('@/conversations/services/AgentMetadataStore');
         // Use the registry's basePath to get the project path
         const projectPath = this.getBasePath();
         return new AgentMetadataStore(conversationId, slug, projectPath);
@@ -1045,7 +1045,7 @@ export class AgentRegistry {
           phases: agent.phases
         } : undefined;
 
-        await AgentPublisher.publishAgentProfile(
+        AgentPublisher.publishAgentProfile(
           agent.signer,
           agent.name,
           agent.role,
@@ -1058,15 +1058,10 @@ export class AgentRegistry {
         // Publish contact list so agent follows all project agents and whitelisted pubkeys
         // Filter out the agent's own pubkey from the contact list
         const agentContactList = contactList.filter(pubkey => pubkey !== agent.pubkey);
-        await AgentPublisher.publishContactList(
+        AgentPublisher.publishContactList(
           agent.signer,
           agentContactList
         );
-
-        logger.info(`Agent ${agent.name} now following ${agentContactList.length} contacts`, {
-          agentPubkey: agent.pubkey.substring(0, 8),
-          followingCount: agentContactList.length,
-        });
       } catch (error) {
         logger.error(`Failed to republish events for agent: ${slug}`, {
           error,

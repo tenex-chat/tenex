@@ -5,6 +5,18 @@ import { handleError } from "@/utils/error-handler";
 import type { z } from "zod";
 
 /**
+ * LanceDB query result structure
+ */
+export interface LanceDBResult {
+  id?: string;
+  content?: string;
+  metadata?: string | Record<string, unknown>;
+  timestamp?: number;
+  source?: string;
+  _distance?: number;
+}
+
+/**
  * Resolves and validates a file path to ensure it stays within the project boundaries.
  *
  * @param filePath - The file path to validate (can be absolute or relative)
@@ -30,8 +42,8 @@ export interface ToolResponse {
   success: boolean;
   message?: string;
   error?: string;
-  data?: any;
-  [key: string]: any;
+  data?: unknown;
+  [key: string]: unknown;
 }
 
 /**
@@ -93,7 +105,7 @@ export async function executeToolWithErrorHandling<T extends z.ZodType>(
 /**
  * Validate required fields in tool input
  */
-export function validateRequiredFields<T extends Record<string, any>>(
+export function validateRequiredFields<T extends Record<string, unknown>>(
   input: T,
   requiredFields: (keyof T)[],
   toolName: string
@@ -142,48 +154,149 @@ export function parseNumericInput(
 }
 
 /**
+ * JSON-serializable primitive value
+ */
+export type JsonPrimitive = string | number | boolean | null;
+
+/**
+ * JSON-serializable value (recursive)
+ */
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
+/**
+ * JSON-serializable object
+ */
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+/**
+ * JSON-serializable array
+ */
+export type JsonArray = JsonValue[];
+
+/**
+ * Document metadata with known common fields and extensibility
+ */
+export interface DocumentMetadata extends JsonObject {
+  language?: string;
+  type?: string;
+  category?: string;
+  tags?: string[];
+  author?: string;
+  title?: string;
+  uri?: string;
+  [key: string]: JsonValue;
+}
+
+/**
+ * LanceDB stored document structure (what gets stored in the DB)
+ */
+export interface LanceDBStoredDocument {
+  id: string;
+  content: string;
+  vector: number[];
+  metadata: string;
+  timestamp: number;
+  source: string;
+}
+
+/**
+ * LanceDB query result structure (what comes back from queries)
+ */
+export interface LanceDBResult {
+  id: string;
+  content: string;
+  metadata?: string;
+  timestamp: number;
+  source: string;
+  vector?: number[];
+  _distance?: number;
+}
+
+/**
  * RAG-specific document interface for mapping
  */
 export interface MappedRAGDocument {
-  id?: string;
+  id: string;
   content: string;
-  metadata?: Record<string, any>;
-  timestamp?: number;
-  source?: string;
+  metadata: DocumentMetadata;
+  timestamp: number;
+  source: string;
 }
 
 /**
- * Map LanceDB query result to RAG document format
- * Handles metadata parsing and field extraction
+ * Type guard to validate JSON object structure
  */
-export function mapLanceResultToDocument(result: any): MappedRAGDocument {
-  return {
-    id: result.id,
-    content: result.content || '',
-    metadata: parseDocumentMetadata(result.metadata),
-    timestamp: result.timestamp,
-    source: result.source
-  };
+export function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * Parse document metadata from JSON string or object
+ * Type guard to validate DocumentMetadata structure
+ */
+export function isDocumentMetadata(value: unknown): value is DocumentMetadata {
+  if (!isJsonObject(value)) return false;
+  
+  // Validate optional known fields if present
+  if (value.language !== undefined && typeof value.language !== 'string') return false;
+  if (value.type !== undefined && typeof value.type !== 'string') return false;
+  if (value.category !== undefined && typeof value.category !== 'string') return false;
+  if (value.author !== undefined && typeof value.author !== 'string') return false;
+  if (value.title !== undefined && typeof value.title !== 'string') return false;
+  if (value.uri !== undefined && typeof value.uri !== 'string') return false;
+  
+  // Deep validation for tags array - ensure all elements are strings
+  if (value.tags !== undefined) {
+    if (!Array.isArray(value.tags)) return false;
+    if (!value.tags.every((tag): tag is string => typeof tag === 'string')) return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Parse document metadata from JSON string or object with type validation
  */
 export function parseDocumentMetadata(
-  metadata: string | Record<string, any> | undefined
-): Record<string, any> {
+  metadata: string | DocumentMetadata | undefined
+): DocumentMetadata {
   if (!metadata) return {};
   
   if (typeof metadata === 'string') {
     try {
-      return JSON.parse(metadata);
+      const parsed = JSON.parse(metadata);
+      if (!isDocumentMetadata(parsed)) {
+        logger.warn('Parsed metadata does not match DocumentMetadata schema', { parsed });
+        return {};
+      }
+      return parsed;
     } catch (error) {
       logger.warn('Failed to parse document metadata', { error, metadata });
       return {};
     }
   }
   
+  if (!isDocumentMetadata(metadata)) {
+    logger.warn('Metadata object does not match DocumentMetadata schema', { metadata });
+    return {};
+  }
+  
   return metadata;
+}
+
+/**
+ * Map LanceDB query result to RAG document format
+ * Handles metadata parsing and field extraction
+ */
+export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocument {
+  return {
+    id: result.id,
+    content: result.content,
+    metadata: parseDocumentMetadata(result.metadata),
+    timestamp: result.timestamp,
+    source: result.source
+  };
 }
 
 /**

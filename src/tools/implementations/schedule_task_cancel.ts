@@ -1,13 +1,14 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { SchedulerService } from "@/services/SchedulerService";
 
 /**
  * Creates a tool for canceling scheduled tasks
  */
-export function createCancelScheduledTaskTool(context: ExecutionContext) {
+export function createCancelScheduledTaskTool(_context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Cancel a scheduled task by its ID",
     inputSchema: z.object({

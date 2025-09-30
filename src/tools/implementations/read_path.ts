@@ -4,6 +4,7 @@ import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
 import { resolveAndValidatePath } from "../utils";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 const readPathSchema = z.object({
   path: z
@@ -58,7 +59,7 @@ async function executeReadPath(
  * Create an AI SDK tool for reading paths
  * This is the primary implementation
  */
-export function createReadPathTool(context: ExecutionContext) {
+export function createReadPathTool(context: ExecutionContext): AISdkTool {
   const toolInstance = tool({
     description:
       "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Automatically tracks context file reads for conversation metadata. Safe and sandboxed to project directory.",

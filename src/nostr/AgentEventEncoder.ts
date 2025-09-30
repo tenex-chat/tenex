@@ -15,6 +15,7 @@ import { nip19 } from "nostr-tools";
 // Intent types that agents can express
 export interface CompletionIntent {
     content: string;
+    reasoning?: string;  // Full accumulated reasoning content
     summary?: string;
     usage?: LanguageModelUsageWithCostUsd;
     isReasoning?: boolean;
@@ -647,7 +648,7 @@ export class AgentEventEncoder {
                 } else {
                     event.tag(["tool-args"]);
                 }
-            } catch (error) {
+            } catch {
                 // If serialization fails, add empty tag
                 event.tag(["tool-args"]);
             }

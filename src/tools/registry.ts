@@ -7,6 +7,7 @@
 import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
+import { mcpService } from "@/services/mcp/MCPManager";
 import { createReadPathTool } from "./implementations/read_path";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
@@ -42,6 +43,10 @@ import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGQueryTool } from "./implementations/rag_query";
 import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
 import { createRAGListCollectionsTool } from "./implementations/rag_list_collections";
+import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscription_create";
+import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
+import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
+import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
 
 /**
  * Tool names available in the system
@@ -81,20 +86,27 @@ export type ToolName =
   | "rag_add_documents"
   | "rag_query"
   | "rag_delete_collection"
-  | "rag_list_collections";
+  | "rag_list_collections"
+  | "rag_subscription_create"
+  | "rag_subscription_list"
+  | "rag_subscription_get"
+  | "rag_subscription_delete";
 
 /**
  * AI SDK Tool type - tools with optional human-readable content generation
  * The getHumanReadableContent function is attached as a non-enumerable property
  */
-export type AISdkTool = CoreTool<any, any> & {
-  getHumanReadableContent?: (args: any) => string;
+export type AISdkTool<
+  TInput = unknown,
+  TOutput = unknown
+> = CoreTool<TInput, TOutput> & {
+  getHumanReadableContent?: (args: TInput) => string;
 };
 
 /**
  * Tool factory type - functions that create AI SDK tools with context
  */
-export type ToolFactory = (context: ExecutionContext) => AISdkTool;
+export type ToolFactory = (context: ExecutionContext) => AISdkTool<unknown, unknown>;
 
 /**
  * Registry of tool factories
@@ -163,6 +175,12 @@ const toolFactories: Record<ToolName, ToolFactory> = {
   rag_query: createRAGQueryTool,
   rag_delete_collection: createRAGDeleteCollectionTool,
   rag_list_collections: createRAGListCollectionsTool,
+  
+  // RAG subscription tools
+  rag_subscription_create: createRAGSubscriptionCreateTool,
+  rag_subscription_list: createRAGSubscriptionListTool,
+  rag_subscription_get: createRAGSubscriptionGetTool,
+  rag_subscription_delete: createRAGSubscriptionDeleteTool,
 };
 
 /**
@@ -171,7 +189,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
  * @param context - Execution context for the tool
  * @returns The instantiated AI SDK tool or undefined if not found
  */
-export function getTool(name: ToolName, context: ExecutionContext): AISdkTool | undefined {
+export function getTool(name: ToolName, context: ExecutionContext): AISdkTool<unknown, unknown> | undefined {
   const factory = toolFactories[name];
   const ret = factory ? factory(context) : undefined;
   return ret;
@@ -183,10 +201,10 @@ export function getTool(name: ToolName, context: ExecutionContext): AISdkTool | 
  * @param context - Execution context for the tools
  * @returns Array of instantiated AI SDK tools
  */
-export function getTools(names: ToolName[], context: ExecutionContext): AISdkTool[] {
+export function getTools(names: ToolName[], context: ExecutionContext): AISdkTool<unknown, unknown>[] {
   return names
     .map(name => getTool(name, context))
-    .filter((tool): tool is AISdkTool => tool !== undefined);
+    .filter((tool): tool is AISdkTool<unknown, unknown> => tool !== undefined);
 }
 
 /**
@@ -194,10 +212,11 @@ export function getTools(names: ToolName[], context: ExecutionContext): AISdkToo
  * @param context - Execution context for the tools
  * @returns Array of all instantiated AI SDK tools
  */
-export function getAllTools(context: ExecutionContext): AISdkTool[] {
-  return Object.keys(toolFactories).map(name => 
-    getTool(name as ToolName, context)
-  ).filter((tool): tool is AISdkTool => tool !== undefined);
+export function getAllTools(context: ExecutionContext): AISdkTool<unknown, unknown>[] {
+  const toolNames = Object.keys(toolFactories) as ToolName[];
+  return toolNames.map(name =>
+    getTool(name, context)
+  ).filter((tool): tool is AISdkTool<unknown, unknown> => !!tool);
 }
 
 /**
@@ -205,7 +224,7 @@ export function getAllTools(context: ExecutionContext): AISdkTool[] {
  * @returns Array of all tool names in the registry
  */
 export function getAllToolNames(): ToolName[] {
-  return Object.keys(toolFactories) as ToolName[];
+  return Object.keys(toolFactories);
 }
 
 /**
@@ -214,8 +233,8 @@ export function getAllToolNames(): ToolName[] {
  * @param context - Execution context for the tools
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
-export function getToolsObject(names: string[], context: ExecutionContext): Record<string, CoreTool<any, any>> {
-  const tools: Record<string, CoreTool<any, any>> = {};
+export function getToolsObject(names: string[], context: ExecutionContext): Record<string, CoreTool<unknown, unknown>> {
+  const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
   // Separate MCP tools, dynamic tools, and regular tools
   const regularTools: ToolName[] = [];
@@ -256,8 +275,7 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
   // Add MCP tools if any requested
   if (mcpToolNames.length > 0) {
     try {
-      // Import and get MCP tools dynamically
-      const { mcpService } = require("@/services/mcp/MCPManager");
+      // Get MCP tools from service
       const allMcpTools = mcpService.getCachedTools();
 
       for (const mcpToolName of mcpToolNames) {
@@ -285,11 +303,12 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
  * @param context - Execution context for the tools
  * @returns Object with all tools keyed by name (returns the underlying CoreTool)
  */
-export function getAllToolsObject(context: ExecutionContext): Record<string, CoreTool<any, any>> {
-  const tools: Record<string, CoreTool<any, any>> = {};
+export function getAllToolsObject(context: ExecutionContext): Record<string, CoreTool<unknown, unknown>> {
+  const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
   // Add static tools
-  for (const name of Object.keys(toolFactories) as ToolName[]) {
+  const toolNames = Object.keys(toolFactories) as ToolName[];
+  for (const name of toolNames) {
     const tool = getTool(name, context);
     if (tool) {
       // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
@@ -309,7 +328,7 @@ export function getAllToolsObject(context: ExecutionContext): Record<string, Cor
  * @param name - The tool name to check
  * @returns True if the tool name is valid
  */
-export function isValidToolName(name: string): name is ToolName {
+export function isValidToolName(name: string): boolean {
   return name in toolFactories || dynamicToolService.isDynamicTool(name);
 }
 

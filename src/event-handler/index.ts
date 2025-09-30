@@ -43,7 +43,7 @@ export class EventHandler {
     // Initialize components directly
     this.conversationCoordinator = new ConversationCoordinator(
       this.projectPath,
-      undefined // default persistence
+      undefined
     );
     this.agentExecutor = new AgentExecutor();
 

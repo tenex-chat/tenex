@@ -1,7 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
-import { RAGService, RAGValidationError } from '@/services/RAGService';
+import type { AISdkTool } from '@/tools/registry';
+import { RAGService } from '@/services/RAGService';
 import { 
     executeToolWithErrorHandling, 
     type ToolResponse 
@@ -21,33 +22,28 @@ const ragCreateCollectionSchema = z.object({
  */
 async function executeCreateCollection(
     input: z.infer<typeof ragCreateCollectionSchema>,
-    context: ExecutionContext
+    _context: ExecutionContext
 ): Promise<ToolResponse> {
     const { name, schema } = input;
     
-    try {
-        const ragService = RAGService.getInstance();
-        const collection = await ragService.createCollection(name, schema);
-        
-        return {
-            success: true,
-            message: `Collection '${name}' created successfully`,
-            collection: {
-                name: collection.name,
-                created_at: new Date(collection.created_at).toISOString(),
-                schema: collection.schema
-            }
-        };
-    } catch (error) {
-        // Let the error bubble up for standard handling
-        throw error;
-    }
+    const ragService = RAGService.getInstance();
+    const collection = await ragService.createCollection(name, schema);
+    
+    return {
+        success: true,
+        message: `Collection '${name}' created successfully`,
+        collection: {
+            name: collection.name,
+            created_at: new Date(collection.created_at).toISOString(),
+            schema: collection.schema
+        }
+    };
 }
 
 /**
  * Create a new RAG collection for storing and retrieving vector embeddings
  */
-export function createRAGCreateCollectionTool(context: ExecutionContext) {
+export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: 'Create a new RAG collection (vector database) for storing documents with semantic search capabilities',
         inputSchema: ragCreateCollectionSchema,

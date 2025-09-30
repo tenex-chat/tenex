@@ -126,10 +126,10 @@ export class ConfigService {
 
     const loadedConfig = { config, agents, llms, mcp };
     this.loadedConfig = loadedConfig;
-    
+
     // Initialize the LLM factory with provider configs
-    llmServiceFactory.initializeProviders(llms.providers);
-    
+    await llmServiceFactory.initializeProviders(llms.providers);
+
     return loadedConfig;
   }
 

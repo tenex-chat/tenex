@@ -43,12 +43,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // Add system prompt
         await this.addSystemPrompt(messages, context);
 
-        logger.info("[ThreadWithMemoryStrategy] Added system prompt", {
-            systemPromptLength: messages[0]?.content.length || 0,
-            systemPromptPreview: messages[0]?.content.substring(0, 200),
-            hasEventFilter: !!eventFilter
-        });
-
         // 1. Get current thread (from root to triggering event)
         logger.debug("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
             triggeringEventId: triggeringEvent.id.substring(0, 8),

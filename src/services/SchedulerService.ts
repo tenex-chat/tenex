@@ -154,7 +154,7 @@ export class SchedulerService {
       await this.publishAgentTriggerEvent(task);
 
       logger.info(`Successfully triggered scheduled task ${task.id} via kind:11 event`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(`Failed to execute scheduled task ${task.id}:`, error);
     }
   }
@@ -225,8 +225,8 @@ export class SchedulerService {
       }
 
       logger.info(`Loaded ${tasks.length} scheduled tasks from disk`);
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
         logger.info('No existing scheduled tasks file found, starting fresh');
       } else {
         logger.error('Failed to load scheduled tasks:', error);

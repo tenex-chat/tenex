@@ -4,7 +4,7 @@ import type { ExecutionTrace } from "./e2e-types";
 /**
  * Assert that agents execute in the expected sequence
  */
-export function assertAgentSequence(trace: ExecutionTrace, ...expectedAgents: string[]) {
+export function assertAgentSequence(trace: ExecutionTrace, ...expectedAgents: string[]): void {
     const executedAgents = trace.executions.map(e => e.agent);
     expect(executedAgents).toEqual(expectedAgents);
 }
@@ -12,7 +12,7 @@ export function assertAgentSequence(trace: ExecutionTrace, ...expectedAgents: st
 /**
  * Assert that phase transitions occur in the expected order
  */
-export function assertPhaseTransitions(trace: ExecutionTrace, ...expectedPhases: string[]) {
+export function assertPhaseTransitions(trace: ExecutionTrace, ...expectedPhases: string[]): void {
     // Extract phases from executions where phase changed
     const phases = trace.executions
         .filter(e => e.message?.includes("Phase changed"))
@@ -23,7 +23,7 @@ export function assertPhaseTransitions(trace: ExecutionTrace, ...expectedPhases:
 /**
  * Assert that specific tools are called by an agent
  */
-export function assertToolCalls(trace: ExecutionTrace, agent: string, ...expectedTools: string[]) {
+export function assertToolCalls(trace: ExecutionTrace, agent: string, ...expectedTools: string[]): void {
     const agentTools = trace.toolCalls
         .filter(tc => tc.agent === agent)
         .map(tc => tc.tool);

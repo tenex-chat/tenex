@@ -20,7 +20,7 @@ export class TreeBuilder {
       const node: ThreadNode = {
         event,
         agent: await this.extractAgentName(event),
-        timestamp: new Date(event.created_at! * 1000),
+        timestamp: new Date((event.created_at ?? 0) * 1000),
         content: event.content,
         toolCall: this.extractToolCall(event),
         children: [],
@@ -31,12 +31,16 @@ export class TreeBuilder {
     
     // Second pass: establish parent-child relationships
     for (const event of events) {
-      const node = nodeMap.get(event.id)!;
+      const node = nodeMap.get(event.id);
+      if (!node) continue;
+      
       const parentId = this.findParentEventId(event);
       
       if (parentId && nodeMap.has(parentId)) {
-        const parentNode = nodeMap.get(parentId)!;
-        parentNode.children.push(node);
+        const parentNode = nodeMap.get(parentId);
+        if (parentNode) {
+          parentNode.children.push(node);
+        }
       } else {
         // No parent found, this is a root node
         rootNodes.push(node);

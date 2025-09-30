@@ -5,9 +5,10 @@ import type { DelegationResponses } from "@/services/DelegationService";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { parseNostrUser, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
-import { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 const delegateExternalSchema = z.object({
   content: z.string().describe("The content of the chat message to send"),
@@ -163,7 +164,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 }
 
 // AI SDK tool factory
-export function createDelegateExternalTool(context: ExecutionContext) {
+export function createDelegateExternalTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: `Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects. If you don't know their pubkey you can use nostr_projects tools.
 

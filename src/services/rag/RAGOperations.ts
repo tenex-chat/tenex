@@ -1,4 +1,4 @@
-import type { Table } from '@lancedb/lancedb';
+import type { Table, VectorQuery } from '@lancedb/lancedb';
 import type { RAGDatabaseManager } from './RAGDatabaseManager';
 import type { EmbeddingProvider } from '../EmbeddingProvider';
 import { logger } from '@/utils/logger';
@@ -6,7 +6,9 @@ import { handleError } from '@/utils/error-handler';
 import { 
     mapLanceResultToDocument, 
     calculateRelevanceScore,
-    parseDocumentMetadata 
+    type LanceDBResult,
+    type LanceDBStoredDocument,
+    type DocumentMetadata
 } from '@/tools/utils';
 
 /**
@@ -15,10 +17,23 @@ import {
 export interface RAGDocument {
     id?: string;
     content: string;
-    metadata?: Record<string, any>;
+    metadata?: DocumentMetadata;
     vector?: Float32Array;
     timestamp?: number;
     source?: string;
+}
+
+/**
+ * Schema definition for LanceDB collection
+ */
+export interface LanceDBSchema {
+    id: string;
+    content: string;
+    vector: string;
+    metadata: string;
+    timestamp: string;
+    source: string;
+    [key: string]: string;
 }
 
 /**
@@ -26,7 +41,7 @@ export interface RAGDocument {
  */
 export interface RAGCollection {
     name: string;
-    schema?: Record<string, any>;
+    schema?: LanceDBSchema;
     created_at: number;
     updated_at: number;
 }
@@ -71,7 +86,7 @@ export class RAGOperations {
     /**
      * Create a new collection with vector schema
      */
-    async createCollection(name: string, customSchema?: Record<string, any>): Promise<RAGCollection> {
+    async createCollection(name: string, customSchema?: Partial<LanceDBSchema>): Promise<RAGCollection> {
         // Validate collection name
         this.validateCollectionName(name);
 
@@ -125,12 +140,10 @@ export class RAGOperations {
                 updated_at: Date.now()
             };
         } catch (error) {
-            if (error instanceof RAGValidationError || error instanceof RAGOperationError) {
-                throw error;
-            }
-            const message = `Failed to create collection '${name}'`;
-            handleError(error, message, { logLevel: 'error' });
-            throw new RAGOperationError(message, error as Error);
+            return this.handleRAGError(
+                error,
+                `Failed to create collection '${name}'`
+            );
         }
     }
 
@@ -161,16 +174,17 @@ export class RAGOperations {
                 `Successfully added ${documents.length} documents to collection '${collectionName}'`
             );
         } catch (error) {
-            const message = `Failed to add documents to collection '${collectionName}'`;
-            handleError(error, message, { logLevel: 'error' });
-            throw new RAGOperationError(message, error as Error);
+            return this.handleRAGError(
+                error,
+                `Failed to add documents to collection '${collectionName}'`
+            );
         }
     }
 
     /**
      * Process a batch of documents for insertion
      */
-    private async processBatch(documents: RAGDocument[]): Promise<any[]> {
+    private async processBatch(documents: RAGDocument[]): Promise<LanceDBStoredDocument[]> {
         return Promise.all(
             documents.map(async (doc) => {
                 // Validate document structure
@@ -178,14 +192,16 @@ export class RAGOperations {
 
                 const vector = doc.vector || await this.embeddingProvider.embed(doc.content);
                 
-                return {
+                const storedDoc: LanceDBStoredDocument = {
                     id: doc.id || this.generateDocumentId(),
                     content: doc.content,
-                    vector: Array.from(vector), // Convert Float32Array to array for LanceDB
+                    vector: Array.from(vector),
                     metadata: JSON.stringify(doc.metadata || {}),
                     timestamp: doc.timestamp || Date.now(),
                     source: doc.source || 'user'
                 };
+                
+                return storedDoc;
             })
         );
     }
@@ -220,12 +236,10 @@ export class RAGOperations {
 
             return results;
         } catch (error) {
-            if (error instanceof RAGValidationError) {
-                throw error;
-            }
-            const message = `Failed to perform semantic search on collection '${collectionName}'`;
-            handleError(error, message, { logLevel: 'error' });
-            throw new RAGOperationError(message, error as Error);
+            return this.handleRAGError(
+                error,
+                `Failed to perform semantic search on collection '${collectionName}'`
+            );
         }
     }
 
@@ -249,7 +263,7 @@ export class RAGOperations {
         table: Table, 
         queryVector: Float32Array, 
         topK: number
-    ): any {
+    ): VectorQuery {
         logger.debug(`Creating vector search with topK=${topK}, vector_dims=${queryVector.length}`);
         return table.search(Array.from(queryVector)).limit(topK);
     }
@@ -257,53 +271,100 @@ export class RAGOperations {
     /**
      * Execute LanceDB query with fallback approaches
      */
-    private async executeLanceDBQuery(searchQuery: any): Promise<any[]> {
-        const results: any[] = [];
+    private async executeLanceDBQuery(searchQuery: VectorQuery): Promise<LanceDBResult[]> {
+        return this.withQueryErrorHandling(
+            async () => {
+                const results = await this.tryToArrayQuery(searchQuery)
+                    ?? await this.tryExecuteQuery(searchQuery)
+                    ?? await this.tryIterateQuery(searchQuery);
+                
+                this.logQueryResults(results);
+                return results;
+            },
+            'Vector search execution failed'
+        );
+    }
+
+    /**
+     * Try executing query using toArray() method
+     */
+    private async tryToArrayQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
+        if (typeof searchQuery.toArray !== 'function') return null;
         
-        try {
-            if (typeof searchQuery.toArray === 'function') {
-                const queryResults = await searchQuery.toArray();
-                logger.debug(`Query executed with toArray(), got ${queryResults.length} results`);
-                results.push(...queryResults);
-            } else {
-                await this.executeQueryFallback(searchQuery, results);
-            }
-        } catch (error) {
-            logger.error('Failed to execute vector search', { error });
-            throw new Error(`Vector search execution failed: ${error}`);
+        const queryResults = await searchQuery.toArray();
+        logger.debug(`Query executed with toArray(), got ${queryResults.length} results`);
+        return queryResults;
+    }
+
+    /**
+     * Try executing query using execute() method
+     */
+    private async tryExecuteQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
+        if (typeof searchQuery.execute !== 'function') return null;
+        
+        const queryResults = await searchQuery.execute();
+        logger.debug(`Query executed with execute()`);
+        
+        if (Array.isArray(queryResults)) {
+            return queryResults;
         }
         
-        this.logQueryResults(results);
+        if (queryResults) {
+            const results: LanceDBResult[] = [];
+            for await (const item of queryResults) {
+                results.push(item);
+            }
+            return results;
+        }
+        
+        return null;
+    }
+
+    /**
+     * Try executing query using direct iteration
+     */
+    private async tryIterateQuery(searchQuery: VectorQuery): Promise<LanceDBResult[]> {
+        logger.debug(`Trying direct iteration`);
+        const results: LanceDBResult[] = [];
+        
+        for await (const item of searchQuery) {
+            results.push(item);
+        }
+        
         return results;
     }
 
     /**
-     * Fallback execution methods for LanceDB query
+     * Higher-order function for consistent error handling in query operations
      */
-    private async executeQueryFallback(searchQuery: any, results: any[]): Promise<void> {
-        if (typeof searchQuery.execute === 'function') {
-            const queryResults = await searchQuery.execute();
-            logger.debug(`Query executed with execute()`);
-            
-            if (Array.isArray(queryResults)) {
-                results.push(...queryResults);
-            } else if (queryResults) {
-                for await (const item of queryResults) {
-                    results.push(item);
-                }
-            }
-        } else {
-            logger.debug(`No toArray() or execute(), trying direct iteration`);
-            for await (const item of searchQuery) {
-                results.push(item);
-            }
+    private async withQueryErrorHandling<T>(
+        operation: () => Promise<T>,
+        errorMessage: string
+    ): Promise<T> {
+        try {
+            return await operation();
+        } catch (error) {
+            logger.error(errorMessage, { error });
+            throw new Error(`${errorMessage}: ${error}`);
         }
+    }
+
+    /**
+     * Centralized error handling for RAG operations
+     * Preserves validation/operation errors, wraps others in RAGOperationError
+     */
+    private handleRAGError(error: unknown, message: string): never {
+        if (error instanceof RAGValidationError || error instanceof RAGOperationError) {
+            throw error;
+        }
+        handleError(error, message, { logLevel: 'error' });
+        throw new RAGOperationError(message, error as Error);
     }
 
     /**
      * Log query results for debugging
      */
-    private logQueryResults(results: any[]): void {
+    private logQueryResults(results: LanceDBResult[]): void {
         logger.debug(`Vector search collected ${results.length} results`);
         
         if (results.length > 0) {
@@ -320,14 +381,14 @@ export class RAGOperations {
     /**
      * Transform LanceDB results to RAGQueryResult format
      */
-    private transformSearchResults(results: any[]): RAGQueryResult[] {
+    private transformSearchResults(results: LanceDBResult[]): RAGQueryResult[] {
         return results.map(result => this.transformSingleResult(result));
     }
 
     /**
      * Transform a single LanceDB result
      */
-    private transformSingleResult(result: any): RAGQueryResult {
+    private transformSingleResult(result: LanceDBResult): RAGQueryResult {
         return {
             document: mapLanceResultToDocument(result),
             score: calculateRelevanceScore(result._distance)

@@ -29,9 +29,34 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     private pipeline: Pipeline | null = null;
     private modelId: string;
     private dimensions: number | null = null;
+    private initializationPromise: Promise<void> | null = null;
     
     constructor(modelId: string = 'Xenova/all-MiniLM-L6-v2') {
         this.modelId = modelId;
+        this.initializationPromise = this.initialize();
+    }
+    
+    /**
+     * Initialize the provider by generating a test embedding to determine dimensions.
+     * This ensures dimensions are always available after construction completes.
+     */
+    private async initialize(): Promise<void> {
+        try {
+            const pipe = await this.ensurePipeline();
+            const output = await pipe('test', { pooling: 'mean', normalize: true });
+            
+            const embedding = output.data instanceof Float32Array 
+                ? output.data 
+                : new Float32Array(output.data);
+            
+            this.dimensions = embedding.length;
+        } catch (error) {
+            throw new Error(
+                `Failed to initialize embedding provider: ${
+                    error instanceof Error ? error.message : String(error)
+                }`
+            );
+        }
     }
     
     private async ensurePipeline(): Promise<Pipeline> {
@@ -47,34 +72,49 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     }
     
     public async embedBatch(texts: string[]): Promise<Float32Array[]> {
+        await this.ensureInitialized();
         const pipe = await this.ensurePipeline();
         const results: Float32Array[] = [];
         
         for (const text of texts) {
             const output = await pipe(text, { pooling: 'mean', normalize: true });
             
-            // Convert to Float32Array if needed
             if (output.data instanceof Float32Array) {
                 results.push(output.data);
             } else {
                 results.push(new Float32Array(output.data));
-            }
-            
-            // Cache dimensions from first embedding
-            if (this.dimensions === null && results.length > 0) {
-                this.dimensions = results[0].length;
             }
         }
         
         return results;
     }
     
-    public async getDimensions(): Promise<number> {
-        if (this.dimensions === null) {
-            // Generate a dummy embedding to get dimensions
-            await this.embed('test');
+    /**
+     * Ensure the provider has completed initialization.
+     * This guarantees dimensions are available before any operations.
+     */
+    private async ensureInitialized(): Promise<void> {
+        if (this.initializationPromise) {
+            await this.initializationPromise;
+            this.initializationPromise = null;
         }
-        return this.dimensions!;
+    }
+    
+    /**
+     * Get embedding dimensions.
+     * Dimensions are guaranteed to be available after initialization completes.
+     */
+    public async getDimensions(): Promise<number> {
+        await this.ensureInitialized();
+        
+        if (this.dimensions === null) {
+            throw new Error(
+                'Embedding dimensions not available after initialization. ' +
+                'This indicates a critical initialization failure.'
+            );
+        }
+        
+        return this.dimensions;
     }
     
     public getModelId(): string {

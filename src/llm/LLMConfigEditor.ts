@@ -131,7 +131,10 @@ export class LLMConfigEditor {
       if (!llmsConfig.providers[provider]) {
         llmsConfig.providers[provider] = { apiKey: "" };
       }
-      llmsConfig.providers[provider]!.apiKey = config.apiKey;
+      const providerConfig = llmsConfig.providers[provider];
+      if (providerConfig) {
+        providerConfig.apiKey = config.apiKey;
+      }
     }
   }
 
@@ -147,6 +150,6 @@ export class LLMConfigEditor {
     } else {
       await configService.saveProjectLLMs(this.configPath, config);
     }
-    llmServiceFactory.initializeProviders(config.providers);
+    await llmServiceFactory.initializeProviders(config.providers);
   }
 }

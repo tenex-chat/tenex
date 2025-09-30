@@ -2,6 +2,7 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { fileExists, readFile, writeJsonFile, ensureDirectory } from "@/lib/fs";
+import type { TenexAgents } from "@/services/config/types";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import * as path from "node:path";
@@ -86,7 +87,7 @@ export const agentMakeGlobalCommand = new Command("make-global")
       await ensureDirectory(globalAgentsDir);
 
       // Check if agent already exists globally
-      let globalAgentsJson: Record<string, any> = {};
+      let globalAgentsJson: TenexAgents = {};
       if (await fileExists(globalAgentsJsonPath)) {
         globalAgentsJson = JSON.parse(await readFile(globalAgentsJsonPath));
       }

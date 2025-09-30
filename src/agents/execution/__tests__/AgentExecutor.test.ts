@@ -173,9 +173,22 @@ describe("AgentExecutor", () => {
       },
     }));
 
+    mock.module("@/conversations/services/ThreadService", () => ({
+      threadService: {
+        getThreadToEvent: () => [],
+        getThreadFromEvent: () => []
+      }
+    }));
+
     mock.module("@/nostr", () => ({
       AgentPublisher: class {
         async typing() {}
+        async error() {}
+        async conversation() {}
+        async complete() { return { id: "complete-event-id" }; }
+        async toolUse() { return { id: "tool-event-id" }; }
+        async publishStreamingDelta() {}
+        async forceFlushStreamingBuffers() {}
       },
     }));
     // Create mock LLM service
@@ -250,8 +263,19 @@ describe("AgentExecutor", () => {
       llmProvider: "anthropic",
       model: "claude-3-opus-20240229",
       temperature: 0.7,
-      
-    };
+      llmConfig: {
+        provider: "anthropic",
+        model: "claude-3-opus-20240229",
+        temperature: 0.7
+      },
+      createMetadataStore: mock(() => ({
+        get: mock(() => undefined),
+        set: mock(() => {}),
+        delete: mock(() => {}),
+        has: mock(() => false),
+        clear: mock(() => {})
+      }))
+    } as any;
 
     // Create mock execution context
     mockContext = {
@@ -281,7 +305,7 @@ describe("AgentExecutor", () => {
         conversation: mock(() => {}),
         complete: mock(async () => {}),
         toolUse: mock(async () => ({ id: "tool-event-id" })),
-        handleContent: mock(async () => {}),
+        publishStreamingDelta: mock(async () => {}),
       } as any,
       onStreamStart: mock(() => {}),
       onStreamToken: mock(() => {}),

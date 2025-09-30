@@ -11,6 +11,8 @@ import { z } from "zod";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { llmOpsRegistry } from '@/services/LLMOperationsRegistry';
+import type { ClaudeCodeSettings } from 'ai-sdk-provider-claude-code';
+import type { ModelMessage } from 'ai';
 
 export enum ClaudeCodeMode {
   WRITE = "WRITE",
@@ -32,6 +34,41 @@ type ClaudeCodeOutput = {
   duration: number;
   response: string;
 };
+
+type Todo = {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+};
+
+type TodoWriteResult = {
+  todos: Todo[];
+};
+
+function isTodoWriteResult(result: unknown): result is TodoWriteResult {
+  if (typeof result !== 'object' || result === null) {
+    return false;
+  }
+  
+  if (!('todos' in result)) {
+    return false;
+  }
+  
+  const candidate = result as Record<string, unknown>;
+  
+  if (!Array.isArray(candidate.todos)) {
+    return false;
+  }
+  
+  return candidate.todos.every(todo => 
+    todo &&
+    typeof todo === 'object' &&
+    'content' in todo &&
+    typeof todo.content === 'string' &&
+    'status' in todo &&
+    (todo.status === 'pending' || todo.status === 'in_progress' || todo.status === 'completed')
+  );
+}
 
 /**
  * AI SDK-based implementation using LLMService
@@ -148,7 +185,7 @@ async function executeClaudeCode(
             cwd: context.projectPath,
           });
 
-          const options: any = {
+          const options: ClaudeCodeSettings = {
             cwd: context.projectPath,
             permissionMode: 'bypassPermissions',
             // Resume existing session if we have one
@@ -200,17 +237,11 @@ async function executeClaudeCode(
       );
     });
 
-    llmService.on('tool-did-execute', async ({ toolName, result }: any) => {
+    llmService.on('tool-did-execute', async ({ toolName, result }) => {
       logger.info("[claude_code] Tool executed", { toolName, result });
       
-      if (toolName === 'TodoWrite' && result?.todos) {
-        const todos = result.todos as Array<{
-          content: string;
-          status: "pending" | "in_progress" | "completed";
-          activeForm?: string;
-        }>;
-        
-        const todoLines = todos.map(todo => {
+      if (toolName === 'TodoWrite' && isTodoWriteResult(result)) {
+        const todoLines = result.todos.map(todo => {
           let checkbox = "- [ ]";
           if (todo.status === "in_progress") {
             checkbox = "- ➡️";
@@ -240,8 +271,8 @@ async function executeClaudeCode(
       }
     });
 
-    llmService.on('complete', ({ message, steps, text, usage }: any) => {
-      console.log("ai sdk cc complete", chalk.blue(text), chalk.green(message));
+    llmService.on('complete', ({ message, steps, usage }) => {
+      console.log("ai sdk cc complete", chalk.green(message));
 
       logger.info("[claude_code] 🏁 STREAM COMPLETE EVENT:", {
         stepCount: steps?.length || 0,
@@ -283,7 +314,7 @@ async function executeClaudeCode(
     });
 
     // Build messages
-    const messages: any[] = [];
+    const messages: ModelMessage[] = [];
     messages.push({
       role: 'user',
       content: prompt

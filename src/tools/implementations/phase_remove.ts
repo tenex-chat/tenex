@@ -1,10 +1,10 @@
 import { tool } from 'ai';
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
 import * as path from "node:path";
-import { getProjectContext } from "@/services";
 
 const removePhaseSchema = z.object({
   phaseName: z
@@ -55,9 +55,6 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
   try {
     const projectPath = process.cwd();
     const agentsDir = path.join(projectPath, ".tenex", "agents");
-
-    // Find the agent's file
-    const projectContext = getProjectContext();
 
     // Get the agent's file name from registry
     const registryPath = path.join(projectPath, ".tenex", "agents.json");
@@ -132,7 +129,7 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
 }
 
 // AI SDK tool factory
-export function createRemovePhaseTool(context: ExecutionContext) {
+export function createRemovePhaseTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
       "Remove a phase definition from your agent configuration. Use this to delete phases that are no longer needed. If you remove all phases, you'll switch back to using the regular delegate tool instead of delegate_phase.",

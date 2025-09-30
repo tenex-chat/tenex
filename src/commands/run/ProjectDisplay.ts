@@ -116,7 +116,10 @@ export class ProjectDisplay {
           if (!mcpByServer.has(serverName)) {
             mcpByServer.set(serverName, []);
           }
-          mcpByServer.get(serverName)!.push(toolName);
+          const serverTools = mcpByServer.get(serverName);
+          if (serverTools) {
+            serverTools.push(toolName);
+          }
         }
       }
       

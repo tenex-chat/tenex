@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ExecutionContext } from '@/agents/execution/types';
+import type { AISdkTool } from '@/tools/registry';
 import { RAGService } from '@/services/RAGService';
 import { 
     executeToolWithErrorHandling,
@@ -21,7 +22,7 @@ const ragDeleteCollectionSchema = z.object({
  */
 async function executeDeleteCollection(
     input: z.infer<typeof ragDeleteCollectionSchema>,
-    context: ExecutionContext
+    _context: ExecutionContext
 ): Promise<ToolResponse> {
     const { name, confirm = false } = input;
     
@@ -46,7 +47,7 @@ async function executeDeleteCollection(
 /**
  * Delete a RAG collection and all its documents
  */
-export function createRAGDeleteCollectionTool(context: ExecutionContext) {
+export function createRAGDeleteCollectionTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: 'Delete a RAG collection and all its documents. This action is permanent and requires confirmation.',
         inputSchema: ragDeleteCollectionSchema,

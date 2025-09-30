@@ -6,6 +6,33 @@ import type {
     RoutingDecision
 } from "./e2e-types";
 
+interface LLMHistoryEntry {
+    toolCalls?: Array<{ name: string }>;
+}
+
+function isLLMHistoryEntry(value: unknown): value is LLMHistoryEntry {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+    
+    const entry = value as Record<string, unknown>;
+    
+    if (!('toolCalls' in entry)) {
+        return true;
+    }
+    
+    if (!Array.isArray(entry.toolCalls)) {
+        return false;
+    }
+    
+    return entry.toolCalls.every(tc => 
+        tc && 
+        typeof tc === 'object' && 
+        'name' in tc && 
+        typeof tc.name === 'string'
+    );
+}
+
 /**
  * Execute agent and return result (internal helper)
  */
@@ -117,12 +144,19 @@ function extractRoutingDecision(orchestratorResult: AgentExecutionResult): Routi
         if (!content) return null;
         
         // Try to parse as JSON
-        const parsed = JSON.parse(content);
-        if (parsed.agents && Array.isArray(parsed.agents)) {
-            return parsed;
+        const parsed = JSON.parse(content) as unknown;
+        
+        if (
+            parsed &&
+            typeof parsed === 'object' &&
+            'agents' in parsed &&
+            Array.isArray(parsed.agents)
+        ) {
+            return parsed as RoutingDecision;
         }
-    } catch {
-        // Not a routing decision
+    } catch (error) {
+        // Not a routing decision - invalid JSON or parsing error
+        console.debug('Failed to parse routing decision:', error);
     }
     return null;
 }
@@ -229,12 +263,17 @@ export async function executeConversationFlow(
                 for (const toolCall of agentResult.toolCalls) {
                     // Handle different tool call structures
                     let toolName: string;
-                    let toolArgs: any;
+                    let toolArgs: Record<string, unknown>;
                     
                     if (toolCall.function) {
                         // Standard OpenAI-style structure
                         toolName = toolCall.function.name;
-                        toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                        try {
+                            toolArgs = JSON.parse(toolCall.function.arguments || '{}') as Record<string, unknown>;
+                        } catch (error) {
+                            console.warn('Failed to parse tool call arguments:', error);
+                            toolArgs = {};
+                        }
                     } else if (toolCall.name) {
                         // Simplified structure from our mock
                         toolName = toolCall.name;
@@ -254,8 +293,8 @@ export async function executeConversationFlow(
                     // Check for continue tool - means we need to go back to orchestrator
                     if (toolName === 'continue') {
                         // Update mock LLM context for next iteration
-                        if ((context.mockLLM as any).updateContext) {
-                            (context.mockLLM as any).updateContext({
+                        if ('updateContext' in context.mockLLM && typeof context.mockLLM.updateContext === 'function') {
+                            context.mockLLM.updateContext({
                                 lastContinueCaller: targetAgent,
                                 iteration: iteration,
                             });
@@ -332,7 +371,7 @@ export async function createConversation(
 export async function getConversationState(
     context: E2ETestContext,
     conversationId: string
-): Promise<{ phase: string; messages: any[] }> {
+): Promise<{ phase: string; messages: Message[] }> {
     const conversation = context.conversationCoordinator.getConversation(conversationId);
     if (!conversation) {
         throw new Error(`Conversation not found: ${conversationId}`);
@@ -371,13 +410,30 @@ export async function waitForPhase(
 /**
  * Get tool calls from mock LLM history
  */
-export function getToolCallsFromHistory(mockLLM: any): string[] {
+export function getToolCallsFromHistory(mockLLM: unknown): string[] {
     const toolCalls: string[] = [];
     
     // Access the conversational logger from the mock LLM
-    if ((mockLLM as any).conversationalLogger) {
-        const history = (mockLLM as any).conversationalLogger.getHistory();
+    if (
+        mockLLM &&
+        typeof mockLLM === 'object' &&
+        'conversationalLogger' in mockLLM &&
+        mockLLM.conversationalLogger &&
+        typeof mockLLM.conversationalLogger === 'object' &&
+        'getHistory' in mockLLM.conversationalLogger &&
+        typeof mockLLM.conversationalLogger.getHistory === 'function'
+    ) {
+        const history = mockLLM.conversationalLogger.getHistory();
+        
+        if (!Array.isArray(history)) {
+            return toolCalls;
+        }
+        
         for (const entry of history) {
+            if (!isLLMHistoryEntry(entry)) {
+                continue;
+            }
+            
             if (entry.toolCalls) {
                 for (const tc of entry.toolCalls) {
                     toolCalls.push(tc.name);

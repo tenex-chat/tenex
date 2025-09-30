@@ -3,6 +3,7 @@ import { DelegationService, type DelegationResponses } from "@/services/Delegati
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 import { getProjectContext } from "@/services";
 
 const askSchema = z.object({
@@ -66,7 +67,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
 }
 
 // AI SDK tool factory
-export function createAskTool(context: ExecutionContext) {
+export function createAskTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: "Ask a question to the project owner and wait for their response. Supports open-ended questions (no suggestions), yes/no questions (suggestions=['Yes', 'No']), or multiple choice questions (custom suggestions list).",
     inputSchema: askSchema,

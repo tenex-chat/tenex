@@ -1,5 +1,6 @@
 import type { TenexLLMs } from "@/services/config/types";
 import { llmServiceFactory } from "../LLMServiceFactory";
+import type { LLMLogger } from "@/logging/LLMLogger";
 import inquirer from "inquirer";
 import chalk from "chalk";
 
@@ -32,18 +33,18 @@ export class ConfigurationTester {
     try {
       // Ensure providers are initialized
       if (!llmServiceFactory.hasProvider(config.provider)) {
-        llmServiceFactory.initializeProviders(llmsConfig.providers);
+        await llmServiceFactory.initializeProviders(llmsConfig.providers);
       }
       
       // Create a simple mock logger for testing
-      const mockLogger = {
+      const mockLogger: Pick<LLMLogger, 'logLLMRequest' | 'logLLMResponse'> = {
         logLLMRequest: async () => {},
         logLLMResponse: async () => {}
       };
       
       // Create the service using the factory
       const service = llmServiceFactory.createService(
-        mockLogger as any, 
+        mockLogger as LLMLogger, 
         config
       );
       
@@ -61,10 +62,10 @@ export class ConfigurationTester {
       
       // Show usage stats if available
       if ('usage' in result && result.usage) {
-        const usage = result.usage as any;
-        const promptTokens = usage.promptTokens || '?';
-        const completionTokens = usage.completionTokens || '?';
-        const totalTokens = usage.totalTokens || '?';
+        const usage = result.usage;
+        const promptTokens = usage.promptTokens ?? '?';
+        const completionTokens = usage.completionTokens ?? '?';
+        const totalTokens = usage.totalTokens ?? '?';
         console.log(chalk.gray(`\nTokens: ${promptTokens} + ${completionTokens} = ${totalTokens}`));
       }
       
