@@ -720,6 +720,10 @@ export class AgentRegistry {
       const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
       const projectEvent = ndkProject;
 
+      // Load whitelisted pubkeys from config
+      const { config: tenexConfig } = await configService.loadConfig(this.getBasePath());
+      const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
+
       // Publish agent profile (kind:0) and request event using static method
       // The publishAgentCreation method now handles passing metadata for agents without eventId
       await AgentPublisher.publishAgentCreation(
@@ -727,7 +731,8 @@ export class AgentRegistry {
         config,
         projectTitle,
         projectEvent,
-        ndkAgentEventId
+        ndkAgentEventId,
+        whitelistedPubkeys
       );
     } catch (error) {
       logger.error("Failed to publish agent events", { error });
@@ -1065,7 +1070,8 @@ export class AgentRegistry {
           projectTitle,
           projectEvent,
           agent.eventId,
-          agentMetadata
+          agentMetadata,
+          whitelistedPubkeys
         );
 
         // Publish contact list so agent follows all project agents and whitelisted pubkeys

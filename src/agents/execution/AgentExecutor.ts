@@ -1,6 +1,5 @@
-import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError, formatStreamError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage, Tool as CoreTool } from "ai";
@@ -11,15 +10,14 @@ import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import type { MessageGenerationStrategy } from "./strategies/types";
-import {
-    ThreadWithMemoryStrategy
-} from "./strategies";
+import { FlattenedChronologicalStrategy } from "./strategies/FlattenedChronologicalStrategy";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
-import type { AISdkProvider } from "@/llm/types";
-import { buildBrainstormModerationPrompt } from "@/prompts/fragments/brainstorm-moderation";
+import { isAISdkProvider } from "@/llm/type-guards";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { AgentSupervisor } from "./AgentSupervisor";
-import { extractPhaseContext } from "@/utils/phase-utils";
+import { createEventContext } from "@/utils/phase-utils";
+import { BrainstormModerator, type BrainstormResponse, type ModerationResult } from "./BrainstormModerator";
+import { SessionManager } from "./SessionManager";
 
 export interface LLMCompletionRequest {
     messages: ModelMessage[];
@@ -34,71 +32,8 @@ export class AgentExecutor {
         private standaloneContext?: StandaloneAgentContext,
         messageStrategy?: MessageGenerationStrategy
     ) {
-        // Use provided strategy or select based on configuration
-        this.messageStrategy = messageStrategy || this.selectStrategy();
+        this.messageStrategy = messageStrategy || new FlattenedChronologicalStrategy();
     }
-
-    /**
-     * Select appropriate message generation strategy
-     */
-    private selectStrategy(): MessageGenerationStrategy {
-        // Always use ThreadWithMemoryStrategy as it's now the only strategy
-        return new ThreadWithMemoryStrategy();
-    }
-
-    /**
-     * Type guard to check if a string is a valid AISdkProvider
-     */
-    private isAISdkProvider(provider: string): provider is AISdkProvider {
-        const validProviders: readonly AISdkProvider[] = [
-            "openrouter", 
-            "anthropic", 
-            "openai", 
-            "ollama", 
-            "claudeCode"
-        ] as const;
-        return (validProviders as readonly string[]).includes(provider);
-    }
-
-
-    /**
-     * Create event filter for session resumption
-     */
-    private createEventFilter(
-        sessionId: string | undefined,
-        lastSentEventId: string | undefined
-    ): ((event: NDKEvent) => boolean) | undefined {
-        if (!sessionId || !lastSentEventId) {
-            return undefined;
-        }
-
-        let foundLastSent = false;
-        return (event: NDKEvent) => {
-            // Skip events until we find the last sent one
-            if (!foundLastSent) {
-                if (event.id === lastSentEventId) {
-                    foundLastSent = true;
-                    logger.debug("[AgentExecutor] 🎯 Found last sent event, excluding it", {
-                        eventId: event.id.substring(0, 8),
-                        content: event.content?.substring(0, 50)
-                    });
-                    return false;
-                }
-                logger.debug("[AgentExecutor] ⏭️ Skipping event (before last sent)", {
-                    eventId: event.id.substring(0, 8),
-                    content: event.content?.substring(0, 50),
-                    lookingFor: lastSentEventId.substring(0, 8)
-                });
-                return false;
-            }
-            logger.debug("[AgentExecutor] ✅ Including event (after last sent)", {
-                eventId: event.id.substring(0, 8),
-                content: event.content?.substring(0, 50)
-            });
-            return true;
-        };
-    }
-
 
     /**
      * Prepare an LLM request without executing it.
@@ -195,7 +130,7 @@ export class AgentExecutor {
         startExecutionTime(conversation);
 
         // Publish typing indicator start
-        const eventContext = this.createEventContext(context);
+        const eventContext = createEventContext(context);
         agentPublisher.typing({ state: "start" }, eventContext).catch(err =>
             logger.warn("Failed to start typing indicator", { error: err })
         );
@@ -211,7 +146,7 @@ export class AgentExecutor {
 
             // Ensure typing indicator is stopped
             try {
-                const eventContext = this.createEventContext(context);
+                const eventContext = createEventContext(context);
                 await agentPublisher.typing({ state: "stop" }, eventContext);
             } catch (typingError) {
                 logger.warn("Failed to stop typing indicator", {
@@ -242,15 +177,10 @@ export class AgentExecutor {
         // Stream the LLM response
         const completionEvent = await this.executeStreaming(context, toolTracker);
 
-        // Check if the execution is complete
-        if (!completionEvent) {
-            logger.error('[AgentExecutor] ❌ No completion event received', {
-                agent: context.agent.name
-            });
-            return undefined;
-        }
+        // Create event context for supervisor
+        const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
-        const isComplete = await supervisor.isExecutionComplete(completionEvent);
+        const isComplete = await supervisor.isExecutionComplete(completionEvent, agentPublisher, eventContext);
 
         if (!isComplete) {
             logger.info('[AgentExecutor] 🔁 RECURSION: Execution not complete, continuing', {
@@ -259,12 +189,11 @@ export class AgentExecutor {
             });
 
             // Only publish intermediate if we had actual content
-            if (completionEvent.message?.trim()) {
+            if (completionEvent?.message?.trim()) {
                 logger.info('[AgentExecutor] Publishing intermediate conversation', {
                     agent: context.agent.name,
                     contentLength: completionEvent.message.length
                 });
-                const eventContext = this.createEventContext(context);
                 await agentPublisher.conversation({
                     content: completionEvent.message
                 }, eventContext);
@@ -285,30 +214,15 @@ export class AgentExecutor {
 
         logger.info('[AgentExecutor] ✅ Execution complete, publishing final response', {
             agent: context.agent.name,
-            hasReasoning: !!completionEvent.reasoning,
-            messageLength: completionEvent.message?.length || 0
+            hasReasoning: !!completionEvent?.reasoning,
+            messageLength: completionEvent?.message?.length || 0
         });
 
-        // Check if there was a phase validation decision to publish
-        const phaseDecision = supervisor.getPhaseValidationDecision();
-        if (phaseDecision) {
-            logger.info('[AgentExecutor] 📝 Publishing phase validation decision', {
-                agent: context.agent.name,
-                decisionLength: phaseDecision.length
-            });
-            const eventContext = this.createEventContext(context, completionEvent.usage?.model);
-            await agentPublisher.conversation({
-                content: phaseDecision,
-                isReasoning: true
-            }, eventContext);
-        }
-
         // Execution is complete - publish and return
-        const eventContext = this.createEventContext(context, completionEvent.usage?.model);
         const finalResponseEvent = await agentPublisher.complete({
-            content: completionEvent.message,
-            reasoning: completionEvent.reasoning,
-            usage: completionEvent.usage
+            content: completionEvent?.message || '',
+            reasoning: completionEvent?.reasoning,
+            usage: completionEvent?.usage
         }, eventContext);
 
         logger.info('[AgentExecutor] 🎯 Published final completion event', {
@@ -320,58 +234,7 @@ export class AgentExecutor {
         return finalResponseEvent;
     }
 
-    /**
-     * Create EventContext for publishing events
-     */
-    private createEventContext(
-        context: ExecutionContext,
-        model?: string
-    ): EventContext {
-        const conversation = context.getConversation();
-        // Extract phase directly from triggering event if it's a phase delegation
-        const phaseContext = extractPhaseContext(context.triggeringEvent);
 
-        return {
-            triggeringEvent: context.triggeringEvent,
-            rootEvent: conversation?.history[0] ?? context.triggeringEvent,
-            conversationId: context.conversationId,
-            model: model ?? context.agent.llmConfig,
-            phase: phaseContext?.phase
-        };
-    }
-
-    /**
-     * Format error for stream/execution errors
-     */
-    private formatStreamError(error: unknown): { message: string; errorType: string } {
-        let errorMessage = "An error occurred while processing your request.";
-        let errorType = "system";
-
-        if (error instanceof Error) {
-            const errorStr = error.toString();
-            if (errorStr.includes("AI_APICallError") ||
-                errorStr.includes("Provider returned error") ||
-                errorStr.includes("422") ||
-                errorStr.includes("openrouter")) {
-                errorType = "ai_api";
-
-                // Extract meaningful error details
-                const providerMatch = errorStr.match(/provider_name":"([^"]+)"/);
-                const provider = providerMatch ? providerMatch[1] : "AI provider";
-                errorMessage = `Failed to process request with ${provider}. The AI service returned an error.`;
-
-                // Add raw error details if available
-                const rawMatch = errorStr.match(/raw":"([^"]+)"/);
-                if (rawMatch) {
-                    errorMessage += ` Details: ${rawMatch[1]}`;
-                }
-            } else {
-                errorMessage = `Error: ${error.message}`;
-            }
-        }
-
-        return { message: errorMessage, errorType };
-    }
 
 
     /**
@@ -388,29 +251,12 @@ export class AgentExecutor {
         // Get tools as a keyed object for AI SDK
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
-        // Get stored session ID and last sent event ID if available (for providers that support session resumption)
-        const metadataStore = context.agent.createMetadataStore(context.conversationId);
-        let sessionId = metadataStore.get<string>('sessionId');
-        const lastSentEventId = metadataStore.get<string>('lastSentEventId');
+        // Initialize session manager for session resumption
+        const sessionManager = new SessionManager(context.agent, context.conversationId);
+        const { sessionId } = sessionManager.getSession();
 
-        if (sessionId) {
-            logger.info("[AgentExecutor] ✅ Found existing session to resume", {
-                sessionId,
-                agent: context.agent.name,
-                conversationId: context.conversationId.substring(0, 8),
-                lastSentEventId: lastSentEventId || 'NONE'
-            });
-        }
-
-        // Create event filter for Claude Code sessions
-        const eventFilter = this.createEventFilter(sessionId, lastSentEventId);
-        
-        if (eventFilter && lastSentEventId) {
-            logger.info("[AgentExecutor] 📋 Created event filter for resumed session", {
-                lastSentEventId: lastSentEventId.substring(0, 8),
-                willFilterEvents: true
-            });
-        }
+        // Create event filter for resumed sessions
+        const eventFilter = sessionManager.createEventFilter();
 
         // Build messages using the strategy, with optional filter for resumed sessions
         let messages = await this.messageStrategy.buildMessages(
@@ -433,6 +279,7 @@ export class AgentExecutor {
             messageCount: messages.length,
             hasFilter: !!eventFilter,
             sessionId: sessionId || 'NONE',
+            hasSession: !!sessionId,
             messageTypes: messages.map((msg, i) => {
                 const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
                 return {
@@ -448,7 +295,7 @@ export class AgentExecutor {
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
 
         const agentPublisher = context.agentPublisher;
-        const eventContext = this.createEventContext(context, llmService.model);
+        const eventContext = createEventContext(context, llmService.model);
 
         // Separate buffers for content and reasoning
         let contentBuffer = '';
@@ -459,7 +306,7 @@ export class AgentExecutor {
         let intermediatePublishTimeout: NodeJS.Timeout | undefined;
 
         // Check if provider supports streaming
-        const supportsStreaming = this.isAISdkProvider(llmService.provider)
+        const supportsStreaming = isAISdkProvider(llmService.provider)
             ? providerSupportsStreaming(llmService.provider)
             : true;
 
@@ -571,7 +418,7 @@ export class AgentExecutor {
 
             // Publish error event to Nostr for visibility
             try {
-                const { message: errorMessage, errorType } = this.formatStreamError(event.error);
+                const { message: errorMessage, errorType } = formatStreamError(event.error);
 
                 await agentPublisher.error({
                     message: errorMessage,
@@ -591,18 +438,7 @@ export class AgentExecutor {
         
         // Handle session capture - store any session ID from the provider
         llmService.on('session-captured', ({ sessionId: capturedSessionId }) => {
-            const metadataStore = context.agent.createMetadataStore(context.conversationId);
-            metadataStore.set('sessionId', capturedSessionId);
-            // Also store the current triggering event as the last sent event
-            metadataStore.set('lastSentEventId', context.triggeringEvent.id);
-            // Update the local sessionId variable so it's available in the closure
-            sessionId = capturedSessionId;
-            logger.info("[AgentExecutor] 💾 Stored session ID and last sent event from provider", {
-                sessionId: capturedSessionId,
-                lastSentEventId: context.triggeringEvent.id.substring(0, 8),
-                agent: context.agent.name,
-                conversationId: context.conversationId.substring(0, 8)
-            });
+            sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
         });
 
         // Tool tracker is always provided from executeWithSupervisor
@@ -635,7 +471,7 @@ export class AgentExecutor {
         } catch (streamError) {
             // Publish error event for stream errors
             try {
-                const { message: errorMessage, errorType } = this.formatStreamError(streamError);
+                const { message: errorMessage, errorType } = formatStreamError(streamError);
 
                 await agentPublisher.error({
                     message: errorMessage,
@@ -677,15 +513,9 @@ export class AgentExecutor {
         // Reset streaming sequence counter for next stream
         agentPublisher.resetStreamingSequence();
 
-        // Store lastSentEventId for new Claude Code sessions
-        if (!sessionId && context.agent.llmConfig.provider === 'claudeCode' && completionEvent) {
-            const metadataStore = context.agent.createMetadataStore(context.conversationId);
-            metadataStore.set('lastSentEventId', context.triggeringEvent.id);
-            logger.info("[AgentExecutor] 📝 Stored lastSentEventId for new Claude Code session", {
-                lastSentEventId: context.triggeringEvent.id.substring(0, 8),
-                agent: context.agent.name,
-                conversationId: context.conversationId.substring(0, 8)
-            });
+        // Store lastSentEventId for new Claude Code sessions (without session ID yet)
+        if (!sessionId && llmService.provider === 'claudeCode' && completionEvent) {
+            sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
         return completionEvent;
@@ -699,139 +529,9 @@ export class AgentExecutor {
      */
     async executeBrainstormModeration(
         context: ExecutionContext,
-        responses: Array<{ agent: { pubkey: string; name: string }; content: string; event: NDKEvent }>
-    ): Promise<{ selectedAgents: string[]; reasoning?: string } | null> {
-        try {
-            // Build messages using the strategy to get the moderator's full identity
-            const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
-
-            // Keep only system messages (agent identity, instructions, etc)
-            const moderationMessages: ModelMessage[] = messages.filter(msg => msg.role === "system");
-
-            // Add the moderation prompt messages
-            const promptMessages = buildBrainstormModerationPrompt(
-                context.triggeringEvent.content,
-                responses.map(r => ({
-                    name: r.agent.name,
-                    pubkey: r.agent.pubkey,
-                    content: r.content
-                }))
-            );
-            moderationMessages.push(...promptMessages);
-
-            logger.debug("[AgentExecutor] Executing brainstorm moderation", {
-                moderator: context.agent.name,
-                responseCount: responses.length,
-                agents: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey })),
-                messageCount: moderationMessages.length
-            });
-
-            // Use regular text generation instead of generateObject
-            // since Claude via OpenRouter doesn't support it well
-            const response = await this.generateTextResponse(moderationMessages, context);
-
-            if (!response) {
-                logger.error("[AgentExecutor] No response from moderator");
-                return null;
-            }
-
-            // Parse JSON from response
-            let parsed: { selectedAgents: string[]; reasoning?: string };
-            try {
-                // Clean the response - remove markdown code blocks if present
-                const cleaned = response
-                    .replace(/```json\n?/g, '')
-                    .replace(/```\n?/g, '')
-                    .trim();
-
-                parsed = JSON.parse(cleaned);
-            } catch (parseError) {
-                logger.error("[AgentExecutor] Failed to parse moderation response as JSON", {
-                    response: response.substring(0, 200),
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
-                });
-                return null;
-            }
-
-            // Handle both single and multiple selections
-            const selectedPubkeys = Array.isArray(parsed.selectedAgents)
-                ? parsed.selectedAgents
-                : [parsed.selectedAgents];
-
-            if (selectedPubkeys.length === 0) {
-                logger.info("[AgentExecutor] No agents selected by moderator - defaulting to all responses");
-                return {
-                    selectedAgents: responses.map(r => r.agent.pubkey),
-                    reasoning: parsed.reasoning || "Moderator did not select specific responses - including all"
-                };
-            }
-
-            // Validate all selected agents exist and map to their pubkeys
-            const validatedPubkeys: string[] = [];
-            for (const selection of selectedPubkeys) {
-                const matchingResponse = responses.find(r =>
-                    r.agent.pubkey === selection ||
-                    r.agent.name === selection
-                );
-
-                if (matchingResponse) {
-                    validatedPubkeys.push(matchingResponse.agent.pubkey);
-                } else {
-                    logger.warn("[AgentExecutor] Selected agent not found", {
-                        selected: selection,
-                        available: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey }))
-                    });
-                }
-            }
-
-            if (validatedPubkeys.length === 0) {
-                logger.error("[AgentExecutor] No valid agents in selection");
-                return null;
-            }
-
-            logger.info("[AgentExecutor] Moderation complete", {
-                moderator: context.agent.name,
-                selectedCount: validatedPubkeys.length,
-                selectedAgents: validatedPubkeys,
-                reasoning: parsed.reasoning?.substring(0, 100)
-            });
-
-            return {
-                selectedAgents: validatedPubkeys,
-                reasoning: parsed.reasoning
-            };
-
-        } catch (error) {
-            logger.error("[AgentExecutor] Brainstorm moderation failed", {
-                error: error instanceof Error ? error.message : String(error),
-                moderator: context.agent.name
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Generate a text response using the LLM service
-     */
-    private async generateTextResponse(
-        messages: ModelMessage[],
-        context: ExecutionContext
-    ): Promise<string | null> {
-        try {
-            const llmService = context.agent.createLLMService();
-
-            // Use complete() since we don't need streaming
-            const result = await llmService.complete(
-                messages,
-                {}  // no tools needed for moderation
-            );
-
-            return result.text?.trim() || null;
-        } catch (error) {
-            logger.error("[AgentExecutor] Failed to generate text response", {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            return null;
-        }
+        responses: BrainstormResponse[]
+    ): Promise<ModerationResult | null> {
+        const moderator = new BrainstormModerator(this.messageStrategy);
+        return moderator.moderate(context, responses);
     }
 }

@@ -38,6 +38,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with the agent
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["global-agent", globalAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "global-agent-pubkey") return globalAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => tag === "d" ? "project-123" : undefined,
       } as any,
@@ -73,6 +77,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with the agent
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["global-agent", globalAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "global-agent-pubkey") return globalAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => tag === "d" ? "project-123" : undefined,
       } as any,
@@ -110,6 +118,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with the agent
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["local-agent", localAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "local-agent-pubkey") return localAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => tag === "d" ? "project-123" : undefined,
       } as any,
@@ -148,6 +160,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with the agent
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["global-agent", globalAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "global-agent-pubkey") return globalAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => tag === "d" ? "project-123" : undefined,
       } as any,
@@ -186,6 +202,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with NO project identifier
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["global-agent", globalAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "global-agent-pubkey") return globalAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => undefined, // No "d" tag - no project identifier
       } as any,
@@ -224,6 +244,10 @@ describe("AgentRouter - Project Context Validation", () => {
     // Create a mock project context with the agent
     const projectContext: Partial<ProjectContext> = {
       agents: new Map([["global-agent", globalAgent as AgentInstance]]),
+      getAgentByPubkey: (pubkey: string) => {
+        if (pubkey === "global-agent-pubkey") return globalAgent as AgentInstance;
+        return undefined;
+      },
       project: {
         tagValue: (tag: string) => tag === "d" ? "project-123" : undefined,
       } as any,

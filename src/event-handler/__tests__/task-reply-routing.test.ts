@@ -47,8 +47,12 @@ describe("Task Reply Routing", () => {
         slug: "orchestrator",
         name: "Orchestrator",
         pubkey: projectPubkey,
-        
+
       })),
+      getAgentByPubkey: mock((pubkey: string) => {
+        if (pubkey === agentPubkey) return mockAgent;
+        return undefined;
+      }),
       project: {
         tag: mock(() => {}),
       },

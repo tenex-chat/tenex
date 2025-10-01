@@ -130,33 +130,3 @@ export function addAllSpecialContexts(
 
     return result;
 }
-
-/**
- * Create a marker message for important events
- * @param message - The marker message content
- * @returns A system message with the marker
- */
-export function createMarkerMessage(message: string): ModelMessage {
-    return {
-        role: "system",
-        content: message
-    };
-}
-
-/**
- * Add a triggering event marker
- * @param messages - The messages array to add to
- * @param eventId - The ID of the triggering event for logging
- */
-export function addTriggeringEventMarker(
-    messages: ModelMessage[],
-    eventId?: string
-): void {
-    messages.push(createMarkerMessage("═══ IMPORTANT: THE FOLLOWING IS THE MESSAGE TO RESPOND TO. ═══"));
-    
-    if (eventId) {
-        logger.debug("[CONTEXT_ENHANCER] Added triggering event marker", {
-            eventId: eventId.substring(0, 8)
-        });
-    }
-}

@@ -1,5 +1,6 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from '@/agents/execution/types';
+import type { EventContext } from '@/nostr/AgentEventEncoder';
 import { ThreadedConversationFormatter } from '@/conversations/formatters/ThreadedConversationFormatter';
 import { logger } from './logger';
 
@@ -30,6 +31,26 @@ export function extractPhaseContext(triggeringEvent: NDKEvent): PhaseContext | u
     return {
         phase: phaseTag[1],
         phaseInstructions: phaseInstructionsTag?.[1]
+    };
+}
+
+/**
+ * Create EventContext for publishing events
+ */
+export function createEventContext(
+    context: ExecutionContext,
+    model?: string
+): EventContext {
+    const conversation = context.getConversation();
+    // Extract phase directly from triggering event if it's a phase delegation
+    const phaseContext = extractPhaseContext(context.triggeringEvent);
+
+    return {
+        triggeringEvent: context.triggeringEvent,
+        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+        conversationId: context.conversationId,
+        model: model ?? context.agent.llmConfig,
+        phase: phaseContext?.phase
     };
 }
 
@@ -70,7 +91,7 @@ export async function formatConversationSnapshot(context: ExecutionContext): Pro
       formatted.push(threadString);
     }
 
-    return formatted.join('\n\n' + '─'.repeat(60) + '\n\n');
+    return formatted.join(`\n\n${'─'.repeat(60)}\n\n`);
   } catch (error) {
     logger.error('[formatConversationSnapshot] Failed to format conversation', {
       error: error instanceof Error ? error.message : String(error)

@@ -13,9 +13,9 @@ import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 import { getNDK } from "@/nostr";
 import { ThreadedConversationFormatter } from "@/conversations/formatters/ThreadedConversationFormatter";
 // Utility imports
-import { stripThinkingBlocks, hasReasoningTag } from "@/conversations/utils/content-utils";
+import { hasReasoningTag } from "@/conversations/utils/content-utils";
 import { extractNostrEntities, resolveNostrEntitiesToSystemMessages } from "@/utils/nostr-entity-parser";
-import { addAllSpecialContexts, addTriggeringEventMarker } from "@/conversations/utils/context-enhancers";
+import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
 
 /**
  * Message generation strategy that includes thread context and agent memory
@@ -164,11 +164,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             const event = currentThread[i];
             const isTriggeringEvent = event.id === triggeringEvent.id;
 
-            // Add a clear marker before the triggering event
-            if (isTriggeringEvent && !event.pubkey.includes(context.agent.pubkey)) {
-                addTriggeringEventMarker(messages, event.id);
-            }
-
             const processedMessages = await this.processEvent(
                 event,
                 context.agent.pubkey,
@@ -260,8 +255,8 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             }
         }
 
-        // Process regular message - only strip thinking blocks, don't process entities
-        const content = stripThinkingBlocks(event.content || '');
+        // Process regular message
+        const content = event.content || '';
 
         // Use EventToModelMessage for proper attribution
         const result = await EventToModelMessage.transform(

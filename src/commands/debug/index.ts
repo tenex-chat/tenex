@@ -10,8 +10,17 @@ import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
 import { ThreadedConversationFormatter } from "@/conversations/formatters/ThreadedConversationFormatter";
-import { NDKFilter } from "@nostr-dev-kit/ndk";
+import { NDKFilter, NDKEvent } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr/ndkClient";
+import inquirer from "inquirer";
+import {
+  ThreadWithMemoryStrategy,
+  FlattenedChronologicalStrategy,
+  type MessageGenerationStrategy
+} from "@/agents/execution/strategies";
+import type { ExecutionContext } from "@/agents/execution/types";
+import { ConversationCoordinator } from "@/conversations/services/ConversationCoordinator";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 
 // Format content with enhancements
 function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {
@@ -45,6 +54,8 @@ interface DebugSystemPromptOptions {
 
 interface DebugThreadedFormatterOptions {
   conversationId: string;
+  strategy?: string;
+  agent?: string;
 }
 
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
@@ -163,8 +174,26 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
     const projectCtx = getProjectContext();
     const ndk = getNDK();
 
+    // Select strategy
+    let strategyName = options.strategy;
+    if (!strategyName) {
+      const answer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'strategy',
+          message: 'Select a message generation strategy:',
+          choices: [
+            { name: 'Threaded with Memory (shows tree structure with other branches)', value: 'threaded-with-memory' },
+            { name: 'Flattened Chronological (flattened chronological view with delegation markers)', value: 'flattened-chronological' }
+          ]
+        }
+      ]);
+      strategyName = answer.strategy;
+    }
+
     logger.info(chalk.cyan("\n=== Fetching Conversation ==="));
     logger.info(`Conversation ID: ${options.conversationId.substring(0, 16)}...`);
+    logger.info(`Strategy: ${chalk.yellow(strategyName)}`);
 
     // Fetch the root event and all replies in the conversation
     const [rootEvents, replyEvents] = await Promise.all([
@@ -188,32 +217,100 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
       process.exit(0);
     }
 
-    // Build thread tree
-    const formatter = new ThreadedConversationFormatter();
-    const tree = await formatter.buildThreadTree(eventArray);
+    // Find the triggering event (last event in conversation)
+    const triggeringEvent = eventArray[eventArray.length - 1];
 
-    logger.info(chalk.cyan("\n=== Threaded Conversation Tree ===\n"));
+    // Get the first agent from the project to use as context
+    const agents = Array.from(projectCtx.agents.values());
+    if (agents.length === 0) {
+      logger.error("No agents found in project");
+      process.exit(1);
+    }
 
-    // Format each root thread
-    for (let i = 0; i < tree.length; i++) {
-      if (i > 0) {
-        console.log(chalk.gray("\n" + "═".repeat(80) + "\n"));
+    // Select agent (from flag or interactively)
+    let agentSlug = options.agent;
+    if (!agentSlug) {
+      const agentAnswer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'agentSlug',
+          message: 'Select agent perspective:',
+          choices: agents.map(agent => ({ name: agent.name, value: agent.slug }))
+        }
+      ]);
+      agentSlug = agentAnswer.agentSlug;
+    }
+
+    const selectedAgent = agents.find(a => a.slug === agentSlug);
+    if (!selectedAgent) {
+      logger.error(`Agent '${agentSlug}' not found`);
+      process.exit(1);
+    }
+
+    logger.info(`Viewing from ${chalk.green(selectedAgent.name)}'s perspective`);
+
+    // Create a strategy instance
+    let strategy: MessageGenerationStrategy;
+    if (strategyName === 'flattened-chronological') {
+      strategy = new FlattenedChronologicalStrategy();
+    } else {
+      strategy = new ThreadWithMemoryStrategy();
+    }
+
+    // Initialize DelegationRegistry
+    await DelegationRegistry.initialize();
+
+    // Create a mock execution context
+    const conversationCoordinator = new ConversationCoordinator(projectPath);
+    await conversationCoordinator.initialize();
+
+    // Check if conversation exists, if not create it
+    let conversation = conversationCoordinator.getConversation(options.conversationId);
+    if (!conversation) {
+      // Create conversation from root event
+      const rootEvent = eventArray[0];
+      conversation = await conversationCoordinator.createConversation(rootEvent);
+
+      // Add remaining events
+      for (let i = 1; i < eventArray.length; i++) {
+        await conversationCoordinator.addEvent(options.conversationId, eventArray[i]);
       }
 
-      const formatted = formatter.formatThread(tree[i], {
-        includeTimestamps: true,
-        timestampFormat: 'time-only',
-        includeToolCalls: true,
-        treeStyle: 'unicode',
-        compactMode: false
-      });
+      logger.info("Created temporary conversation for debug purposes");
+    }
 
-      console.log(formatted);
+    const mockContext: ExecutionContext = {
+      agent: selectedAgent,
+      conversationId: options.conversationId,
+      conversationCoordinator,
+      getConversation: () => conversationCoordinator.getConversation(options.conversationId),
+      isDelegationCompletion: false,
+      debug: true
+    };
+
+    // Build messages using the strategy
+    logger.info(chalk.cyan("\n=== Building Messages with Strategy ===\n"));
+    const messages = await strategy.buildMessages(mockContext, triggeringEvent);
+
+    // Display the messages
+    logger.info(chalk.cyan(`=== Strategy Output (${messages.length} messages) ===\n`));
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      console.log(chalk.bold.yellow(`\n─── Message ${i + 1} (${msg.role}) ───`));
+
+      const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2);
+      const formattedContent = formatContentWithEnhancements(content, msg.role === 'system');
+      console.log(formattedContent);
+
+      if (i < messages.length - 1) {
+        console.log(chalk.dim(`\n${"─".repeat(60)}\n`));
+      }
     }
 
     console.log(chalk.cyan("\n" + "═".repeat(80) + "\n"));
 
-    logger.info("Thread formatting complete");
+    logger.info("Strategy formatting complete");
     process.exit(0);
   } catch (err) {
     handleCliError(err, "Failed to format threaded conversation");

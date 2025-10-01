@@ -481,7 +481,8 @@ export class AgentPublisher {
       instructions?: string;
       useCriteria?: string;
       phases?: Record<string, string>;
-    }
+    },
+    whitelistedPubkeys?: string[]
   ): Promise<void> {
     let profileEvent: NDKEvent;
 
@@ -540,6 +541,21 @@ export class AgentPublisher {
           }
         }
       }
+
+      // Add p-tags for all whitelisted pubkeys
+      if (whitelistedPubkeys && whitelistedPubkeys.length > 0) {
+        for (const pubkey of whitelistedPubkeys) {
+          if (pubkey && pubkey !== signer.pubkey) { // Don't p-tag self
+            profileEvent.tags.push(["p", pubkey]);
+          }
+        }
+      }
+
+      // Add bot tag
+      profileEvent.tags.push(["bot"]);
+
+      // Add tenex tag
+      profileEvent.tags.push(["t", "tenex"]);
 
       await profileEvent.sign(signer, { pTags: false });
       await profileEvent.publish();
@@ -626,7 +642,8 @@ export class AgentPublisher {
     agentConfig: Omit<AgentConfig, "nsec">,
     projectTitle: string,
     projectEvent: NDKProject,
-    ndkAgentEventId?: string
+    ndkAgentEventId?: string,
+    whitelistedPubkeys?: string[]
   ): Promise<void> {
     // Prepare metadata for agents without NDKAgentDefinition
     const agentMetadata = !ndkAgentEventId ? {
@@ -644,7 +661,8 @@ export class AgentPublisher {
       projectTitle,
       projectEvent,
       ndkAgentEventId,
-      agentMetadata
+      agentMetadata,
+      whitelistedPubkeys
     );
 
     // Publish request event

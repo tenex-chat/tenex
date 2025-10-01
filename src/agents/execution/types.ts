@@ -13,6 +13,7 @@ export interface ExecutionContext {
   agentPublisher: AgentPublisher; // Required: shared publisher instance for consistent event ordering
   isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
   additionalSystemMessage?: string; // System message to add for retries (used by AgentSupervisor)
+  debug?: boolean; // True when running in debug mode - enables additional output like event IDs
 
   /**
    * Helper method to get the conversation for this context

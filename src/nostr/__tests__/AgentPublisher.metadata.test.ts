@@ -20,6 +20,14 @@ mock.module("@/utils/logger", () => ({
   },
 }));
 
+// Mock AgentsRegistryService
+mock.module("@/services/AgentsRegistryService", () => ({
+  agentsRegistryService: {
+    getProjectsForAgent: mock(() => Promise.resolve([])),
+    addAgent: mock(() => Promise.resolve()),
+  },
+}));
+
 describe("AgentPublisher - Agent Metadata in Kind:0", () => {
   let mockPublish: any;
   let mockSign: any;
@@ -64,7 +72,8 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         "Test Project",
         projectEvent,
         undefined, // No NDKAgentDefinition event ID
-        agentMetadata
+        agentMetadata,
+        [] // No whitelisted pubkeys for this test
       );
 
       expect(mockSign).toHaveBeenCalled();
@@ -104,6 +113,14 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         const executionPhase = phaseTags.find(tag => tag[1] === "execution");
         expect(executionPhase).toBeDefined();
         expect(executionPhase?.[2]).toBe("Execute tests with precision");
+        
+        // Check bot tag is present
+        const botTag = tags.find(tag => tag[0] === "bot" && tag.length === 1);
+        expect(botTag).toBeDefined();
+        
+        // Check tenex tag is present
+        const tenexTag = tags.find(tag => tag[0] === "t" && tag[1] === "tenex");
+        expect(tenexTag).toBeDefined();
       }
     });
 
@@ -132,7 +149,8 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         "Test Project",
         projectEvent,
         ndkAgentEventId, // Has NDKAgentDefinition event ID
-        agentMetadata
+        agentMetadata,
+        [] // No whitelisted pubkeys for this test
       );
 
       expect(mockSign).toHaveBeenCalled();
@@ -163,6 +181,13 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         
         const phaseTags = tags.filter(tag => tag[0] === "phase" && tag.length === 3);
         expect(phaseTags.length).toBe(0);
+        
+        // Check bot and tenex tags are still present even with NDKAgentDefinition
+        const botTag = tags.find(tag => tag[0] === "bot" && tag.length === 1);
+        expect(botTag).toBeDefined();
+        
+        const tenexTag = tags.find(tag => tag[0] === "t" && tag[1] === "tenex");
+        expect(tenexTag).toBeDefined();
       }
     });
 
@@ -184,7 +209,8 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         "Test Project",
         projectEvent,
         undefined, // No NDKAgentDefinition event ID
-        agentMetadata
+        agentMetadata,
+        [] // No whitelisted pubkeys for this test
       );
 
       expect(mockSign).toHaveBeenCalled();
@@ -210,6 +236,53 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         expect(phaseTags.length).toBe(0);
       }
     });
+  });
+
+  it("should include p-tags for whitelisted pubkeys", async () => {
+    const signer = NDKPrivateKeySigner.generate();
+    const projectEvent = new NDKProject(getNDK());
+    projectEvent.tagValue = mock(() => "Test Project");
+    projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+    const whitelistedPubkeys = [
+      "pubkey1234567890abcdef",
+      "pubkey0987654321fedcba",
+      signer.pubkey // This should be filtered out
+    ];
+
+    await AgentPublisher.publishAgentProfile(
+      signer,
+      "TestAgent",
+      "Tester",
+      "Test Project",
+      projectEvent,
+      undefined,
+      undefined,
+      whitelistedPubkeys
+    );
+
+    expect(mockSign).toHaveBeenCalled();
+    expect(mockPublish).toHaveBeenCalled();
+    expect(capturedEvent).toBeDefined();
+
+    if (capturedEvent) {
+      const tags = capturedEvent.tags;
+      
+      // Check p-tags for whitelisted pubkeys (excluding self)
+      const pTags = tags.filter(tag => tag[0] === "p");
+      expect(pTags.length).toBe(2); // Should not include agent's own pubkey
+      expect(pTags.some(tag => tag[1] === "pubkey1234567890abcdef")).toBe(true);
+      expect(pTags.some(tag => tag[1] === "pubkey0987654321fedcba")).toBe(true);
+      expect(pTags.some(tag => tag[1] === signer.pubkey)).toBe(false); // Should not p-tag self
+      
+      // Check bot tag is present
+      const botTag = tags.find(tag => tag[0] === "bot" && tag.length === 1);
+      expect(botTag).toBeDefined();
+      
+      // Check tenex tag is present
+      const tenexTag = tags.find(tag => tag[0] === "t" && tag[1] === "tenex");
+      expect(tenexTag).toBeDefined();
+    }
   });
 
   describe("publishAgentCreation", () => {
@@ -240,7 +313,8 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         agentConfig,
         "Test Project",
         projectEvent,
-        undefined // No eventId
+        undefined, // No eventId
+        [] // No whitelisted pubkeys for this test
       );
 
       expect(mockSign).toHaveBeenCalled();

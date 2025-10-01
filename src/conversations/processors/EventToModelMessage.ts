@@ -32,10 +32,21 @@ export  class EventToModelMessage {
 
         if (phaseTag) {
             // This event marks a phase transition
-            const phaseContent = PromptBuilder.buildFragment("phase-transition", {
-                phase: phaseTag,
-                phaseInstructions: phaseInstructionsTag
-            });
+            // Check if this agent is p-tagged on the event
+            const targetedAgentPubkeys = getTargetedAgentPubkeys(event);
+            const isTargetedAgent = targetedAgentPubkeys.includes(targetAgentPubkey);
+
+            let phaseContent: string;
+            if (isTargetedAgent) {
+                // Show full phase transition with instructions for targeted agent
+                phaseContent = PromptBuilder.buildFragment("phase-transition", {
+                    phase: phaseTag,
+                    phaseInstructions: phaseInstructionsTag
+                }) || "";
+            } else {
+                // Only show phase name for non-targeted agents
+                phaseContent = `=== PHASE TRANSITION: ${phaseTag.toUpperCase()} ===`;
+            }
 
             if (phaseContent) {
                 messages.push({ role: "system", content: phaseContent });

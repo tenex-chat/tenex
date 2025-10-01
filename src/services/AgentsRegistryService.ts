@@ -78,14 +78,11 @@ export class AgentsRegistryService {
 
     // agent tags
     for (const a of agents) {
-      ev.tag(["agent", a.pubkey]);
+      ev.tag(["p", a.pubkey]);
     }
 
-    // also tag the project itself (optional – useful for downstream filters)
-    ev.tag(["project", projectTag]);
-
     await ev.sign(signer);
-    await ev.publish();
+    ev.publish();
 
     logger.debug("Published agents-registry snapshot", {
       projectTag,

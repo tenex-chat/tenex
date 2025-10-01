@@ -36,6 +36,12 @@ export const availableAgentsFragment: PromptFragment<AvailableAgentsArgs> = {
           parts.push(`  Description: ${agent.description}`);
         }
 
+        // Add phase management information if applicable
+        if (agent.phases && Object.keys(agent.phases).length > 0) {
+          const phaseNames = Object.keys(agent.phases).join(", ");
+          parts.push(`  Manages phases: ${phaseNames}`);
+        }
+
         return parts.join("\n");
       })
       .join("\n\n");

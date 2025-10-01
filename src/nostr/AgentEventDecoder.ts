@@ -46,7 +46,7 @@ export class AgentEventDecoder {
    * Check if this is a task completion event (for NDKTask kind:1934)
    * Note: This is different from delegation completions (kind:1111)
    */
-  private static isTaskCompletionEvent(event: NDKEvent): boolean {
+  static isTaskCompletionEvent(event: NDKEvent): boolean {
     // Only for actual NDKTask completions, not delegations
     if (
       event.tagValue("K") === NDKTask.kind.toString() &&

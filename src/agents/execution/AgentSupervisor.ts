@@ -6,6 +6,8 @@ import type { CompleteEvent } from "@/llm/service";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
 
 /**
  * AgentSupervisor - Monitors agent execution and validates completion
@@ -115,13 +117,6 @@ export class AgentSupervisor {
   }
 
   /**
-   * Get the phase validation decision from the last execution check
-   */
-  getPhaseValidationDecision(): string | undefined {
-    return this.phaseValidationDecision;
-  }
-
-  /**
    * Get the continuation prompt for when execution is not complete
    */
   getContinuationPrompt(): string {
@@ -129,17 +124,24 @@ export class AgentSupervisor {
   }
 
   /**
-   * Check if the execution is complete
-   * @param completionEvent - The completion event from the LLM
+   * Check if the execution is complete and publish any decisions
+   * @param completionEvent - The completion event from the LLM (can be undefined if stream failed)
+   * @param agentPublisher - Publisher for nostr events
+   * @param eventContext - Context for event publishing
    * @returns true if execution is complete, false if it needs to continue
    */
-  async isExecutionComplete(completionEvent: CompleteEvent): Promise<boolean> {
+  async isExecutionComplete(
+    completionEvent: CompleteEvent | undefined,
+    agentPublisher: AgentPublisher,
+    eventContext: EventContext
+  ): Promise<boolean> {
     logger.info('[AgentSupervisor] Starting execution completion check', {
       agent: this.agent.name,
-      hasMessage: !!completionEvent.message,
-      messageLength: completionEvent.message?.length || 0,
-      hasReasoning: !!completionEvent.reasoning,
-      reasoningLength: completionEvent.reasoning?.length || 0,
+      hasCompletionEvent: !!completionEvent,
+      hasMessage: !!completionEvent?.message,
+      messageLength: completionEvent?.message?.length || 0,
+      hasReasoning: !!completionEvent?.reasoning,
+      reasoningLength: completionEvent?.reasoning?.length || 0,
       hasPhases: !!this.agent.phases,
       phaseCount: this.agent.phases ? Object.keys(this.agent.phases).length : 0,
       continuationAttempts: this.continuationAttempts,
@@ -156,7 +158,31 @@ export class AgentSupervisor {
       return true;
     }
 
-    // First validation: Check if there's an actual response (not just reasoning)
+    // First validation: Check if we received a completion event at all
+    if (!completionEvent) {
+      logger.error('[AgentSupervisor] ❌ INVALID: No completion event received from LLM', {
+        agent: this.agent.name,
+        attempts: this.continuationAttempts
+      });
+
+      const reason = "The LLM did not return a completion event. Please try again.";
+
+      // Check if we're stuck in a loop with the same issue
+      if (this.lastInvalidReason === reason) {
+        logger.warn('[AgentSupervisor] ⚠️ Agent stuck with no completion events, forcing completion', {
+          agent: this.agent.name,
+          attempts: this.continuationAttempts
+        });
+        return true;
+      }
+
+      this.invalidReason = reason;
+      this.lastInvalidReason = reason;
+      this.continuationAttempts++;
+      return false;
+    }
+
+    // Second validation: Check if there's an actual response (not just reasoning)
     if (!completionEvent.message?.trim()) {
       logger.info('[AgentSupervisor] ❌ INVALID: No response content from agent', {
         agent: this.agent.name,
@@ -187,7 +213,7 @@ export class AgentSupervisor {
       messagePreview: completionEvent.message.substring(0, 100)
     });
 
-    // Second validation: Check phase completion if applicable
+    // Third validation: Check phase completion if applicable
     if (this.agent.phases && Object.keys(this.agent.phases).length > 0) {
       logger.info('[AgentSupervisor] Checking phase completion', {
         agent: this.agent.name,
@@ -237,7 +263,18 @@ export class AgentSupervisor {
       }
     }
 
-    // All validations passed
+    // All validations passed - publish any decisions before completing
+    if (this.phaseValidationDecision) {
+      logger.info('[AgentSupervisor] 📝 Publishing phase validation decision', {
+        agent: this.agent.name,
+        decisionLength: this.phaseValidationDecision.length
+      });
+      await agentPublisher.conversation({
+        content: this.phaseValidationDecision,
+        isReasoning: true
+      }, eventContext);
+    }
+
     logger.info('[AgentSupervisor] ✅ EXECUTION COMPLETE: All validations passed', {
       agent: this.agent.name
     });

@@ -105,3 +105,36 @@ export function formatToolError(error: ToolError): string {
     }
   }
 }
+
+/**
+ * Format error for stream/execution errors from LLM providers
+ */
+export function formatStreamError(error: unknown): { message: string; errorType: string } {
+  let errorMessage = "An error occurred while processing your request.";
+  let errorType = "system";
+
+  if (error instanceof Error) {
+    const errorStr = error.toString();
+    if (errorStr.includes("AI_APICallError") ||
+        errorStr.includes("Provider returned error") ||
+        errorStr.includes("422") ||
+        errorStr.includes("openrouter")) {
+      errorType = "ai_api";
+
+      // Extract meaningful error details
+      const providerMatch = errorStr.match(/provider_name":"([^"]+)"/);
+      const provider = providerMatch ? providerMatch[1] : "AI provider";
+      errorMessage = `Failed to process request with ${provider}. The AI service returned an error.`;
+
+      // Add raw error details if available
+      const rawMatch = errorStr.match(/raw":"([^"]+)"/);
+      if (rawMatch) {
+        errorMessage += ` Details: ${rawMatch[1]}`;
+      }
+    } else {
+      errorMessage = `Error: ${error.message}`;
+    }
+  }
+
+  return { message: errorMessage, errorType };
+}
