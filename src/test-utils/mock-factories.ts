@@ -1,8 +1,12 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
+import type { ConversationCoordinator } from "@/conversations";
+import type { ParticipationIndex } from "@/conversations/services/ParticipationIndex";
+import type { ThreadService } from "@/conversations/services/ThreadService";
 import type { Conversation } from "@/conversations/types";
 import type { ToolCall } from "@/llm/types";
 import { EVENT_KINDS } from "@/llm/types";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -114,31 +118,43 @@ export function createMockExecutionContext(
 ): ExecutionContext {
   const agent = overrides?.agent || createMockAgent();
   const mockEvent = createMockNDKEvent();
+  const conversationId =
+    overrides?.conversationId || `mock-conv-${Math.random().toString(36).substr(2, 9)}`;
 
-  // Create mock publisher and conversation manager
-  const mockPublisher = {
-    publishReply: async () => mockEvent,
-    publishToolCall: async () => mockEvent,
-    publishAgentThinking: async () => mockEvent,
-  } as unknown;
+  const mockConversation = createMockConversation({ id: conversationId });
 
-  const mockConversationCoordinator = {
-    getConversation: async () => createMockConversation(),
-    updateConversation: async () => {},
-    transitionPhase: async () => {},
-  } as unknown;
+  const mockConversationCoordinator: ConversationCoordinator = {
+    threadService: {} as ThreadService,
+    participationIndex: {} as ParticipationIndex,
+    initialize: async () => {},
+    createConversation: async () => mockConversation,
+    getConversation: () => mockConversation,
+    addEvent: async () => {},
+    updateMetadata: async () => {},
+    getAllConversations: () => [mockConversation],
+  };
+
+  const mockPublisher: AgentPublisher = {
+    agent,
+    reply: async () => mockEvent,
+    thinking: async () => mockEvent,
+    typing: async () => {},
+    conversation: async () => mockEvent,
+    task: async () => mockEvent,
+    createTask: async () => mockEvent,
+    lesson: async () => mockEvent,
+  };
 
   return {
     agent,
-    conversationId:
-      overrides?.conversationId || `mock-conv-${Math.random().toString(36).substr(2, 9)}`,
-    phase: "CHAT",
+    conversationId,
     projectPath: "/mock/project",
     triggeringEvent: mockEvent,
-    publisher: mockPublisher,
     conversationCoordinator: mockConversationCoordinator,
+    agentPublisher: mockPublisher,
+    getConversation: () => mockConversationCoordinator.getConversation(conversationId),
     ...overrides,
-  } as ExecutionContext;
+  };
 }
 
 export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {

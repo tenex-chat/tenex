@@ -277,7 +277,7 @@ export class ConfigService {
     llmLogger: LLMLogger,
     configName?: string,
     context?: {
-      tools?: Record<string, any>;
+      tools?: Record<string, unknown>;
       agentName?: string;
     }
   ): LLMService {

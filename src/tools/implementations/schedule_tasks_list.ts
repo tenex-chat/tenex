@@ -39,12 +39,12 @@ export function createListScheduledTasksTool(_context: ExecutionContext): AISdkT
           tasks: formattedTasks,
           count: formattedTasks.length,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error("Failed to list scheduled tasks:", error);
 
         return {
           success: false,
-          error: error.message || "Failed to list scheduled tasks",
+          error: error instanceof Error ? error.message : "Failed to list scheduled tasks",
         };
       }
     },

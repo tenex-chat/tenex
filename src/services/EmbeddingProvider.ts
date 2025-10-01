@@ -160,10 +160,14 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         if (!response.ok) {
             throw new Error(`OpenAI API error: ${response.statusText}`);
         }
-        
-        const data = await response.json();
-        
-        return data.data.map((item: any) => new Float32Array(item.embedding));
+
+        interface EmbeddingResponse {
+            data: Array<{ embedding: number[] }>;
+        }
+
+        const data = await response.json() as EmbeddingResponse;
+
+        return data.data.map((item) => new Float32Array(item.embedding));
     }
     
     public async getDimensions(): Promise<number> {

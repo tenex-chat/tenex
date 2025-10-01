@@ -1,9 +1,17 @@
 // ToolExecutionResult removed - using AI SDK tools only
 
+interface ToolResult {
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  success: boolean;
+  output?: unknown;
+  error?: { message?: string };
+}
+
 /**
  * Format a tool result as a string for inclusion in the conversation
  */
-export function formatToolResultAsString(result: any): string {
+export function formatToolResultAsString(result: ToolResult): string {
   const toolInfo = result.toolName ? `[${result.toolName}]` : "[Unknown Tool]";
   const argsInfo = result.toolArgs && Object.keys(result.toolArgs).length > 0
     ? ` with args: ${JSON.stringify(result.toolArgs)}`

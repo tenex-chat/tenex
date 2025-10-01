@@ -36,12 +36,12 @@ export function createCancelScheduledTaskTool(_context: ExecutionContext): AISdk
           message: `Task ${taskId} cancelled successfully`,
           taskId,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error(`Failed to cancel scheduled task ${taskId}:`, error);
 
         return {
           success: false,
-          error: error.message || "Failed to cancel scheduled task",
+          error: error instanceof Error ? error.message : "Failed to cancel scheduled task",
           taskId,
         };
       }

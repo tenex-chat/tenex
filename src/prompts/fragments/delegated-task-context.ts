@@ -21,7 +21,7 @@ You have been assigned a specific task to complete:
 Focus on completing this specific task efficiently and effectively.`;
   },
   validateArgs: (args): args is DelegatedTaskContextArgs => {
-    return typeof (args as any).taskDescription === "string";
+    return typeof (args as Record<string, unknown>).taskDescription === "string";
   },
   expectedArgs: "{ taskDescription: string }",
 };

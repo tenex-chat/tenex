@@ -304,7 +304,7 @@ export class AgentPublisher {
     await this.agent.sign(event);
     await event.publish();
 
-    logger.info("[AgentPublisher] Streaming event published", {
+    logger.debug("[AgentPublisher] Streaming event published", {
       eventId: event.id?.substring(0, 8),
       kind: event.kind,
       contentLength: intent.content.length,
@@ -380,7 +380,7 @@ export class AgentPublisher {
       isReasoning,
     };
 
-    logger.info("[AgentPublisher] Publishing streaming event (21111) for pre-buffered content", {
+    logger.debug("[AgentPublisher] Publishing streaming event (21111) for pre-buffered content", {
       contentLength: delta.length,
       sequence: streamingIntent.sequence,
       isReasoning,

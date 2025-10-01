@@ -120,7 +120,7 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
             // Publish status
             if (context.agentPublisher && context.triggeringEvent) {
                 try {
-                    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+                    const conversation = context.getConversation();
                     if (conversation?.history?.[0]) {
                         await context.agentPublisher.conversation(
                             { content: `🔧 Created dynamic tool: ${name}` },

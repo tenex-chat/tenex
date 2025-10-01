@@ -18,7 +18,9 @@
         "outDir": "./dist",
         "baseUrl": ".",
         "paths": {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
+            "ai": ["./node_modules/@pablof7z/ai"],
+            "ai/*": ["./node_modules/@pablof7z/ai/*"]
         },
         "noUnusedLocals": true,
         "noUnusedParameters": true,

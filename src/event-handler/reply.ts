@@ -262,6 +262,7 @@ async function handleReplyLogic(
       projectPath: projectCtx.agentRegistry.getBasePath(),
       triggeringEvent: event,
       conversationCoordinator,
+      getConversation: () => conversationCoordinator.getConversation(conversation.id),
     };
 
     // Execute agent

@@ -4,7 +4,7 @@ import { SubscriptionManager } from "@/commands/run/SubscriptionManager";
 import { EventHandler } from "@/event-handler";
 // LLMLogger will be accessed from ProjectContext
 import { shutdownNDK, getNDK } from "@/nostr/ndkClient";
-import { configService, getProjectContext, dynamicToolService } from "@/services";
+import { getProjectContext, dynamicToolService } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { SchedulerService } from "@/services/SchedulerService";
 import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
@@ -91,14 +91,10 @@ async function runProjectListener(projectPath: string): Promise<void> {
     const dTag = project.tagValue("d") || "";
     logger.info(`Starting listener for project: ${titleTag} (${dTag})`);
 
-    // Load LLM service from config
-    const llmLogger = projectCtx.llmLogger;
-    const llmService = configService.createLLMService(llmLogger);
-
     // MCP service already initialized before displaying agents
 
     // Initialize event handler
-    const eventHandler = new EventHandler(projectPath, llmService);
+    const eventHandler = new EventHandler(projectPath);
     await eventHandler.initialize();
 
     // Initialize subscription manager

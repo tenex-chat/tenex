@@ -63,7 +63,7 @@ export interface LLMConfiguration {
   temperature?: number;
   maxTokens?: number;
   topP?: number;
-  [key: string]: any; // Allow additional provider-specific settings
+  [key: string]: unknown; // Allow additional provider-specific settings
 }
 
 /**

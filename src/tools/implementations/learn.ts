@@ -58,7 +58,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
   };
 
   // Get conversation for the event context
-  const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+  const conversation = context.getConversation();
 
   // Create event context
   const eventContext: EventContext = {
@@ -73,14 +73,14 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 
   // Publish status message with the Nostr reference
   try {
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    if (conversation?.history?.[0]) {
+    const conversationForStatus = context.getConversation();
+    if (conversationForStatus?.history?.[0]) {
       const nostrReference = `nostr:${lessonEvent.encode()}`;
       await context.agentPublisher.conversation(
         { content: `📚 Learning lesson: ${nostrReference}` },
         {
           triggeringEvent: context.triggeringEvent,
-          rootEvent: conversation.history[0],
+          rootEvent: conversationForStatus.history[0],
           conversationId: context.conversationId,
           model: context.agent.llmConfig, // Include LLM configuration
         }

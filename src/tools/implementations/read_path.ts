@@ -39,7 +39,7 @@ async function executeReadPath(
 
     // Track file read in conversation metadata if path starts with context/
     if (path.startsWith("context/") && context.conversationCoordinator) {
-      const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+      const conversation = context.getConversation();
       const currentMetadata = conversation?.metadata || {};
       const readFiles = currentMetadata.readFiles || [];
 

@@ -57,7 +57,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
     recipients: [ownerPubkey],
     request: content,
     suggestions,
-  } as any); // Type assertion needed as we're extending the interface
+  });
 
   logger.info("[ask() tool] ✅ Received response", {
     responseCount: responses.responses.length,

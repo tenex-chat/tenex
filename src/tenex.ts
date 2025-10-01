@@ -5,7 +5,7 @@ import { handleCliError } from "@/utils/cli-error";
 import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
-import { runDebugSystemPrompt } from "./commands/debug/index";
+import { runDebugSystemPrompt, runDebugThreadedFormatter } from "./commands/debug/index";
 import { mcpCommand } from "./commands/mcp/index";
 import { projectCommand } from "./commands/project/index";
 import { setupCommand } from "./commands/setup/index";
@@ -29,6 +29,11 @@ debug
   .description("Show the system prompt for an agent")
   .option("--agent <name>", "Agent name", "default")
   .action((options) => runDebugSystemPrompt(options));
+
+debug
+  .command("threaded-formatter <conversationId>")
+  .description("Show the threaded conversation formatter output for a conversation")
+  .action((conversationId) => runDebugThreadedFormatter({ conversationId }));
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {

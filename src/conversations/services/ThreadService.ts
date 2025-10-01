@@ -28,7 +28,7 @@ export class ThreadService {
         const visited = new Set<string>();
         let current: NDKEvent | null = event;
 
-        logger.info("[ThreadService] Starting thread build", {
+        logger.debug("[ThreadService] Starting thread build", {
             targetEventId: eventId.substring(0, 8),
             targetContent: event.content?.substring(0, 50),
             targetParentTag: event.tagValue("e")?.substring(0, 8)
@@ -72,7 +72,7 @@ export class ThreadService {
         if (parentChain.length === 2 && parentChain[1].id === event.id) {
             const rootId = parentChain[0].id;
 
-            logger.info("[ThreadService] Direct reply to root - including all root-level messages", {
+            logger.debug("[ThreadService] Direct reply to root - including all root-level messages", {
                 rootId: rootId.substring(0, 8),
                 targetId: event.id.substring(0, 8)
             });
@@ -86,7 +86,7 @@ export class ThreadService {
                 return e.tagValue("e") === rootId;
             }).sort((a, b) => a.created_at - b.created_at);
 
-            logger.info("[ThreadService] Found root-level replies", {
+            logger.debug("[ThreadService] Found root-level replies", {
                 count: rootReplies.length,
                 replies: rootReplies.map(r => ({
                     id: r.id.substring(0, 8),
@@ -121,7 +121,7 @@ export class ThreadService {
             }
         }
 
-        logger.info("[ThreadService] Complete thread built", {
+        logger.debug("[ThreadService] Complete thread built", {
             eventId: eventId.substring(0, 8),
             parentChainLength: parentChain.length,
             completeThreadLength: completeThread.length,

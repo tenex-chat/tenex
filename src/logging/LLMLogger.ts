@@ -59,7 +59,6 @@ export class LLMLogger {
    */
   initialize(projectPath: string): void {
     this.logDir = join(projectPath, ".tenex", "logs", "llms");
-    console.log(`[LLMLogger] Initialized with project path: ${projectPath}, logDir: ${this.logDir}`);
   }
 
   /**
@@ -140,7 +139,6 @@ export class LLMLogger {
     tools?: Array<{ name: string; description?: string }>;
     startTime: number;
   }): Promise<void> {
-    console.log(`[LLMLogger] logLLMRequest called, initialized: ${this.isInitialized()}, logDir: ${this.logDir}`);
     if (!this.isInitialized()) {
       console.warn("[LLMLogger] Not initialized. Skipping request logging. logDir:", this.logDir);
       return;
@@ -176,7 +174,6 @@ export class LLMLogger {
     try {
       // Append to JSONL file (one JSON object per line)
       await fs.appendFile(filepath, JSON.stringify({ ...logEntry, type: 'request' }) + "\n", "utf-8");
-      console.log(`[LLMLogger] Logged LLM request to ${filename}`);
     } catch (error) {
       console.error("[LLMLogger] Failed to write log:", error);
     }
@@ -237,7 +234,6 @@ export class LLMLogger {
     try {
       // Append response entry
       await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, type: 'response' }) + "\n", "utf-8");
-      console.log(`[LLMLogger] Logged LLM response to ${filename}`);
     } catch (error) {
       console.error("[LLMLogger] Failed to write response log:", error);
     }

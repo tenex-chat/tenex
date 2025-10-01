@@ -32,7 +32,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
         const { threadService } = context.conversationCoordinator;
-        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        const conversation = context.getConversation();
 
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
@@ -236,8 +236,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         const isThisAgent = event.pubkey === agentPubkey;
 
         if (isToolEvent) {
-            const toolName = event.tagValue("tool")
-            console.log('Found a tool event', toolName)
             if (isThisAgent) {
                 // Load tool messages from storage
                 const toolMessages = await toolMessageStorage.load(event.id);
@@ -260,8 +258,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 }
                 return [];
             }
-        } else {
-            console.log('Not a tool event')
         }
 
         // Process regular message - only strip thinking blocks, don't process entities
@@ -320,7 +316,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         messages: ModelMessage[],
         context: ExecutionContext
     ): Promise<void> {
-        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        const conversation = context.getConversation();
         if (!conversation) return;
 
         if (isProjectContextInitialized()) {
@@ -337,7 +333,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
             const isProjectManager = context.agent.pubkey === projectCtx.getProjectManager().pubkey;
 
-            const systemMessages = buildSystemPromptMessages({
+            const systemMessages = await buildSystemPromptMessages({
                 agent: context.agent,
                 project,
                 availableAgents,

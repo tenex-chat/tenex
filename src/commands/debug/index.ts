@@ -9,6 +9,9 @@ import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
+import { ThreadedConversationFormatter } from "@/conversations/formatters/ThreadedConversationFormatter";
+import { NDKFilter } from "@nostr-dev-kit/ndk";
+import { getNDK } from "@/nostr/ndkClient";
 
 // Format content with enhancements
 function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {
@@ -38,6 +41,10 @@ function formatContentWithEnhancements(content: string, isSystemPrompt = false):
 interface DebugSystemPromptOptions {
   agent: string;
   phase: string;
+}
+
+interface DebugThreadedFormatterOptions {
+  conversationId: string;
 }
 
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
@@ -96,7 +103,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
       // Check if this agent is the project manager
       const isProjectManager = agent.pubkey === projectCtx.getProjectManager().pubkey;
 
-      const systemMessages = buildSystemPromptMessages({
+      const systemMessages = await buildSystemPromptMessages({
         agent,
         project: projectCtx.project,
         availableAgents,
@@ -145,5 +152,70 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     process.exit(0);
   } catch (err) {
     handleCliError(err, "Failed to generate system prompt");
+  }
+}
+
+export async function runDebugThreadedFormatter(options: DebugThreadedFormatterOptions): Promise<void> {
+  try {
+    const projectPath = process.cwd();
+    await ensureProjectInitialized(projectPath);
+
+    const projectCtx = getProjectContext();
+    const ndk = getNDK();
+
+    logger.info(chalk.cyan("\n=== Fetching Conversation ==="));
+    logger.info(`Conversation ID: ${options.conversationId.substring(0, 16)}...`);
+
+    // Fetch the root event and all replies in the conversation
+    const [rootEvents, replyEvents] = await Promise.all([
+      ndk.fetchEvents({
+        kinds: [1111],
+        ids: [options.conversationId]
+      }),
+      ndk.fetchEvents({
+        kinds: [1111],
+        "#E": [options.conversationId]
+      })
+    ]);
+
+    const eventArray = [...Array.from(rootEvents), ...Array.from(replyEvents)]
+      .sort((a, b) => a.created_at! - b.created_at!);
+
+    logger.info(`Found ${eventArray.length} events in conversation`);
+
+    if (eventArray.length === 0) {
+      logger.warn("No events found in conversation");
+      process.exit(0);
+    }
+
+    // Build thread tree
+    const formatter = new ThreadedConversationFormatter();
+    const tree = await formatter.buildThreadTree(eventArray);
+
+    logger.info(chalk.cyan("\n=== Threaded Conversation Tree ===\n"));
+
+    // Format each root thread
+    for (let i = 0; i < tree.length; i++) {
+      if (i > 0) {
+        console.log(chalk.gray("\n" + "═".repeat(80) + "\n"));
+      }
+
+      const formatted = formatter.formatThread(tree[i], {
+        includeTimestamps: true,
+        timestampFormat: 'time-only',
+        includeToolCalls: true,
+        treeStyle: 'unicode',
+        compactMode: false
+      });
+
+      console.log(formatted);
+    }
+
+    console.log(chalk.cyan("\n" + "═".repeat(80) + "\n"));
+
+    logger.info("Thread formatting complete");
+    process.exit(0);
+  } catch (err) {
+    handleCliError(err, "Failed to format threaded conversation");
   }
 }

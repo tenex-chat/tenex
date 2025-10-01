@@ -63,7 +63,7 @@ interface ToolDidExecuteEvent {
 /**
  * Completion event
  */
-interface CompleteEvent {
+export interface CompleteEvent {
     message: string;
     reasoning?: string;
     steps: StepResult<Record<string, AISdkTool>>[];
@@ -384,8 +384,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
             });
 
-            console.log('complete result', result);
-            
             // Capture session ID from provider metadata if using Claude Code
             if (this.provider === 'claudeCode' && result.providerMetadata?.['claude-code']?.sessionId) {
                 const capturedSessionId = result.providerMetadata['claude-code'].sessionId;
@@ -597,8 +595,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         // Update previousChunkType AFTER emitting the change event
         this.previousChunkType = chunk.type;
 
-        console.log('handleCunk on llm service', chunk.type);
-
         switch (chunk.type) {
             case "text-delta":
                 // AI SDK uses 'delta' for text-delta chunks, not 'text'
@@ -609,16 +605,21 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     this.handleTextDelta(chunk.text);
                 }
                 break;
-            case "reasoning-delta":
+            case "reasoning-delta": {
                 // Handle reasoning-delta separately - emit reasoning event
                 // The AI SDK may transform our custom reasoning-delta chunks
                 // to use 'text' property instead of 'delta'
-                const reasoningContent = (chunk as any).delta || (chunk as any).text;
+                interface ReasoningDeltaChunk {
+                    delta?: string;
+                    text?: string;
+                }
+                const reasoningChunk = chunk as ReasoningDeltaChunk;
+                const reasoningContent = reasoningChunk.delta || reasoningChunk.text;
                 logger.debug("[LLMService] Processing reasoning-delta chunk - DETAILED", {
                     hasDelta: 'delta' in chunk,
-                    deltaLength: (chunk as any).delta?.length,
+                    deltaLength: reasoningChunk.delta?.length,
                     hasText: 'text' in chunk,
-                    textLength: (chunk as any).text?.length,
+                    textLength: reasoningChunk.text?.length,
                     reasoningContent: reasoningContent?.substring(0, 100),
                     willCallHandleReasoningDelta: !!reasoningContent
                 });
@@ -634,6 +635,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     });
                 }
                 break;
+            }
             case "tool-call":
                 this.handleToolCall(chunk.toolCallId, chunk.toolName, chunk.input);
                 break;

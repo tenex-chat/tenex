@@ -62,12 +62,12 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
           prompt,
           targetAgent: targetAgent || 'self',
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error("Failed to schedule task:", error);
 
         return {
           success: false,
-          error: error.message || "Failed to schedule task",
+          error: error instanceof Error ? error.message : "Failed to schedule task",
         };
       }
     },

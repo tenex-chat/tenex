@@ -6,7 +6,7 @@ import { logger } from "@/utils/logger";
  * @param context Optional context for error logging
  * @returns Parsed object or null if parsing fails
  */
-export function safeParseJSON<T = any>(text: string, context?: string): T | null {
+export function safeParseJSON<T = unknown>(text: string, context?: string): T | null {
     try {
         // Clean up response - remove markdown code blocks if present
         let cleanText = text.trim();

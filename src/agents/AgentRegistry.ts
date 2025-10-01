@@ -9,7 +9,7 @@ import type {
 import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { configService } from "@/services";
+import { configService, getProjectContext } from "@/services";
 import type { TenexAgents } from "@/services/config/types";
 // Tool type removed - using AI SDK tools only
 import { formatAnyError } from "@/utils/error-formatter";
@@ -829,6 +829,19 @@ export class AgentRegistry {
         // Use the registry's basePath to get the project path
         const projectPath = this.getBasePath();
         return new AgentMetadataStore(conversationId, slug, projectPath);
+      },
+      createLLMService: (options) => {
+        const projectCtx = getProjectContext();
+        const llmLogger = projectCtx.llmLogger.withAgent(agentDefinition.name);
+        return configService.createLLMService(
+          llmLogger,
+          agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+          {
+            tools: options?.tools ?? {},
+            agentName: agentDefinition.name,
+            sessionId: options?.sessionId
+          }
+        );
       },
       sign: async (event: NDKEvent) => {
         // Sign the event with pTags: false to prevent automatic p-tag addition

@@ -5,7 +5,6 @@ import { BrainstormStrategy } from "@/agents/execution/strategies/BrainstormStra
 import { ConversationCoordinator } from "@/conversations";
 import type { Conversation } from "@/conversations/types";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
-import { configService } from "@/services/ConfigService";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK } from "@/nostr/ndkClient";
@@ -247,6 +246,7 @@ export class BrainstormService {
             projectPath: this.projectContext.agentRegistry.getBasePath(),
             triggeringEvent: event,
             conversationCoordinator: coordinator,
+            getConversation: () => coordinator.getConversation(conversation.id),
         };
 
         const strategy = new BrainstormStrategy();
@@ -288,6 +288,7 @@ export class BrainstormService {
                 projectPath: this.projectContext.agentRegistry.getBasePath(),
                 triggeringEvent: brainstormRoot, // Use the real brainstorm root as triggering event
                 conversationCoordinator: coordinator,
+                getConversation: () => coordinator.getConversation(conversation.id),
             };
 
             // Use BrainstormStrategy for proper context building
@@ -508,11 +509,7 @@ export class BrainstormService {
                 followUp
             );
 
-            const llmLogger = this.projectContext.llmLogger.withAgent(moderator.name);
-            const llmService = configService.createLLMService(
-                llmLogger,
-                moderator.llmConfig
-            );
+            const llmService = moderator.createLLMService();
 
             const result = await llmService.complete([
                 {

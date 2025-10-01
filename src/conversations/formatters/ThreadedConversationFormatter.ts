@@ -270,19 +270,20 @@ export class ThreadedConversationFormatter {
     }
 
     const connector = this.treeRenderer.getConnector(options.treeStyle, isLast);
-    const line = `${prefix}${connector}${agentName}${timestamp}: ${message}`;
-    lines.push(line);
-    
+
+    // Handle multi-line messages by joining with ⏎ separator
+    const inlineMessage = message.replace(/\n/g, ' ⏎ ');
+    lines.push(`${prefix}${connector}${agentName}${timestamp}: ${inlineMessage}`);
+
     // Render children with appropriate prefixes
+    const childPrefix = prefix + this.treeRenderer.getChildPrefix(options.treeStyle, isLast);
     if (node.children.length > 0 && (!options.maxDepth || node.depth < options.maxDepth)) {
-      const childPrefix = prefix + this.treeRenderer.getChildPrefix(options.treeStyle, isLast);
-      
       for (const [index, child] of node.children.entries()) {
         const isLastChild = index === node.children.length - 1;
         lines.push(this.renderNode(child, options, childPrefix, isLastChild));
       }
     }
-    
+
     return lines.join('\n');
   }
 

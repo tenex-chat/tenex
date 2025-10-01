@@ -87,8 +87,8 @@ export class RAGDatabaseManager {
      * Create a new table with schema
      */
     async createTable(
-        name: string, 
-        initialData: any[],
+        name: string,
+        initialData: Record<string, unknown>[],
         options?: { mode?: 'create' | 'overwrite' }
     ): Promise<Table> {
         const connection = await this.ensureConnection();

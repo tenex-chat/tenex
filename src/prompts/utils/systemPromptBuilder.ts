@@ -42,12 +42,12 @@ export interface SystemMessage {
 /**
  * Add core agent fragments that are common to both project and standalone modes
  */
-function addCoreAgentFragments(
+async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     conversation?: Conversation,
     agentLessons?: Map<string, NDKAgentLesson[]>,
-): void {
+): Promise<void> {
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
         builder.add("referenced-article", conversation.metadata.referencedArticle);
@@ -59,6 +59,41 @@ function addCoreAgentFragments(
         conversation,
         agentLessons: agentLessons || new Map(),
     });
+
+    // Add MCP resources if agent has MCP access and RAG subscription tools
+    const hasMcpAccess = agent.mcp !== false;
+    const hasRagSubscriptionTools = agent.tools.includes("rag_subscription_create");
+
+    if (hasMcpAccess && hasRagSubscriptionTools) {
+        // Lazy-load MCPManager to avoid circular dependency
+        const { mcpManager } = await import("@/services/mcp/MCPManager");
+        const runningServers = mcpManager.getRunningServers();
+
+        // Fetch resources from all running servers
+        const { logger } = await import("@/utils/logger");
+        const resourcesPerServer = await Promise.all(
+            runningServers.map(async (serverName) => {
+                try {
+                    const [resources, templates] = await Promise.all([
+                        mcpManager.listResources(serverName),
+                        mcpManager.listResourceTemplates(serverName)
+                    ]);
+                    logger.debug(`Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`);
+                    return { serverName, resources, templates };
+                } catch (error) {
+                    logger.warn(`Failed to fetch MCP resources from '${serverName}':`, error);
+                    // Return empty resources if server fails
+                    return { serverName, resources: [], templates: [] };
+                }
+            })
+        );
+
+        builder.add("mcp-resources", {
+            agentPubkey: agent.pubkey,
+            mcpEnabled: true,
+            resourcesPerServer,
+        });
+    }
 }
 
 /**
@@ -83,11 +118,11 @@ function addAgentFragments(
  * with optional caching metadata.
  * This is the single source of truth for system prompt generation.
  */
-export function buildSystemPromptMessages(options: BuildSystemPromptOptions): SystemMessage[] {
+export async function buildSystemPromptMessages(options: BuildSystemPromptOptions): Promise<SystemMessage[]> {
   const messages: SystemMessage[] = [];
 
   // Build the main system prompt
-  const mainPrompt = buildMainSystemPrompt(options);
+  const mainPrompt = await buildMainSystemPrompt(options);
   messages.push({
     message: { role: "system", content: mainPrompt },
     metadata: {
@@ -101,7 +136,7 @@ export function buildSystemPromptMessages(options: BuildSystemPromptOptions): Sy
 /**
  * Builds the main system prompt content
  */
-function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
+async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise<string> {
   const {
     agent,
     project,
@@ -123,7 +158,7 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
   systemPromptBuilder.add("agent-phases", { agent });
 
   // Add core agent fragments using shared composition
-  addCoreAgentFragments(
+  await addCoreAgentFragments(
     systemPromptBuilder,
     agent,
     conversation,
@@ -145,13 +180,13 @@ function buildMainSystemPrompt(options: BuildSystemPromptOptions): string {
  * Builds system prompt messages for standalone agents (without project context).
  * Includes most fragments except project-specific ones.
  */
-export function buildStandaloneSystemPromptMessages(
+export async function buildStandaloneSystemPromptMessages(
   options: BuildStandalonePromptOptions
-): SystemMessage[] {
+): Promise<SystemMessage[]> {
   const messages: SystemMessage[] = [];
 
   // Build the main system prompt
-  const mainPrompt = buildStandaloneMainPrompt(options);
+  const mainPrompt = await buildStandaloneMainPrompt(options);
   messages.push({
     message: { role: "system", content: mainPrompt },
     metadata: {
@@ -165,7 +200,7 @@ export function buildStandaloneSystemPromptMessages(
 /**
  * Builds the main system prompt for standalone agents
  */
-function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): string {
+async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): Promise<string> {
   const {
     agent,
     availableAgents = [],
@@ -183,7 +218,7 @@ function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): strin
   });
 
   // Add core agent fragments using shared composition
-  addCoreAgentFragments(
+  await addCoreAgentFragments(
     systemPromptBuilder,
     agent,
     conversation,

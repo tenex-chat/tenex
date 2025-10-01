@@ -60,7 +60,7 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
             // Optionally publish status if we have the publisher
             if (context.agentPublisher && context.triggeringEvent) {
                 try {
-                    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+                    const conversation = context.getConversation();
                     if (conversation?.history?.[0]) {
                         await context.agentPublisher.conversation(
                             { content: `🧮 Calculated: ${a} ${operation} ${b} = ${result}` },

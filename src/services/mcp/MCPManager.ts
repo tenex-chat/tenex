@@ -73,12 +73,20 @@ export class MCPManager {
   }
 
   private async startServers(mcpConfig: TenexMCP): Promise<void> {
-    const startPromises = Object.entries(mcpConfig.servers).map(([name, config]) =>
-      this.startServer(name, config).catch((error) => {
-        logger.error(`Failed to start MCP server '${name}':`, error);
-        // Continue with other servers
+    const startPromises = Object.entries(mcpConfig.servers)
+      .filter(([name]) => {
+        if (!name || name.trim() === '') {
+          logger.warn('Skipping MCP server with empty or invalid name');
+          return false;
+        }
+        return true;
       })
-    );
+      .map(([name, config]) =>
+        this.startServer(name, config).catch((error) => {
+          logger.error(`Failed to start MCP server '${name}':`, error);
+          // Continue with other servers
+        })
+      );
 
     await Promise.all(startPromises);
   }
@@ -331,7 +339,11 @@ export class MCPManager {
   async listResources(serverName: string): Promise<experimental_MCPResource[]> {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
     try {
@@ -371,7 +383,11 @@ export class MCPManager {
   async listResourceTemplates(serverName: string): Promise<experimental_MCPResourceTemplate[]> {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
     try {
@@ -412,7 +428,11 @@ export class MCPManager {
   async readResource(serverName: string, uri: string): Promise<experimental_MCPReadResourceResult> {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
     try {
@@ -460,7 +480,11 @@ export class MCPManager {
   async subscribeToResource(serverName: string, resourceUri: string): Promise<void> {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found or not running`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 
     try {
@@ -480,7 +504,11 @@ export class MCPManager {
   async unsubscribeFromResource(serverName: string, resourceUri: string): Promise<void> {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found or not running`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 
     try {
@@ -503,7 +531,11 @@ export class MCPManager {
   ): void {
     const entry = this.clients.get(serverName);
     if (!entry) {
-      throw new Error(`MCP server '${serverName}' not found or not running`);
+      const validServers = this.getRunningServers();
+      const serverList = validServers.length > 0
+        ? `Valid servers: ${validServers.join(', ')}`
+        : 'No MCP servers are currently running';
+      throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 
     entry.client.onResourceUpdated(handler);

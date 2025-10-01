@@ -16,6 +16,7 @@ import { availableAgentsFragment } from "./15-available-agents";
 import "./20-voice-mode";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
+import { mcpResourcesFragment } from "./26-mcp-resources";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -43,7 +44,8 @@ export function registerAllFragments(): void {
   // Context and learning
   fragmentRegistry.register(retrievedLessonsFragment);
   fragmentRegistry.register(ragInstructionsFragment);
-  
+  fragmentRegistry.register(mcpResourcesFragment);
+
 }
 
 // Auto-register all fragments on import

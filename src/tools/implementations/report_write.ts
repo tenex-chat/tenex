@@ -57,8 +57,8 @@ async function executeReportWrite(input: ReportWriteInput, context: ExecutionCon
   // Publish status message with the Nostr reference to the article
   try {
     // Use shared AgentPublisher instance from context (guaranteed to be present)
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    
+    const conversation = context.getConversation();
+
     if (conversation?.history?.[0]) {
       const nostrReference = `nostr:${articleId}`;
       await context.agentPublisher.conversation(

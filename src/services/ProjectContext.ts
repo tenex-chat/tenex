@@ -177,11 +177,6 @@ export class ProjectContext {
     return this.projectManager;
   }
 
-  getProjectAgent(): AgentInstance {
-    // Returns the project manager agent
-    return this.projectManager;
-  }
-
   getAgentSlugs(): string[] {
     return Array.from(this.agentRegistry.getAllAgentsMap().keys());
   }

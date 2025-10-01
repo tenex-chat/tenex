@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { MCPManager } from '../MCPManager';
 import type { experimental_MCPClient } from 'ai';
-
-// Mock the dependencies
-vi.mock('@/services/ConfigService');
-vi.mock('@/utils/logger');
 
 describe('MCPManager - Resources Support', () => {
   let mcpManager: MCPManager;
@@ -37,14 +33,14 @@ describe('MCPManager - Resources Support', () => {
   describe('listResources', () => {
     it('should throw error for non-existent server', async () => {
       await expect(mcpManager.listResources('non-existent')).rejects.toThrow(
-        "MCP server 'non-existent' not found"
+        /MCP server 'non-existent' not found/
       );
     });
 
     it('should call client.listResources for valid server', async () => {
       // Mock a client entry
       const mockClient = {
-        listResources: vi.fn().mockResolvedValue({
+        listResources: mock().mockResolvedValue({
           resources: [
             {
               uri: 'file:///test.txt',
@@ -77,7 +73,7 @@ describe('MCPManager - Resources Support', () => {
 
     it('should aggregate resources from all servers', async () => {
       const mockClient1 = {
-        listResources: vi.fn().mockResolvedValue({
+        listResources: mock().mockResolvedValue({
           resources: [
             { uri: 'file:///test1.txt', name: 'resource1' },
           ],
@@ -85,7 +81,7 @@ describe('MCPManager - Resources Support', () => {
       } as unknown as experimental_MCPClient;
 
       const mockClient2 = {
-        listResources: vi.fn().mockResolvedValue({
+        listResources: mock().mockResolvedValue({
           resources: [
             { uri: 'file:///test2.txt', name: 'resource2' },
           ],
@@ -104,11 +100,11 @@ describe('MCPManager - Resources Support', () => {
 
     it('should continue with other servers if one fails', async () => {
       const mockClient1 = {
-        listResources: vi.fn().mockRejectedValue(new Error('Server error')),
+        listResources: mock().mockRejectedValue(new Error('Server error')),
       } as unknown as experimental_MCPClient;
 
       const mockClient2 = {
-        listResources: vi.fn().mockResolvedValue({
+        listResources: mock().mockResolvedValue({
           resources: [{ uri: 'file:///test2.txt', name: 'resource2' }],
         }),
       } as unknown as experimental_MCPClient;
@@ -126,13 +122,13 @@ describe('MCPManager - Resources Support', () => {
   describe('listResourceTemplates', () => {
     it('should throw error for non-existent server', async () => {
       await expect(mcpManager.listResourceTemplates('non-existent')).rejects.toThrow(
-        "MCP server 'non-existent' not found"
+        /MCP server 'non-existent' not found/
       );
     });
 
     it('should call client.listResourceTemplates for valid server', async () => {
       const mockClient = {
-        listResourceTemplates: vi.fn().mockResolvedValue({
+        listResourceTemplates: mock().mockResolvedValue({
           resourceTemplates: [
             {
               uriTemplate: 'file:///{path}',
@@ -161,12 +157,12 @@ describe('MCPManager - Resources Support', () => {
     it('should throw error for non-existent server', async () => {
       await expect(
         mcpManager.readResource('non-existent', 'file:///test.txt')
-      ).rejects.toThrow("MCP server 'non-existent' not found");
+      ).rejects.toThrow(/MCP server 'non-existent' not found/);
     });
 
     it('should call client.readResource for valid server', async () => {
       const mockClient = {
-        readResource: vi.fn().mockResolvedValue({
+        readResource: mock().mockResolvedValue({
           contents: [
             {
               uri: 'file:///test.txt',
@@ -193,8 +189,7 @@ describe('MCPManager - Resources Support', () => {
   describe('getResourceContext', () => {
     it('should format multiple resources as context string', async () => {
       const mockClient = {
-        readResource: vi
-          .fn()
+        readResource: mock()
           .mockResolvedValueOnce({
             contents: [
               {
@@ -234,7 +229,7 @@ describe('MCPManager - Resources Support', () => {
 
     it('should handle binary content', async () => {
       const mockClient = {
-        readResource: vi.fn().mockResolvedValue({
+        readResource: mock().mockResolvedValue({
           contents: [
             {
               uri: 'file:///binary.dat',
@@ -260,8 +255,7 @@ describe('MCPManager - Resources Support', () => {
 
     it('should continue with other resources if one fails', async () => {
       const mockClient = {
-        readResource: vi
-          .fn()
+        readResource: mock()
           .mockRejectedValueOnce(new Error('Read error'))
           .mockResolvedValueOnce({
             contents: [
@@ -292,7 +286,7 @@ describe('MCPManager - Resources Support', () => {
   describe('refreshTools with resources', () => {
     it('should pass includeResources option to client.tools()', async () => {
       const mockClient = {
-        tools: vi.fn().mockResolvedValue({}),
+        tools: mock().mockResolvedValue({}),
       } as unknown as experimental_MCPClient;
 
       (mcpManager as any).clients.set('test-server', {
@@ -310,7 +304,7 @@ describe('MCPManager - Resources Support', () => {
 
     it('should pass includeResources: false when disabled', async () => {
       const mockClient = {
-        tools: vi.fn().mockResolvedValue({}),
+        tools: mock().mockResolvedValue({}),
       } as unknown as experimental_MCPClient;
 
       (mcpManager as any).clients.set('test-server', {

@@ -148,6 +148,9 @@ export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
 
     Object.defineProperty(aiTool, 'getHumanReadableContent', {
         value: ({ phase, recipients }: DelegatePhaseInput) => {
+            if (!phase) {
+                return 'Switching phase';
+            }
             if (!recipients || recipients.length === 0) {
                 return `Switching to ${phase.toUpperCase()} phase`;
             }

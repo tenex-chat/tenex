@@ -39,12 +39,6 @@ export  class EventToModelMessage {
 
             if (phaseContent) {
                 messages.push({ role: "system", content: phaseContent });
-
-                logger.info("[EventToModelMessage] Added phase transition", {
-                    eventId: event.id.substring(0, 8),
-                    phase: phaseTag,
-                    hasInstructions: !!phaseInstructionsTag,
-                });
             }
         }
 

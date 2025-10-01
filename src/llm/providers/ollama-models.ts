@@ -25,12 +25,21 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
       return [];
     }
 
-    const data = await response.json();
+    interface OllamaResponse {
+      models?: Array<{
+        name: string;
+        size: number;
+        modified_at: string;
+        digest: string;
+      }>;
+    }
+
+    const data = await response.json() as OllamaResponse;
     const models = data.models || [];
-    
+
     logger.debug(`Fetched ${models.length} Ollama models`);
-    
-    return models.map((model: any) => ({
+
+    return models.map((model) => ({
       name: model.name,
       size: formatSize(model.size),
       modified: model.modified_at,

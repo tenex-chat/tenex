@@ -113,7 +113,7 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   // Publish conversation status event
   try {
     // Use shared AgentPublisher instance from context (guaranteed to be present)
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+    const conversation = context.getConversation();
 
     if (conversation?.history?.[0]) {
       await context.agentPublisher.conversation(

@@ -65,8 +65,8 @@ export class RAGService {
      * Create a new collection
      */
     public async createCollection(
-        name: string, 
-        schema?: Record<string, any>
+        name: string,
+        schema?: Record<string, unknown>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
         return this.operations.createCollection(name, schema);

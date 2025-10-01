@@ -1,6 +1,8 @@
 // Tool type removed - using AI SDK tools only
 import type { NDKPrivateKeySigner, NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
+import type { LLMService } from "@/llm/service";
+import type { Tool as CoreTool } from "ai";
 
 /**
  * Simplified agent representation for UI display and selection
@@ -50,6 +52,8 @@ export interface AgentInstance {
   phases?: Record<string, string>;
   /** Create a metadata store for this agent in a specific conversation */
   createMetadataStore(conversationId: string): AgentMetadataStore;
+  /** Create an LLM service for this agent with optional tools and session */
+  createLLMService(options?: { tools?: Record<string, CoreTool>; sessionId?: string }): LLMService;
   /** Sign an NDK event with the agent's signer, preventing automatic p-tags */
   sign(event: NDKEvent): Promise<void>;
 }

@@ -50,8 +50,8 @@ async function executeShell(
   // Publish status message about what command we're running
   try {
     const agentPublisher = context.agentPublisher;
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-    
+    const conversation = context.getConversation();
+
     if (conversation?.history?.[0]) {
       await agentPublisher.conversation(
         { content: `⚡ Executing: ${command}` },

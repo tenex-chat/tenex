@@ -3,13 +3,7 @@ import type { RAGDatabaseManager } from './RAGDatabaseManager';
 import type { EmbeddingProvider } from '../EmbeddingProvider';
 import { logger } from '@/utils/logger';
 import { handleError } from '@/utils/error-handler';
-import { 
-    mapLanceResultToDocument, 
-    calculateRelevanceScore,
-    type LanceDBResult,
-    type LanceDBStoredDocument,
-    type DocumentMetadata
-} from '@/tools/utils';
+import type { LanceDBResult, LanceDBStoredDocument, DocumentMetadata } from '@/tools/utils';
 
 /**
  * Document structure for RAG operations

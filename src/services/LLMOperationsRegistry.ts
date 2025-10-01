@@ -27,7 +27,7 @@ class LLMOperationsRegistry {
   
   registerOperation(context: ExecutionContext): AbortSignal {
     const operationId = crypto.randomUUID();
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+    const conversation = context.getConversation();
     const rootEventId = conversation?.history[0]?.id || context.triggeringEvent.id;
     
     // Create operation with metadata

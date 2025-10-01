@@ -76,7 +76,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
             // Example: Publish a status update
             if (agentPublisher && context.triggeringEvent) {
                 try {
-                    const conversation = context.conversationCoordinator.getConversation(conversationId);
+                    const conversation = context.getConversation();
                     if (conversation?.history?.[0]) {
                         await agentPublisher.conversation(
                             { content: `⚡ Processing: ${input.exampleParam}` },

@@ -23,8 +23,8 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         triggeringEvent: NDKEvent,
         eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
-        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
-        
+        const conversation = context.getConversation();
+
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
@@ -96,10 +96,10 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         const project = projectCtx.project;
 
         // Get conversation from context
-        const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+        const conversation = context.getConversation();
 
         // Build system prompt messages
-        const systemMessages = buildSystemPromptMessages({
+        const systemMessages = await buildSystemPromptMessages({
             agent: context.agent,
             project,
             availableAgents: Array.from(projectCtx.agents.values()),
@@ -307,10 +307,6 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
 
             if (phaseContent) {
                 messages.push({ role: "system", content: phaseContent });
-                logger.debug("[BrainstormStrategy] Added phase transition", {
-                    eventId: event.id?.substring(0, 8),
-                    phase: phaseTag
-                });
             }
         }
 

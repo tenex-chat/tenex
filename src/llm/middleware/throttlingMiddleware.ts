@@ -6,6 +6,29 @@ import { logger } from "@/utils/logger";
 import * as fs from "fs/promises";
 import * as path from "path";
 
+// Type guards for stream parts with delta content
+interface TextDeltaChunk {
+  type: 'text-delta';
+  delta?: string;
+  text?: string;
+  id?: string;
+}
+
+interface ReasoningDeltaChunk {
+  type: 'reasoning-delta';
+  delta?: string;
+  text?: string;
+  id?: string;
+}
+
+function isTextDelta(chunk: LanguageModelV1StreamPart): chunk is TextDeltaChunk {
+  return chunk.type === 'text-delta';
+}
+
+function isReasoningDelta(chunk: LanguageModelV1StreamPart): chunk is ReasoningDeltaChunk {
+  return chunk.type === 'reasoning-delta';
+}
+
 /**
  * Throttling middleware that buffers content chunks and flushes them
  * at regular intervals after the first chunk arrives.
@@ -39,7 +62,7 @@ export function throttlingMiddleware(
       // Ensure debug directory exists
       await fs.mkdir(logDir, { recursive: true });
 
-      logger.info("[ThrottlingMiddleware] Starting stream wrapper", {
+      logger.debug("[ThrottlingMiddleware] Starting stream wrapper", {
         flushInterval,
         timestamp: new Date().toISOString(),
         debugLogFile: logFile,
@@ -54,7 +77,6 @@ export function throttlingMiddleware(
       let reasoningBuffer = "";
       let reasoningId = "";
       let flushTimer: NodeJS.Timeout | null = null;
-      let lastFlushTime = 0;
       let totalFlushes = 0;
       let totalChunks = 0;
 
@@ -108,7 +130,7 @@ export function throttlingMiddleware(
           };
 
           // Helper to flush buffers
-          const flush = (forceFlushAll: boolean = false) => {
+          const flush = (forceFlushAll: boolean = false): void => {
             const flushTime = Date.now();
             totalFlushes++;
 
@@ -128,7 +150,7 @@ export function throttlingMiddleware(
               }
 
               if (toFlush.length > 0) {
-                logger.info("[ThrottlingMiddleware] Flushing text buffer", {
+                logger.debug("[ThrottlingMiddleware] Flushing text buffer", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: flushTime - startTime,
                   bufferLength: toFlush.length,
@@ -162,7 +184,7 @@ export function throttlingMiddleware(
               }
 
               if (toFlush.length > 0) {
-                logger.info("[ThrottlingMiddleware] Flushing reasoning buffer", {
+                logger.debug("[ThrottlingMiddleware] Flushing reasoning buffer", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: flushTime - startTime,
                   bufferLength: toFlush.length,
@@ -180,7 +202,6 @@ export function throttlingMiddleware(
               }
             }
 
-            lastFlushTime = flushTime;
             if (flushTimer) {
               clearTimeout(flushTimer);
               flushTimer = null;
@@ -188,10 +209,10 @@ export function throttlingMiddleware(
           };
 
           // Handle different chunk types
-          if (chunk.type === "text-delta") {
+          if (isTextDelta(chunk)) {
             // Extract delta content (handle both v1 text and v2 delta properties)
-            const deltaContent = (chunk as any).delta || (chunk as any).text;
-            const chunkId = (chunk as any).id || textId || "text-default";
+            const deltaContent = chunk.delta || chunk.text;
+            const chunkId = chunk.id || textId || "text-default";
 
             if (deltaContent) {
               // If ID changes, force flush current buffer
@@ -213,14 +234,14 @@ export function throttlingMiddleware(
 
               // Check if we should flush immediately due to newline
               if (chunking === 'line' && textBuffer.includes('\n')) {
-                logger.info("[ThrottlingMiddleware] Found newline, flushing immediately", {
+                logger.debug("[ThrottlingMiddleware] Found newline, flushing immediately", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
                 });
                 flush();
               } else if (!flushTimer) {
                 // Start flush timer if not already running
-                logger.info("[ThrottlingMiddleware] Starting flush timer", {
+                logger.debug("[ThrottlingMiddleware] Starting flush timer", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
                   flushInterval,
@@ -236,10 +257,10 @@ export function throttlingMiddleware(
                 }, flushInterval);
               }
             }
-          } else if (chunk.type === "reasoning-delta") {
+          } else if (isReasoningDelta(chunk)) {
             // Extract delta content (handle both v1 text and v2 delta properties)
-            const deltaContent = (chunk as any).delta || (chunk as any).text;
-            const chunkId = (chunk as any).id || reasoningId || "reasoning-default";
+            const deltaContent = chunk.delta || chunk.text;
+            const chunkId = chunk.id || reasoningId || "reasoning-default";
 
             if (deltaContent) {
               // If ID changes, force flush current buffer
@@ -261,14 +282,14 @@ export function throttlingMiddleware(
 
               // Check if we should flush immediately due to newline
               if (chunking === 'line' && reasoningBuffer.includes('\n')) {
-                logger.info("[ThrottlingMiddleware] Found newline in reasoning, flushing immediately", {
+                logger.debug("[ThrottlingMiddleware] Found newline in reasoning, flushing immediately", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
                 });
                 flush();
               } else if (!flushTimer) {
                 // Start flush timer if not already running
-                logger.info("[ThrottlingMiddleware] Starting flush timer for reasoning", {
+                logger.debug("[ThrottlingMiddleware] Starting flush timer for reasoning", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
                   flushInterval,
@@ -287,7 +308,7 @@ export function throttlingMiddleware(
           } else {
             // For non-text/reasoning chunks, force flush any buffered content first
             if (textBuffer.length > 0 || reasoningBuffer.length > 0) {
-              logger.info("[ThrottlingMiddleware] Non-text chunk received, force flushing buffers", {
+              logger.debug("[ThrottlingMiddleware] Non-text chunk received, force flushing buffers", {
                 timestamp: new Date().toISOString(),
                 elapsedSinceStart: chunkTimestamp - startTime,
                 chunkType: chunk.type,
@@ -307,7 +328,7 @@ export function throttlingMiddleware(
 
           // Force flush any remaining buffered content (including partial lines)
           if (textBuffer.length > 0 || reasoningBuffer.length > 0) {
-            logger.info("[ThrottlingMiddleware] Final flush of remaining buffers", {
+            logger.debug("[ThrottlingMiddleware] Final flush of remaining buffers", {
               timestamp: new Date().toISOString(),
               elapsedSinceStart: finalTime - startTime,
               hasTextBuffer: textBuffer.length > 0,
@@ -340,7 +361,7 @@ export function throttlingMiddleware(
             flushTimer = null;
           }
 
-          logger.info("[ThrottlingMiddleware] Stream completed", {
+          logger.debug("[ThrottlingMiddleware] Stream completed", {
             timestamp: new Date().toISOString(),
             totalDuration: finalTime - startTime,
             totalChunks,

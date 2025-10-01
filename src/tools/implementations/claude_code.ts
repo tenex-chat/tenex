@@ -116,7 +116,7 @@ async function executeClaudeCode(
     }
 
     // Get conversation for other purposes
-    const conversation = context.conversationCoordinator.getConversation(context.conversationId);
+    const conversation = context.getConversation();
 
     // Create event context for Nostr publishing
     const rootEvent = conversation?.history[0] ?? context.triggeringEvent;

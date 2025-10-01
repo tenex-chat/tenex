@@ -227,6 +227,7 @@ export class RagSubscriptionService {
             `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
             `Call pollResource() manually or set up a polling interval.`
           );
+          process.exit(1);
         } else {
           throw error;
         }

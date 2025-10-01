@@ -55,6 +55,7 @@ export const handleNewConversation = async (
       projectPath: process.cwd(),
       triggeringEvent: event,
       conversationCoordinator: context.conversationCoordinator,
+      getConversation: () => context.conversationCoordinator.getConversation(conversation.id),
     });
 
     logger.info(chalk.green("✅ Conversation routed successfully"));

@@ -54,7 +54,6 @@
  * ```
  */
 
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 import { logger } from "@/utils/logger";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
