@@ -10,6 +10,7 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { logger } from "@/utils/logger";
+import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 
 /**
  * Add voice mode context if applicable
@@ -97,10 +98,37 @@ export function addDelegationCompletionContext(
         if (agentName) {
             logger.debug("[CONTEXT_ENHANCER] Added delegation completion context", { agent: agentName });
         }
-        
+
         return true;
     }
     return false;
+}
+
+/**
+ * Add context about who the agent is responding to
+ * @param messages - The messages array to add to
+ * @param triggeringEvent - The event that triggered this execution
+ * @param agentName - Name of the agent for logging
+ */
+export async function addRespondingToContext(
+    messages: ModelMessage[],
+    triggeringEvent: NDKEvent,
+    agentName?: string
+): Promise<void> {
+    const nameRepo = getPubkeyNameRepository();
+    const triggeringUserName = await nameRepo.getName(triggeringEvent.pubkey);
+
+    messages.push({
+        role: "system",
+        content: `You are responding to @${triggeringUserName}. If you need to consult with a different agent before you're ready to satisfy the request from @${triggeringUserName}, use the delegate or ask tools.`
+    });
+
+    if (agentName) {
+        logger.debug("[CONTEXT_ENHANCER] Added responding-to context", {
+            agent: agentName,
+            respondingTo: triggeringUserName
+        });
+    }
 }
 
 /**
@@ -111,17 +139,20 @@ export function addDelegationCompletionContext(
  * @param agentName - Name of the agent for logging
  * @returns Object indicating which contexts were added
  */
-export function addAllSpecialContexts(
+export async function addAllSpecialContexts(
     messages: ModelMessage[],
     triggeringEvent: NDKEvent,
     isDelegationCompletion: boolean,
     agentName?: string
-): { voiceMode: boolean; debugMode: boolean; delegationMode: boolean } {
+): Promise<{ voiceMode: boolean; debugMode: boolean; delegationMode: boolean }> {
     const result = {
         voiceMode: addVoiceModeContext(messages, triggeringEvent, agentName),
         debugMode: addDebugModeContext(messages, triggeringEvent, agentName),
         delegationMode: addDelegationCompletionContext(messages, isDelegationCompletion, agentName)
     };
+
+    // Add context about who the agent is responding to
+    await addRespondingToContext(messages, triggeringEvent, agentName);
 
     // Only build combined context if any mode is active
     if (!result.voiceMode && !result.debugMode && !result.delegationMode) {

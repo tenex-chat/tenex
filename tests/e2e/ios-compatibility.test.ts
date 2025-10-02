@@ -160,35 +160,7 @@ describe("iOS-Backend Compatibility", () => {
       expect(toolTag?.[2]).toBe("executor");
     });
 
-    it("should handle execution queue tags correctly", () => {
-      const iosEvent = {
-        kind: 24010,
-        tags: [
-          ["a", "31933:pubkey:project"],
-          ["execution-queue", "conversation-1", "active", "1699999999"],
-          ["execution-queue", "conversation-2"],
-          ["execution-queue", "conversation-3"],
-        ],
-        content: "",
-      } as any;
-
-      const status = NDKProjectStatus.from(new NDKEvent(undefined, iosEvent));
-      
-      // Note: The backend's NDKProjectStatus doesn't have execution queue methods yet
-      // This test documents the expected structure for iOS to parse
-      const queueTags = status.tags.filter(t => t[0] === "execution-queue");
-      expect(queueTags).toHaveLength(3);
-      
-      // Active execution
-      const activeTag = queueTags.find(t => t[2] === "active");
-      expect(activeTag?.[1]).toBe("conversation-1");
-      expect(activeTag?.[3]).toBe("1699999999");
-      
-      // Waiting executions
-      const waitingTags = queueTags.filter(t => !t[2]);
-      expect(waitingTags).toHaveLength(2);
-      expect(waitingTags[0][1]).toBe("conversation-2");
-    });
+    // Execution queue test removed - queue functionality was never implemented
   });
 
   describe("Typing Indicator Events", () => {

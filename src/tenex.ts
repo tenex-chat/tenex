@@ -35,7 +35,8 @@ debug
   .description("Show the threaded conversation formatter output for a conversation")
   .option("--strategy <strategy>", "Strategy to use (threaded-with-memory, flattened-chronological)")
   .option("--agent <agent>", "Agent slug to view from perspective")
-  .action((conversationId, options) => runDebugThreadedFormatter({ conversationId, strategy: options.strategy, agent: options.agent }));
+  .option("--dont-trim", "Don't trim message content (default: trim to 500 chars)")
+  .action((conversationId, options) => runDebugThreadedFormatter({ conversationId, strategy: options.strategy, agent: options.agent, dontTrim: options.dontTrim }));
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {

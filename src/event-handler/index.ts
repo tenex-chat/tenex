@@ -72,11 +72,12 @@ export class EventHandler {
         isNDKEvent: event instanceof NDKEvent,
       });
       // Don't mask the issue - let it fail so we can trace it
+      process.exit(1);
     }
 
     // Try to get agent slug if the event is from an agent
     let fromIdentifier = event.pubkey;
-    let forIdentifiers: string = "without any recipient";
+    let forIdentifiers = "without any recipient";
     
     try {
       const projectCtx = getProjectContext();
@@ -95,7 +96,6 @@ export class EventHandler {
           eventType: typeof event,
           eventConstructor: event?.constructor?.name,
           eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
-          hasGetMatchingTags: typeof event?.getMatchingTags,
           eventKeys: Object.keys(event || {}),
           event: JSON.stringify(event, null, 2)
         });
@@ -139,6 +139,19 @@ export class EventHandler {
     const delegationRegistry = DelegationRegistry.getInstance();
     if (delegationRegistry.isDelegationResponse(event)) {
       await delegationRegistry.handleDelegationResponse(event);
+
+      // Add the delegation response to conversation history for context
+      const { ConversationResolver } = await import("@/conversations/services/ConversationResolver");
+      const resolver = new ConversationResolver(this.conversationCoordinator);
+      const result = await resolver.resolveConversationForEvent(event);
+
+      if (result.conversation) {
+        await this.conversationCoordinator.addEvent(result.conversation.id, event);
+        logger.debug(`Added delegation response to conversation history: ${result.conversation.id.substring(0, 8)}`);
+      } else {
+        logger.warn(`Could not find conversation for delegation response: ${event.id?.substring(0, 8)}`);
+      }
+
       return; // Done - this was a delegation response
     }
 

@@ -181,7 +181,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         }
 
         // Add special context instructions if needed
-        addAllSpecialContexts(
+        await addAllSpecialContexts(
             messages,
             triggeringEvent,
             context.isDelegationCompletion || false,

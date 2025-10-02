@@ -114,7 +114,6 @@ export class StatusPublisher {
         agents: [],
         models: [],
         tools: [],
-        queue: [],
       };
 
       // Gather agent info - preserve order from NDKProject

@@ -9,8 +9,6 @@ import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
 import { logger } from "@/utils/logger";
 import { ensureProjectInitialized } from "@/utils/projectInitialization";
 import chalk from "chalk";
-import { ThreadedConversationFormatter } from "@/conversations/formatters/ThreadedConversationFormatter";
-import { NDKFilter, NDKEvent } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr/ndkClient";
 import inquirer from "inquirer";
 import {
@@ -22,8 +20,16 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { ConversationCoordinator } from "@/conversations/services/ConversationCoordinator";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 
+// Trim content to max length if needed
+function trimContent(content: string, maxLength: number): string {
+  if (content.length <= maxLength) {
+    return content;
+  }
+  return content.substring(0, maxLength) + chalk.dim(` ... [trimmed ${content.length - maxLength} chars]`);
+}
+
 // Format content with enhancements
-function formatContentWithEnhancements(content: string, isSystemPrompt = false): string {
+function formatContentWithEnhancements(content: string, isSystemPrompt = false, trim = false, maxLength = 500): string {
   let formattedContent = content.replace(/\\n/g, "\n");
 
   if (isSystemPrompt) {
@@ -44,6 +50,11 @@ function formatContentWithEnhancements(content: string, isSystemPrompt = false):
     }
   );
 
+  // Apply trimming if requested
+  if (trim) {
+    formattedContent = trimContent(formattedContent, maxLength);
+  }
+
   return formattedContent;
 }
 
@@ -56,6 +67,7 @@ interface DebugThreadedFormatterOptions {
   conversationId: string;
   strategy?: string;
   agent?: string;
+  dontTrim?: boolean;
 }
 
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
@@ -293,14 +305,18 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
     const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
     // Display the messages
+    const shouldTrim = !options.dontTrim;
     logger.info(chalk.cyan(`=== Strategy Output (${messages.length} messages) ===\n`));
+    if (shouldTrim) {
+      logger.info(chalk.dim("(Messages trimmed to 500 chars. Use --dont-trim to see full content)\n"));
+    }
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
       console.log(chalk.bold.yellow(`\n─── Message ${i + 1} (${msg.role}) ───`));
 
       const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2);
-      const formattedContent = formatContentWithEnhancements(content, msg.role === 'system');
+      const formattedContent = formatContentWithEnhancements(content, msg.role === 'system', shouldTrim);
       console.log(formattedContent);
 
       if (i < messages.length - 1) {

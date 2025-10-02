@@ -15,10 +15,7 @@ import { nip19 } from "nostr-tools";
 // Intent types that agents can express
 export interface CompletionIntent {
     content: string;
-    reasoning?: string;  // Full accumulated reasoning content
-    summary?: string;
     usage?: LanguageModelUsageWithCostUsd;
-    isReasoning?: boolean;
 }
 
 export interface DelegationIntent {
@@ -46,7 +43,6 @@ export interface ErrorIntent {
 
 export interface TypingIntent {
   state: "start" | "stop";
-  message?: string;
 }
 
 export interface StreamingIntent {
@@ -68,7 +64,6 @@ export interface StatusIntent {
   agents: Array<{ pubkey: string; slug: string }>;
   models: Array<{ slug: string; agents: string[] }>;
   tools: Array<{ name: string; agents: string[] }>;
-  queue?: string[];
 }
 
 export interface ToolUseIntent {
@@ -206,16 +201,6 @@ export class AgentEventEncoder {
         // Mark as natural completion
         event.tag(["status", "completed"]);
 
-        // Add reasoning tag if this is reasoning content
-        if (intent.isReasoning) {
-            event.tag(["reasoning"]);
-        }
-
-        // Add summary if provided
-        if (intent.summary) {
-            event.tag(["summary", intent.summary]);
-        }
-
         // Add usage information if provided
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
@@ -226,7 +211,6 @@ export class AgentEventEncoder {
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            summary: intent.summary,
             completingTo: context.triggeringEvent.id?.substring(0, 8),
             completingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
         });
@@ -441,7 +425,7 @@ export class AgentEventEncoder {
         // Use appropriate event kind based on state
         if (intent.state === "start") {
             event.kind = EVENT_KINDS.TYPING_INDICATOR;
-            event.content = intent.message || `${agent.name} is typing`;
+            event.content = `${agent.name} is typing`;
         } else {
             // Stop event uses different kind
             event.kind = EVENT_KINDS.TYPING_INDICATOR_STOP;

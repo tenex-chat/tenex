@@ -84,6 +84,8 @@ export class DelegationService {
     
     // Wait for all responses - no timeout as delegations are long-running
     const completions = await registry.waitForBatchCompletion(result.batchId);
+
+    console.log("delegation response", completions);
     
     // Return formatted responses with event details
     return {

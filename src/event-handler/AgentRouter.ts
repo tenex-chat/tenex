@@ -44,7 +44,7 @@ export  class AgentRouter {
           targetAgents.push(agent);
         }
       }
-      
+
       if (targetAgents.length > 0) {
         const agentNames = targetAgents.map(a => a.name).join(", ");
         logger.info(chalk.gray(`Routing to ${targetAgents.length} p-tagged agent(s): ${agentNames}`));
@@ -162,7 +162,7 @@ export  class AgentRouter {
 
     const eventProjectIdentifier = parts[2];
     const currentProjectIdentifier = projectContext.project.tagValue("d");
-    
+
     // Handle case where current project has no identifier
     if (!currentProjectIdentifier) {
       return true;

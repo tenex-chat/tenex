@@ -4,8 +4,9 @@ import { logger } from "@/utils/logger";
 import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "./utils/claudeCodePromptCompiler";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
-import type { ToolCallArguments } from "@/agents/types";
 import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
+import { isAISdkProvider } from "./type-guards";
+import { providerSupportsStreaming } from "./provider-configs";
 import {
     type LanguageModelUsage,
     type LanguageModel,
@@ -65,7 +66,6 @@ interface ToolDidExecuteEvent {
  */
 export interface CompleteEvent {
     message: string;
-    reasoning?: string;
     steps: StepResult<Record<string, AISdkTool>>[];
     usage: LanguageModelUsageWithCostUsd;
     finishReason?: string;
@@ -124,6 +124,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
+    private contentPublishTimeout?: NodeJS.Timeout;
+    private cachedContentForComplete: string = '';
 
     constructor(
         private readonly llmLogger: LLMLogger,
@@ -249,65 +251,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             model: baseModel,
             middleware: middlewares,
         });
-    }
-
-    /**
-     * Type guard for valid ToolCallArguments value types
-     */
-    private isValidArgumentValue(value: unknown): value is string | number | boolean | undefined {
-        const valueType = typeof value;
-        return valueType === 'string' || 
-               valueType === 'number' || 
-               valueType === 'boolean' || 
-               value === undefined;
-    }
-
-    /**
-     * Parse tool input arguments with deep type safety validation
-     * Validates all fields recursively to ensure conformance to ToolCallArguments
-     */
-    private parseToolArguments(input: unknown): ToolCallArguments {
-        if (typeof input !== 'object' || input === null) {
-            return {};
-        }
-        
-        const args = input as Record<string, unknown>;
-        const parsed: ToolCallArguments = {};
-        
-        // Validate and assign known fields
-        if (typeof args.command === 'string') {
-            parsed.command = args.command;
-        }
-        if (typeof args.path === 'string') {
-            parsed.path = args.path;
-        }
-        if (typeof args.mode === 'string') {
-            parsed.mode = args.mode;
-        }
-        if (typeof args.prompt === 'string') {
-            parsed.prompt = args.prompt;
-        }
-        
-        // Validate and assign additional dynamic fields
-        for (const [key, value] of Object.entries(args)) {
-            // Skip known fields already processed
-            if (key === 'command' || key === 'path' || key === 'mode' || key === 'prompt') {
-                continue;
-            }
-            
-            // Deep validation for dynamic fields
-            if (this.isValidArgumentValue(value)) {
-                parsed[key] = value;
-            } else {
-                logger.warn('[LLMService] Skipping invalid tool argument', {
-                    key,
-                    valueType: typeof value,
-                    expectedTypes: 'string | number | boolean | undefined'
-                });
-            }
-        }
-        
-        return parsed;
     }
 
     /**
@@ -502,20 +445,15 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const progressMonitor = new ProgressMonitor(reviewModel);
 
         const stopWhen = async ({ steps }: { steps: StepResult<Record<string, AISdkTool>>[] }): Promise<boolean> => {
-            const toolCalls: import("@/agents/types").ToolCall[] = [];
+            const toolNames: string[] = [];
             for (const step of steps) {
                 if (step.toolCalls) {
                     for (const tc of step.toolCalls) {
-                        const args = this.parseToolArguments(tc.input);
-                        toolCalls.push({
-                            tool: tc.toolName,
-                            args,
-                            id: tc.toolCallId
-                        });
+                        toolNames.push(tc.toolName);
                     }
                 }
             }
-            const shouldContinue = await progressMonitor.check(toolCalls);
+            const shouldContinue = await progressMonitor.check(toolNames);
             return !shouldContinue;
         };
 
@@ -531,36 +469,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 openrouter: {
                     usage: { include: true },
                 },
-            },
-
-            // Check for delegation completion and inject follow-up hint
-            prepareStep: async (options) => {
-                const lastStep = options.steps[options.steps.length - 1];
-                const lastToolCall = lastStep?.toolCalls?.[0];
-
-                // Check if last tool was a delegation
-                const delegationTools = [
-                    "delegate",
-                    "delegate_phase",
-                    "delegate_external",
-                    "delegate_followup",
-                ];
-                if (lastToolCall && delegationTools.includes(lastToolCall.toolName)) {
-                    const lastResult = lastStep?.toolResults?.[0];
-
-                    // Check if we got responses
-                    if (lastResult?.responses?.length > 0) {
-                        // Add assistant message about follow-up capability
-                        return {
-                            messages: [
-                                {
-                                    role: "assistant",
-                                    content: `I've received the delegation response. If I need any clarification or have follow-up questions, I can use delegate_followup to continue the conversation with the responding agent.`,
-                                },
-                            ],
-                        };
-                    }
-                }
             },
 
             onChunk: this.handleChunk.bind(this),
@@ -597,13 +505,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         switch (chunk.type) {
             case "text-delta":
-                // AI SDK uses 'delta' for text-delta chunks, not 'text'
-                if ('delta' in chunk && chunk.delta) {
-                    this.handleTextDelta(chunk.delta);
-                } else if ('text' in chunk && chunk.text) {
-                    // Fallback for compatibility
-                    this.handleTextDelta(chunk.text);
-                }
+                this.handleTextDelta(chunk.text);
                 break;
             case "reasoning-delta": {
                 // Handle reasoning-delta separately - emit reasoning event
@@ -616,9 +518,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 const reasoningChunk = chunk as ReasoningDeltaChunk;
                 const reasoningContent = reasoningChunk.delta || reasoningChunk.text;
                 logger.debug("[LLMService] Processing reasoning-delta chunk - DETAILED", {
-                    hasDelta: 'delta' in chunk,
                     deltaLength: reasoningChunk.delta?.length,
-                    hasText: 'text' in chunk,
                     textLength: reasoningChunk.text?.length,
                     reasoningContent: reasoningContent?.substring(0, 100),
                     willCallHandleReasoningDelta: !!reasoningContent
@@ -654,12 +554,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.debug("[LLMService] Tool input delta", {
                     toolCallId: chunk.toolCallId,
                     text: chunk.text
-                });
-                break;
-            case "tool-input-available":
-                // Full tool input is now available - could be useful for logging
-                logger.debug("[LLMService] Tool input available", {
-                    toolCallId: chunk.toolCallId
                 });
                 break;
             case "reasoning-start":
@@ -698,6 +592,22 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             const duration = Date.now() - startTime;
 
             try {
+                // Cancel any pending content publish timeout for non-streaming providers
+                if (this.contentPublishTimeout) {
+                    clearTimeout(this.contentPublishTimeout);
+                    this.contentPublishTimeout = undefined;
+                }
+
+                // Check if provider supports streaming
+                const supportsStreaming = isAISdkProvider(this.provider)
+                    ? providerSupportsStreaming(this.provider)
+                    : true;
+
+                // For non-streaming providers, use cached content; for streaming, use e.text
+                const finalMessage = !supportsStreaming && this.cachedContentForComplete
+                    ? this.cachedContentForComplete
+                    : (e.text || "");
+
                 await this.llmLogger.logLLMResponse({
                     response: {
                         content: e.text,
@@ -722,36 +632,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                         providerMetadata: e.providerMetadata
                     });
                 }
-                
-                logger.debug("[LLMService] Stream finished", {
-                    duration,
-                    model: this.model,
-                    startTime,
-                    finishReason: e.finishReason,
-                    agentSlug: this.agentSlug,
-                });
-
-                // Extract reasoning from all steps
-                const allReasoningTexts = e.steps
-                    .map(step => step.reasoningText)
-                    .filter(text => text && text.trim().length > 0);
-                const fullReasoning = allReasoningTexts.length > 0
-                    ? allReasoningTexts.join('\n\n')
-                    : undefined;
 
                 logger.debug("[LLMService] Stream onFinish - emitting complete event", {
                     hasText: !!e.text,
                     textLength: e.text?.length || 0,
                     textPreview: e.text?.substring(0, 100),
-                    hasReasoning: !!fullReasoning,
-                    reasoningLength: fullReasoning?.length || 0,
-                    reasoningPreview: fullReasoning?.substring(0, 100),
                     finishReason: e.finishReason,
+                    usingCachedContent: !supportsStreaming && !!this.cachedContentForComplete,
                 });
 
                 this.emit("complete", {
-                    message: e.text || "",
-                    reasoning: fullReasoning,
+                    message: finalMessage,
                     steps: e.steps,
                     usage: {
                         costUsd: e.providerMetadata?.openrouter?.usage?.cost,
@@ -759,6 +650,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     },
                     finishReason: e.finishReason,
                 });
+
+                // Clear cached content after use
+                this.cachedContentForComplete = '';
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
                     error: error instanceof Error ? error.message : String(error),
@@ -795,7 +689,28 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleTextDelta(text: string): void {
-        this.emit("content", { delta: text });
+        // Check if provider supports streaming
+        const supportsStreaming = isAISdkProvider(this.provider)
+            ? providerSupportsStreaming(this.provider)
+            : true;
+
+        if (supportsStreaming) {
+            // Streaming providers: emit immediately
+            this.emit("content", { delta: text });
+        } else {
+            // Non-streaming providers: cache content and delay emission
+            this.cachedContentForComplete = text;
+
+            // Clear any existing timeout
+            if (this.contentPublishTimeout) {
+                clearTimeout(this.contentPublishTimeout);
+            }
+
+            // Set new timeout to emit after 250ms
+            this.contentPublishTimeout = setTimeout(() => {
+                this.emit("content", { delta: this.cachedContentForComplete });
+            }, 250);
+        }
     }
 
     private handleReasoningDelta(text: string): void {

@@ -81,16 +81,11 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         // Create completion intent
         const intent: CompletionIntent = {
-          
           content: "Analysis complete. Found 3 anomalies in the dataset.",
-          summary: "3 anomalies detected",
-          executionMetadata: {
-            executionTime: 2500,
-            usage: {
-              prompt_tokens: 150,
-              completion_tokens: 50,
-              total_tokens: 200,
-            },
+          usage: {
+            promptTokens: 150,
+            completionTokens: 50,
+            totalTokens: 200,
           },
         };
 
@@ -113,10 +108,10 @@ describe("AgentEventEncoder Integration Tests", () => {
         expect(event.tagValue("E")).toBe(conversationEvent.id);
         expect(event.tagValue("K")).toBe(String(conversationEvent.kind));
         expect(event.tagValue("P")).toBe(conversationEvent.pubkey);
-        
-        // Verify metadata
-        expect(event.tagValue("summary")).toBe("3 anomalies detected");
-        expect(event.tagValue("execution-time")).toBe("2500");
+
+        // Verify usage metadata
+        expect(event.tagValue("llm-prompt-tokens")).toBe("150");
+        expect(event.tagValue("llm-completion-tokens")).toBe("50");
         expect(event.tagValue("llm-total-tokens")).toBe("200");
       });
     });
@@ -144,19 +139,8 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         // Coordinator delegates to workers
         const delegationIntent: DelegationIntent = {
-          
-          tasks: [
-            {
-              content: "Extract key points from document",
-              recipientPubkey: worker1.pubkey,
-              title: "Extract",
-            },
-            {
-              content: "Create visual summary",
-              recipientPubkey: worker2.pubkey,
-              title: "Visualize",
-            },
-          ],
+          recipients: [worker1.pubkey, worker2.pubkey],
+          request: "Extract key points from document and create visual summary",
         };
 
         const context: EventContext = {
@@ -175,92 +159,27 @@ describe("AgentEventEncoder Integration Tests", () => {
 
         // Create delegation events
         const delegationEvents = encoder.encodeDelegation(delegationIntent, context);
-        
-        expect(delegationEvents).toHaveLength(2);
-        
-        // Verify first delegation
-        expect(delegationEvents[0].kind).toBe(EVENT_KINDS.TASK);
-        expect(delegationEvents[0].content).toBe("Extract key points from document");
-        expect(delegationEvents[0].tagValue("title")).toBe("Extract");
-        const pTag1 = delegationEvents[0].getMatchingTags("p").find(t => t[3] === "agent");
-        expect(pTag1?.[1]).toBe(worker1.pubkey);
-        
-        // Verify second delegation
-        expect(delegationEvents[1].content).toBe("Create visual summary");
-        expect(delegationEvents[1].tagValue("title")).toBe("Visualize");
-        const pTag2 = delegationEvents[1].getMatchingTags("p").find(t => t[3] === "agent");
-        expect(pTag2?.[1]).toBe(worker2.pubkey);
-        
-        // Both should reference the original task
-        expect(delegationEvents[0].tagValue("e")).toBe(userRequest.id);
-        expect(delegationEvents[1].tagValue("e")).toBe(userRequest.id);
+
+        // Current implementation creates a single event with multiple p-tags
+        expect(delegationEvents).toHaveLength(1);
+        const delegationEvent = delegationEvents[0];
+
+        // Verify event structure
+        expect(delegationEvent.kind).toBe(1111); // GenericReply/conversation kind
+        expect(delegationEvent.content).toContain("Extract key points from document and create visual summary");
+
+        // Verify both recipients are p-tagged
+        const pTags = delegationEvent.getMatchingTags("p");
+        const recipientPubkeys = pTags.map(tag => tag[1]);
+        expect(recipientPubkeys).toContain(worker1.pubkey);
+        expect(recipientPubkeys).toContain(worker2.pubkey);
+
+        // Should reference the original task
+        expect(delegationEvent.tagValue("e")).toBe(userRequest.id);
       });
     });
 
-    it("should properly encode status updates with relay simulation", async () => {
-      await withTestEnvironment(async (fixture) => {
-        const { user: agent, signer } = await getTestUserWithSigner("eve", fixture.ndk);
-        
-        // Create mock relay
-        const relay = fixture.createMockRelay("wss://status.relay");
-        await relay.connect();
-        
-        // Mock getNDK and project context
-        (getNDK as any).mockReturnValue(fixture.ndk);
-        (getProjectContext as any).mockReturnValue({
-          project: {
-            pubkey: "project-owner",
-            tagReference: () => ["a", "31933:project-owner:test-project"],
-          },
-        });
-
-        // Create status intent
-        const statusIntent: StatusIntent = {
-          type: "status",
-          status: "processing",
-          phase: "MAIN",
-          message: "Analyzing data patterns...",
-          progress: 45,
-          queuedAgents: ["analyzer", "validator"],
-        };
-
-        // Create mock ConversationCoordinator and encoder
-        const mockConversationCoordinator = {};
-        const encoder = new AgentEventEncoder(mockConversationCoordinator as any);
-
-        // Encode status
-        const event = encoder.encodeProjectStatus(statusIntent);
-        
-        // Verify status event
-        expect(event.kind).toBe(NDKKind.Text);
-        expect(event.tagValue("status")).toBe("processing");
-        expect(event.tagValue("phase")).toBe("MAIN");
-        expect(event.tagValue("progress")).toBe("45");
-        expect(event.content).toBe("Analyzing data patterns...");
-        
-        // Verify queue tags
-        const queueTags = event.getMatchingTags("queue");
-        expect(queueTags).toHaveLength(2);
-        expect(queueTags[0][1]).toBe("analyzer");
-        expect(queueTags[1][1]).toBe("validator");
-        
-        // Simulate publishing to relay
-        await relay.publish(event);
-        
-        // Verify relay received the event
-        const publishedMessage = relay.messageLog.find(
-          log => log.direction === "out" && log.message.includes("EVENT")
-        );
-        expect(publishedMessage).toBeDefined();
-        
-        // Simulate receiving the event back
-        await relay.simulateEvent(event, "status-sub");
-        
-        // Verify we can decode it back
-        const isStatus = AgentEventDecoder.isStatusUpdate(event);
-        expect(isStatus).toBe(true);
-      });
-    });
+    // Status test removed - queue functionality no longer exists
 
     it("should handle conversation flow with proper threading", async () => {
       await withTestEnvironment(async (fixture) => {

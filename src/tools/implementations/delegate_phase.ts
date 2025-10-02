@@ -99,14 +99,6 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     logger.info(`Set conversation title: ${title}`);
   }
 
-  logger.info("[delegate_phase() tool] 🎯 Starting phase delegation", {
-    fromAgent: context.agent.slug,
-    phase: actualPhaseName,
-    recipients: recipients,
-    recipientCount: resolvedPubkeys.length,
-    mode: "synchronous",
-  });
-
   // Use DelegationService to execute the delegation
   // Phase instructions are now passed through the delegation intent via event tags
   const delegationService = new DelegationService(
@@ -114,8 +106,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
     context.conversationId,
     context.conversationCoordinator,
     context.triggeringEvent,
-    context.agentPublisher, // Pass the required AgentPublisher
-    actualPhaseName // Pass the new phase as context
+    context.agentPublisher
   );
 
   const responses = await delegationService.execute({

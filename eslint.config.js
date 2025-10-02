@@ -30,6 +30,7 @@ export default typescript.config(
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_'
       }],
+      'quotes': ['error', 'double', { avoidEscape: true }],
       'no-console': 'off',
       'no-debugger': 'error'
     }
@@ -50,6 +51,7 @@ export default typescript.config(
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_'
       }],
+      'quotes': ['error', 'double', { avoidEscape: true }],
       'no-console': 'off'
     }
   }

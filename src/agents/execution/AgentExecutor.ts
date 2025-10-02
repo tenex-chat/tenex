@@ -137,10 +137,6 @@ export class AgentExecutor {
 
         // Create cleanup function
         const cleanup = async (): Promise<void> => {
-            logger.info('[AgentExecutor] 🧹 Cleanup: Stopping execution timer and clearing tracker', {
-                agent: context.agent.name
-            });
-
             if (conversation) stopExecutionTime(conversation);
             toolTracker.clear();
 
@@ -167,7 +163,7 @@ export class AgentExecutor {
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentPublisher
     ): Promise<NDKEvent | undefined> {
-        logger.info('[AgentExecutor] 🎬 Starting supervised execution', {
+        logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
             agent: context.agent.name,
             conversationId: context.conversationId.substring(0, 8),
             hasPhases: !!context.agent.phases,
@@ -183,14 +179,14 @@ export class AgentExecutor {
         const isComplete = await supervisor.isExecutionComplete(completionEvent, agentPublisher, eventContext);
 
         if (!isComplete) {
-            logger.info('[AgentExecutor] 🔁 RECURSION: Execution not complete, continuing', {
+            logger.info("[AgentExecutor] 🔁 RECURSION: Execution not complete, continuing", {
                 agent: context.agent.name,
                 reason: supervisor.getContinuationPrompt()
             });
 
             // Only publish intermediate if we had actual content
             if (completionEvent?.message?.trim()) {
-                logger.info('[AgentExecutor] Publishing intermediate conversation', {
+                logger.info("[AgentExecutor] Publishing intermediate conversation", {
                     agent: context.agent.name,
                     contentLength: completionEvent.message.length
                 });
@@ -202,7 +198,7 @@ export class AgentExecutor {
             // Get continuation instructions from supervisor
             context.additionalSystemMessage = supervisor.getContinuationPrompt();
 
-            logger.info('[AgentExecutor] 🔄 Resetting supervisor and recursing', {
+            logger.info("[AgentExecutor] 🔄 Resetting supervisor and recursing", {
                 agent: context.agent.name,
                 systemMessage: context.additionalSystemMessage
             });
@@ -212,20 +208,18 @@ export class AgentExecutor {
             return this.executeWithSupervisor(context, supervisor, toolTracker, agentPublisher);
         }
 
-        logger.info('[AgentExecutor] ✅ Execution complete, publishing final response', {
+        logger.info("[AgentExecutor] ✅ Execution complete, publishing final response", {
             agent: context.agent.name,
-            hasReasoning: !!completionEvent?.reasoning,
             messageLength: completionEvent?.message?.length || 0
         });
 
         // Execution is complete - publish and return
         const finalResponseEvent = await agentPublisher.complete({
-            content: completionEvent?.message || '',
-            reasoning: completionEvent?.reasoning,
+            content: completionEvent?.message || "",
             usage: completionEvent?.usage
         }, eventContext);
 
-        logger.info('[AgentExecutor] 🎯 Published final completion event', {
+        logger.info("[AgentExecutor] 🎯 Published final completion event", {
             agent: context.agent.name,
             eventId: finalResponseEvent?.id,
             usage: completionEvent.usage
@@ -268,7 +262,7 @@ export class AgentExecutor {
         // Add any additional system message from retry
         if (context.additionalSystemMessage) {
             messages = [...messages, {
-                role: 'system',
+                role: "system",
                 content: context.additionalSystemMessage
             }];
             // Clear it after use
@@ -278,10 +272,10 @@ export class AgentExecutor {
         logger.debug("[AgentExecutor] 📝 Built messages for execution", {
             messageCount: messages.length,
             hasFilter: !!eventFilter,
-            sessionId: sessionId || 'NONE',
+            sessionId: sessionId || "NONE",
             hasSession: !!sessionId,
             messageTypes: messages.map((msg, i) => {
-                const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 return {
                     index: i,
                     role: msg.role,
@@ -298,12 +292,9 @@ export class AgentExecutor {
         const eventContext = createEventContext(context, llmService.model);
 
         // Separate buffers for content and reasoning
-        let contentBuffer = '';
-        let reasoningBuffer = '';
+        let contentBuffer = "";
+        let reasoningBuffer = "";
         let completionEvent: CompleteEvent | undefined;
-
-        // Timeout for non-streaming intermediate event publishing
-        let intermediatePublishTimeout: NodeJS.Timeout | undefined;
 
         // Check if provider supports streaming
         const supportsStreaming = isAISdkProvider(llmService.provider)
@@ -313,23 +304,18 @@ export class AgentExecutor {
         // Helper to flush accumulated reasoning
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
-                logger.info(`[AgentExecutor] Flushing reasoning buffer (${reasoningBuffer.length} chars)`, {
-                    preview: reasoningBuffer.substring(0, 50),
-                    agentName: context.agent.name
-                });
-
                 // Publish reasoning as kind:1111 with reasoning tag
                 await agentPublisher.conversation({
                     content: reasoningBuffer,
                     isReasoning: true
                 }, eventContext);
 
-                reasoningBuffer = '';
+                reasoningBuffer = "";
             }
         };
 
         // Wire up event handlers
-        llmService.on('content', async (event) => {
+        llmService.on("content", async (event) => {
             logger.debug("[AgentExecutor] RECEIVED CONTENT EVENT!!!", {
                 deltaLength: event.delta?.length,
                 supportsStreaming,
@@ -337,27 +323,18 @@ export class AgentExecutor {
                 agentName: context.agent.name,
             });
 
-            // Only accumulate in buffer for streaming providers
-            // Non-streaming providers publish each chunk directly and use event.message from onFinish
-            if (supportsStreaming) {
-                contentBuffer += event.delta;
-            }
-
             // Publish chunks for display
             if (supportsStreaming) {
+                contentBuffer += event.delta;
                 // For streaming providers, publish as streaming deltas (kind:21111)
                 await agentPublisher.publishStreamingDelta(event.delta, eventContext, false);
             } else {
-                // For non-streaming providers, buffer the intermediate event with a 250ms delay
-                // This prevents duplicate publishing when complete event arrives quickly
-                intermediatePublishTimeout = setTimeout(() => {
-                    agentPublisher.conversation({ content: event.delta }, eventContext);
-                    intermediatePublishTimeout = undefined;
-                }, 250);
+                // For non-streaming providers, publish as conversation events (kind:1111)
+                await agentPublisher.conversation({ content: event.delta }, eventContext);
             }
         });
 
-        llmService.on('reasoning', async (event) => {
+        llmService.on("reasoning", async (event) => {
             // Only accumulate in buffer for streaming providers
             // Non-streaming providers publish each chunk directly
             if (supportsStreaming) {
@@ -377,7 +354,7 @@ export class AgentExecutor {
             }
         });
 
-        llmService.on('chunk-type-change', async (event) => {
+        llmService.on("chunk-type-change", async (event) => {
             logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
                 agentName: context.agent.name,
                 hasReasoningBuffer: reasoningBuffer.length > 0,
@@ -386,20 +363,15 @@ export class AgentExecutor {
 
             // When switching FROM reasoning to anything else (text-start, text-delta, etc)
             // flush reasoning as complete event
-            if (event.from === 'reasoning-delta') {
+            if (event.from === "reasoning-delta") {
                 await flushReasoningBuffer();
             }
         });
 
-        llmService.on('complete', (event) => {
-            // Cancel any pending intermediate event publication
-            if (intermediatePublishTimeout) {
-                clearTimeout(intermediatePublishTimeout);
-                intermediatePublishTimeout = undefined;
-            }
-
+        llmService.on("complete", (event) => {
             // Store the completion event
             completionEvent = event;
+            console.log("complete event", event.message);
 
             logger.info("[AgentExecutor] LLM complete event received", {
                 agent: context.agent.name,
@@ -410,7 +382,7 @@ export class AgentExecutor {
             });
         });
         
-        llmService.on('stream-error', async (event) => {
+        llmService.on("stream-error", async (event) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
 
             // Reset streaming sequence on error
@@ -437,13 +409,13 @@ export class AgentExecutor {
         });
         
         // Handle session capture - store any session ID from the provider
-        llmService.on('session-captured', ({ sessionId: capturedSessionId }) => {
+        llmService.on("session-captured", ({ sessionId: capturedSessionId }) => {
             sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
         });
 
         // Tool tracker is always provided from executeWithSupervisor
 
-        llmService.on('tool-will-execute', async (event) => {
+        llmService.on("tool-will-execute", async (event) => {
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
@@ -454,7 +426,7 @@ export class AgentExecutor {
             });
         });
 
-        llmService.on('tool-did-execute', async (event) => {
+        llmService.on("tool-did-execute", async (event) => {
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
@@ -500,7 +472,7 @@ export class AgentExecutor {
         }
 
         // After streaming, handle cleanup and post-processing
-        logger.debug('[AgentExecutor] 🏃 Stream completed, handling post-processing', {
+        logger.debug("[AgentExecutor] 🏃 Stream completed, handling post-processing", {
             agent: context.agent.name,
             hasCompletionEvent: !!completionEvent,
             hasReasoningBuffer: reasoningBuffer.trim().length > 0
@@ -514,7 +486,7 @@ export class AgentExecutor {
         agentPublisher.resetStreamingSequence();
 
         // Store lastSentEventId for new Claude Code sessions (without session ID yet)
-        if (!sessionId && llmService.provider === 'claudeCode' && completionEvent) {
+        if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 

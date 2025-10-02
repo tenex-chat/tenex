@@ -66,10 +66,7 @@ Comprehensive analysis of the distributed learning infrastructure. Enables agent
 #### 16. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
 Comprehensive execution flow tracking, debugging capabilities, and structured logging. Implements hierarchical context propagation for detailed insight into system behavior and performance.
 
-#### 18. [Execution Queue Mutex System](./execution-queue-mutex-system.md)
-Project-wide synchronization mechanism ensuring only one conversation per project can execute at a time. Prevents resource conflicts, maintains state consistency, and provides fair queuing with transparent wait times.
-
-#### 19. [User Preferences and Tooling Lessons](./user-preferences-and-tooling-lessons.md)
+#### 17. [User Preferences and Tooling Lessons](./user-preferences-and-tooling-lessons.md)
 Captured lessons learned from user interactions and tooling implementations. Documents development patterns, Nostr integration standards, and best practices for tool development within the TENEX ecosystem.
 
 ## Architecture Principles

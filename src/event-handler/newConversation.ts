@@ -5,6 +5,7 @@ import type { ConversationCoordinator } from "../conversations";
 import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
+import { AgentRouter } from "./AgentRouter";
 
 
 interface EventHandlerContext {
@@ -23,30 +24,17 @@ export const handleNewConversation = async (
     // Get project context
     const projectCtx = getProjectContext();
 
-    // Check for p-tags to determine if user @mentioned a specific agent
-    const pTags = event.tags.filter((tag) => tag[0] === "p");
-    const mentionedPubkeys = pTags
-      .map((tag) => tag[1])
-      .filter((pubkey): pubkey is string => !!pubkey);
+    // Use AgentRouter to resolve target agents (includes project validation for global agents)
+    const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
 
-    let targetAgent = null;
-
-    // If there are p-tags, check if any match system agents
-    if (mentionedPubkeys.length > 0) {
-      for (const pubkey of mentionedPubkeys) {
-        const agent = Array.from(projectCtx.agents.values()).find((a) => a.pubkey === pubkey);
-        if (agent) {
-          targetAgent = agent;
-          break;
-        }
-      }
-    }
-
-    // If no p-tags or no matching agent, just log and return
-    if (!targetAgent) {
-      logger.info(chalk.gray(`New conversation without p-tags or matching agents - not routing to any agent`));
+    // If no valid agents found (filtered by project context), return
+    if (targetAgents.length === 0) {
+      logger.info(chalk.gray(`New conversation - no valid agents to route to (may have been filtered by project context)`));
       return;
     }
+
+    // Use first agent for kind 11 (new conversation)
+    const targetAgent = targetAgents[0];
 
     // Execute with the appropriate agent
     await context.agentExecutor.execute({

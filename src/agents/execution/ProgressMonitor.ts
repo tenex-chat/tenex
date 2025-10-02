@@ -1,4 +1,3 @@
-import type { ToolCall } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import type { LanguageModel } from "ai";
 import { generateText } from "ai";
@@ -9,7 +8,7 @@ export class ProgressMonitor {
 
     constructor(private readonly reviewModel: LanguageModel) {}
 
-    async check(toolCalls: ToolCall[]): Promise<boolean> {
+    async check(toolNames: string[]): Promise<boolean> {
         this.stepCount++;
 
         if (this.stepCount < this.REVIEW_THRESHOLD) {
@@ -19,15 +18,15 @@ export class ProgressMonitor {
         this.stepCount = 0;
 
         try {
-            const toolCallSummary = toolCalls.map((tc, i) => 
-                `${i + 1}. ${tc.tool}`
+            const toolCallSummary = toolNames.map((name, i) =>
+                `${i + 1}. ${name}`
             ).join('\n');
 
             const result = await generateText({
                 model: this.reviewModel,
                 messages: [{
                     role: 'user',
-                    content: `Review these ${toolCalls.length} tool calls. Is the agent making progress or stuck?\n\n${toolCallSummary}\n\nRespond with only "continue" or "stop":`
+                    content: `Review these ${toolNames.length} tool calls. Is the agent making progress or stuck?\n\n${toolCallSummary}\n\nRespond with only "continue" or "stop":`
                 }],
                 maxOutputTokens: 10,
                 temperature: 0
@@ -37,7 +36,7 @@ export class ProgressMonitor {
 
             logger.info("[ProgressMonitor] Review completed", {
                 shouldContinue,
-                toolCallCount: toolCalls.length
+                toolCallCount: toolNames.length
             });
 
             return shouldContinue;
