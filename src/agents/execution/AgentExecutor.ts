@@ -170,8 +170,20 @@ export class AgentExecutor {
             phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0
         });
 
-        // Stream the LLM response
-        const completionEvent = await this.executeStreaming(context, toolTracker);
+        let completionEvent: CompleteEvent | undefined;
+
+        try {
+            // Stream the LLM response
+            completionEvent = await this.executeStreaming(context, toolTracker);
+        } catch (streamError) {
+            // Streaming failed - error was already published in executeStreaming
+            // Re-throw to let the caller handle it
+            logger.error("[AgentExecutor] Streaming failed in executeWithSupervisor", {
+                agent: context.agent.name,
+                error: formatAnyError(streamError)
+            });
+            throw streamError;
+        }
 
         // Create event context for supervisor
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
