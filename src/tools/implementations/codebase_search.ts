@@ -343,7 +343,22 @@ export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
       try {
         return await executeCodebaseSearch(input, context);
       } catch (error) {
-        throw new Error(`Codebase search failed: ${error instanceof Error ? error.message : String(error)}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        // Check for context limit errors and provide graceful degradation
+        if (errorMsg.includes('maximum context length') ||
+            errorMsg.includes('tokens') ||
+            errorMsg.includes('quota')) {
+          return {
+            type: 'error-text',
+            text: `Search failed: Context limit exceeded. Try:\n` +
+                  `1. Narrowing your search query to be more specific\n` +
+                  `2. Adding a file type filter (e.g., fileType: ".ts")\n` +
+                  `3. Reducing maxResults to a smaller number`
+          };
+        }
+
+        throw new Error(`Codebase search failed: ${errorMsg}`);
       }
     },
   });

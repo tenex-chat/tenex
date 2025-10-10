@@ -168,7 +168,19 @@ export class ToolExecutionTracker {
         // Generate human-readable content for the tool execution
         const humanContent = this.getHumanReadableContent(toolName, args, toolsObject);
 
-        // Publish the tool execution event to Nostr
+        // Store the execution state BEFORE async operations to prevent race conditions
+        // Use a placeholder event ID that will be updated after publishing
+        const execution: TrackedExecution = {
+            toolCallId,
+            toolName,
+            toolEventId: '', // Will be updated after publish
+            input: args,
+            completed: false
+        };
+
+        this.executions.set(toolCallId, execution);
+
+        // Publish the tool execution event to Nostr (async operation)
         const toolEvent = await agentPublisher.toolUse(
             {
                 toolName,
@@ -178,16 +190,8 @@ export class ToolExecutionTracker {
             eventContext
         );
 
-        // Store the execution state for correlation with future results
-        const execution: TrackedExecution = {
-            toolCallId,
-            toolName,
-            toolEventId: toolEvent.id,
-            input: args,
-            completed: false
-        };
-
-        this.executions.set(toolCallId, execution);
+        // Update the execution with the actual event ID
+        execution.toolEventId = toolEvent.id;
 
         logger.debug('[ToolExecutionTracker] Tool execution tracked', {
             toolCallId,
@@ -230,6 +234,16 @@ export class ToolExecutionTracker {
                 availableExecutions: Array.from(this.executions.keys())
             });
             return;
+        }
+
+        // Log errors explicitly for visibility
+        if (error) {
+            logger.error('[ToolExecutionTracker] Tool execution failed', {
+                toolName: execution.toolName,
+                toolCallId,
+                toolEventId: execution.toolEventId,
+                result
+            });
         }
 
         // Update execution state

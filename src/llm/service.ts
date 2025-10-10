@@ -571,6 +571,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 logger.error("[LLMService] Error chunk received", {
                     error: chunk.error
                 });
+                this.emit("stream-error", { error: chunk.error });
                 break;
             default:
                 // Log unknown chunk types for debugging
@@ -740,17 +741,42 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         });
     }
 
+    /**
+     * Check if a tool result indicates an error
+     * AI SDK wraps tool execution errors in error-text or error-json formats
+     */
+    private isToolResultError(result: unknown): boolean {
+        if (typeof result !== 'object' || result === null) {
+            return false;
+        }
+        const res = result as Record<string, unknown>;
+        // Check for AI SDK's known error formats
+        return (res.type === 'error-text' && typeof res.text === 'string') ||
+               (res.type === 'error-json' && typeof res.json === 'object');
+    }
+
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
-        logger.debug("[LLMService] Emitting tool-did-execute", {
-            toolName,
-            toolCallId,
-            toolCallIdType: typeof toolCallId,
-            toolCallIdLength: toolCallId?.length,
-        });
+        const hasError = this.isToolResultError(result);
+
+        if (hasError) {
+            logger.warn(`[LLMService] Tool '${toolName}' reported an error in its result`, {
+                toolCallId,
+                result
+            });
+        } else {
+            logger.debug("[LLMService] Emitting tool-did-execute", {
+                toolName,
+                toolCallId,
+                toolCallIdType: typeof toolCallId,
+                toolCallIdLength: toolCallId?.length,
+            });
+        }
+
         this.emit("tool-did-execute", {
             toolName,
             toolCallId,
             result,
+            error: hasError,
         });
     }
 
