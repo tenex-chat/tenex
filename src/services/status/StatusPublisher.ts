@@ -4,7 +4,8 @@ const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 import { EVENT_KINDS } from "@/llm/types";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
-import { configService, getProjectContext, isProjectContextInitialized } from "@/services";
+import { configService, getProjectContext, isProjectContextInitialized, type ProjectContext } from "@/services";
+import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -33,16 +34,28 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class StatusPublisher {
   private statusInterval?: NodeJS.Timeout;
+  private projectContext?: ProjectContext;
 
   constructor() {
     // No dependencies needed
   }
 
-  async startPublishing(projectPath: string): Promise<void> {
+  async startPublishing(projectPath: string, projectContext?: ProjectContext): Promise<void> {
+    // Store the project context if provided (for unified daemon mode)
+    this.projectContext = projectContext;
+
     await this.publishStatusEvent(projectPath);
 
     this.statusInterval = setInterval(async () => {
-      await this.publishStatusEvent(projectPath);
+      // If we have a stored context, wrap the publish in AsyncLocalStorage
+      if (this.projectContext) {
+        await projectContextStore.run(this.projectContext, async () => {
+          await this.publishStatusEvent(projectPath);
+        });
+      } else {
+        // Single project mode - just publish directly
+        await this.publishStatusEvent(projectPath);
+      }
     }, STATUS_INTERVAL_MS);
   }
 
@@ -62,8 +75,10 @@ export class StatusPublisher {
     event.kind = EVENT_KINDS.PROJECT_STATUS;
     event.content = "";
 
+    // Use stored context or fall back to global
+    const projectCtx = this.projectContext || getProjectContext();
+
     // Add project tag
-    const projectCtx = getProjectContext();
     event.tag(projectCtx.project.tagReference());
 
     // Add p-tag for the project owner's pubkey
@@ -106,7 +121,8 @@ export class StatusPublisher {
 
   private async publishStatusEvent(projectPath: string): Promise<void> {
     try {
-      const projectCtx = getProjectContext();
+      // Use stored context or fall back to global
+      const projectCtx = this.projectContext || getProjectContext();
 
       // Build status intent
       const intent: StatusIntent = {
@@ -117,7 +133,7 @@ export class StatusPublisher {
       };
 
       // Gather agent info - preserve order from NDKProject
-      if (isProjectContextInitialized()) {
+      if (this.projectContext || isProjectContextInitialized()) {
         // Get agent tags from project in their original order
         const projectAgentTags = projectCtx.project.tags
           .filter((tag) => tag[0] === "agent" && tag[1]);
@@ -199,8 +215,8 @@ export class StatusPublisher {
       logger.debug(`Global default configuration: ${llms.default || "none"}`);
 
       // Process agent-specific configurations
-      if (isProjectContextInitialized()) {
-        const projectCtx = getProjectContext();
+      if (this.projectContext || isProjectContextInitialized()) {
+        const projectCtx = this.projectContext || getProjectContext();
 
         // Get the global default configuration name
         const globalDefault = llms.default;
@@ -226,7 +242,7 @@ export class StatusPublisher {
           }
         }
       } else {
-        if (!isProjectContextInitialized()) {
+        if (!this.projectContext && !isProjectContextInitialized()) {
           logger.debug("Project context not initialized for agent mapping");
         }
       }
@@ -249,12 +265,12 @@ export class StatusPublisher {
 
   private async gatherToolInfo(intent: StatusIntent): Promise<void> {
     try {
-      if (!isProjectContextInitialized()) {
+      if (!this.projectContext && !isProjectContextInitialized()) {
         logger.warn("ProjectContext not initialized for tool tags");
         return;
       }
 
-      const projectCtx = getProjectContext();
+      const projectCtx = this.projectContext || getProjectContext();
       const toolAgentMap = new Map<string, Set<string>>();
 
       // Import the delegate tools and core tools lists from the single source of truth

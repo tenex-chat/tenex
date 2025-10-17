@@ -7,7 +7,7 @@ import { mcpService } from "@/services/mcp/MCPManager";
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
 import { logger } from "@/utils/logger";
-import { ensureProjectInitialized } from "@/utils/projectInitialization";
+// import { ensureProjectInitialized } from "@/utils/projectInitialization";  // Removed - using unified daemon
 import chalk from "chalk";
 import { getNDK } from "@/nostr/ndkClient";
 import inquirer from "inquirer";
@@ -74,8 +74,8 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
   try {
     const projectPath = process.cwd();
 
-    // Initialize project context if needed
-    await ensureProjectInitialized(projectPath);
+    // Debug commands work with the current directory
+    // No initialization needed - just load the project context directly
 
     // Load agent from registry
     const agentRegistry = new AgentRegistry(projectPath);
@@ -182,7 +182,7 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
 export async function runDebugThreadedFormatter(options: DebugThreadedFormatterOptions): Promise<void> {
   try {
     const projectPath = process.cwd();
-    await ensureProjectInitialized(projectPath);
+    // Debug commands work with the current directory
 
     const projectCtx = getProjectContext();
     const ndk = getNDK();

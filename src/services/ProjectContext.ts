@@ -271,11 +271,14 @@ export class ProjectContext {
   }
 }
 
-// Module-level variable for global access
+import { projectContextStore } from "./ProjectContextStore";
+
+// Module-level variable for backwards compatibility (single project mode)
 let projectContext: ProjectContext | undefined;
 
 /**
  * Initialize the project context. Should be called once during project startup.
+ * In unified daemon mode, this is only used for backwards compatibility.
  */
 export async function setProjectContext(project: NDKProject, agentRegistry: AgentRegistry, llmLogger: LLMLogger): Promise<void> {
   projectContext = new ProjectContext(project, agentRegistry, llmLogger);
@@ -287,9 +290,17 @@ export async function setProjectContext(project: NDKProject, agentRegistry: Agen
 
 /**
  * Get the initialized project context
+ * First checks AsyncLocalStorage, then falls back to global variable
  * @throws Error if not initialized
  */
 export function getProjectContext(): ProjectContext {
+  // First try to get from AsyncLocalStorage (unified daemon mode)
+  const asyncContext = projectContextStore.getContext();
+  if (asyncContext) {
+    return asyncContext;
+  }
+
+  // Fallback to global variable (single project mode)
   if (!projectContext) {
     throw new Error(
       "ProjectContext not initialized. Please call setProjectContext() first or ensure the project has been properly initialized."
@@ -300,7 +311,8 @@ export function getProjectContext(): ProjectContext {
 
 /**
  * Check if project context is initialized
+ * Checks both AsyncLocalStorage and global variable
  */
 export function isProjectContextInitialized(): boolean {
-  return projectContext !== undefined;
+  return projectContextStore.hasContext() || projectContext !== undefined;
 }

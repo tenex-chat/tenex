@@ -112,7 +112,7 @@ describe("Delegation tools - Self-delegation validation", () => {
   });
 
   describe("delegate_external tool", () => {
-    it("should reject self-delegation", async () => {
+    it("should reject self-delegation without projectId", async () => {
       const context = createMockContext();
       const externalTool = createDelegateExternalTool(context);
 
@@ -125,8 +125,28 @@ describe("Delegation tools - Self-delegation validation", () => {
         await externalTool.execute(input);
         expect(true).toBe(false); // Should not reach here
       } catch (error: any) {
-        expect(error.message).toContain("Self-delegation is not permitted with the delegate_external tool");
+        expect(error.message).toContain("Self-delegation is not permitted with the delegate_external tool unless targeting a different project");
         expect(error.message).toContain("self-agent");
+      }
+    });
+
+    it("should allow self-delegation when projectId is provided", async () => {
+      const context = createMockContext();
+      const externalTool = createDelegateExternalTool(context);
+
+      const input = {
+        content: "Cross-project delegation",
+        recipient: "agent-pubkey-123",
+        projectId: "naddr1differentproject",
+      };
+
+      // This should not throw - it will fail later due to missing mocks
+      // but the validation should pass
+      try {
+        await externalTool.execute(input);
+      } catch (error: any) {
+        // Should fail for a different reason (NDK mocking), not self-delegation
+        expect(error.message).not.toContain("Self-delegation is not permitted");
       }
     });
   });

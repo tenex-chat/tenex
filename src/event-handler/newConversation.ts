@@ -11,6 +11,7 @@ import { AgentRouter } from "./AgentRouter";
 interface EventHandlerContext {
   conversationCoordinator: ConversationCoordinator;
   agentExecutor: AgentExecutor;
+  projectPath: string;
 }
 
 export const handleNewConversation = async (
@@ -40,7 +41,7 @@ export const handleNewConversation = async (
     await context.agentExecutor.execute({
       agent: targetAgent,
       conversationId: conversation.id,
-      projectPath: process.cwd(),
+      projectPath: context.projectPath,
       triggeringEvent: event,
       conversationCoordinator: context.conversationCoordinator,
       getConversation: () => context.conversationCoordinator.getConversation(conversation.id),

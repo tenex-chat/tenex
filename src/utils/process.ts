@@ -42,6 +42,8 @@ export function setupGracefulShutdown(shutdownHandler: ShutdownHandler): void {
 
   process.on("unhandledRejection", (reason, promise) => {
     logger.error("Unhandled rejection", { reason, promise });
-    shutdown("unhandledRejection");
+    // Don't shutdown for unhandled rejections - they're usually not critical
+    // e.g., relay rejections like "replaced: have newer event"
+    // Let the daemon's handler deal with these instead
   });
 }

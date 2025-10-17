@@ -44,14 +44,15 @@ export class AgentExecutor {
         agent: AgentInstance,
         initialPrompt: string,
         originalEvent: NDKEvent,
-        conversationHistory: ModelMessage[] = []
+        conversationHistory: ModelMessage[] = [],
+        projectPath?: string
     ): Promise<LLMCompletionRequest> {
         // Build a minimal execution context for message generation
         const context: Partial<ExecutionContext> = {
             agent,
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id, // Use event ID as conversation ID for stateless calls
-            projectPath: process.cwd(),
+            projectPath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
         };
 
         // If we have conversation history, prepend it to the messages

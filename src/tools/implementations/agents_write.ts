@@ -3,6 +3,7 @@ import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import { agentStorage } from "@/agents/AgentStorage";
+import type { ExecutionContext } from "@/agents/execution/types";
 // Define the input schema
 const agentsWriteSchema = z.object({
   slug: z.string().describe("The slug identifier for the agent"),
@@ -36,7 +37,8 @@ interface AgentsWriteOutput {
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsWrite(
-  input: AgentsWriteInput
+  input: AgentsWriteInput,
+  context?: ExecutionContext
 ): Promise<AgentsWriteOutput> {
   const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, phases } = input;
 
@@ -56,7 +58,11 @@ async function executeAgentsWrite(
 
   // Get project context
   const projectContext = getProjectContext();
-  const projectPath = process.cwd();
+
+  if (!context?.projectPath) {
+    throw new Error("ExecutionContext with projectPath is required for agents_write tool");
+  }
+  const projectPath = context.projectPath;
 
   // Check if agent exists by slug
   const existingAgent = await agentStorage.getAgentBySlug(slug);
@@ -141,13 +147,13 @@ async function executeAgentsWrite(
  * Create an AI SDK tool for writing agents
  * This is the primary implementation
  */
-export function createAgentsWriteTool(): ReturnType<typeof tool> {
+export function createAgentsWriteTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
     inputSchema: agentsWriteSchema,
     execute: async (input: AgentsWriteInput) => {
       try {
-        return await executeAgentsWrite(input);
+        return await executeAgentsWrite(input, context);
       } catch (error) {
         logger.error("Failed to write agent definition", { error });
         throw new Error(`Failed to write agent definition: ${error instanceof Error ? error.message : String(error)}`);

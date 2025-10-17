@@ -32,22 +32,25 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
     throw new Error(`Invalid recipient format: ${recipient}`);
   }
 
-  // Check for self-delegation (not allowed in delegate_external tool)
-  if (pubkey === context.agent.pubkey) {
+  // Check for self-delegation (only allowed when targeting a different project)
+  if (pubkey === context.agent.pubkey && !projectId) {
     throw new Error(
-      "Self-delegation is not permitted with the delegate_external tool. " +
-      `Agent "${context.agent.slug}" cannot delegate to itself as an external agent. ` +
-      "Use the delegate_phase tool if you need to transition phases within the same agent."
+      "Self-delegation is not permitted with the delegate_external tool unless targeting a different project. " +
+      `Agent "${context.agent.slug}" cannot delegate to itself as an external agent without specifying a projectId. ` +
+      "Use the delegate_phase tool if you need to transition phases within the same agent, or provide a projectId to delegate to yourself in a different project context."
     );
   }
 
   const ndk = getNDK();
 
-  logger.info("🚀 Delegating to external agent", {
+  const isSelfDelegation = pubkey === context.agent.pubkey;
+
+  logger.info(isSelfDelegation ? "🔄 Cross-project self-delegation" : "🚀 Delegating to external agent", {
     agent: context.agent.name,
     hasProject: !!projectId,
     recipientPubkey: pubkey.substring(0, 8),
     contentLength: content.length,
+    isSelfDelegation,
   });
 
   // Normalize optional IDs
@@ -167,6 +170,8 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
 export function createDelegateExternalTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description: `Delegate a task to an external agent or user and wait for their response. Use this tool only to engage with agents in OTHER projects. If you don't know their pubkey you can use nostr_projects tools.
+
+You can also use this tool to delegate to yourself in the context of a different project by providing your own pubkey along with a projectId. This enables cross-project self-delegation.
 
 When using this tool, provide context to the recipient, introduce yourself and explain you are an agent and the project you are working on. It's important for the recipient to understand where you're coming from.
 

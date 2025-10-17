@@ -1,4 +1,4 @@
-import { ProjectManager } from "@/daemon/ProjectManager";
+// import { ProjectManager } from "@/daemon/ProjectManager";  // Removed - using unified daemon now
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
@@ -235,12 +235,16 @@ export const serverCommand = new Command("server")
       let project: NDKEvent | null = null;
 
       try {
-        const projectManager = new ProjectManager();
-        await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
-        projectContext = getProjectContext();
-        agents = projectContext.agents;
-        project = projectContext.project;
-        logger.info("Running MCP server with project context");
+        // TODO: Load project context from unified daemon if needed
+        // For now, MCP server runs in standalone mode
+        logger.info("Running MCP server in standalone mode (project context loading disabled)");
+
+        // Commented out old ProjectManager usage:
+        // const projectManager = new ProjectManager();
+        // await projectManager.loadAndInitializeProjectContext(projectPath, ndk);
+        // projectContext = getProjectContext();
+        // agents = projectContext.agents;
+        // project = projectContext.project;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes("Project configuration missing projectNaddr")) {

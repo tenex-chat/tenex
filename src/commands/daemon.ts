@@ -1,21 +1,38 @@
 import * as path from "node:path";
-import { EventMonitor } from "@/daemon/EventMonitor";
-import { ProcessManager } from "@/daemon/ProcessManager";
-import { ProjectManager } from "@/daemon/ProjectManager";
-import { initNDK, shutdownNDK, getNDK } from "@/nostr/ndkClient";
+import { getUnifiedDaemon } from "@/daemon/unified";
 import { configService, dynamicToolService } from "@/services";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "@/utils/setup";
 import { Command } from "commander";
 import { SchedulerService } from "@/services/SchedulerService";
+import { getNDK } from "@/nostr/ndkClient";
+import chalk from "chalk";
 
+/**
+ * Unified daemon command - runs all projects in a single process
+ */
 export const daemonCommand = new Command("daemon")
-  .description("Start the TENEX daemon to monitor Nostr events")
+  .description("Start the unified TENEX daemon to manage all projects")
   .option("-w, --whitelist <pubkeys>", "Comma-separated list of whitelisted pubkeys")
   .option("-c, --config <path>", "Path to config file")
-  .option("-p, --projects-path <path>", "Path to projects directory")
+  .option("-v, --verbose", "Enable verbose logging")
+  .option("--legacy", "Use legacy multi-process daemon (deprecated)")
   .action(async (options) => {
+    // If legacy flag is set, warn the user
+    if (options.legacy) {
+      console.log(chalk.yellow("⚠️  Legacy multi-process daemon is deprecated."));
+      console.log(chalk.yellow("   Please migrate to the unified daemon."));
+      console.log();
+      // You could keep the old implementation here if needed for transition
+      process.exit(1);
+    }
+
+    // Enable verbose logging if requested
+    if (options.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
     // Load configuration
     const { config: globalConfig, llms: globalLLMs } = await configService.loadConfig(
       options.config ? path.dirname(options.config) : undefined
@@ -46,54 +63,61 @@ export const daemonCommand = new Command("daemon")
       whitelistedPubkeys = setupConfig.whitelistedPubkeys || [];
     }
 
-    // Initialize NDK and get singleton
-    await initNDK();
-    const ndk = getNDK();
+    console.log(chalk.cyan("╔════════════════════════════════════════╗"));
+    console.log(chalk.cyan("║     TENEX Unified Daemon Starting      ║"));
+    console.log(chalk.cyan("╚════════════════════════════════════════╝"));
+    console.log();
 
-    // Initialize core components
-    const projectManager = new ProjectManager(options.projectsPath);
-    const processManager = new ProcessManager();
-    const eventMonitor = new EventMonitor(projectManager, processManager);
-    
-    // Initialize scheduler service
+    // Initialize services that the unified daemon needs
     const schedulerService = SchedulerService.getInstance();
-    await schedulerService.initialize(ndk, options.projectsPath);
-    
-    // Initialize dynamic tool service
+    await schedulerService.initialize(getNDK(), ".tenex");
+
     await dynamicToolService.initialize();
+
+    // Get the unified daemon instance
+    const daemon = getUnifiedDaemon();
 
     // Set up graceful shutdown
     setupGracefulShutdown(async () => {
-      // Stop monitoring new events
-      await eventMonitor.stop();
-      
-      // Shutdown scheduler
+      logger.info("Shutting down unified daemon...");
+
+      // Stop the unified daemon
+      await daemon.stop();
+
+      // Shutdown services
       schedulerService.shutdown();
-      
-      // Shutdown dynamic tool service
       dynamicToolService.shutdown();
 
-      // Stop all running projects
-      await processManager.stopAll();
-
-      // Shutdown NDK singleton
-      await shutdownNDK();
-
-      logger.info("Daemon shutdown complete");
+      logger.info("Unified daemon shutdown complete");
     });
 
     try {
-      // Start monitoring without passing LLM configs - let projects load from global config with proper default detection
-      await eventMonitor.start(whitelistedPubkeys);
+      // Start the unified daemon
+      await daemon.start();
 
-      logger.info("TENEX daemon is running. Press Ctrl+C to stop.");
+      console.log(chalk.green("✅ Unified daemon started successfully"));
+      console.log(chalk.gray("   Managing all projects in a single process"));
+      console.log(chalk.gray("   Press Ctrl+C to stop"));
+      console.log();
+
+      // Log initial status
+      const status = daemon.getStatus();
+      console.log(chalk.blue("📊 Initial Status:"));
+      console.log(chalk.gray(`   Known Projects: ${status.knownProjects}`));
+      console.log(chalk.gray(`   Active Projects: ${status.activeProjects}`));
+      console.log(chalk.gray(`   Total Agents: ${status.agents}`));
+      console.log(chalk.gray(`   Memory: ${Math.round(status.memory.heapUsed / 1024 / 1024)} MB`));
+      console.log();
+
+      logger.info("TENEX unified daemon is running. Press Ctrl+C to stop.");
 
       // Keep the process alive
       await new Promise(() => {
         // This promise never resolves, keeping the daemon running
       });
     } catch (error) {
-      logger.error("Failed to start daemon", { error });
+      logger.error("Failed to start unified daemon", { error });
+      console.error(chalk.red("❌ Failed to start daemon:"), error);
       process.exit(1);
     }
   });

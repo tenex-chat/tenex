@@ -53,7 +53,7 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
 
   // Persist to agent's JSON file
   try {
-    const projectPath = process.cwd();
+    const projectPath = context.projectPath;
     const agentsDir = path.join(projectPath, ".tenex", "agents");
 
     // Get the agent's file name from registry

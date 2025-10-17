@@ -39,6 +39,21 @@ export class AgentPublisher {
     this.encoder = new AgentEventEncoder();
   }
 
+  /**
+   * Safely publish an event with error handling
+   */
+  private async safePublish(event: NDKEvent, context: string): Promise<void> {
+    try {
+      await event.publish();
+    } catch (error) {
+      logger.warn(`Failed to publish ${context}`, {
+        error,
+        eventId: event.id?.substring(0, 8),
+        agent: this.agent.name,
+      });
+    }
+  }
+
 
   /**
    * Publish a completion event.
@@ -55,7 +70,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "completion event");
 
     logger.debug("Completion event published", {
       eventId: event.id,
@@ -103,7 +118,7 @@ export class AgentPublisher {
 
     // Publish the single event
     for (const [index, event] of events.entries()) {
-      await event.publish();
+      await this.safePublish(event, "delegation request");
       logger.debug("Published delegation request", {
         index,
         eventId: event.id,
@@ -163,14 +178,14 @@ export class AgentPublisher {
     });
     
     // Publish the follow-up event
-    await followUpEvent.publish();
-    
+    await this.safePublish(followUpEvent, "follow-up event");
+
     logger.debug("Follow-up event published", {
       eventId: followUpEvent.id?.substring(0, 8),
       replyingTo: responseEvent.id?.substring(0, 8),
       batchId,
     });
-    
+
     return { events: [followUpEvent], batchId };
   }
 
@@ -219,7 +234,7 @@ export class AgentPublisher {
     });
 
     // Publish the event
-    await event.publish();
+    await this.safePublish(event, "ask event");
 
     logger.debug("Ask event published", {
       eventId: event.id?.substring(0, 8),
@@ -243,7 +258,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "conversation event");
 
     return event;
   }
@@ -263,7 +278,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "error event");
 
     logger.debug("Error event published", {
       eventId: event.id,
@@ -288,7 +303,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "typing indicator");
 
     return event;
   }
@@ -302,7 +317,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "streaming event");
 
     logger.debug("[AgentPublisher] Streaming event published", {
       eventId: event.id?.substring(0, 8),
@@ -327,7 +342,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(lessonEvent);
-    await lessonEvent.publish();
+    await this.safePublish(lessonEvent, "lesson event");
 
     logger.debug("Lesson event published", {
       eventId: lessonEvent.id,
@@ -352,7 +367,7 @@ export class AgentPublisher {
 
     // Sign and publish
     await this.agent.sign(event);
-    await event.publish();
+    await this.safePublish(event, "tool use event");
 
     logger.debug("Tool usage event published", {
       eventId: event.id,
@@ -420,7 +435,7 @@ export class AgentPublisher {
 
     // Sign with agent's signer
     await this.agent.sign(task);
-    await task.publish();
+    await this.safePublish(task, "task event");
 
     logger.debug("Created task", {
       taskId: task.id,
@@ -453,7 +468,7 @@ export class AgentPublisher {
 
     update.tag(["status", status]);
     await this.agent.sign(update);
-    await update.publish();
+    await this.safePublish(update, "task update");
 
     logger.debug("Published task update", {
       taskId: task.id,
@@ -558,18 +573,26 @@ export class AgentPublisher {
       profileEvent.tags.push(["t", "tenex"]);
 
       await profileEvent.sign(signer, { pTags: false });
-      await profileEvent.publish();
-      
+
+      try {
+        await profileEvent.publish();
+      } catch (publishError) {
+        logger.warn("Failed to publish agent profile (may already exist)", {
+          error: publishError,
+          agentName,
+          pubkey: signer.pubkey.substring(0, 8)
+        });
+      }
+
       // Update agent registry after successful profile publish
       const projectTag = projectEvent.tagId();
       if (projectTag) {
         await agentsRegistryService.addAgent(projectTag, signer.pubkey);
       }
     } catch (error) {
-      logger.error("Failed to publish agent profile", {
+      logger.error("Failed to create agent profile", {
         error,
         agentName,
-        event: profileEvent.inspect
       });
       throw error;
     }
@@ -616,17 +639,25 @@ export class AgentPublisher {
       requestEvent.tags.push(...tags);
 
       await requestEvent.sign(signer, { pTags: false });
-      await requestEvent.publish();
 
-      logger.debug("Published agent request", {
-        agentName: agentConfig.name,
-        pubkey: signer.pubkey,
-        hasNDKAgentDefinitionEvent: !!ndkAgentEventId,
-      });
+      try {
+        await requestEvent.publish();
+        logger.debug("Published agent request", {
+          agentName: agentConfig.name,
+          pubkey: signer.pubkey,
+          hasNDKAgentDefinitionEvent: !!ndkAgentEventId,
+        });
+      } catch (publishError) {
+        logger.warn("Failed to publish agent request (may already exist)", {
+          error: publishError,
+          agentName: agentConfig.name,
+          pubkey: signer.pubkey.substring(0, 8)
+        });
+      }
 
       return requestEvent;
     } catch (error) {
-      logger.error("Failed to publish agent request", {
+      logger.error("Failed to create agent request", {
         error,
         agentName: agentConfig.name,
       });
@@ -695,9 +726,17 @@ export class AgentPublisher {
 
       // Sign and publish the contact list
       await contactListEvent.sign(signer, { pTags: false });
-      contactListEvent.publish();
+
+      try {
+        await contactListEvent.publish();
+      } catch (publishError) {
+        logger.warn("Failed to publish contact list (may already exist)", {
+          error: publishError,
+          agentPubkey: signer.pubkey.substring(0, 8),
+        });
+      }
     } catch (error) {
-      logger.error("Failed to publish contact list", {
+      logger.error("Failed to create contact list", {
         error,
         agentPubkey: signer.pubkey.substring(0, 8),
       });

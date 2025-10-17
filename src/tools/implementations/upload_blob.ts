@@ -38,9 +38,9 @@ interface BlossomConfig {
 /**
  * Get Blossom server configuration from config file
  */
-async function getBlossomConfig(): Promise<BlossomConfig> {
+async function getBlossomConfig(projectPath: string): Promise<BlossomConfig> {
   try {
-    const configPath = path.join(process.cwd(), ".tenex", "config.json");
+    const configPath = path.join(projectPath, ".tenex", "config.json");
     const configContent = await fs.readFile(configPath, "utf-8");
     const config = JSON.parse(configContent);
     return {
@@ -280,7 +280,7 @@ async function executeUploadBlob(
   });
 
   // Get Blossom server configuration
-  const config = await getBlossomConfig();
+  const config = await getBlossomConfig(context.projectPath);
   const serverUrl = config.serverUrl;
   
   logger.info("[upload_blob] Using Blossom server", { serverUrl });

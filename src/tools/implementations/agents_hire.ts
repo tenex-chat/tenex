@@ -6,6 +6,7 @@ import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { filterAndRelaySetFromBech32 } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
 const agentsHireSchema = z.object({
   eventId: z.string().describe("The event ID of the Agent Definition Event to hire"),
   slug: z
@@ -34,7 +35,8 @@ type AgentsHireOutput = {
  * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeAgentsHire(
-  input: AgentsHireInput
+  input: AgentsHireInput,
+  context: ExecutionContext
 ): Promise<AgentsHireOutput> {
   const { eventId: rawEventId, slug } = input;
 
@@ -71,7 +73,7 @@ async function executeAgentsHire(
 
   // Get project context
   const projectContext = getProjectContext();
-  const projectPath = process.cwd();
+  const projectPath = context.projectPath;
 
   // Use the shared function to install the agent
   const result = await installAgentFromEvent(
@@ -142,13 +144,13 @@ async function executeAgentsHire(
  * Create an AI SDK tool for hiring agents
  * This is the primary implementation
  */
-export function createAgentsHireTool(): ReturnType<typeof tool> {
+export function createAgentsHireTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
     description: "Hire (add) a new agent from the Nostr network to the current project using its event ID",
     inputSchema: agentsHireSchema,
     execute: async (input: AgentsHireInput) => {
       try {
-        return await executeAgentsHire(input);
+        return await executeAgentsHire(input, context);
       } catch (error) {
         logger.error("Failed to hire agent", { error });
         throw new Error(`Failed to hire agent: ${error instanceof Error ? error.message : String(error)}`);

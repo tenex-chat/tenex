@@ -171,6 +171,7 @@ export class EventHandler {
           await handleNewConversation(event, {
             conversationCoordinator: this.conversationCoordinator,
             agentExecutor: this.agentExecutor,
+            projectPath: this.projectPath,
           });
         }
         break;
