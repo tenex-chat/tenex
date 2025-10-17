@@ -1,5 +1,5 @@
-import { tool } from 'ai';
-import { z } from 'zod';
+import { tool } from "ai";
+import { z } from "zod";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ExecutionContext } from "@/agents/execution/types";
@@ -32,9 +32,9 @@ async function executeDelegateFollowup(
   // Check for self-delegation (not allowed in delegate_followup tool)
   if (recipientPubkey === context.agent.pubkey) {
     throw new Error(
-      `Self-delegation is not permitted with the delegate_followup tool. ` +
+      "Self-delegation is not permitted with the delegate_followup tool. " +
       `Agent "${context.agent.slug}" cannot send follow-up questions to itself. ` +
-      `Use the delegate_phase tool if you need to transition phases within the same agent.`
+      "Use the delegate_phase tool if you need to transition phases within the same agent."
     );
   }
   
@@ -103,8 +103,8 @@ export function createDelegateFollowupTool(context: ExecutionContext): AISdkTool
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
-    value: () => `Sending follow-up question`,
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
+    value: () => "Sending follow-up question",
     enumerable: false,
     configurable: true
   });

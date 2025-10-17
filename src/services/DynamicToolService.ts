@@ -1,10 +1,10 @@
-import { watch } from 'fs';
-import { readdir, stat } from 'fs/promises';
-import { join, basename } from 'path';
-import { logger } from '@/utils/logger';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { debounce } from 'lodash';
+import { watch } from "fs";
+import { readdir, stat } from "fs/promises";
+import { join, basename } from "path";
+import { logger } from "@/utils/logger";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { debounce } from "lodash";
 
 /**
  * Type for dynamic tool factory functions
@@ -16,7 +16,7 @@ export type DynamicToolFactory = (context: ExecutionContext) => AISdkTool<unknow
  */
 export class DynamicToolService {
     private static instance: DynamicToolService;
-    private readonly dynamicToolsPath = join(process.cwd(), '.tenex/tools');
+    private readonly dynamicToolsPath = join(process.cwd(), ".tenex/tools");
     private dynamicTools = new Map<string, DynamicToolFactory>();
     private watcher: ReturnType<typeof watch> | null = null;
     private fileHashes = new Map<string, string>();
@@ -39,7 +39,7 @@ export class DynamicToolService {
      * Initialize the service and start watching for dynamic tools
      */
     public async initialize(): Promise<void> {
-        logger.info('[DynamicToolService] Initializing dynamic tool service', {
+        logger.info("[DynamicToolService] Initializing dynamic tool service", {
             path: this.dynamicToolsPath
         });
         
@@ -48,9 +48,9 @@ export class DynamicToolService {
             await stat(this.dynamicToolsPath);
         } catch {
             // Directory doesn't exist, create it
-            const { mkdir } = await import('fs/promises');
+            const { mkdir } = await import("fs/promises");
             await mkdir(this.dynamicToolsPath, { recursive: true });
-            logger.info('[DynamicToolService] Created dynamic tools directory', {
+            logger.info("[DynamicToolService] Created dynamic tools directory", {
                 path: this.dynamicToolsPath
             });
         }
@@ -68,9 +68,9 @@ export class DynamicToolService {
     private async scanDirectory(): Promise<void> {
         try {
             const files = await readdir(this.dynamicToolsPath);
-            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            const tsFiles = files.filter(f => f.endsWith(".ts"));
             
-            logger.info('[DynamicToolService] Found dynamic tool files', {
+            logger.info("[DynamicToolService] Found dynamic tool files", {
                 count: tsFiles.length,
                 files: tsFiles
             });
@@ -80,7 +80,7 @@ export class DynamicToolService {
                 await this.loadTool(filePath);
             }
         } catch (error) {
-            logger.error('[DynamicToolService] Error scanning directory', {
+            logger.error("[DynamicToolService] Error scanning directory", {
                 error: error instanceof Error ? error.message : String(error)
             });
         }
@@ -92,10 +92,10 @@ export class DynamicToolService {
     private setupWatcher(): void {
         // Debounced handler for file changes
         const handleFileChange = debounce(async (filename: string) => {
-            if (!filename?.endsWith('.ts')) return;
+            if (!filename?.endsWith(".ts")) return;
             
             const filePath = join(this.dynamicToolsPath, filename);
-            logger.info('[DynamicToolService] File change detected', { file: filename });
+            logger.info("[DynamicToolService] File change detected", { file: filename });
             
             try {
                 // Check if file still exists
@@ -114,7 +114,7 @@ export class DynamicToolService {
             }
         });
         
-        logger.info('[DynamicToolService] File watcher initialized');
+        logger.info("[DynamicToolService] File watcher initialized");
     }
     
     /**
@@ -130,7 +130,7 @@ export class DynamicToolService {
             // Check if we need to reload
             const previousHash = this.fileHashes.get(filePath);
             if (previousHash === hash) {
-                logger.debug('[DynamicToolService] Tool unchanged, skipping reload', {
+                logger.debug("[DynamicToolService] Tool unchanged, skipping reload", {
                     file: basename(filePath)
                 });
                 return;
@@ -141,40 +141,40 @@ export class DynamicToolService {
             const module = await import(importPath);
             
             // Validate the module
-            if (!module.default || typeof module.default !== 'function') {
-                throw new Error('Module must export a default function');
+            if (!module.default || typeof module.default !== "function") {
+                throw new Error("Module must export a default function");
             }
             
             // Extract tool name from filename
-            const filename = basename(filePath, '.ts');
+            const filename = basename(filePath, ".ts");
             const toolName = this.extractToolName(filename);
             
             // Test that the factory function works
             // We'll need a minimal context to validate it returns a valid tool
             const testContext = {
-                agent: { name: 'test' },
+                agent: { name: "test" },
                 projectPath: process.cwd(),
-                conversationId: 'test',
-                triggeringEvent: {} as ExecutionContext['triggeringEvent'],
-                conversationCoordinator: {} as ExecutionContext['conversationCoordinator'],
-                agentPublisher: {} as ExecutionContext['agentPublisher']
+                conversationId: "test",
+                triggeringEvent: {} as ExecutionContext["triggeringEvent"],
+                conversationCoordinator: {} as ExecutionContext["conversationCoordinator"],
+                agentPublisher: {} as ExecutionContext["agentPublisher"]
             } as ExecutionContext;
             
             const testTool = module.default(testContext);
-            if (!testTool || typeof testTool.execute !== 'function') {
-                throw new Error('Factory must return a valid CoreTool');
+            if (!testTool || typeof testTool.execute !== "function") {
+                throw new Error("Factory must return a valid CoreTool");
             }
             
             // Store the factory
             this.dynamicTools.set(toolName, module.default);
             this.fileHashes.set(filePath, hash);
             
-            logger.info('[DynamicToolService] Dynamic tool loaded', {
+            logger.info("[DynamicToolService] Dynamic tool loaded", {
                 name: toolName,
                 file: basename(filePath)
             });
         } catch (error) {
-            logger.error('[DynamicToolService] Failed to load dynamic tool', {
+            logger.error("[DynamicToolService] Failed to load dynamic tool", {
                 file: basename(filePath),
                 error: error instanceof Error ? error.message : String(error)
             });
@@ -185,14 +185,14 @@ export class DynamicToolService {
      * Unload a dynamic tool
      */
     private async unloadTool(filePath: string): Promise<void> {
-        const filename = basename(filePath, '.ts');
+        const filename = basename(filePath, ".ts");
         const toolName = this.extractToolName(filename);
         
         if (this.dynamicTools.has(toolName)) {
             this.dynamicTools.delete(toolName);
             this.fileHashes.delete(filePath);
             
-            logger.info('[DynamicToolService] Dynamic tool unloaded', {
+            logger.info("[DynamicToolService] Dynamic tool unloaded", {
                 name: toolName,
                 file: basename(filePath)
             });
@@ -231,7 +231,7 @@ export class DynamicToolService {
                 const tool = factory(context);
                 tools[name] = tool;
             } catch (error) {
-                logger.error('[DynamicToolService] Failed to instantiate dynamic tool', {
+                logger.error("[DynamicToolService] Failed to instantiate dynamic tool", {
                     name,
                     error: error instanceof Error ? error.message : String(error)
                 });
@@ -258,7 +258,7 @@ export class DynamicToolService {
         }
         this.dynamicTools.clear();
         this.fileHashes.clear();
-        logger.info('[DynamicToolService] Service shut down');
+        logger.info("[DynamicToolService] Service shut down");
     }
 }
 

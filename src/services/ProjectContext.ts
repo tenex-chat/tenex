@@ -224,9 +224,9 @@ export class ProjectContext {
    */
   async updateProjectData(newProject: NDKProject): Promise<void> {
     this.project = newProject;
-    
+
     // Reload agents from project
-    await this.agentRegistry.loadFromProject();
+    await this.agentRegistry.loadFromProject(newProject);
     
     const agents = this.agentRegistry.getAllAgentsMap();
 

@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { z } from "zod";
 import { readdir } from "node:fs/promises";
 import { exec } from "node:child_process";
@@ -29,7 +29,7 @@ const codebaseSearchSchema = z.object({
 
 type SearchResult = {
   path: string;
-  type: 'file' | 'directory';
+  type: "file" | "directory";
   match?: {
     line?: number;
     snippet?: string;
@@ -102,8 +102,8 @@ async function executeCodebaseSearch(
     
     for (const result of finalResults) {
       output += `• ${result.path}`;
-      if (result.type === 'directory') {
-        output += ' (directory)';
+      if (result.type === "directory") {
+        output += " (directory)";
       }
       if (result.match) {
         if (result.match.line) {
@@ -113,7 +113,7 @@ async function executeCodebaseSearch(
           output += `\n  ${result.match.snippet.trim()}`;
         }
       }
-      output += '\n';
+      output += "\n";
     }
 
     return output;
@@ -138,7 +138,7 @@ async function searchByFilename(
   
   // Add file type filter if specified
   if (fileType) {
-    const ext = fileType.startsWith('.') ? fileType : `.${fileType}`;
+    const ext = fileType.startsWith(".") ? fileType : `.${fileType}`;
     findCommand += ` -name "*${ext}"`;
   }
   
@@ -158,13 +158,13 @@ async function searchByFilename(
     });
 
     if (stdout) {
-      const files = stdout.trim().split('\n').filter(Boolean);
+      const files = stdout.trim().split("\n").filter(Boolean);
       for (const file of files) {
         // Remove leading ./ if present
-        const cleanPath = file.startsWith('./') ? file.slice(2) : file;
+        const cleanPath = file.startsWith("./") ? file.slice(2) : file;
         results.push({
           path: cleanPath,
-          type: 'file',
+          type: "file",
         });
       }
     }
@@ -182,12 +182,12 @@ async function searchByFilename(
     });
 
     if (stdout) {
-      const dirs = stdout.trim().split('\n').filter(Boolean);
+      const dirs = stdout.trim().split("\n").filter(Boolean);
       for (const dir of dirs) {
-        const cleanPath = dir.startsWith('./') ? dir.slice(2) : dir;
+        const cleanPath = dir.startsWith("./") ? dir.slice(2) : dir;
         results.push({
           path: cleanPath,
-          type: 'directory',
+          type: "directory",
         });
       }
     }
@@ -205,7 +205,7 @@ async function recursiveFileSearch(
   fileType: string | null,
   results: SearchResult[],
   maxResults: number,
-  currentPath: string = ''
+  currentPath: string = ""
 ): Promise<void> {
   if (results.length >= maxResults) return;
 
@@ -220,13 +220,13 @@ async function recursiveFileSearch(
       
       // Skip common ignored directories
       if (entry.isDirectory()) {
-        const ignoreDirs = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage'];
+        const ignoreDirs = ["node_modules", ".git", "dist", "build", ".next", "coverage"];
         if (!ignoreDirs.includes(entry.name)) {
           // Check if directory name matches
           if (entry.name.toLowerCase().includes(query.toLowerCase())) {
             results.push({
               path: entryPath,
-              type: 'directory',
+              type: "directory",
             });
           }
           // Recurse into directory
@@ -235,7 +235,7 @@ async function recursiveFileSearch(
       } else if (entry.isFile()) {
         // Check file type if filter is specified
         if (fileType) {
-          const ext = fileType.startsWith('.') ? fileType : `.${fileType}`;
+          const ext = fileType.startsWith(".") ? fileType : `.${fileType}`;
           if (extname(entry.name) !== ext) continue;
         }
         
@@ -243,7 +243,7 @@ async function recursiveFileSearch(
         if (entry.name.toLowerCase().includes(query.toLowerCase())) {
           results.push({
             path: entryPath,
-            type: 'file',
+            type: "file",
           });
         }
       }
@@ -270,18 +270,18 @@ async function searchByContent(
   
   // Add file type filter if specified
   if (fileType) {
-    const ext = fileType.startsWith('.') ? fileType : `.${fileType}`;
+    const ext = fileType.startsWith(".") ? fileType : `.${fileType}`;
     grepCommand += ` --include="*${ext}"`;
   }
   
   // Exclude common directories and binary files
-  grepCommand += ' --exclude-dir=node_modules';
-  grepCommand += ' --exclude-dir=.git';
-  grepCommand += ' --exclude-dir=dist';
-  grepCommand += ' --exclude-dir=build';
-  grepCommand += ' --exclude-dir=.next';
-  grepCommand += ' --exclude-dir=coverage';
-  grepCommand += ' --binary-files=without-match';
+  grepCommand += " --exclude-dir=node_modules";
+  grepCommand += " --exclude-dir=.git";
+  grepCommand += " --exclude-dir=dist";
+  grepCommand += " --exclude-dir=build";
+  grepCommand += " --exclude-dir=.next";
+  grepCommand += " --exclude-dir=coverage";
+  grepCommand += " --binary-files=without-match";
   grepCommand += ` | head -${maxResults * 2}`; // Get more results since we'll filter
 
   try {
@@ -292,18 +292,18 @@ async function searchByContent(
     });
 
     if (stdout) {
-      const matches = stdout.trim().split('\n').filter(Boolean);
+      const matches = stdout.trim().split("\n").filter(Boolean);
       
       for (const match of matches) {
         if (results.length >= maxResults) break;
         
         // Parse grep output format: "path:line:content"
-        const colonIndex = match.indexOf(':');
+        const colonIndex = match.indexOf(":");
         if (colonIndex === -1) continue;
         
         const path = match.substring(0, colonIndex);
         const afterPath = match.substring(colonIndex + 1);
-        const secondColonIndex = afterPath.indexOf(':');
+        const secondColonIndex = afterPath.indexOf(":");
         
         if (secondColonIndex === -1) continue;
         
@@ -311,11 +311,11 @@ async function searchByContent(
         const content = afterPath.substring(secondColonIndex + 1);
         
         // Clean up the path
-        const cleanPath = path.startsWith('./') ? path.slice(2) : path;
+        const cleanPath = path.startsWith("./") ? path.slice(2) : path;
         
         results.push({
           path: cleanPath,
-          type: 'file',
+          type: "file",
           match: {
             line: lineNumber,
             snippet: includeSnippets ? content : undefined,
@@ -346,15 +346,15 @@ export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
         const errorMsg = error instanceof Error ? error.message : String(error);
 
         // Check for context limit errors and provide graceful degradation
-        if (errorMsg.includes('maximum context length') ||
-            errorMsg.includes('tokens') ||
-            errorMsg.includes('quota')) {
+        if (errorMsg.includes("maximum context length") ||
+            errorMsg.includes("tokens") ||
+            errorMsg.includes("quota")) {
           return {
-            type: 'error-text',
-            text: `Search failed: Context limit exceeded. Try:\n` +
-                  `1. Narrowing your search query to be more specific\n` +
-                  `2. Adding a file type filter (e.g., fileType: ".ts")\n` +
-                  `3. Reducing maxResults to a smaller number`
+            type: "error-text",
+            text: "Search failed: Context limit exceeded. Try:\n" +
+                  "1. Narrowing your search query to be more specific\n" +
+                  "2. Adding a file type filter (e.g., fileType: \".ts\")\n" +
+                  "3. Reducing maxResults to a smaller number"
           };
         }
 
@@ -364,7 +364,7 @@ export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
   });
 
   // Add human-readable content generation
-  Object.defineProperty(toolInstance, 'getHumanReadableContent', {
+  Object.defineProperty(toolInstance, "getHumanReadableContent", {
     value: (input: z.infer<typeof codebaseSearchSchema>) => {
       const { query, searchType } = input;
       return `Searching codebase for "${query}" (${searchType})`;

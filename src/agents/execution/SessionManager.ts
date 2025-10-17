@@ -29,15 +29,15 @@ export class SessionManager {
      */
     private loadSession(): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
-        this.sessionId = metadataStore.get<string>('sessionId');
-        this.lastSentEventId = metadataStore.get<string>('lastSentEventId');
+        this.sessionId = metadataStore.get<string>("sessionId");
+        this.lastSentEventId = metadataStore.get<string>("lastSentEventId");
 
         if (this.sessionId) {
             logger.info("[SessionManager] ✅ Found existing session to resume", {
                 sessionId: this.sessionId,
                 agent: this.agent.name,
                 conversationId: this.conversationId.substring(0, 8),
-                lastSentEventId: this.lastSentEventId || 'NONE'
+                lastSentEventId: this.lastSentEventId || "NONE"
             });
         }
     }
@@ -57,8 +57,8 @@ export class SessionManager {
      */
     saveSession(sessionId: string, lastSentEventId: string): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
-        metadataStore.set('sessionId', sessionId);
-        metadataStore.set('lastSentEventId', lastSentEventId);
+        metadataStore.set("sessionId", sessionId);
+        metadataStore.set("lastSentEventId", lastSentEventId);
 
         // Update local state
         this.sessionId = sessionId;
@@ -77,7 +77,7 @@ export class SessionManager {
      */
     saveLastSentEventId(lastSentEventId: string): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
-        metadataStore.set('lastSentEventId', lastSentEventId);
+        metadataStore.set("lastSentEventId", lastSentEventId);
 
         this.lastSentEventId = lastSentEventId;
 

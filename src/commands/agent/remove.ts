@@ -1,71 +1,77 @@
-import { AgentRegistry } from "@/agents/AgentRegistry";
+import { agentStorage } from "@/agents/AgentStorage";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { confirm } from "@inquirer/prompts";
 import { Command } from "commander";
-
-interface RemoveOptions {
-  project?: boolean;
-  global?: boolean;
-  force?: boolean;
-}
+import { getNDK } from "@/nostr";
+import { initNDK } from "@/nostr/ndkClient";
 
 export const agentRemoveCommand = new Command("remove")
-  .description("Remove an agent")
-  .argument("<name>", "Agent name or slug to remove")
-  .option("--project", "Remove from project configuration")
-  .option("--global", "Remove from global configuration")
+  .description("Remove an agent from current project")
+  .argument("<slug>", "Agent slug to remove")
   .option("-f, --force", "Skip confirmation prompt")
-  .action(async (name: string, options: RemoveOptions) => {
+  .action(async (slug: string, options: { force?: boolean }) => {
     try {
       const projectPath = process.cwd();
+
+      // Check if we're in a project
       const isProject = await configService.projectConfigExists(projectPath, "config.json");
-
-      // Determine where to remove from
-      let useProject = false;
-      if (options.global && options.project) {
-        logger.error("Cannot use both --global and --project flags");
+      if (!isProject) {
+        logger.error("Not in a TENEX project directory. Run this command from within a project.");
         process.exit(1);
-      } else if (options.global) {
-        useProject = false;
-      } else if (options.project) {
-        if (!isProject) {
-          logger.error(
-            "Not in a TENEX project directory. Use --global flag or run from a project."
-          );
-          process.exit(1);
-        }
-        useProject = true;
-      } else {
-        // Default: try project first if in one, otherwise global
-        useProject = isProject;
       }
 
-      // Load the appropriate registry
-      const registryPath = useProject
-        ? projectPath
-        : configService.getGlobalPath().replace("/.tenex", "");
-      const registry = new AgentRegistry(registryPath, !useProject);
-      await registry.loadFromProject();
+      // Load project config to get projectNaddr
+      const { config } = await configService.loadConfig(projectPath);
+      if (!config.projectNaddr) {
+        logger.error("Project configuration missing projectNaddr");
+        process.exit(1);
+      }
 
-      // Find the agent
-      const agent = registry.getAgent(name) || registry.getAgentByName(name);
+      // Initialize NDK and fetch project
+      await initNDK();
+      const ndk = getNDK();
+      const project = await ndk.fetchEvent(config.projectNaddr);
+
+      if (!project || !project.dTag) {
+        logger.error("Could not fetch project from Nostr");
+        process.exit(1);
+      }
+
+      // Initialize agent storage
+      await agentStorage.initialize();
+
+      // Find the agent by slug
+      const agent = await agentStorage.getAgentBySlug(slug);
       if (!agent) {
-        const location = useProject ? "project" : "global";
-        logger.error(`Agent "${name}" not found in ${location} configuration`);
-
-        // If we defaulted to project, suggest checking global
-        if (useProject && !options.project) {
-          logger.info("Try using --global flag to remove from global configuration");
-        }
+        logger.error(`Agent "${slug}" not found`);
         process.exit(1);
       }
 
+      // Check if agent is in this project
+      if (!agent.projects.includes(project.dTag)) {
+        logger.error(`Agent "${slug}" is not associated with this project`);
+        process.exit(1);
+      }
+
+      // Get pubkey from nsec for removal
+      const { NDKPrivateKeySigner } = await import("@nostr-dev-kit/ndk");
+      const signer = new NDKPrivateKeySigner(agent.nsec);
+      const pubkey = signer.pubkey;
 
       // Confirm deletion unless --force is used
       if (!options.force) {
+        const otherProjects = agent.projects.filter(p => p !== project.dTag);
+        let message = `Are you sure you want to remove agent "${agent.name}" (${slug}) from this project?`;
+
+        if (otherProjects.length > 0) {
+          message += `\n  The agent will remain in ${otherProjects.length} other project(s).`;
+        } else {
+          message += "\n  ⚠️  This is the agent's last project - it will be deleted completely.";
+        }
+
         const confirmed = await confirm({
-          message: `Are you sure you want to remove agent "${agent.name}" (${agent.slug})?`,
+          message,
           default: false,
         });
 
@@ -75,17 +81,15 @@ export const agentRemoveCommand = new Command("remove")
         }
       }
 
-      // Remove the agent
-      const removed = agent.eventId
-        ? await registry.removeAgentByEventId(agent.eventId)
-        : await registry.removeAgentBySlug(agent.slug);
+      // Remove agent from project
+      await agentStorage.removeAgentFromProject(pubkey, project.dTag);
 
-      if (removed) {
-        const location = useProject ? "project" : "global";
-        logger.info(`✅ Agent "${agent.name}" removed from ${location} configuration`);
+      const otherProjects = agent.projects.filter(p => p !== project.dTag);
+      if (otherProjects.length > 0) {
+        logger.info(`✅ Agent "${agent.name}" removed from this project`);
+        logger.info(`   Agent remains in ${otherProjects.length} other project(s)`);
       } else {
-        logger.error("Failed to remove agent");
-        process.exit(1);
+        logger.info(`✅ Agent "${agent.name}" completely removed (was only in this project)`);
       }
 
       process.exit(0);

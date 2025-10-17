@@ -16,7 +16,7 @@ export const phaseTransitionFragment: PromptFragment = {
       content += `\n\n${data.phaseInstructions}`;
     }
 
-    content += `\n\nPlease adjust your behavior according to the phase requirements.`;
+    content += "\n\nPlease adjust your behavior according to the phase requirements.";
 
     return content;
   },

@@ -11,9 +11,9 @@ import {
   type experimental_MCPResource,
   type experimental_MCPResourceTemplate,
   type experimental_MCPReadResourceResult,
-} from 'ai';
-import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio';
-import type { CoreTool } from 'ai';
+} from "ai";
+import { Experimental_StdioMCPTransport } from "ai/mcp-stdio";
+import type { CoreTool } from "ai";
 import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -75,8 +75,8 @@ export class MCPManager {
   private async startServers(mcpConfig: TenexMCP): Promise<void> {
     const startPromises = Object.entries(mcpConfig.servers)
       .filter(([name]) => {
-        if (!name || name.trim() === '') {
-          logger.warn('Skipping MCP server with empty or invalid name');
+        if (!name || name.trim() === "") {
+          logger.warn("Skipping MCP server with empty or invalid name");
           return false;
         }
         return true;
@@ -204,9 +204,9 @@ export class MCPManager {
           logger.debug(`MCP tool '${namespacedName}' registered`, {
             hasDescription: !!tool.description,
             hasParameters: !!tool.parameters,
-            hasExecute: typeof tool.execute === 'function',
-            parametersType: tool.parameters ? typeof tool.parameters : 'undefined',
-            isResourceTool: toolName.startsWith('resource_')
+            hasExecute: typeof tool.execute === "function",
+            parametersType: tool.parameters ? typeof tool.parameters : "undefined",
+            isResourceTool: toolName.startsWith("resource_")
           });
         }
 
@@ -258,7 +258,7 @@ export class MCPManager {
     }
 
     // Filter requested MCP tools
-    const requestedMcpTools = requestedTools.filter(name => name.startsWith('mcp__'));
+    const requestedMcpTools = requestedTools.filter(name => name.startsWith("mcp__"));
 
     if (requestedMcpTools.length > 0) {
       // Return only requested MCP tools
@@ -341,8 +341,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
@@ -385,8 +385,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
@@ -430,8 +430,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
     }
 
@@ -457,9 +457,9 @@ export class MCPManager {
         const result = await this.readResource(serverName, uri);
 
         for (const content of result.contents) {
-          if ('text' in content) {
+          if ("text" in content) {
             contents.push(`Resource: ${uri}\n${content.text}`);
-          } else if ('blob' in content) {
+          } else if ("blob" in content) {
             contents.push(`Resource: ${uri}\n[Binary content: ${content.blob.length} bytes]`);
           }
         }
@@ -469,7 +469,7 @@ export class MCPManager {
       }
     }
 
-    return contents.join('\n\n---\n\n');
+    return contents.join("\n\n---\n\n");
   }
 
   /**
@@ -482,8 +482,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 
@@ -506,8 +506,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 
@@ -533,8 +533,8 @@ export class MCPManager {
     if (!entry) {
       const validServers = this.getRunningServers();
       const serverList = validServers.length > 0
-        ? `Valid servers: ${validServers.join(', ')}`
-        : 'No MCP servers are currently running';
+        ? `Valid servers: ${validServers.join(", ")}`
+        : "No MCP servers are currently running";
       throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
     }
 

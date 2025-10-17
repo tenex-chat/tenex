@@ -25,13 +25,13 @@ export class ProviderConfigUI {
    * Configure a specific provider interactively
    */
   static async configureProvider(provider: string, currentConfig?: TenexLLMs): Promise<{ apiKey: string }> {
-    if (provider === 'claudeCode') {
+    if (provider === "claudeCode") {
       // Claude Code doesn't require an API key
       console.log(chalk.green("✓ Claude Code provider configured (no API key required)"));
       return { apiKey: "none" }; // Claude Code doesn't use API keys
-    } else if (provider === 'ollama') {
+    } else if (provider === "ollama") {
       // For Ollama, ask for base URL instead of API key
-      const currentUrl = currentConfig?.providers[provider]?.apiKey || 'local';
+      const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";
       const { ollamaConfig } = await inquirer.prompt([{
         type: "list",
         name: "ollamaConfig",
@@ -40,16 +40,16 @@ export class ProviderConfigUI {
           { name: "Use local Ollama (http://localhost:11434)", value: "local" },
           { name: "Use custom Ollama URL", value: "custom" }
         ],
-        default: currentUrl === 'local' ? 'local' : 'custom'
+        default: currentUrl === "local" ? "local" : "custom"
       }]);
 
-      let baseUrl = 'local';
-      if (ollamaConfig === 'custom') {
+      let baseUrl = "local";
+      if (ollamaConfig === "custom") {
         const { customUrl } = await inquirer.prompt([{
           type: "input",
           name: "customUrl",
           message: "Enter Ollama base URL:",
-          default: currentUrl !== 'local' ? currentUrl : 'http://localhost:11434',
+          default: currentUrl !== "local" ? currentUrl : "http://localhost:11434",
           validate: (input: string) => {
             if (!input.trim()) return "URL is required";
             try {
@@ -108,8 +108,8 @@ export class ProviderConfigUI {
       for (const name of configNames) {
         const config = llmsConfig.configurations[name];
         const isDefault = name === llmsConfig.default;
-        const marker = isDefault ? chalk.cyan('• ') : '  ';
-        const defaultTag = isDefault ? chalk.gray(' (default)') : '';
+        const marker = isDefault ? chalk.cyan("• ") : "  ";
+        const defaultTag = isDefault ? chalk.gray(" (default)") : "";
         console.log(`  ${marker}${name}${defaultTag}: ${config.provider}:${config.model}`);
       }
     }

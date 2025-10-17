@@ -1,14 +1,14 @@
-import { ConfigService } from '@/services/ConfigService';
-import { LocalTransformerEmbeddingProvider, OpenAIEmbeddingProvider, type EmbeddingProvider } from '../EmbeddingProvider';
-import { logger } from '@/utils/logger';
-import * as path from 'path';
-import { readJsonFile, fileExists } from '@/lib/fs';
+import { ConfigService } from "@/services/ConfigService";
+import { LocalTransformerEmbeddingProvider, OpenAIEmbeddingProvider, type EmbeddingProvider } from "../EmbeddingProvider";
+import { logger } from "@/utils/logger";
+import * as path from "path";
+import { readJsonFile, fileExists } from "@/lib/fs";
 
 /**
  * Configuration for embedding providers
  */
 export interface EmbeddingConfig {
-    provider: 'local' | 'openai';
+    provider: "local" | "openai";
     model: string;
     apiKey?: string;
 }
@@ -20,33 +20,33 @@ export interface EmbeddingConfig {
 type RawEmbeddingConfig = 
     | string // Old format: just model name
     | { model: string; provider?: never } // Old format: object with just model
-    | { provider: 'local' | 'openai'; model: string; apiKey?: string }; // New format
+    | { provider: "local" | "openai"; model: string; apiKey?: string }; // New format
 
 function isRawEmbeddingConfig(value: unknown): value is RawEmbeddingConfig {
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
         return true;
     }
     
-    if (typeof value !== 'object' || value === null) {
+    if (typeof value !== "object" || value === null) {
         return false;
     }
     
     const obj = value as Record<string, unknown>;
     
     // Must have a model
-    if (!('model' in obj) || typeof obj.model !== 'string') {
+    if (!("model" in obj) || typeof obj.model !== "string") {
         return false;
     }
     
     // If provider is present, must be valid
-    if ('provider' in obj) {
-        if (obj.provider !== 'local' && obj.provider !== 'openai') {
+    if ("provider" in obj) {
+        if (obj.provider !== "local" && obj.provider !== "openai") {
             return false;
         }
     }
     
     // If apiKey is present, must be string
-    if ('apiKey' in obj && typeof obj.apiKey !== 'string') {
+    if ("apiKey" in obj && typeof obj.apiKey !== "string") {
         return false;
     }
     
@@ -57,10 +57,10 @@ function isRawEmbeddingConfig(value: unknown): value is RawEmbeddingConfig {
  * Factory for creating embedding providers based on configuration
  */
 export class EmbeddingProviderFactory {
-    private static readonly EMBED_CONFIG_FILE = 'embed.json';
+    private static readonly EMBED_CONFIG_FILE = "embed.json";
     private static readonly DEFAULT_CONFIG: EmbeddingConfig = {
-        provider: 'local',
-        model: 'Xenova/all-MiniLM-L6-v2'
+        provider: "local",
+        model: "Xenova/all-MiniLM-L6-v2"
     };
 
     /**
@@ -72,13 +72,13 @@ export class EmbeddingProviderFactory {
         logger.debug(`Creating embedding provider: ${config.provider}/${config.model}`);
 
         switch (config.provider) {
-            case 'openai':
+            case "openai":
                 if (!config.apiKey) {
-                    throw new Error('OpenAI API key is required for OpenAI embedding provider');
+                    throw new Error("OpenAI API key is required for OpenAI embedding provider");
                 }
                 return new OpenAIEmbeddingProvider(config.apiKey, config.model);
             
-            case 'local':
+            case "local":
             default:
                 return new LocalTransformerEmbeddingProvider(config.model);
         }
@@ -125,10 +125,10 @@ export class EmbeddingProviderFactory {
             }
 
             // Use default if no config found
-            logger.debug('No embedding configuration found, using defaults');
+            logger.debug("No embedding configuration found, using defaults");
             return this.DEFAULT_CONFIG;
         } catch (error) {
-            logger.warn('Failed to load embedding configuration, using defaults', { error });
+            logger.warn("Failed to load embedding configuration, using defaults", { error });
             return this.DEFAULT_CONFIG;
         }
     }
@@ -138,28 +138,28 @@ export class EmbeddingProviderFactory {
      */
     private static parseConfig(raw: RawEmbeddingConfig): EmbeddingConfig {
         // Support both old format (just model string) and new format
-        if (typeof raw === 'string' || (raw && raw.model && !raw.provider)) {
+        if (typeof raw === "string" || (raw && raw.model && !raw.provider)) {
             // Old format or just model specified
-            const modelId = typeof raw === 'string' ? raw : raw.model;
+            const modelId = typeof raw === "string" ? raw : raw.model;
             
             // Infer provider from model name
-            if (modelId.includes('text-embedding')) {
+            if (modelId.includes("text-embedding")) {
                 return {
-                    provider: 'openai',
+                    provider: "openai",
                     model: modelId,
                     apiKey: process.env.OPENAI_API_KEY
                 };
             }
             
             return {
-                provider: 'local',
+                provider: "local",
                 model: modelId
             };
         }
 
         // New format with explicit provider
         return {
-            provider: raw.provider || 'local',
+            provider: raw.provider || "local",
             model: raw.model || this.DEFAULT_CONFIG.model,
             apiKey: raw.apiKey || process.env.OPENAI_API_KEY
         };
@@ -170,11 +170,11 @@ export class EmbeddingProviderFactory {
      */
     static async saveConfiguration(
         config: EmbeddingConfig,
-        scope: 'global' | 'project' = 'global'
+        scope: "global" | "project" = "global"
     ): Promise<void> {
         const configService = ConfigService.getInstance();
         
-        const basePath = scope === 'global' 
+        const basePath = scope === "global" 
             ? configService.getGlobalPath()
             : configService.getProjectPath(process.cwd());
         
@@ -186,7 +186,7 @@ export class EmbeddingProviderFactory {
             model: config.model
         };
         
-        const { writeJsonFile, ensureDirectory } = await import('@/lib/fs');
+        const { writeJsonFile, ensureDirectory } = await import("@/lib/fs");
         await ensureDirectory(basePath);
         await writeJsonFile(configPath, configToSave);
         

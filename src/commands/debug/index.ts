@@ -78,8 +78,9 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
     await ensureProjectInitialized(projectPath);
 
     // Load agent from registry
-    const agentRegistry = new AgentRegistry(projectPath, false);
-    await agentRegistry.loadFromProject();
+    const agentRegistry = new AgentRegistry(projectPath);
+    const projectCtx = getProjectContext();
+    await agentRegistry.loadFromProject(projectCtx.project);
     const agent = agentRegistry.getAgent(options.agent);
 
     logger.info(chalk.cyan("\n=== Agent Information ==="));
@@ -191,12 +192,12 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
     if (!strategyName) {
       const answer = await inquirer.prompt([
         {
-          type: 'list',
-          name: 'strategy',
-          message: 'Select a message generation strategy:',
+          type: "list",
+          name: "strategy",
+          message: "Select a message generation strategy:",
           choices: [
-            { name: 'Threaded with Memory (shows tree structure with other branches)', value: 'threaded-with-memory' },
-            { name: 'Flattened Chronological (flattened chronological view with delegation markers)', value: 'flattened-chronological' }
+            { name: "Threaded with Memory (shows tree structure with other branches)", value: "threaded-with-memory" },
+            { name: "Flattened Chronological (flattened chronological view with delegation markers)", value: "flattened-chronological" }
           ]
         }
       ]);
@@ -244,9 +245,9 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
     if (!agentSlug) {
       const agentAnswer = await inquirer.prompt([
         {
-          type: 'list',
-          name: 'agentSlug',
-          message: 'Select agent perspective:',
+          type: "list",
+          name: "agentSlug",
+          message: "Select agent perspective:",
           choices: agents.map(agent => ({ name: agent.name, value: agent.slug }))
         }
       ]);
@@ -263,7 +264,7 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
 
     // Create a strategy instance
     let strategy: MessageGenerationStrategy;
-    if (strategyName === 'flattened-chronological') {
+    if (strategyName === "flattened-chronological") {
       strategy = new FlattenedChronologicalStrategy();
     } else {
       strategy = new ThreadWithMemoryStrategy();
@@ -315,8 +316,8 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
       const msg = messages[i];
       console.log(chalk.bold.yellow(`\n─── Message ${i + 1} (${msg.role}) ───`));
 
-      const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2);
-      const formattedContent = formatContentWithEnhancements(content, msg.role === 'system', shouldTrim);
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content, null, 2);
+      const formattedContent = formatContentWithEnhancements(content, msg.role === "system", shouldTrim);
       console.log(formattedContent);
 
       if (i < messages.length - 1) {

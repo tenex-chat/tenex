@@ -224,7 +224,7 @@ export class AgentEventEncoder {
      */
     private prependRecipientsToContent(content: string, recipients: string[]): string {
         // Check if content already starts with nostr:npub or @slug patterns
-        const hasNostrPrefix = content.startsWith('nostr:');
+        const hasNostrPrefix = content.startsWith("nostr:");
         const hasSlugPrefix = content.match(/^@[\w-]+:/);
 
         if (hasNostrPrefix || hasSlugPrefix) {
@@ -254,7 +254,7 @@ export class AgentEventEncoder {
         });
 
         // Prepend recipients to content
-        return `${recipientIdentifiers.join(', ')}: ${content}`;
+        return `${recipientIdentifiers.join(", ")}: ${content}`;
     }
 
     /**

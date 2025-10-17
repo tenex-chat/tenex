@@ -1,10 +1,8 @@
-import { tool } from 'ai';
-import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
+import { tool } from "ai";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import * as path from "node:path";
 import { z } from "zod";
+import { agentStorage } from "@/agents/AgentStorage";
 // Define the input schema
 const agentsWriteSchema = z.object({
   slug: z.string().describe("The slug identifier for the agent"),
@@ -15,7 +13,6 @@ const agentsWriteSchema = z.object({
   useCriteria: z.string().nullable().optional().describe("Criteria for when this agent should be selected"),
   llmConfig: z.string().nullable().optional().describe("LLM configuration identifier"),
   tools: z.array(z.string()).nullable().optional().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned based on whether the agent has phases defined - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, claude_code, nostr_projects, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
-  mcp: z.boolean().nullable().optional().describe("Whether this agent has access to MCP tools (defaults to true)"),
   phases: z.record(z.string(), z.string()).optional().nullable().describe("Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent gets delegate_phase tool instead of delegate tool."),
 });
 
@@ -41,7 +38,7 @@ interface AgentsWriteOutput {
 async function executeAgentsWrite(
   input: AgentsWriteInput
 ): Promise<AgentsWriteOutput> {
-  const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, mcp, phases } = input;
+  const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, phases } = input;
 
   if (!slug) {
     return {
@@ -57,116 +54,87 @@ async function executeAgentsWrite(
     };
   }
 
-  // Get project path
-  const projectPath = process.cwd();
-  
-  // Determine agents directory
-  const agentsDir = path.join(projectPath, ".tenex", "agents");
-  await ensureDirectory(agentsDir);
-
-  // Create the agent definition file path
-  const fileName = `${slug}.json`;
-  const filePath = path.join(agentsDir, fileName);
-
-  // Check if file exists and load existing data if updating
-  let existingData = {};
-  if (await fileExists(filePath)) {
-    try {
-      const content = await readFile(filePath);
-      existingData = JSON.parse(content);
-      logger.info(`Updating existing agent definition: ${slug}`);
-    } catch (error) {
-      logger.warn(`Failed to read existing agent file, will create new`, { error });
-    }
-  } else {
-    logger.info(`Creating new agent definition: ${slug}`);
-  }
-
-  // Create agent definition object
-  const agentDefinition = {
-    ...existingData,
-    name,
-    role,
-    ...(description !== undefined && { description }),
-    ...(instructions !== undefined && { instructions }),
-    ...(useCriteria !== undefined && { useCriteria }),
-    ...(llmConfig !== undefined && { llmConfig }),
-    ...(tools !== undefined && { tools }),
-    ...(mcp !== undefined && { mcp }),
-    ...(phases !== undefined && { phases }),
-  };
-
-  // Write the agent definition to file
-  await writeJsonFile(filePath, agentDefinition);
-
-  // Update the agents registry
-  const registryPath = path.join(projectPath, ".tenex", "agents.json");
-  let registry: Record<string, { file: string; nsec?: string; eventId?: string }> = {};
-  
-  if (await fileExists(registryPath)) {
-    try {
-      const content = await readFile(registryPath);
-      registry = JSON.parse(content);
-    } catch (error) {
-      logger.warn("Failed to read agents registry, will create new", { error });
-    }
-  }
-
-  // Generate nsec if needed (check for both missing and empty string)
-  let nsec = registry[slug]?.nsec;
-  if (!nsec || nsec === "") {
-    const signer = NDKPrivateKeySigner.generate();
-    nsec = signer.privateKey;
-    logger.info(`Generated new nsec for agent "${slug}"`);
-  }
-
-  // Add or update the agent in the registry
-  registry[slug] = {
-    file: fileName,
-    nsec: nsec,
-  };
-
-  await writeJsonFile(registryPath, registry);
-
-  // Use the existing agent registry from project context
+  // Get project context
   const projectContext = getProjectContext();
-  
-  // Ensure the agent is registered with all proper initialization
-  const agentConfig = {
-    name,
-    role,
-    description,
-    instructions,
-    useCriteria,
-    llmConfig,
-    tools,
-    mcp,
-    phases,
-  };
-  
-  // Use the existing agent registry to ensure the agent
-  const agent = await projectContext.agentRegistry.ensureAgent(slug, agentConfig, projectContext.project);
-  
-  // The agentRegistry.ensureAgent already updates the registry internally,
-  // but we need to update the ProjectContext's agents map as well
-  const updatedAgents = new Map(projectContext.agents);
-  updatedAgents.set(slug, agent);
-  await projectContext.updateProjectData(projectContext.project, updatedAgents);
+  const projectPath = process.cwd();
 
-  logger.info(`Successfully wrote and activated agent "${name}" (${slug})`);
-  logger.info(`  File: ${filePath}`);
-  logger.info(`  Pubkey: ${agent.pubkey}`);
+  // Check if agent exists by slug
+  const existingAgent = await agentStorage.getAgentBySlug(slug);
 
-  return {
-    success: true,
-    message: `Successfully wrote and activated agent "${name}"`,
-    filePath,
-    agent: {
-      slug,
+  if (existingAgent) {
+    logger.info(`Updating existing agent: ${slug}`);
+
+    // Update fields
+    existingAgent.name = name;
+    existingAgent.role = role;
+    if (description !== undefined) existingAgent.description = description;
+    if (instructions !== undefined) existingAgent.instructions = instructions;
+    if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria;
+    if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig;
+    if (tools !== undefined) existingAgent.tools = tools;
+    if (phases !== undefined) existingAgent.phases = phases;
+
+    // Save to storage
+    await agentStorage.saveAgent(existingAgent);
+
+    // Reload project context to pick up changes
+    await projectContext.updateProjectData(projectContext.project);
+
+    const agent = projectContext.getAgent(slug);
+    if (!agent) {
+      return {
+        success: false,
+        error: `Agent ${slug} updated in storage but not found in project context`,
+      };
+    }
+
+    logger.info(`Successfully updated agent "${name}" (${slug})`);
+    logger.info(`  Pubkey: ${agent.pubkey}`);
+
+    return {
+      success: true,
+      message: `Successfully updated agent "${name}"`,
+      agent: {
+        slug,
+        name,
+        pubkey: agent.pubkey,
+      },
+    };
+  } else {
+    logger.info(`Creating new agent: ${slug}`);
+
+    // Create agent config
+    const agentConfig = {
       name,
-      pubkey: agent.pubkey,
-    },
-  };
+      role,
+      description,
+      instructions,
+      useCriteria,
+      llmConfig,
+      tools,
+      phases,
+    };
+
+    // Use ensureAgent to create and register the agent
+    const agent = await projectContext.agentRegistry.ensureAgent(
+      slug,
+      agentConfig,
+      projectContext.project
+    );
+
+    logger.info(`Successfully created agent "${name}" (${slug})`);
+    logger.info(`  Pubkey: ${agent.pubkey}`);
+
+    return {
+      success: true,
+      message: `Successfully created agent "${name}"`,
+      agent: {
+        slug,
+        name,
+        pubkey: agent.pubkey,
+      },
+    };
+  }
 }
 
 /**

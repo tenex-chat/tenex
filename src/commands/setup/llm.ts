@@ -46,7 +46,7 @@ export const llmCommand = new Command("llm")
     } catch (error: unknown) {
       // Handle SIGINT (Ctrl+C) gracefully - just exit without error
       const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage?.includes('SIGINT') || errorMessage?.includes('force closed')) {
+      if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {
         process.exit(0);
       }
       // Only show error for actual problems

@@ -242,7 +242,7 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
   const dynamicToolNames: string[] = [];
 
   for (const name of names) {
-    if (name.startsWith('mcp__')) {
+    if (name.startsWith("mcp__")) {
       mcpToolNames.push(name);
     } else if (name in toolFactories) {
       regularTools.push(name as ToolName);

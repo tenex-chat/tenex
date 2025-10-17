@@ -74,8 +74,8 @@ export class BrainstormModerator {
             try {
                 // Clean the response - remove markdown code blocks if present
                 const cleaned = response
-                    .replace(/```json\n?/g, '')
-                    .replace(/```\n?/g, '')
+                    .replace(/```json\n?/g, "")
+                    .replace(/```\n?/g, "")
                     .trim();
 
                 parsed = JSON.parse(cleaned);

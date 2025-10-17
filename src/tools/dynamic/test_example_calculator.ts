@@ -1,7 +1,7 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 /**
  * Example Dynamic Tool: Calculator
@@ -12,9 +12,9 @@ import type { AISdkTool } from '@/tools/registry';
 
 // Define the input schema for the calculator
 const calculatorSchema = z.object({
-    operation: z.enum(['add', 'subtract', 'multiply', 'divide']).describe('The arithmetic operation to perform'),
-    a: z.number().describe('First number'),
-    b: z.number().describe('Second number'),
+    operation: z.enum(["add", "subtract", "multiply", "divide"]).describe("The arithmetic operation to perform"),
+    a: z.number().describe("First number"),
+    b: z.number().describe("Second number"),
 });
 
 // Type for the tool input
@@ -26,7 +26,7 @@ type CalculatorInput = z.infer<typeof calculatorSchema>;
 const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
     // Create the tool using the AI SDK's tool function
     const aiTool = tool({
-        description: 'Performs basic arithmetic operations (add, subtract, multiply, divide)',
+        description: "Performs basic arithmetic operations (add, subtract, multiply, divide)",
         
         inputSchema: calculatorSchema,
         
@@ -35,18 +35,18 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
             let result: number;
             
             switch (operation) {
-                case 'add':
+                case "add":
                     result = a + b;
                     break;
-                case 'subtract':
+                case "subtract":
                     result = a - b;
                     break;
-                case 'multiply':
+                case "multiply":
                     result = a * b;
                     break;
-                case 'divide':
+                case "divide":
                     if (b === 0) {
-                        throw new Error('Division by zero is not allowed');
+                        throw new Error("Division by zero is not allowed");
                     }
                     result = a / b;
                     break;
@@ -72,7 +72,7 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
                         );
                     }
                 } catch (error) {
-                    console.warn('Failed to publish calculator status:', error);
+                    console.warn("Failed to publish calculator status:", error);
                 }
             }
             
@@ -87,13 +87,13 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
     });
     
     // Add human-readable content generation
-    Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: (input: CalculatorInput) => {
             const symbols: Record<string, string> = {
-                add: '+',
-                subtract: '-',
-                multiply: '×',
-                divide: '÷',
+                add: "+",
+                subtract: "-",
+                multiply: "×",
+                divide: "÷",
             };
             return `Calculating: ${input.a} ${symbols[input.operation]} ${input.b}`;
         },

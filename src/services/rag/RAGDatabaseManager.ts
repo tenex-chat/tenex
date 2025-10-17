@@ -1,7 +1,7 @@
-import { connect, type Connection, type Table } from '@lancedb/lancedb';
-import * as path from 'path';
-import { logger } from '@/utils/logger';
-import { handleError } from '@/utils/error-handler';
+import { connect, type Connection, type Table } from "@lancedb/lancedb";
+import * as path from "path";
+import { logger } from "@/utils/logger";
+import { handleError } from "@/utils/error-handler";
 
 /**
  * Custom error for database-related issues
@@ -9,7 +9,7 @@ import { handleError } from '@/utils/error-handler';
 export class RAGDatabaseError extends Error {
     constructor(message: string, public readonly cause?: Error) {
         super(message);
-        this.name = 'RAGDatabaseError';
+        this.name = "RAGDatabaseError";
     }
 }
 
@@ -26,7 +26,7 @@ export class RAGDatabaseManager {
         // Use provided directory or environment variable, fallback to default
         this.dataDir = dataDir ||
                       process.env.LANCEDB_DATA_DIR ||
-                      path.join(process.cwd(), '.tenex', 'data', 'lancedb');
+                      path.join(process.cwd(), ".tenex", "data", "lancedb");
 
         logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
     }
@@ -41,7 +41,7 @@ export class RAGDatabaseManager {
                 logger.info(`LanceDB connection established at ${this.dataDir}`);
             } catch (error) {
                 const message = `Failed to connect to LanceDB at ${this.dataDir}`;
-                handleError(error, message, { logLevel: 'error' });
+                handleError(error, message, { logLevel: "error" });
                 throw new RAGDatabaseError(message, error as Error);
             }
         }
@@ -78,7 +78,7 @@ export class RAGDatabaseManager {
                 throw error;
             }
             const message = `Failed to open table: ${name}`;
-            handleError(error, message, { logLevel: 'error' });
+            handleError(error, message, { logLevel: "error" });
             throw new RAGDatabaseError(message, error as Error);
         }
     }
@@ -89,7 +89,7 @@ export class RAGDatabaseManager {
     async createTable(
         name: string,
         initialData: Record<string, unknown>[],
-        options?: { mode?: 'create' | 'overwrite' }
+        options?: { mode?: "create" | "overwrite" }
     ): Promise<Table> {
         const connection = await this.ensureConnection();
         
@@ -107,7 +107,7 @@ export class RAGDatabaseManager {
             return table;
         } catch (error) {
             const message = `Failed to create table: ${name}`;
-            handleError(error, message, { logLevel: 'error' });
+            handleError(error, message, { logLevel: "error" });
             throw new RAGDatabaseError(message, error as Error);
         }
     }
@@ -126,7 +126,7 @@ export class RAGDatabaseManager {
             logger.info(`Dropped table: ${name}`);
         } catch (error) {
             const message = `Failed to drop table: ${name}`;
-            handleError(error, message, { logLevel: 'error' });
+            handleError(error, message, { logLevel: "error" });
             throw new RAGDatabaseError(message, error as Error);
         }
     }
@@ -140,8 +140,8 @@ export class RAGDatabaseManager {
         try {
             return await connection.tableNames();
         } catch (error) {
-            const message = 'Failed to list tables';
-            handleError(error, message, { logLevel: 'error' });
+            const message = "Failed to list tables";
+            handleError(error, message, { logLevel: "error" });
             throw new RAGDatabaseError(message, error as Error);
         }
     }
@@ -160,7 +160,7 @@ export class RAGDatabaseManager {
     async close(): Promise<void> {
         this.tableCache.clear();
         this.connection = null;
-        logger.debug('RAGDatabaseManager closed');
+        logger.debug("RAGDatabaseManager closed");
     }
 
     /**

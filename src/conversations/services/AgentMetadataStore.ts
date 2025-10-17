@@ -1,6 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { logger } from '@/utils/logger';
+import * as fs from "fs";
+import * as path from "path";
+import { logger } from "@/utils/logger";
 
 /**
  * Simple KV store for agent-specific metadata within a conversation.
@@ -15,7 +15,7 @@ export class AgentMetadataStore {
     private agentSlug: string,
     projectPath: string
   ) {
-    this.filePath = path.join(projectPath, '.tenex', 'metadata', `${conversationId}-${agentSlug}.json`);
+    this.filePath = path.join(projectPath, ".tenex", "metadata", `${conversationId}-${agentSlug}.json`);
     this.load();
   }
 
@@ -31,17 +31,17 @@ export class AgentMetadataStore {
   private load(): void {
     try {
       if (fs.existsSync(this.filePath)) {
-        const content = fs.readFileSync(this.filePath, 'utf-8');
+        const content = fs.readFileSync(this.filePath, "utf-8");
         const parsed = JSON.parse(content);
         this.data = new Map(Object.entries(parsed));
-        logger.debug(`[AgentMetadataStore] Loaded metadata`, {
+        logger.debug("[AgentMetadataStore] Loaded metadata", {
           conversationId: this.conversationId.substring(0, 8),
           agentSlug: this.agentSlug,
           keys: Array.from(this.data.keys())
         });
       }
     } catch (error) {
-      logger.error(`[AgentMetadataStore] Failed to load metadata`, {
+      logger.error("[AgentMetadataStore] Failed to load metadata", {
         conversationId: this.conversationId.substring(0, 8),
         agentSlug: this.agentSlug,
         error
@@ -54,13 +54,13 @@ export class AgentMetadataStore {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
       const obj = Object.fromEntries(this.data);
       fs.writeFileSync(this.filePath, JSON.stringify(obj, null, 2));
-      logger.debug(`[AgentMetadataStore] Saved metadata`, {
+      logger.debug("[AgentMetadataStore] Saved metadata", {
         conversationId: this.conversationId.substring(0, 8),
         agentSlug: this.agentSlug,
         keys: Array.from(this.data.keys())
       });
     } catch (error) {
-      logger.error(`[AgentMetadataStore] Failed to save metadata`, {
+      logger.error("[AgentMetadataStore] Failed to save metadata", {
         conversationId: this.conversationId.substring(0, 8),
         agentSlug: this.agentSlug,
         error

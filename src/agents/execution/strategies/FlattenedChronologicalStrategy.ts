@@ -62,11 +62,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             eventFilter
         );
 
-        logger.debug("[FlattenedChronologicalStrategy] Processing events", {
-            totalEvents: relevantEvents.length,
-            agentPubkey: context.agent.pubkey.substring(0, 8),
-            conversationId: context.conversationId.substring(0, 8)
-        });
 
         // Sort events chronologically
         relevantEvents.sort((a, b) => a.timestamp - b.timestamp);
@@ -89,10 +84,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             context.agent.name
         );
 
-        logger.debug("[FlattenedChronologicalStrategy] Message building complete", {
-            totalMessages: messages.length,
-            eventCount: relevantEvents.length
-        });
 
         return messages;
     }
@@ -109,14 +100,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const relevantEvents: EventWithContext[] = [];
         const delegationRegistry = DelegationRegistry.getInstance();
 
-        console.log("[FlattenedChronologicalStrategy] gatherRelevantEvents called", {
-            agentName: context.agent.name,
-            agentSlug: context.agent.slug,
-            agentPubkey: agentPubkey.substring(0, 16),
-            totalEvents: allEvents.length
-        });
-
-        console.log("[FlattenedChronologicalStrategy] All event IDs:", allEvents.map(e => e.id.substring(0, 8)));
 
         // Track delegations this agent has made
         const outgoingDelegations = new Map<string, { content: string, targets: string[] }>();
@@ -145,17 +128,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             // AND we have project context initialized (otherwise we can't reliably determine user vs agent)
             const isPublicBroadcast = isProjectContextInitialized() && isFromUser && getTargetedAgentPubkeys(event).length === 0;
 
-            logger.debug("[FlattenedChronologicalStrategy] Processing event in gatherRelevantEvents", {
-                eventId: event.id.substring(0, 8),
-                kind: event.kind,
-                isFromAgent,
-                isTargetedToAgent,
-                isFromUser,
-                isPublicBroadcast,
-                eventPubkey: event.pubkey.substring(0, 8),
-                agentPubkey: agentPubkey.substring(0, 8),
-                willCheckDelegation: !isFromAgent && !isTargetedToAgent && !isPublicBroadcast
-            });
 
             // Check if this is a delegation response (do this FIRST, before other filtering)
             // Delegation responses are special because they should be formatted differently
@@ -177,10 +149,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     if (delegationRecord) {
                         eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
                     }
-                    logger.debug("[FlattenedChronologicalStrategy] Marked as delegation response", {
-                        eventId: event.id.substring(0, 8),
-                        delegationId: eventWithContext.delegationId
-                    });
                 }
             }
 
@@ -190,10 +158,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             // 3. It's a public broadcast from user (no specific agent targets)
             // 4. It's a delegation response to this agent
             if (!isFromAgent && !isTargetedToAgent && !isPublicBroadcast && !eventWithContext.isDelegationResponse) {
-                logger.debug("[FlattenedChronologicalStrategy] Skipping event - not relevant", {
-                    eventId: event.id.substring(0, 8),
-                    reason: "Not from agent, not targeted, not broadcast, not delegation response"
-                });
                 continue;
             }
 
@@ -228,12 +192,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                                 targets: [recipientPubkey]
                             });
 
-                            logger.debug("[FlattenedChronologicalStrategy] Detected delegation event", {
-                                delegationId: eventWithContext.delegationId,
-                                toPubkey: recipientPubkey.substring(0, 8),
-                                phase: phaseTag,
-                                content: event.content.substring(0, 50)
-                            });
                             break;
                         }
                     }
@@ -256,18 +214,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     if (mentionsAgent) {
                         eventWithContext.isDelegationResponse = true;
                         eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
-
-                        logger.debug("[FlattenedChronologicalStrategy] Detected delegation response", {
-                            delegationId: eventWithContext.delegationId,
-                            fromPubkey: event.pubkey.substring(0, 8),
-                            content: event.content?.substring(0, 50)
-                        });
-                    } else {
-                        logger.debug("[FlattenedChronologicalStrategy] Skipping event from delegated agent (doesn't p-tag this agent)", {
-                            eventId: event.id.substring(0, 8),
-                            fromPubkey: event.pubkey.substring(0, 8),
-                            thisAgent: agentPubkey.substring(0, 8)
-                        });
                     }
                 }
             }
@@ -335,7 +281,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
         const delegationRegistry = DelegationRegistry.getInstance();
 
-        console.log(`[FlattenedChronologicalStrategy] Building flattened view with ${events.length} events`);
 
         // First pass: Collect all delegations and their responses
         interface DelegationData {
@@ -378,7 +323,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     }
 
                     // Get phase from event tags if available
-                    const phaseTag = event.tags.find(t => t[0] === 'phase');
+                    const phaseTag = event.tags.find(t => t[0] === "phase");
                     const phase = phaseTag?.[1];
 
                     if (!delegationMap.has(eventContext.delegationId)) {
@@ -437,8 +382,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         // Also identify tool-call events for delegate_phase (they should be skipped)
         for (const eventWithContext of events) {
-            const toolTag = eventWithContext.event.tags.find(t => t[0] === 'tool');
-            if (toolTag && (toolTag[1] === 'delegate_phase' || toolTag[1] === 'delegate')) {
+            const toolTag = eventWithContext.event.tags.find(t => t[0] === "tool");
+            if (toolTag && (toolTag[1] === "delegate_phase" || toolTag[1] === "delegate")) {
                 toolCallEventIds.add(eventWithContext.event.id);
             }
         }
@@ -446,19 +391,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         for (const eventContext of events) {
             const { event } = eventContext;
 
-            console.log(`[FlattenedChronologicalStrategy] Processing event in buildFlattenedView:`, {
-                eventId: event.id.substring(0, 8),
-                isDelegationRequest: eventContext.isDelegationRequest,
-                isDelegationResponse: eventContext.isDelegationResponse,
-                fromAgent: event.pubkey === agentPubkey,
-                isToolCall: toolCallEventIds.has(event.id)
-            });
-
             // Skip tool-call events for delegations (they're replaced by the delegation XML)
             if (toolCallEventIds.has(event.id)) {
-                logger.debug("[FlattenedChronologicalStrategy] Skipping delegation tool-call event", {
-                    eventId: event.id.substring(0, 8)
-                });
                 continue;
             }
 
@@ -475,12 +409,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     });
 
                     processedDelegations.add(eventContext.delegationId);
-
-                    logger.debug("[FlattenedChronologicalStrategy] Added condensed delegation block", {
-                        delegationId: eventContext.delegationId,
-                        recipients: delegation.recipients,
-                        responseCount: delegation.responses.length
-                    });
                 }
                 // Skip the actual delegation request event - it's now in the XML block
                 continue;
@@ -488,9 +416,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             // Skip delegation responses - they're now in the delegation block
             if (eventContext.isDelegationResponse && delegationResponseEventIds.has(event.id)) {
-                logger.debug("[FlattenedChronologicalStrategy] Skipping delegation response (in delegation block)", {
-                    eventId: event.id.substring(0, 8)
-                });
                 continue;
             }
 
@@ -519,7 +444,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         }
 
         // Check if this is a tool event from this agent
-        const isToolEvent = event.tags.some(t => t[0] === 'tool');
+        const isToolEvent = event.tags.some(t => t[0] === "tool");
         const isThisAgent = event.pubkey === agentPubkey;
 
         if (isToolEvent) {
@@ -531,7 +456,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     if (debug) {
                         const eventIdPrefix = `[Event ${event.id.substring(0, 8)}] `;
                         toolMessages.forEach(msg => {
-                            if (typeof msg.content === 'string') {
+                            if (typeof msg.content === "string") {
                                 msg.content = eventIdPrefix + msg.content;
                             }
                         });
@@ -546,7 +471,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         }
 
         // Process regular message
-        const content = event.content || '';
+        const content = event.content || "";
 
         // Use EventToModelMessage for proper attribution
         const result = await EventToModelMessage.transform(
@@ -563,7 +488,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         if (debug) {
             const eventIdPrefix = `[Event ${event.id.substring(0, 8)}] `;
             messagesToAdd.forEach(msg => {
-                if (typeof msg.content === 'string') {
+                if (typeof msg.content === "string") {
                     msg.content = eventIdPrefix + msg.content;
                 }
             });
@@ -573,13 +498,13 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         // If not from this agent and contains nostr entities, append system messages
         if (event.pubkey !== agentPubkey) {
-            const entities = extractNostrEntities(event.content || '');
+            const entities = extractNostrEntities(event.content || "");
             if (entities.length > 0) {
                 try {
                     const nameRepo = getPubkeyNameRepository();
                     const ndk = getNDK();
                     const entitySystemMessages = await resolveNostrEntitiesToSystemMessages(
-                        event.content || '',
+                        event.content || "",
                         ndk,
                         (pubkey) => nameRepo.getName(pubkey)
                     );

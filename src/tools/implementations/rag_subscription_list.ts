@@ -1,8 +1,8 @@
-import { tool } from 'ai';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
-import { executeToolWithErrorHandling, type ToolResponse } from '@/tools/utils';
+import { tool } from "ai";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
+import { executeToolWithErrorHandling, type ToolResponse } from "@/tools/utils";
 
 /**
  * Core implementation of listing RAG subscriptions
@@ -13,7 +13,7 @@ async function executeListSubscriptions(
 ): Promise<ToolResponse> {
   // Mandate agent identity - no compromises
   if (!context.agent?.pubkey) {
-    throw new Error('Agent identity is required. Cannot list subscriptions without valid agent pubkey.');
+    throw new Error("Agent identity is required. Cannot list subscriptions without valid agent pubkey.");
   }
   const agentPubkey = context.agent.pubkey;
   
@@ -44,13 +44,13 @@ async function executeListSubscriptions(
     acc.totalDocumentsProcessed += sub.documentsProcessed;
     
     switch (sub.status) {
-      case 'RUNNING':
+      case "RUNNING":
         acc.running++;
         break;
-      case 'ERROR':
+      case "ERROR":
         acc.error++;
         break;
-      case 'STOPPED':
+      case "STOPPED":
         acc.stopped++;
         break;
     }
@@ -105,10 +105,10 @@ async function executeListSubscriptions(
  */
 export function createRAGSubscriptionListTool(context: ExecutionContext): AISdkTool {
   return tool({
-    description: 'List all active RAG subscriptions for the current agent, showing their status, configuration, and statistics.',
+    description: "List all active RAG subscriptions for the current agent, showing their status, configuration, and statistics.",
     execute: async () => {
       return executeToolWithErrorHandling(
-        'rag_subscription_list',
+        "rag_subscription_list",
         {},
         context,
         executeListSubscriptions

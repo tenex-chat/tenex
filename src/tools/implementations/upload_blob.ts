@@ -1,12 +1,12 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { logger } from '@/utils/logger';
-import type { NDKEvent } from '@nostr-dev-kit/ndk';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as crypto from "crypto";
 
 const uploadBlobSchema = z.object({
   input: z
@@ -40,16 +40,16 @@ interface BlossomConfig {
  */
 async function getBlossomConfig(): Promise<BlossomConfig> {
   try {
-    const configPath = path.join(process.cwd(), '.tenex', 'config.json');
-    const configContent = await fs.readFile(configPath, 'utf-8');
+    const configPath = path.join(process.cwd(), ".tenex", "config.json");
+    const configContent = await fs.readFile(configPath, "utf-8");
     const config = JSON.parse(configContent);
     return {
-      serverUrl: config.blossomServerUrl || 'https://blossom.primal.net'
+      serverUrl: config.blossomServerUrl || "https://blossom.primal.net"
     };
   } catch {
     // Return default configuration if file doesn't exist or has errors
     return {
-      serverUrl: 'https://blossom.primal.net'
+      serverUrl: "https://blossom.primal.net"
     };
   }
 }
@@ -61,34 +61,34 @@ function detectMimeType(filePath?: string, data?: Buffer): string {
   if (filePath) {
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes: Record<string, string> = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.mp4': 'video/mp4',
-      '.mov': 'video/quicktime',
-      '.avi': 'video/x-msvideo',
-      '.webm': 'video/webm',
-      '.mp3': 'audio/mpeg',
-      '.wav': 'audio/wav',
-      '.pdf': 'application/pdf',
-      '.json': 'application/json',
-      '.txt': 'text/plain',
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".mp4": "video/mp4",
+      ".mov": "video/quicktime",
+      ".avi": "video/x-msvideo",
+      ".webm": "video/webm",
+      ".mp3": "audio/mpeg",
+      ".wav": "audio/wav",
+      ".pdf": "application/pdf",
+      ".json": "application/json",
+      ".txt": "text/plain",
     };
-    return mimeTypes[ext] || 'application/octet-stream';
+    return mimeTypes[ext] || "application/octet-stream";
   }
 
   // Try to detect from data magic bytes
   if (data && data.length > 4) {
-    const header = data.slice(0, 4).toString('hex');
-    if (header.startsWith('ffd8ff')) return 'image/jpeg';
-    if (header === '89504e47') return 'image/png';
-    if (header === '47494638') return 'image/gif';
-    if (header.startsWith('52494646') && data.slice(8, 12).toString('hex') === '57454250') return 'image/webp';
+    const header = data.slice(0, 4).toString("hex");
+    if (header.startsWith("ffd8ff")) return "image/jpeg";
+    if (header === "89504e47") return "image/png";
+    if (header === "47494638") return "image/gif";
+    if (header.startsWith("52494646") && data.slice(8, 12).toString("hex") === "57454250") return "image/webp";
   }
 
-  return 'application/octet-stream';
+  return "application/octet-stream";
 }
 
 /**
@@ -96,21 +96,21 @@ function detectMimeType(filePath?: string, data?: Buffer): string {
  */
 function getExtensionFromMimeType(mimeType: string): string {
   const extensions: Record<string, string> = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'image/gif': '.gif',
-    'image/webp': '.webp',
-    'video/mp4': '.mp4',
-    'video/quicktime': '.mov',
-    'video/x-msvideo': '.avi',
-    'video/webm': '.webm',
-    'audio/mpeg': '.mp3',
-    'audio/wav': '.wav',
-    'application/pdf': '.pdf',
-    'application/json': '.json',
-    'text/plain': '.txt',
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/webm": ".webm",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
+    "application/pdf": ".pdf",
+    "application/json": ".json",
+    "text/plain": ".txt",
   };
-  return extensions[mimeType] || '';
+  return extensions[mimeType] || "";
 }
 
 /**
@@ -119,7 +119,7 @@ function getExtensionFromMimeType(mimeType: string): string {
 function isURL(input: string): boolean {
   try {
     const url = new URL(input);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
   }
@@ -129,11 +129,11 @@ function isURL(input: string): boolean {
  * Download media from URL
  */
 async function downloadFromURL(url: string): Promise<{ data: Buffer; mimeType?: string; filename?: string }> {
-  logger.info('[upload_blob] Downloading from URL', { url });
+  logger.info("[upload_blob] Downloading from URL", { url });
   
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'TENEX/1.0 (Blossom Upload Tool)'
+      "User-Agent": "TENEX/1.0 (Blossom Upload Tool)"
     }
   });
 
@@ -142,25 +142,25 @@ async function downloadFromURL(url: string): Promise<{ data: Buffer; mimeType?: 
   }
 
   // Get content type from headers
-  const contentType = response.headers.get('content-type');
-  const mimeType = contentType?.split(';')[0].trim();
+  const contentType = response.headers.get("content-type");
+  const mimeType = contentType?.split(";")[0].trim();
   
   // Try to extract filename from Content-Disposition header or URL
   let filename: string | undefined;
-  const contentDisposition = response.headers.get('content-disposition');
+  const contentDisposition = response.headers.get("content-disposition");
   if (contentDisposition) {
     const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
     if (filenameMatch) {
-      filename = filenameMatch[1].replace(/['"]/g, '');
+      filename = filenameMatch[1].replace(/['"]/g, "");
     }
   }
   
   if (!filename) {
     // Try to extract filename from URL
     const urlPath = new URL(url).pathname;
-    const pathSegments = urlPath.split('/');
+    const pathSegments = urlPath.split("/");
     const lastSegment = pathSegments[pathSegments.length - 1];
-    if (lastSegment && lastSegment.includes('.')) {
+    if (lastSegment && lastSegment.includes(".")) {
       filename = lastSegment;
     }
   }
@@ -168,7 +168,7 @@ async function downloadFromURL(url: string): Promise<{ data: Buffer; mimeType?: 
   const arrayBuffer = await response.arrayBuffer();
   const data = Buffer.from(arrayBuffer);
   
-  logger.info('[upload_blob] Downloaded from URL', {
+  logger.info("[upload_blob] Downloaded from URL", {
     size: data.length,
     mimeType,
     filename
@@ -181,7 +181,7 @@ async function downloadFromURL(url: string): Promise<{ data: Buffer; mimeType?: 
  * Calculate SHA256 hash of data
  */
 function calculateSHA256(data: Buffer): string {
-  return crypto.createHash('sha256').update(data).digest('hex');
+  return crypto.createHash("sha256").update(data).digest("hex");
 }
 
 /**
@@ -192,16 +192,16 @@ async function createAuthEvent(
   description: string,
   context: ExecutionContext
 ): Promise<NDKEvent> {
-  const { NDKEvent } = await import('@nostr-dev-kit/ndk');
+  const { NDKEvent } = await import("@nostr-dev-kit/ndk");
   
   const event = new NDKEvent();
   event.kind = 24242;
   event.content = description;
   event.created_at = Math.floor(Date.now() / 1000);
   event.tags = [
-    ['t', 'upload'],
-    ['x', sha256Hash],
-    ['expiration', String(Math.floor(Date.now() / 1000) + 3600)] // 1 hour expiration
+    ["t", "upload"],
+    ["x", sha256Hash],
+    ["expiration", String(Math.floor(Date.now() / 1000) + 3600)] // 1 hour expiration
   ];
   
   // Sign the event with the agent's signer
@@ -220,14 +220,14 @@ async function uploadToBlossomServer(
   authEvent: NDKEvent
 ): Promise<UploadBlobOutput> {
   // Encode the auth event as base64 for the header
-  const authHeader = `Nostr ${Buffer.from(JSON.stringify(authEvent.rawEvent())).toString('base64')}`;
+  const authHeader = `Nostr ${Buffer.from(JSON.stringify(authEvent.rawEvent())).toString("base64")}`;
   
   const response = await fetch(`${serverUrl}/upload`, {
-    method: 'PUT',
+    method: "PUT",
     headers: {
-      'Authorization': authHeader,
-      'Content-Type': mimeType,
-      'Content-Length': String(data.length),
+      "Authorization": authHeader,
+      "Content-Type": mimeType,
+      "Content-Length": String(data.length),
     },
     body: data,
   });
@@ -272,9 +272,9 @@ async function executeUploadBlob(
     throw new Error("The 'input' parameter is required. Pass the URL, file path, or base64 data via { input: '...' }. Note: The parameter name is 'input', not 'url' or 'file'.");
   }
   
-  logger.info('[upload_blob] Starting blob upload', {
+  logger.info("[upload_blob] Starting blob upload", {
     isURL: isURL(dataInput),
-    hasFilePath: !isURL(dataInput) && !dataInput.startsWith('data:') && !dataInput.includes(','),
+    hasFilePath: !isURL(dataInput) && !dataInput.startsWith("data:") && !dataInput.includes(","),
     hasMimeType: !!providedMimeType,
     description,
   });
@@ -283,7 +283,7 @@ async function executeUploadBlob(
   const config = await getBlossomConfig();
   const serverUrl = config.serverUrl;
   
-  logger.info('[upload_blob] Using Blossom server', { serverUrl });
+  logger.info("[upload_blob] Using Blossom server", { serverUrl });
 
   let data: Buffer;
   let mimeType: string;
@@ -295,27 +295,27 @@ async function executeUploadBlob(
     const downloadResult = await downloadFromURL(dataInput);
     data = downloadResult.data;
     mimeType = providedMimeType || downloadResult.mimeType || detectMimeType(downloadResult.filename, data);
-    uploadDescription = description || downloadResult.filename || 'Upload from URL';
-  } else if (dataInput.startsWith('data:') || dataInput.includes(',')) {
+    uploadDescription = description || downloadResult.filename || "Upload from URL";
+  } else if (dataInput.startsWith("data:") || dataInput.includes(",")) {
     // Handle base64 data (with or without data URL prefix)
-    const base64Data = dataInput.includes(',') 
-      ? dataInput.split(',')[1] 
+    const base64Data = dataInput.includes(",") 
+      ? dataInput.split(",")[1] 
       : dataInput;
     
     // Extract MIME type from data URL if present
-    if (dataInput.startsWith('data:')) {
+    if (dataInput.startsWith("data:")) {
       const matches = dataInput.match(/^data:([^;]+);/);
       if (matches) {
         mimeType = matches[1];
       } else {
-        mimeType = providedMimeType || 'application/octet-stream';
+        mimeType = providedMimeType || "application/octet-stream";
       }
     } else {
-      mimeType = providedMimeType || 'application/octet-stream';
+      mimeType = providedMimeType || "application/octet-stream";
     }
     
-    data = Buffer.from(base64Data, 'base64');
-    uploadDescription = description || 'Upload blob data';
+    data = Buffer.from(base64Data, "base64");
+    uploadDescription = description || "Upload blob data";
   } else {
     // Handle file path
     const filePath = path.resolve(dataInput);
@@ -335,7 +335,7 @@ async function executeUploadBlob(
   // Calculate SHA256 hash
   const sha256Hash = calculateSHA256(data);
   
-  logger.info('[upload_blob] Calculated SHA256', {
+  logger.info("[upload_blob] Calculated SHA256", {
     hash: sha256Hash,
     size: data.length,
     mimeType,
@@ -344,7 +344,7 @@ async function executeUploadBlob(
   // Create authorization event
   const authEvent = await createAuthEvent(sha256Hash, uploadDescription, context);
   
-  logger.info('[upload_blob] Created authorization event', {
+  logger.info("[upload_blob] Created authorization event", {
     eventId: authEvent.id,
     kind: authEvent.kind,
   });
@@ -353,7 +353,7 @@ async function executeUploadBlob(
     // Upload to Blossom server
     const result = await uploadToBlossomServer(serverUrl, data, mimeType, authEvent);
     
-    logger.info('[upload_blob] Upload successful', {
+    logger.info("[upload_blob] Upload successful", {
       url: result.url,
       sha256: result.sha256,
       size: result.size,
@@ -361,7 +361,7 @@ async function executeUploadBlob(
     
     return result;
   } catch (error) {
-    logger.error('[upload_blob] Upload failed', { error });
+    logger.error("[upload_blob] Upload failed", { error });
     throw error;
   }
 }
@@ -393,20 +393,20 @@ export function createUploadBlobTool(context: ExecutionContext): AISdkTool {
   });
 
   // Add human-readable content generation
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: (args: UploadBlobInput | undefined) => {
       if (!args || !args.input) {
-        return 'Uploading blob data';
+        return "Uploading blob data";
       }
       const { input, description } = args;
       
       if (isURL(input)) {
         const url = new URL(input);
-        return `Downloading and uploading from ${url.hostname}${description ? ` - ${description}` : ''}`;
-      } else if (!input.startsWith('data:') && !input.includes(',')) {
-        return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ''}`;
+        return `Downloading and uploading from ${url.hostname}${description ? ` - ${description}` : ""}`;
+      } else if (!input.startsWith("data:") && !input.includes(",")) {
+        return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ""}`;
       } else {
-        return `Uploading blob data${description ? ` - ${description}` : ''}`;
+        return `Uploading blob data${description ? ` - ${description}` : ""}`;
       }
     },
     enumerable: false,

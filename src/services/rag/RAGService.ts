@@ -1,9 +1,9 @@
-import { RAGDatabaseManager } from './RAGDatabaseManager';
-import { RAGOperations } from './RAGOperations';
-import { EmbeddingProviderFactory } from './EmbeddingProviderFactory';
-import type { EmbeddingProvider } from '../EmbeddingProvider';
-import type { RAGDocument, RAGCollection, RAGQueryResult } from './RAGOperations';
-import { logger } from '@/utils/logger';
+import { RAGDatabaseManager } from "./RAGDatabaseManager";
+import { RAGOperations } from "./RAGOperations";
+import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
+import type { EmbeddingProvider } from "../EmbeddingProvider";
+import type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
+import { logger } from "@/utils/logger";
 
 /**
  * Facade for RAG functionality
@@ -44,7 +44,7 @@ export class RAGService {
      */
     private async initialize(): Promise<void> {
         try {
-            logger.debug('Initializing RAGService components');
+            logger.debug("Initializing RAGService components");
             
             this.dbManager = new RAGDatabaseManager();
             this.embeddingProvider = await EmbeddingProviderFactory.create();
@@ -53,10 +53,10 @@ export class RAGService {
                 this.embeddingProvider
             );
             
-            logger.info('RAGService initialized successfully');
+            logger.info("RAGService initialized successfully");
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            logger.error('RAGService initialization failed', { error: message });
+            logger.error("RAGService initialization failed", { error: message });
             throw new Error(`Failed to initialize RAGService: ${message}`);
         }
     }
@@ -124,7 +124,7 @@ export class RAGService {
             provider
         );
         
-        logger.info('Embedding provider updated');
+        logger.info("Embedding provider updated");
     }
 
     /**
@@ -141,7 +141,7 @@ export class RAGService {
     public async close(): Promise<void> {
         await this.ensureInitialized();
         await this.dbManager.close();
-        logger.debug('RAGService closed');
+        logger.debug("RAGService closed");
     }
 
     /**
@@ -156,6 +156,6 @@ export class RAGService {
 }
 
 // Export the main types for convenience
-export type { RAGDocument, RAGCollection, RAGQueryResult } from './RAGOperations';
-export { RAGValidationError, RAGOperationError } from './RAGOperations';
-export { RAGDatabaseError } from './RAGDatabaseManager';
+export type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
+export { RAGValidationError, RAGOperationError } from "./RAGOperations";
+export { RAGDatabaseError } from "./RAGDatabaseManager";

@@ -1,18 +1,18 @@
-import { tool } from 'ai';
-import { claudeCode } from 'ai-sdk-provider-claude-code';
-import { createProviderRegistry } from 'ai';
+import { tool } from "ai";
+import { claudeCode } from "ai-sdk-provider-claude-code";
+import { createProviderRegistry } from "ai";
 import chalk from "chalk";
-import { LLMService } from '@/llm/service';
-import { LLMLogger } from '@/logging/LLMLogger';
+import { LLMService } from "@/llm/service";
+import { LLMLogger } from "@/logging/LLMLogger";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { llmOpsRegistry } from '@/services/LLMOperationsRegistry';
-import type { ClaudeCodeSettings } from 'ai-sdk-provider-claude-code';
-import type { ModelMessage } from 'ai';
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
+import type { ModelMessage } from "ai";
 
 export enum ClaudeCodeMode {
   WRITE = "WRITE",
@@ -46,11 +46,11 @@ type TodoWriteResult = {
 };
 
 function isTodoWriteResult(result: unknown): result is TodoWriteResult {
-  if (typeof result !== 'object' || result === null) {
+  if (typeof result !== "object" || result === null) {
     return false;
   }
   
-  if (!('todos' in result)) {
+  if (!("todos" in result)) {
     return false;
   }
   
@@ -62,11 +62,11 @@ function isTodoWriteResult(result: unknown): result is TodoWriteResult {
   
   return candidate.todos.every(todo => 
     todo &&
-    typeof todo === 'object' &&
-    'content' in todo &&
-    typeof todo.content === 'string' &&
-    'status' in todo &&
-    (todo.status === 'pending' || todo.status === 'in_progress' || todo.status === 'completed')
+    typeof todo === "object" &&
+    "content" in todo &&
+    typeof todo.content === "string" &&
+    "status" in todo &&
+    (todo.status === "pending" || todo.status === "in_progress" || todo.status === "completed")
   );
 }
 
@@ -92,10 +92,10 @@ async function executeClaudeCode(
     const metadataStore = context.agent.createMetadataStore(context.conversationId);
 
     // Get existing session from metadata
-    const existingSessionId = metadataStore.get<string>('sessionId');
+    const existingSessionId = metadataStore.get<string>("sessionId");
 
-    logger.info(`[claude_code] 🔍 SESSION CHECK:`, {
-      existingSessionId: existingSessionId || 'NONE',
+    logger.info("[claude_code] 🔍 SESSION CHECK:", {
+      existingSessionId: existingSessionId || "NONE",
       agent: context.agent.slug,
       conversationId: context.conversationId.substring(0, 8),
       mode,
@@ -103,13 +103,13 @@ async function executeClaudeCode(
     });
 
     if (existingSessionId) {
-      logger.info(`[claude_code] ✅ FOUND EXISTING SESSION`, {
+      logger.info("[claude_code] ✅ FOUND EXISTING SESSION", {
         sessionId: existingSessionId,
         agent: context.agent.slug,
         conversationId: context.conversationId.substring(0, 8),
       });
     } else {
-      logger.info(`[claude_code] 🆕 NO EXISTING SESSION - Will create new`, {
+      logger.info("[claude_code] 🆕 NO EXISTING SESSION - Will create new", {
         agent: context.agent.slug,
         conversationId: context.conversationId.substring(0, 8),
       });
@@ -163,11 +163,11 @@ async function executeClaudeCode(
     switch (mode) {
       case ClaudeCodeMode.READ:
         // Read-only mode - no write operations allowed
-        disallowedTools = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Delete'];
+        disallowedTools = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Delete"];
         break;
       case ClaudeCodeMode.PLAN:
         // Planning mode - focus on reading and todo management
-        allowedTools = ['Read', 'LS', 'Grep', 'Glob', 'TodoWrite', 'ExitPlanMode'];
+        allowedTools = ["Read", "LS", "Grep", "Glob", "TodoWrite", "ExitPlanMode"];
         break;
       case ClaudeCodeMode.WRITE:
         // Write mode - full access to all tools (default behavior)
@@ -177,24 +177,24 @@ async function executeClaudeCode(
 
     // Create provider registry with Claude Code
     const registry = createProviderRegistry({
-      'claude-code': {
+      "claude-code": {
         languageModel: (modelId: string) => {
-          logger.info(`[claude_code] 🔧 CREATING CLAUDE CODE OPTIONS:`, {
-            existingSessionId: existingSessionId || 'NONE',
+          logger.info("[claude_code] 🔧 CREATING CLAUDE CODE OPTIONS:", {
+            existingSessionId: existingSessionId || "NONE",
             willResume: !!existingSessionId,
             cwd: context.projectPath,
           });
 
           const options: ClaudeCodeSettings = {
             cwd: context.projectPath,
-            permissionMode: 'bypassPermissions',
+            permissionMode: "bypassPermissions",
             // Resume existing session if we have one
             resume: existingSessionId,
           };
 
-          logger.info(`[claude_code] 📋 FINAL PROVIDER OPTIONS:`, {
-            hasResume: 'resume' in options,
-            resumeValue: options.resume || 'UNDEFINED',
+          logger.info("[claude_code] 📋 FINAL PROVIDER OPTIONS:", {
+            hasResume: "resume" in options,
+            resumeValue: options.resume || "UNDEFINED",
             optionsKeys: Object.keys(options),
           });
           
@@ -217,14 +217,14 @@ async function executeClaudeCode(
     const llmService = new LLMService(
       llmLogger,
       registry,
-      'claude-code',
-      'opus',
+      "claude-code",
+      "opus",
       undefined, // temperature
       undefined  // maxTokens
     );
 
     // Set up event handlers for Nostr publishing
-    llmService.on('content', async ({ delta }) => {
+    llmService.on("content", async ({ delta }) => {
       logger.info("[claude_code] content", { delta });
       lastAssistantMessage += delta;
       messageCount++;
@@ -237,10 +237,10 @@ async function executeClaudeCode(
       );
     });
 
-    llmService.on('tool-did-execute', async ({ toolName, result }) => {
+    llmService.on("tool-did-execute", async ({ toolName, result }) => {
       logger.info("[claude_code] Tool executed", { toolName, result });
       
-      if (toolName === 'TodoWrite' && isTodoWriteResult(result)) {
+      if (toolName === "TodoWrite" && isTodoWriteResult(result)) {
         const todoLines = result.todos.map(todo => {
           let checkbox = "- [ ]";
           if (todo.status === "in_progress") {
@@ -257,7 +257,7 @@ async function executeClaudeCode(
           todoLines.join("\n"),
           baseEventContext
         );
-      } else if (toolName === 'ExitPlanMode' && mode === ClaudeCodeMode.PLAN) {
+      } else if (toolName === "ExitPlanMode" && mode === ClaudeCodeMode.PLAN) {
         // Capture plan result and abort
         planResult = result?.plan || "Plan completed";
         logger.info("[claude_code] ExitPlanMode detected", {
@@ -271,7 +271,7 @@ async function executeClaudeCode(
       }
     });
 
-    llmService.on('complete', ({ message, steps, usage }) => {
+    llmService.on("complete", ({ message, steps, usage }) => {
       console.log("ai sdk cc complete", chalk.green(message));
 
       logger.info("[claude_code] 🏁 STREAM COMPLETE EVENT:", {
@@ -286,14 +286,14 @@ async function executeClaudeCode(
         hasLastStep: !!lastStep,
         hasProviderMetadata: !!lastStep?.providerMetadata,
         providerMetadataKeys: lastStep?.providerMetadata ? Object.keys(lastStep.providerMetadata) : [],
-        claudeCodeMetadata: lastStep?.providerMetadata?.['claude-code'],
+        claudeCodeMetadata: lastStep?.providerMetadata?.["claude-code"],
       });
 
-      if (lastStep?.providerMetadata?.['claude-code']?.sessionId) {
-        capturedSessionId = lastStep.providerMetadata['claude-code'].sessionId;
+      if (lastStep?.providerMetadata?.["claude-code"]?.sessionId) {
+        capturedSessionId = lastStep.providerMetadata["claude-code"].sessionId;
         logger.info("[claude_code] ✨ CAPTURED NEW SESSION ID FROM PROVIDER", {
           capturedSessionId,
-          previousSessionId: existingSessionId || 'NONE',
+          previousSessionId: existingSessionId || "NONE",
           sessionChanged: capturedSessionId !== existingSessionId,
         });
       } else {
@@ -316,7 +316,7 @@ async function executeClaudeCode(
     // Build messages
     const messages: ModelMessage[] = [];
     messages.push({
-      role: 'user',
+      role: "user",
       content: prompt
     });
 
@@ -325,8 +325,8 @@ async function executeClaudeCode(
       messageRoles: messages.map(m => m.role),
       promptLength: prompt.length,
       promptPreview: prompt.substring(0, 500),
-      sessionMode: existingSessionId ? 'RESUME' : 'NEW',
-      existingSessionId: existingSessionId || 'NONE',
+      sessionMode: existingSessionId ? "RESUME" : "NEW",
+      existingSessionId: existingSessionId || "NONE",
       EXPLANATION: existingSessionId
         ? "Session already has context, only sending new user message"
         : "New session, sending complete prompt",
@@ -353,27 +353,27 @@ async function executeClaudeCode(
       // Only use real session IDs from Claude Code provider
       const sessionId = capturedSessionId || existingSessionId;
 
-      logger.info(`[claude_code] 📊 SESSION RESOLUTION:`, {
-        capturedSessionId: capturedSessionId || 'NONE',
-        existingSessionId: existingSessionId || 'NONE',
-        finalSessionId: sessionId || 'NONE',
-        source: capturedSessionId ? 'NEW_FROM_PROVIDER' : (existingSessionId ? 'EXISTING' : 'NONE'),
+      logger.info("[claude_code] 📊 SESSION RESOLUTION:", {
+        capturedSessionId: capturedSessionId || "NONE",
+        existingSessionId: existingSessionId || "NONE",
+        finalSessionId: sessionId || "NONE",
+        source: capturedSessionId ? "NEW_FROM_PROVIDER" : (existingSessionId ? "EXISTING" : "NONE"),
       });
 
       // Store session ID for future resumption
       if (sessionId) {
-        metadataStore.set('sessionId', sessionId);
+        metadataStore.set("sessionId", sessionId);
 
-        logger.info(`[claude_code] 💾 STORED SESSION FOR FUTURE USE`, {
+        logger.info("[claude_code] 💾 STORED SESSION FOR FUTURE USE", {
           sessionId,
           agent: context.agent.slug,
           conversationId: context.conversationId.substring(0, 8),
           wasUpdate: capturedSessionId && capturedSessionId !== existingSessionId,
         });
       } else {
-        logger.warn(`[claude_code] ⚠️ NO SESSION ID TO STORE`, {
-          capturedSessionId: capturedSessionId || 'NONE',
-          existingSessionId: existingSessionId || 'NONE',
+        logger.warn("[claude_code] ⚠️ NO SESSION ID TO STORE", {
+          capturedSessionId: capturedSessionId || "NONE",
+          existingSessionId: existingSessionId || "NONE",
         });
       }
 
@@ -411,7 +411,7 @@ async function executeClaudeCode(
       // Publish error update
       await context.agentPublisher.publishTaskUpdate(
         task,
-        `❌ Task ${isAborted ? 'interrupted' : 'failed'}\n\nError: ${errorMessage}`,
+        `❌ Task ${isAborted ? "interrupted" : "failed"}\n\nError: ${errorMessage}`,
         baseEventContext
       );
 

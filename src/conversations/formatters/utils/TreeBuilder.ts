@@ -1,6 +1,6 @@
-import { NDKEvent } from '@nostr-dev-kit/ndk';
-import { ThreadNode } from '../ThreadedConversationFormatter';
-import { getPubkeyNameRepository } from '@/services/PubkeyNameRepository';
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { ThreadNode } from "../ThreadedConversationFormatter";
+import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 
 export class TreeBuilder {
   /**
@@ -60,7 +60,7 @@ export class TreeBuilder {
   
   private findParentEventId(event: NDKEvent): string | null {
     // Look for 'e' tags that indicate a reply
-    const eTags = event.tags.filter(tag => tag[0] === 'e');
+    const eTags = event.tags.filter(tag => tag[0] === "e");
     
     // The convention is that the first 'e' tag is the root,
     // and the last 'e' tag is the direct parent (if multiple e tags)
@@ -68,7 +68,7 @@ export class TreeBuilder {
       return eTags[0][1]; // Single e tag is the parent
     } else if (eTags.length > 1) {
       // Check for 'reply' marker
-      const replyTag = eTags.find(tag => tag[3] === 'reply');
+      const replyTag = eTags.find(tag => tag[3] === "reply");
       if (replyTag) {
         return replyTag[1];
       }
@@ -88,7 +88,7 @@ export class TreeBuilder {
   
   private extractToolCall(event: NDKEvent): { name: string; args?: string } | undefined {
     // Look for tool call indicators in tags
-    const toolTag = event.tags.find(tag => tag[0] === 'tool');
+    const toolTag = event.tags.find(tag => tag[0] === "tool");
     if (toolTag) {
       return {
         name: toolTag[1],

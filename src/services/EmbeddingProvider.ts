@@ -1,4 +1,4 @@
-import { pipeline, type Pipeline } from '@xenova/transformers';
+import { pipeline, type Pipeline } from "@xenova/transformers";
 
 export interface EmbeddingProvider {
     /**
@@ -31,7 +31,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     private dimensions: number | null = null;
     private initializationPromise: Promise<void> | null = null;
     
-    constructor(modelId: string = 'Xenova/all-MiniLM-L6-v2') {
+    constructor(modelId: string = "Xenova/all-MiniLM-L6-v2") {
         this.modelId = modelId;
         this.initializationPromise = this.initialize();
     }
@@ -43,7 +43,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     private async initialize(): Promise<void> {
         try {
             const pipe = await this.ensurePipeline();
-            const output = await pipe('test', { pooling: 'mean', normalize: true });
+            const output = await pipe("test", { pooling: "mean", normalize: true });
             
             const embedding = output.data instanceof Float32Array 
                 ? output.data 
@@ -61,7 +61,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     
     private async ensurePipeline(): Promise<Pipeline> {
         if (!this.pipeline) {
-            this.pipeline = await pipeline('feature-extraction', this.modelId) as Pipeline;
+            this.pipeline = await pipeline("feature-extraction", this.modelId) as Pipeline;
         }
         return this.pipeline;
     }
@@ -77,7 +77,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
         const results: Float32Array[] = [];
         
         for (const text of texts) {
-            const output = await pipe(text, { pooling: 'mean', normalize: true });
+            const output = await pipe(text, { pooling: "mean", normalize: true });
             
             if (output.data instanceof Float32Array) {
                 results.push(output.data);
@@ -109,8 +109,8 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
         
         if (this.dimensions === null) {
             throw new Error(
-                'Embedding dimensions not available after initialization. ' +
-                'This indicates a critical initialization failure.'
+                "Embedding dimensions not available after initialization. " +
+                "This indicates a critical initialization failure."
             );
         }
         
@@ -130,13 +130,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     private modelId: string;
     private dimensions: number;
     
-    constructor(apiKey: string, modelId: string = 'text-embedding-3-small') {
+    constructor(apiKey: string, modelId: string = "text-embedding-3-small") {
         this.apiKey = apiKey;
         this.modelId = modelId;
         // Default dimensions for common models
-        this.dimensions = modelId === 'text-embedding-3-small' ? 1536 : 
-                         modelId === 'text-embedding-3-large' ? 3072 : 
-                         modelId === 'text-embedding-ada-002' ? 1536 : 1536;
+        this.dimensions = modelId === "text-embedding-3-small" ? 1536 : 
+                         modelId === "text-embedding-3-large" ? 3072 : 
+                         modelId === "text-embedding-ada-002" ? 1536 : 1536;
     }
     
     public async embed(text: string): Promise<Float32Array> {
@@ -145,11 +145,11 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
     
     public async embedBatch(texts: string[]): Promise<Float32Array[]> {
-        const response = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
+        const response = await fetch("https://api.openai.com/v1/embeddings", {
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${this.apiKey}`
             },
             body: JSON.stringify({
                 model: this.modelId,

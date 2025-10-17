@@ -1,19 +1,19 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RAGService } from '@/services/RAGService';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RAGService } from "@/services/RAGService";
 import { 
     executeToolWithErrorHandling, 
     type ToolResponse 
-} from '@/tools/utils';
+} from "@/tools/utils";
 
 const ragCreateCollectionSchema = z.object({
     name: z.string().describe(
-        'Name of the collection to create (alphanumeric with underscores)'
+        "Name of the collection to create (alphanumeric with underscores)"
     ),
     schema: z.record(z.any()).optional().describe(
-        'Optional custom schema for the collection (default includes id, content, vector, metadata, timestamp, source)'
+        "Optional custom schema for the collection (default includes id, content, vector, metadata, timestamp, source)"
     ),
 });
 
@@ -45,11 +45,11 @@ async function executeCreateCollection(
  */
 export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkTool {
     return tool({
-        description: 'Create a new RAG collection (vector database) for storing documents with semantic search capabilities',
+        description: "Create a new RAG collection (vector database) for storing documents with semantic search capabilities",
         inputSchema: ragCreateCollectionSchema,
         execute: async (input: z.infer<typeof ragCreateCollectionSchema>) => {
             return executeToolWithErrorHandling(
-                'rag_create_collection',
+                "rag_create_collection",
                 input,
                 context,
                 executeCreateCollection

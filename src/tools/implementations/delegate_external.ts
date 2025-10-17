@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
@@ -35,9 +35,9 @@ async function executeDelegateExternal(input: DelegateExternalInput, context: Ex
   // Check for self-delegation (not allowed in delegate_external tool)
   if (pubkey === context.agent.pubkey) {
     throw new Error(
-      `Self-delegation is not permitted with the delegate_external tool. ` +
+      "Self-delegation is not permitted with the delegate_external tool. " +
       `Agent "${context.agent.slug}" cannot delegate to itself as an external agent. ` +
-      `Use the delegate_phase tool if you need to transition phases within the same agent.`
+      "Use the delegate_phase tool if you need to transition phases within the same agent."
     );
   }
 
@@ -177,7 +177,7 @@ When using this tool, provide context to the recipient, introduce yourself and e
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ recipient, projectId }: DelegateExternalInput) => {
       let message = `Delegating to external agent ${recipient}`;
       if (projectId) {

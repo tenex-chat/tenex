@@ -68,20 +68,17 @@ export class ProjectManager implements IProjectManager {
       // Create project structure (without nsec in config)
       await this.createProjectStructure(projectPath, projectData);
 
-      // Initialize agent registry
+      // Initialize agent registry with new simplified model
       const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
-      const agentRegistry = new AgentRegistry(projectPath, false);
+      const agentRegistry = new AgentRegistry(projectPath);
 
-      // IMPORTANT: Load existing registry first to preserve nsecs
-      await agentRegistry.loadFromProject();
-
-      // Then fetch and install/update agents from Nostr (source of truth)
-      logger.info(`Installing/updating ${projectData.agentEventIds.length} agents from Nostr events`);
+      // Install agents from Nostr events
+      logger.info(`Installing ${projectData.agentEventIds.length} agents from Nostr events`);
       const { installAgentFromEvent } = await import("@/utils/agentInstaller");
 
       for (const eventId of projectData.agentEventIds) {
         try {
-          logger.debug(`Installing/updating agent from event: ${eventId}`);
+          logger.debug(`Installing agent from event: ${eventId}`);
           await installAgentFromEvent(eventId, projectPath, project, undefined, ndk, agentRegistry);
         } catch (error) {
           logger.error(`Failed to install agent ${eventId} from Nostr`, { error });
@@ -102,8 +99,8 @@ export class ProjectManager implements IProjectManager {
         }
       }
 
-      // Now load from local files (which were just created/updated)
-      await agentRegistry.loadFromProject();
+      // Load agents from new storage
+      await agentRegistry.loadFromProject(project);
 
       // Create and initialize LLM logger
       const llmLogger = new LLMLogger();
@@ -185,73 +182,11 @@ export class ProjectManager implements IProjectManager {
         projectNaddr: config.projectNaddr,
       });
 
-      // Load agents using AgentRegistry
+      // Load agents using simplified AgentRegistry
+      // loadFromProject handles everything: loading from storage and installing from Nostr
       const AgentRegistry = (await import("@/agents/AgentRegistry")).AgentRegistry;
-      const agentRegistry = new AgentRegistry(projectPath, false);
-
-      // IMPORTANT: Load existing registry first to preserve nsecs
-      await agentRegistry.loadFromProject();
-
-      // Then fetch and install/update agents from Nostr (source of truth)
-      const agentEventIds = project.tags
-        .filter((t) => t[0] === "agent" && t[1])
-        .map((t) => t[1])
-        .filter(Boolean) as string[];
-
-      logger.info(`Installing/updating ${agentEventIds.length} agents from Nostr events`);
-      const { installAgentFromEvent, loadAgentFromLocalFile } = await import("@/utils/agentInstaller");
-
-      const failedAgents: string[] = [];
-      for (const eventId of agentEventIds) {
-        try {
-          logger.debug(`Installing/updating agent from event: ${eventId}`);
-          const result = await installAgentFromEvent(eventId, projectPath, project, undefined, ndk, agentRegistry);
-          if (!result.success && !result.alreadyExists) {
-            // Try loading from local file as fallback
-            logger.info(`Attempting to load agent ${eventId} from local file as fallback`);
-            const localResult = await loadAgentFromLocalFile(eventId, projectPath, agentRegistry);
-            if (!localResult.success) {
-              logger.error(`Failed to install agent ${eventId}: ${result.error}`);
-              logger.error(`Also failed to load from local: ${localResult.error}`);
-              failedAgents.push(eventId);
-            } else {
-              logger.warn(`Loaded agent ${eventId} from local file (Nostr sync unavailable)`);
-            }
-          }
-        } catch (error) {
-          logger.error(`Failed to install agent ${eventId} from Nostr`, { error });
-          // Try loading from local file as fallback
-          try {
-            const localResult = await loadAgentFromLocalFile(eventId, projectPath, agentRegistry);
-            if (localResult.success) {
-              logger.warn(`Loaded agent ${eventId} from local file after Nostr failure`);
-            } else {
-              failedAgents.push(eventId);
-            }
-          } catch (localError) {
-            logger.error(`Also failed to load agent ${eventId} from local file`, { localError });
-            failedAgents.push(eventId);
-          }
-        }
-      }
-
-      // If critical agents failed to load, throw a more informative error
-      if (failedAgents.length > 0) {
-        // Check if PM agent is among the failed ones
-        const pmTag = project.tags.find((tag: string[]) => tag[0] === "pm" && tag[1]);
-        const pmEventId = pmTag ? pmTag[1] : agentEventIds[0]; // PM or first agent
-
-        if (failedAgents.includes(pmEventId)) {
-          throw new Error(
-            `Critical agent failed to load from Nostr. ` +
-            `Agent event ID ${pmEventId} could not be fetched. ` +
-            `This might be due to network issues or the event not being available on the configured relays. ` +
-            `Please check your network connection and relay configuration.`
-          );
-        }
-
-        logger.warn(`${failedAgents.length} agent(s) failed to load from Nostr but continuing with available agents`);
-      }
+      const agentRegistry = new AgentRegistry(projectPath);
+      await agentRegistry.loadFromProject(project);
 
       // Create and initialize LLM logger
       const llmLogger = new LLMLogger();

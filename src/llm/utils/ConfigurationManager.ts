@@ -32,9 +32,9 @@ export class ConfigurationManager {
     
     // Select model based on provider
     let model: string;
-    if (provider === 'openrouter') {
+    if (provider === "openrouter") {
       model = await ModelSelector.selectOpenRouterModel();
-    } else if (provider === 'ollama') {
+    } else if (provider === "ollama") {
       model = await ModelSelector.selectOllamaModel();
     } else {
       const { inputModel } = await inquirer.prompt([{

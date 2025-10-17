@@ -48,12 +48,12 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
 /**
  * Delegate tools that should be excluded from configuration and kind 24010 events
  */
-export const DELEGATE_TOOLS = ['ask', 'delegate', 'delegate_phase', 'delegate_external', 'delegate_followup'] as const;
+export const DELEGATE_TOOLS = ["ask", "delegate", "delegate_phase", "delegate_external", "delegate_followup"] as const;
 
 /**
  * Phase management tools
  */
-export const PHASE_MANAGEMENT_TOOLS = ['phase_add', 'phase_remove'] as const;
+export const PHASE_MANAGEMENT_TOOLS = ["phase_add", "phase_remove"] as const;
 
 /**
  * Get the correct delegate tools for an agent based on whether they have phases defined
@@ -63,24 +63,24 @@ export function getDelegateToolsForAgent(agent: { phases?: Record<string, string
   const tools: string[] = [];
 
   // All agents get ask tool
-  tools.push('ask');
+  tools.push("ask");
 
   // Check if agent has phases defined
   const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
 
   if (hasPhases) {
     // Agents with phases get delegate_phase
-    tools.push('delegate_phase');
+    tools.push("delegate_phase");
     // Also add phase management tools by default for agents with phases
-    tools.push('phase_add', 'phase_remove');
+    tools.push("phase_add", "phase_remove");
   } else {
     // Agents without phases get delegate
-    tools.push('delegate');
+    tools.push("delegate");
   }
 
   // All agents get delegate_external and delegate_followup
-  tools.push('delegate_external');
-  tools.push('delegate_followup');
+  tools.push("delegate_external");
+  tools.push("delegate_followup");
 
   return tools;
 }

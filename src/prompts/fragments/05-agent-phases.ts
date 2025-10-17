@@ -29,7 +29,7 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
     // List all phases with their instructions
     for (const [phaseName, instructions] of Object.entries(agent.phases)) {
       parts.push(`### Phase: ${phaseName.toUpperCase()}`);
-      parts.push(`**Instructions that will be provided to delegated agents:**`);
+      parts.push("**Instructions that will be provided to delegated agents:**");
       parts.push(instructions);
       parts.push("");
     }

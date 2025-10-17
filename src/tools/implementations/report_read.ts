@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { ReportManager } from "@/services/ReportManager";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -33,7 +33,7 @@ interface ReportReadOutput {
 /**
  * Format article data for display
  */
-function formatArticleContent(article: ReportReadOutput['article']): string {
+function formatArticleContent(article: ReportReadOutput["article"]): string {
   if (!article) {
     return "No article data available";
   }
@@ -43,7 +43,7 @@ function formatArticleContent(article: ReportReadOutput['article']): string {
   // Title section
   if (article.title) {
     sections.push(`# ${article.title}`);
-    sections.push(''); // Empty line for spacing
+    sections.push(""); // Empty line for spacing
   }
   
   // Metadata section
@@ -63,42 +63,42 @@ function formatArticleContent(article: ReportReadOutput['article']): string {
   }
   
   if (article.hashtags && article.hashtags.length > 0) {
-    metadata.push(`**Tags:** ${article.hashtags.map(tag => `#${tag}`).join(', ')}`);
+    metadata.push(`**Tags:** ${article.hashtags.map(tag => `#${tag}`).join(", ")}`);
   }
   
   if (metadata.length > 0) {
-    sections.push(metadata.join('\n'));
-    sections.push(''); // Empty line for spacing
+    sections.push(metadata.join("\n"));
+    sections.push(""); // Empty line for spacing
   }
   
   // Summary section
   if (article.summary) {
-    sections.push('## Summary');
+    sections.push("## Summary");
     sections.push(article.summary);
-    sections.push(''); // Empty line for spacing
+    sections.push(""); // Empty line for spacing
   }
   
   // Content section
   if (article.content) {
-    sections.push('## Content');
+    sections.push("## Content");
     sections.push(article.content);
-    sections.push(''); // Empty line for spacing
+    sections.push(""); // Empty line for spacing
   }
   
   // Reference section
   if (article.projectReference) {
-    sections.push('---');
+    sections.push("---");
     sections.push(`**Project Reference:** ${article.projectReference}`);
   }
   
   if (article.id) {
     if (!article.projectReference) {
-      sections.push('---');
+      sections.push("---");
     }
     sections.push(`**Nostr ID:** ${article.id}`);
   }
   
-  return sections.join('\n').trim();
+  return sections.join("\n").trim();
 }
 
 /**
@@ -118,7 +118,7 @@ async function executeReportRead(
   const reportManager = new ReportManager();
 
   // Remove nostr: prefix if present
-  const cleanIdentifier = identifier.startsWith('nostr:')
+  const cleanIdentifier = identifier.startsWith("nostr:")
     ? identifier.slice(6)
     : identifier;
 
@@ -189,7 +189,7 @@ export function createReportReadTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ identifier }: ReportReadInput) => {
       return `Reading report: ${identifier}`;
     },

@@ -25,9 +25,9 @@ export interface OpenRouterModelsResponse {
  */
 export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/models', {
+    const response = await fetch("https://openrouter.ai/api/v1/models", {
       headers: {
-        'Accept': 'application/json',
+        "Accept": "application/json",
       }
     });
 
@@ -41,12 +41,12 @@ export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
     return data.data.sort((a, b) => {
       // Prioritize commonly used models
       const priority = [
-        'openai/gpt-4',
-        'openai/gpt-4-turbo',
-        'anthropic/claude-3-5-sonnet',
-        'anthropic/claude-3-opus',
-        'google/gemini-2.0-flash',
-        'google/gemini-pro',
+        "openai/gpt-4",
+        "openai/gpt-4-turbo",
+        "anthropic/claude-3-5-sonnet",
+        "anthropic/claude-3-opus",
+        "google/gemini-2.0-flash",
+        "google/gemini-pro",
       ];
       
       const aIndex = priority.indexOf(a.id);
@@ -59,7 +59,7 @@ export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
       return a.name.localeCompare(b.name);
     });
   } catch (error) {
-    console.error('Error fetching OpenRouter models:', error);
+    console.error("Error fetching OpenRouter models:", error);
     return [];
   }
 }
@@ -69,34 +69,34 @@ export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
  */
 export function getPopularModels(): Record<string, string[]> {
   return {
-    'OpenAI': [
-      'openai/gpt-4',
-      'openai/gpt-4-turbo',
-      'openai/gpt-3.5-turbo',
-      'openai/o1-preview',
-      'openai/o1-mini',
+    "OpenAI": [
+      "openai/gpt-4",
+      "openai/gpt-4-turbo",
+      "openai/gpt-3.5-turbo",
+      "openai/o1-preview",
+      "openai/o1-mini",
     ],
-    'Anthropic': [
-      'anthropic/claude-3-5-sonnet',
-      'anthropic/claude-3-opus',
-      'anthropic/claude-3-haiku',
-      'anthropic/claude-3-5-haiku',
+    "Anthropic": [
+      "anthropic/claude-3-5-sonnet",
+      "anthropic/claude-3-opus",
+      "anthropic/claude-3-haiku",
+      "anthropic/claude-3-5-haiku",
     ],
-    'Google': [
-      'google/gemini-2.0-flash-thinking-exp',
-      'google/gemini-2.0-flash-exp',
-      'google/gemini-pro',
-      'google/gemini-pro-1.5',
+    "Google": [
+      "google/gemini-2.0-flash-thinking-exp",
+      "google/gemini-2.0-flash-exp",
+      "google/gemini-pro",
+      "google/gemini-pro-1.5",
     ],
-    'Meta': [
-      'meta-llama/llama-3.1-405b-instruct',
-      'meta-llama/llama-3.1-70b-instruct',
-      'meta-llama/llama-3.1-8b-instruct',
+    "Meta": [
+      "meta-llama/llama-3.1-405b-instruct",
+      "meta-llama/llama-3.1-70b-instruct",
+      "meta-llama/llama-3.1-8b-instruct",
     ],
-    'Mistral': [
-      'mistralai/mistral-large',
-      'mistralai/mixtral-8x22b-instruct',
-      'mistralai/mixtral-8x7b-instruct',
+    "Mistral": [
+      "mistralai/mistral-large",
+      "mistralai/mixtral-8x22b-instruct",
+      "mistralai/mixtral-8x7b-instruct",
     ],
   };
 }

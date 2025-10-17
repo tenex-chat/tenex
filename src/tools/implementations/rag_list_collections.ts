@@ -1,16 +1,16 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RAGService } from '@/services/RAGService';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RAGService } from "@/services/RAGService";
 import { 
     executeToolWithErrorHandling,
     type ToolResponse 
-} from '@/tools/utils';
+} from "@/tools/utils";
 
 const ragListCollectionsSchema = z.object({
     include_stats: z.boolean().optional().default(false).describe(
-        'Whether to include statistics for each collection (document count, size, etc.)'
+        "Whether to include statistics for each collection (document count, size, etc.)"
     ),
 });
 
@@ -35,7 +35,7 @@ async function executeListCollections(
     
     // If stats requested, add a note that it's not yet implemented
     if (include_stats && collections.length > 0) {
-        response.note = 'Statistics feature is planned for future release';
+        response.note = "Statistics feature is planned for future release";
     }
     
     return response;
@@ -46,11 +46,11 @@ async function executeListCollections(
  */
 export function createRAGListCollectionsTool(context: ExecutionContext): AISdkTool {
     return tool({
-        description: 'List all available RAG collections in the system',
+        description: "List all available RAG collections in the system",
         inputSchema: ragListCollectionsSchema,
         execute: async (input: z.infer<typeof ragListCollectionsSchema>) => {
             return executeToolWithErrorHandling(
-                'rag_list_collections',
+                "rag_list_collections",
                 input,
                 context,
                 executeListCollections

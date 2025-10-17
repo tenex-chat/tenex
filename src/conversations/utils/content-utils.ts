@@ -28,19 +28,19 @@ export function stripThinkingBlocks(content: string): string {
     // 1. Only collapse multiple spaces that aren't at the beginning of a line (preserve indentation)
     // 2. Collapse multiple blank lines to a single newline
     stripped = stripped
-        .split('\n')
+        .split("\n")
         .map(line => {
             // Only collapse spaces in the middle of lines, not at the start (preserve indentation)
             if (line.trimStart() !== line) {
                 // Line has leading whitespace - preserve it
-                const leadingWhitespace = line.match(/^\s*/)?.[0] || '';
+                const leadingWhitespace = line.match(/^\s*/)?.[0] || "";
                 const rest = line.slice(leadingWhitespace.length);
-                return leadingWhitespace + rest.replace(/  +/g, ' ');
+                return leadingWhitespace + rest.replace(/  +/g, " ");
             }
             // No leading whitespace - collapse all multiple spaces
-            return line.replace(/  +/g, ' ');
+            return line.replace(/  +/g, " ");
         })
-        .join('\n')
+        .join("\n")
         .replace(/\n\s*\n+/g, "\n")  // Collapse 2+ newlines to single newline
         .trim();                      // Trim leading/trailing whitespace
     

@@ -37,7 +37,7 @@ export class ConfigurationTester {
       }
       
       // Create a simple mock logger for testing
-      const mockLogger: Pick<LLMLogger, 'logLLMRequest' | 'logLLMResponse'> = {
+      const mockLogger: Pick<LLMLogger, "logLLMRequest" | "logLLMResponse"> = {
         logLLMRequest: async () => {},
         logLLMResponse: async () => {}
       };
@@ -57,15 +57,15 @@ export class ConfigurationTester {
       });
       
       console.log(chalk.green("\n✅ Test successful!"));
-      const resultText = 'text' in result ? result.text : '';
+      const resultText = "text" in result ? result.text : "";
       console.log(chalk.white("Response: ") + chalk.cyan(resultText));
       
       // Show usage stats if available
-      if ('usage' in result && result.usage) {
+      if ("usage" in result && result.usage) {
         const usage = result.usage;
-        const promptTokens = usage.promptTokens ?? '?';
-        const completionTokens = usage.completionTokens ?? '?';
-        const totalTokens = usage.totalTokens ?? '?';
+        const promptTokens = usage.promptTokens ?? "?";
+        const completionTokens = usage.completionTokens ?? "?";
+        const totalTokens = usage.totalTokens ?? "?";
         console.log(chalk.gray(`\nTokens: ${promptTokens} + ${completionTokens} = ${totalTokens}`));
       }
       
@@ -80,11 +80,11 @@ export class ConfigurationTester {
       }
       
       // Check for common issues
-      if (errorMessage?.includes('401') || errorMessage?.includes('Unauthorized')) {
+      if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
         console.log(chalk.yellow("\n💡 Invalid or expired API key"));
-      } else if (errorMessage?.includes('404')) {
+      } else if (errorMessage?.includes("404")) {
         console.log(chalk.yellow(`\n💡 Model '${config.model}' may not be available`));
-      } else if (errorMessage?.includes('rate limit')) {
+      } else if (errorMessage?.includes("rate limit")) {
         console.log(chalk.yellow("\n💡 Rate limit hit. Please wait and try again"));
       }
       

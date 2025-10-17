@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { AGENTS_FILE, CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
+import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import type { LLMService } from "@/llm/service";
@@ -9,13 +9,11 @@ import type {
   ConfigFile,
   LLMConfiguration,
   LoadedConfig,
-  TenexAgents,
   TenexConfig,
   TenexLLMs,
   TenexMCP,
 } from "@/services/config/types";
 import {
-  TenexAgentsSchema,
   TenexConfigSchema,
   TenexLLMsSchema,
   TenexMCPSchema,
@@ -98,10 +96,7 @@ export class ConfigService {
       ],
     };
 
-    // Load agents (merge global and project)
-    const globalAgents = await this.loadTenexAgents(globalPath);
-    const projectAgents = projPath ? await this.loadTenexAgents(projPath) : {};
-    const agents: TenexAgents = { ...globalAgents, ...projectAgents };
+    // No longer loading agents from config files
 
     // Load LLMs (merge global and project)
     const globalLLMs = await this.loadTenexLLMs(globalPath);
@@ -124,7 +119,7 @@ export class ConfigService {
       enabled: projectMCP.enabled !== undefined ? projectMCP.enabled : globalMCP.enabled,
     };
 
-    const loadedConfig = { config, agents, llms, mcp };
+    const loadedConfig = { config, llms, mcp };
     this.loadedConfig = loadedConfig;
 
     // Initialize the LLM factory with provider configs
@@ -145,13 +140,6 @@ export class ConfigService {
     );
   }
 
-  async loadTenexAgents(basePath: string): Promise<TenexAgents> {
-    return this.loadConfigFile(
-      this.getConfigFilePath(basePath, AGENTS_FILE),
-      TenexAgentsSchema,
-      {}
-    );
-  }
 
   async loadTenexLLMs(basePath: string): Promise<TenexLLMs> {
     return this.loadConfigFile(this.getConfigFilePath(basePath, LLMS_FILE), TenexLLMsSchema, {
@@ -189,13 +177,6 @@ export class ConfigService {
     );
   }
 
-  async saveTenexAgents(basePath: string, agents: TenexAgents): Promise<void> {
-    await this.saveConfigFile(
-      this.getConfigFilePath(basePath, AGENTS_FILE),
-      agents,
-      TenexAgentsSchema
-    );
-  }
 
   async saveTenexLLMs(basePath: string, llms: TenexLLMs): Promise<void> {
     await this.saveConfigFile(this.getConfigFilePath(basePath, LLMS_FILE), llms, TenexLLMsSchema);
@@ -262,7 +243,7 @@ export class ConfigService {
     if (!config) {
       const available = Object.keys(this.loadedConfig.llms.configurations);
       throw new Error(
-        `No valid LLM configuration found. Requested: "${configName || 'default'}". ` +
+        `No valid LLM configuration found. Requested: "${configName || "default"}". ` +
         `Available: ${available.length > 0 ? available.join(", ") : "none"}`
       );
     }
@@ -355,22 +336,6 @@ export class ConfigService {
     await this.saveTenexConfig(projPath, config);
   }
 
-  async saveGlobalAgents(agents: TenexAgents): Promise<void> {
-    const globalPath = this.getGlobalPath();
-    await ensureDirectory(globalPath);
-    await this.saveTenexAgents(globalPath, agents);
-  }
-
-  async loadProjectAgents(projectPath: string): Promise<TenexAgents> {
-    const projPath = this.getProjectPath(projectPath);
-    return this.loadTenexAgents(projPath);
-  }
-
-  async saveProjectAgents(projectPath: string, agents: TenexAgents): Promise<void> {
-    const projPath = this.getProjectPath(projectPath);
-    await ensureDirectory(projPath);
-    await this.saveTenexAgents(projPath, agents);
-  }
 
   async saveGlobalLLMs(llms: TenexLLMs): Promise<void> {
     const globalPath = this.getGlobalPath();

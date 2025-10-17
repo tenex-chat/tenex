@@ -729,7 +729,7 @@ export class DelegationRegistry extends EventEmitter {
       
       // Deserialize NDKEvent objects when loading delegations
       const deserializedDelegations = validatedData.delegations.map(([key, record]) => {
-        if (record.completion?.event && typeof record.completion.event === 'string') {
+        if (record.completion?.event && typeof record.completion.event === "string") {
           const deserializedRecord = { ...record };
           deserializedRecord.completion = {
             ...record.completion,

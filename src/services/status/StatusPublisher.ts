@@ -196,7 +196,7 @@ export class StatusPublisher {
       }
 
       logger.debug(`Found ${Object.keys(llms.configurations).length} LLM configurations`);
-      logger.debug(`Global default configuration: ${llms.default || 'none'}`);
+      logger.debug(`Global default configuration: ${llms.default || "none"}`);
 
       // Process agent-specific configurations
       if (isProjectContextInitialized()) {
@@ -207,7 +207,7 @@ export class StatusPublisher {
 
         // Map each agent to its configuration
         const agentsList = Array.from(projectCtx.agentRegistry.getAllAgentsMap().keys());
-        logger.debug(`Mapping ${agentsList.length} agents to configurations: ${agentsList.join(', ')}`);
+        logger.debug(`Mapping ${agentsList.length} agents to configurations: ${agentsList.join(", ")}`);
         
         for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
           // Check if agent has a specific llmConfig
@@ -234,7 +234,7 @@ export class StatusPublisher {
       // Add models to intent
       for (const [configSlug, agentSet] of configToAgents) {
         const agentSlugs = Array.from(agentSet).sort(); // Sort for consistency
-        logger.debug(`Configuration '${configSlug}' has ${agentSlugs.length} agents: ${agentSlugs.join(', ')}`);
+        logger.debug(`Configuration '${configSlug}' has ${agentSlugs.length} agents: ${agentSlugs.join(", ")}`);
         intent.models.push({
           slug: configSlug,
           agents: agentSlugs,

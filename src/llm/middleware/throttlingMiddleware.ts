@@ -8,25 +8,25 @@ import * as path from "path";
 
 // Type guards for stream parts with delta content
 interface TextDeltaChunk {
-  type: 'text-delta';
+  type: "text-delta";
   delta?: string;
   text?: string;
   id?: string;
 }
 
 interface ReasoningDeltaChunk {
-  type: 'reasoning-delta';
+  type: "reasoning-delta";
   delta?: string;
   text?: string;
   id?: string;
 }
 
 function isTextDelta(chunk: LanguageModelV1StreamPart): chunk is TextDeltaChunk {
-  return chunk.type === 'text-delta';
+  return chunk.type === "text-delta";
 }
 
 function isReasoningDelta(chunk: LanguageModelV1StreamPart): chunk is ReasoningDeltaChunk {
-  return chunk.type === 'reasoning-delta';
+  return chunk.type === "reasoning-delta";
 }
 
 /**
@@ -45,18 +45,18 @@ function isReasoningDelta(chunk: LanguageModelV1StreamPart): chunk is ReasoningD
 export function throttlingMiddleware(
   options: {
     flushInterval?: number;
-    chunking?: 'line' | 'none';
+    chunking?: "line" | "none";
   } = {},
 ): Experimental_LanguageModelV1Middleware {
   const flushInterval = options.flushInterval ?? 500; // Default 500ms
-  const chunking = options.chunking ?? 'line'; // Default to line-based chunking
+  const chunking = options.chunking ?? "line"; // Default to line-based chunking
 
   return {
     middlewareVersion: "v2" as const,
     wrapStream: async ({ doStream }) => {
       const startTime = Date.now();
-      const sessionId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).substring(7)}`;
-      const logDir = path.join(process.cwd(), '.tenex', 'debug', 'stream-chunks');
+      const sessionId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).substring(7)}`;
+      const logDir = path.join(process.cwd(), ".tenex", "debug", "stream-chunks");
       const logFile = path.join(logDir, `stream-${sessionId}.jsonl`);
 
       // Ensure debug directory exists
@@ -97,8 +97,8 @@ export function throttlingMiddleware(
 
           await fs.appendFile(
             logFile,
-            JSON.stringify(rawChunkLog) + '\n',
-            'utf8'
+            JSON.stringify(rawChunkLog) + "\n",
+            "utf8"
           );
 
           logger.debug("[ThrottlingMiddleware] Received chunk", {
@@ -110,13 +110,13 @@ export function throttlingMiddleware(
 
           // Helper to detect complete lines in buffer
           const extractCompleteLines = (buffer: string): { complete: string; remaining: string } => {
-            if (chunking === 'none') {
+            if (chunking === "none") {
               // No chunking - flush entire buffer
               return { complete: buffer, remaining: "" };
             }
 
             // Line-based chunking - find last newline
-            const lastNewline = buffer.lastIndexOf('\n');
+            const lastNewline = buffer.lastIndexOf("\n");
             if (lastNewline === -1) {
               // No complete lines yet, keep buffering
               return { complete: "", remaining: buffer };
@@ -233,7 +233,7 @@ export function throttlingMiddleware(
               });
 
               // Check if we should flush immediately due to newline
-              if (chunking === 'line' && textBuffer.includes('\n')) {
+              if (chunking === "line" && textBuffer.includes("\n")) {
                 logger.debug("[ThrottlingMiddleware] Found newline, flushing immediately", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
@@ -281,7 +281,7 @@ export function throttlingMiddleware(
               });
 
               // Check if we should flush immediately due to newline
-              if (chunking === 'line' && reasoningBuffer.includes('\n')) {
+              if (chunking === "line" && reasoningBuffer.includes("\n")) {
                 logger.debug("[ThrottlingMiddleware] Found newline in reasoning, flushing immediately", {
                   timestamp: new Date().toISOString(),
                   elapsedSinceStart: chunkTimestamp - startTime,
@@ -371,15 +371,15 @@ export function throttlingMiddleware(
           // Write summary to debug file
           await fs.appendFile(
             logFile,
-            '\n' + JSON.stringify({
-              type: 'STREAM_SUMMARY',
+            "\n" + JSON.stringify({
+              type: "STREAM_SUMMARY",
               timestamp: new Date().toISOString(),
               totalDuration: finalTime - startTime,
               totalChunks,
               totalFlushes,
               logFile,
-            }) + '\n',
-            'utf8'
+            }) + "\n",
+            "utf8"
           );
         }
       });

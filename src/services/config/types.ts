@@ -28,27 +28,6 @@ export const TenexConfigSchema = z.object({
   projectNaddr: z.string().optional(),
 });
 
-// =====================================================================================
-// AGENTS SCHEMA (agents.json)
-// =====================================================================================
-
-export interface TenexAgents {
-  [agentSlug: string]: {
-    nsec: string;
-    file: string;
-    eventId?: string;
-    isPM?: boolean;  // True if this agent is the project manager
-  };
-}
-
-export const TenexAgentsSchema = z.record(
-  z.object({
-    nsec: z.string(),
-    file: z.string(),
-    eventId: z.string().optional(),
-    isPM: z.boolean().optional(),
-  })
-);
 
 // =====================================================================================
 // LLM SCHEMA (llms.json)
@@ -144,7 +123,6 @@ export const TenexMCPSchema = z.object({
 
 export interface LoadedConfig {
   config: TenexConfig;
-  agents: TenexAgents;
   llms: TenexLLMs;
   mcp: TenexMCP;
 }
@@ -153,7 +131,7 @@ export interface LoadedConfig {
 // HELPER TYPES
 // =====================================================================================
 
-export type ConfigFile = "config.json" | "agents.json" | "llms.json" | "mcp.json";
+export type ConfigFile = "config.json" | "llms.json" | "mcp.json";
 
 export interface ConfigPaths {
   global: string;

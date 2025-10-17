@@ -31,7 +31,7 @@ export class LLMConfigEditor {
         { name: "Configure provider API keys", value: "providers" },
         { name: "Add new configuration", value: "add" },
         { name: "Delete configuration", value: "delete" },
-        { name: `Set default (current: ${llmsConfig.default || 'none'})`, value: "default" },
+        { name: `Set default (current: ${llmsConfig.default || "none"})`, value: "default" },
         { name: "Test configuration", value: "test" },
         { name: "Exit", value: "exit" }
       ]

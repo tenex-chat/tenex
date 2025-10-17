@@ -1,26 +1,26 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RAGService, type RAGQueryResult } from '@/services/RAGService';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RAGService, type RAGQueryResult } from "@/services/RAGService";
 import { 
     executeToolWithErrorHandling,
     parseNumericInput,
     type ToolResponse 
-} from '@/tools/utils';
+} from "@/tools/utils";
 
 const ragQuerySchema = z.object({
     collection: z.string().describe(
-        'Name of the collection to query'
+        "Name of the collection to query"
     ),
     query_text: z.string().describe(
-        'The text query for semantic search'
+        "The text query for semantic search"
     ),
     top_k: z.number().optional().default(5).describe(
-        'Number of top results to return (default: 5)'
+        "Number of top results to return (default: 5)"
     ),
     include_metadata: z.boolean().optional().default(true).describe(
-        'Whether to include document metadata in results (default: true)'
+        "Whether to include document metadata in results (default: true)"
     ),
 });
 
@@ -45,7 +45,7 @@ function formatResults(results: RAGQueryResult[], includeMetadata: boolean): For
         rank: index + 1,
         score: result.score,
         content: result.document.content.length > 500 
-            ? result.document.content.substring(0, 500) + '...' 
+            ? result.document.content.substring(0, 500) + "..." 
             : result.document.content,
         ...(includeMetadata && {
             metadata: result.document.metadata,
@@ -87,11 +87,11 @@ async function executeQuery(
  */
 export function createRAGQueryTool(context: ExecutionContext): AISdkTool {
     return tool({
-        description: 'Perform semantic search on a RAG collection. Returns the most relevant documents based on vector similarity to the query.',
+        description: "Perform semantic search on a RAG collection. Returns the most relevant documents based on vector similarity to the query.",
         inputSchema: ragQuerySchema,
         execute: async (input: z.infer<typeof ragQuerySchema>) => {
             return executeToolWithErrorHandling(
-                'rag_query',
+                "rag_query",
                 input,
                 context,
                 executeQuery

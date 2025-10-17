@@ -210,9 +210,9 @@ export class BrainstormService {
         // Extract successful responses and log failures
         const responses: BrainstormResponse[] = [];
         for (const [index, result] of results.entries()) {
-            if (result.status === 'fulfilled' && result.value) {
+            if (result.status === "fulfilled" && result.value) {
                 responses.push(result.value);
-            } else if (result.status === 'rejected') {
+            } else if (result.status === "rejected") {
                 logger.error("[BrainstormService] Participant execution failed", {
                     participant: participants[index].name,
                     error: result.reason
@@ -643,9 +643,9 @@ export class BrainstormService {
         return `Original brainstorm prompt:\n${originalPrompt}\n\n` +
                `Winning response:\n${winningResponse}\n\n` +
                `Follow-up comment:\n${followUp}\n\n` +
-               `Evaluate if this follow-up adds significant value, provides important corrections, ` +
-               `or contributes meaningful insights to the discussion. ` +
-               `Be selective - only approve truly valuable additions.`;
+               "Evaluate if this follow-up adds significant value, provides important corrections, " +
+               "or contributes meaningful insights to the discussion. " +
+               "Be selective - only approve truly valuable additions.";
     }
 
 }

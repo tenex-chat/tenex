@@ -1,19 +1,19 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RAGService } from '@/services/RAGService';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RAGService } from "@/services/RAGService";
 import { 
     executeToolWithErrorHandling,
     type ToolResponse 
-} from '@/tools/utils';
+} from "@/tools/utils";
 
 const ragDeleteCollectionSchema = z.object({
     name: z.string().describe(
-        'Name of the collection to delete'
+        "Name of the collection to delete"
     ),
     confirm: z.boolean().optional().default(false).describe(
-        'Confirmation flag to prevent accidental deletion (must be true to proceed)'
+        "Confirmation flag to prevent accidental deletion (must be true to proceed)"
     ),
 });
 
@@ -29,7 +29,7 @@ async function executeDeleteCollection(
     if (!confirm) {
         return {
             success: false,
-            error: 'Deletion requires confirmation. Set confirm=true to proceed.',
+            error: "Deletion requires confirmation. Set confirm=true to proceed.",
             warning: `This will permanently delete the collection '${name}' and all its documents.`
         };
     }
@@ -49,11 +49,11 @@ async function executeDeleteCollection(
  */
 export function createRAGDeleteCollectionTool(context: ExecutionContext): AISdkTool {
     return tool({
-        description: 'Delete a RAG collection and all its documents. This action is permanent and requires confirmation.',
+        description: "Delete a RAG collection and all its documents. This action is permanent and requires confirmation.",
         inputSchema: ragDeleteCollectionSchema,
         execute: async (input: z.infer<typeof ragDeleteCollectionSchema>) => {
             return executeToolWithErrorHandling(
-                'rag_delete_collection',
+                "rag_delete_collection",
                 input,
                 context,
                 executeDeleteCollection

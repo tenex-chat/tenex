@@ -1,8 +1,8 @@
-import { logger } from '@/utils/logger';
-import { handleError } from '@/utils/error-handler';
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import { RAGService } from './RAGService';
+import { logger } from "@/utils/logger";
+import { handleError } from "@/utils/error-handler";
+import * as path from "path";
+import * as fs from "fs/promises";
+import { RAGService } from "./RAGService";
 
 /**
  * RagSubscriptionService - Manages persistent RAG subscriptions to MCP resources
@@ -24,9 +24,9 @@ type Notification = {
 };
 
 export enum SubscriptionStatus {
-  RUNNING = 'RUNNING',
-  ERROR = 'ERROR',
-  STOPPED = 'STOPPED'
+  RUNNING = "RUNNING",
+  ERROR = "ERROR",
+  STOPPED = "STOPPED"
 }
 
 export interface RagSubscription {
@@ -53,8 +53,8 @@ export class RagSubscriptionService {
   private resourceListeners: Map<string, (notification: Notification) => void> = new Map();
 
   private constructor() {
-    const tenexDir = path.join(process.cwd(), '.tenex');
-    this.persistencePath = path.join(tenexDir, 'rag_subscriptions.json');
+    const tenexDir = path.join(process.cwd(), ".tenex");
+    this.persistencePath = path.join(tenexDir, "rag_subscriptions.json");
     this.ragService = RAGService.getInstance();
   }
 
@@ -98,7 +98,7 @@ export class RagSubscriptionService {
       this.isInitialized = true;
       logger.info(`RagSubscriptionService initialized with ${this.subscriptions.size} subscriptions`);
     } catch (error) {
-      handleError(error, 'Failed to initialize RagSubscriptionService', { logLevel: 'error' });
+      handleError(error, "Failed to initialize RagSubscriptionService", { logLevel: "error" });
       throw error;
     }
   }
@@ -125,9 +125,9 @@ export class RagSubscriptionService {
     } catch {
       throw new Error(
         `Invalid resourceUri: "${resourceUri}". ` +
-        `Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ` +
-        `This appears to be a tool name or invalid format. ` +
-        `If you're using a resource template, you must first expand it with parameters to get the actual URI.`
+        "Resource URI must be a valid URI format (e.g., \"nostr://feed/pubkey/kinds\", \"file:///path/to/file\"). " +
+        "This appears to be a tool name or invalid format. " +
+        "If you're using a resource template, you must first expand it with parameters to get the actual URI."
       );
     }
 
@@ -163,8 +163,8 @@ export class RagSubscriptionService {
       return subscription;
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
-      subscription.lastError = error instanceof Error ? error.message : 'Unknown error';
-      handleError(error, `Failed to create subscription '${subscriptionId}'`, { logLevel: 'error' });
+      subscription.lastError = error instanceof Error ? error.message : "Unknown error";
+      handleError(error, `Failed to create subscription '${subscriptionId}'`, { logLevel: "error" });
       throw error;
     }
   }
@@ -178,7 +178,7 @@ export class RagSubscriptionService {
     // Create listener for this resource
     const listener = async (notification: { uri: string; content?: string }): Promise<void> => {
       await this.handleResourceUpdate(subscription, {
-        method: 'notifications/resources/updated',
+        method: "notifications/resources/updated",
         params: notification
       });
     };
@@ -190,14 +190,14 @@ export class RagSubscriptionService {
       } catch {
         throw new Error(
           `Invalid resourceUri: "${subscription.resourceUri}". ` +
-          `Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ` +
-          `This appears to be a tool name or invalid format. ` +
-          `If you're using a resource template, you must first expand it with parameters to get the actual URI.`
+          "Resource URI must be a valid URI format (e.g., \"nostr://feed/pubkey/kinds\", \"file:///path/to/file\"). " +
+          "This appears to be a tool name or invalid format. " +
+          "If you're using a resource template, you must first expand it with parameters to get the actual URI."
         );
       }
 
       // Import mcpManager dynamically to avoid circular dependency
-      const { mcpManager } = await import('../mcp/MCPManager');
+      const { mcpManager } = await import("../mcp/MCPManager");
 
       // Try to subscribe to resource updates
       let subscriptionSupported = true;
@@ -219,13 +219,13 @@ export class RagSubscriptionService {
           `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
         );
       } catch (error) {
-        if (error instanceof Error && error.message.includes('does not support resource subscriptions')) {
+        if (error instanceof Error && error.message.includes("does not support resource subscriptions")) {
           // Server doesn't support subscriptions, use polling instead
           subscriptionSupported = false;
           logger.warn(
             `Server '${subscription.mcpServerId}' does not support resource subscriptions. ` +
             `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
-            `Call pollResource() manually or set up a polling interval.`
+            "Call pollResource() manually or set up a polling interval."
           );
           process.exit(1);
         } else {
@@ -234,11 +234,11 @@ export class RagSubscriptionService {
       }
 
       if (!subscriptionSupported) {
-        subscription.lastError = 'Server does not support subscriptions - use polling mode';
+        subscription.lastError = "Server does not support subscriptions - use polling mode";
       }
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
-      subscription.lastError = error instanceof Error ? error.message : 'Unknown error';
+      subscription.lastError = error instanceof Error ? error.message : "Unknown error";
       throw error;
     }
   }
@@ -281,11 +281,11 @@ export class RagSubscriptionService {
       logger.debug(`Processed update for subscription '${subscription.subscriptionId}', total documents: ${subscription.documentsProcessed}`);
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
-      subscription.lastError = error instanceof Error ? error.message : 'Unknown error';
+      subscription.lastError = error instanceof Error ? error.message : "Unknown error";
       subscription.updatedAt = Date.now();
       await this.saveSubscriptions();
       
-      handleError(error, `Failed to process update for subscription '${subscription.subscriptionId}'`, { logLevel: 'error' });
+      handleError(error, `Failed to process update for subscription '${subscription.subscriptionId}'`, { logLevel: "error" });
     }
   }
 
@@ -294,14 +294,14 @@ export class RagSubscriptionService {
    */
   private extractContentFromNotification(notification: Notification): string {
     // Handle different notification formats
-    if (typeof notification.params === 'object' && notification.params !== null) {
-      if ('content' in notification.params) {
+    if (typeof notification.params === "object" && notification.params !== null) {
+      if ("content" in notification.params) {
         return String(notification.params.content);
       }
-      if ('data' in notification.params) {
+      if ("data" in notification.params) {
         return JSON.stringify(notification.params.data);
       }
-      if ('text' in notification.params) {
+      if ("text" in notification.params) {
         return String(notification.params.text);
       }
     }
@@ -349,7 +349,7 @@ export class RagSubscriptionService {
       const listener = this.resourceListeners.get(listenerKey);
 
       if (listener) {
-        const { mcpManager } = await import('../mcp/MCPManager');
+        const { mcpManager } = await import("../mcp/MCPManager");
 
         // Unsubscribe from the resource
         await mcpManager.unsubscribeFromResource(
@@ -367,7 +367,7 @@ export class RagSubscriptionService {
       logger.info(`Deleted subscription '${subscriptionId}'`);
       return true;
     } catch (error) {
-      handleError(error, `Failed to delete subscription '${subscriptionId}'`, { logLevel: 'error' });
+      handleError(error, `Failed to delete subscription '${subscriptionId}'`, { logLevel: "error" });
       throw error;
     }
   }
@@ -377,7 +377,7 @@ export class RagSubscriptionService {
    */
   private async loadSubscriptions(): Promise<void> {
     try {
-      const data = await fs.readFile(this.persistencePath, 'utf-8');
+      const data = await fs.readFile(this.persistencePath, "utf-8");
       const subscriptions = JSON.parse(data) as RagSubscription[];
       
       for (const subscription of subscriptions) {
@@ -387,8 +387,8 @@ export class RagSubscriptionService {
       logger.debug(`Loaded ${subscriptions.length} subscriptions from disk`);
     } catch (error) {
       // File doesn't exist yet, that's okay
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        handleError(error, 'Failed to load subscriptions', { logLevel: 'warn' });
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        handleError(error, "Failed to load subscriptions", { logLevel: "warn" });
       }
     }
   }
@@ -402,7 +402,7 @@ export class RagSubscriptionService {
       await fs.writeFile(this.persistencePath, JSON.stringify(subscriptions, null, 2));
       logger.debug(`Saved ${subscriptions.length} subscriptions to disk`);
     } catch (error) {
-      handleError(error, 'Failed to save subscriptions', { logLevel: 'error' });
+      handleError(error, "Failed to save subscriptions", { logLevel: "error" });
     }
   }
 
@@ -469,7 +469,7 @@ export class RagSubscriptionService {
 
     // Simulate a notification
     const notification: Notification = {
-      method: 'notifications/resources/updated',
+      method: "notifications/resources/updated",
       params: {
         content,
         uri: subscription.resourceUri,
@@ -501,7 +501,7 @@ export class RagSubscriptionService {
 
     try {
       // Import mcpManager here to avoid circular dependency
-      const { mcpManager } = await import('../mcp/MCPManager');
+      const { mcpManager } = await import("../mcp/MCPManager");
 
       // Read the current resource content
       const result = await mcpManager.readResource(
@@ -511,10 +511,10 @@ export class RagSubscriptionService {
 
       // Extract text content
       for (const content of result.contents) {
-        if ('text' in content) {
+        if ("text" in content) {
           // Create notification with the content
           const notification: Notification = {
-            method: 'notifications/resources/updated',
+            method: "notifications/resources/updated",
             params: {
               content: content.text,
               uri: subscription.resourceUri,
@@ -529,12 +529,12 @@ export class RagSubscriptionService {
       logger.debug(`Polled resource for subscription '${subscriptionId}'`);
     } catch (error) {
       subscription.status = SubscriptionStatus.ERROR;
-      subscription.lastError = error instanceof Error ? error.message : 'Unknown error';
+      subscription.lastError = error instanceof Error ? error.message : "Unknown error";
       subscription.updatedAt = Date.now();
       await this.saveSubscriptions();
 
       handleError(error, `Failed to poll resource for subscription '${subscriptionId}'`, {
-        logLevel: 'error'
+        logLevel: "error"
       });
       throw error;
     }

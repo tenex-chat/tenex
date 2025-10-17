@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
 import type { ExecutionContext } from "@/agents/execution/types";

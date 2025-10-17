@@ -1,6 +1,6 @@
 // ToolError removed - define it locally if needed
 interface ToolError {
-  kind: 'validation' | 'execution' | 'system';
+  kind: "validation" | "execution" | "system";
   message: string;
   field?: string;
   tool?: string;

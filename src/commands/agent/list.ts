@@ -1,139 +1,78 @@
-import { AgentRegistry } from "@/agents/AgentRegistry";
-import type { AgentInstance } from "@/agents/types";
+import { agentStorage } from "@/agents/AgentStorage";
 import { configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
-
-interface ListOptions {
-  project?: boolean;
-  global?: boolean;
-  all?: boolean;
-}
+import { getNDK } from "@/nostr";
+import { initNDK } from "@/nostr/ndkClient";
 
 export const agentListCommand = new Command("list")
-  .description("List available agents")
-  .option("--project", "Show only project agents")
-  .option("--global", "Show only global agents")
-  .option("--all", "Show all agents (default)")
-  .action(async (options: ListOptions) => {
+  .description("List agents for current project")
+  .action(async () => {
     try {
       const projectPath = process.cwd();
+
+      // Check if we're in a project
       const isProject = await configService.projectConfigExists(projectPath, "config.json");
-
-      // Default to showing all agents
-      const showAll = options.all || (!options.project && !options.global);
-      const showProject = options.project || showAll;
-      const showGlobal = options.global || showAll;
-
-      // Validate options
-      if (options.project && !isProject) {
-        logger.error(
-          "Not in a TENEX project directory. Remove --project flag or run from a project."
-        );
+      if (!isProject) {
+        logger.error("Not in a TENEX project directory. Run this command from within a project.");
         process.exit(1);
       }
 
-      logger.info("Available agents:");
-      logger.info("");
-
-      // Load and display global agents
-      if (showGlobal) {
-        try {
-          const globalPath = configService.getGlobalPath().replace("/.tenex", "");
-          const globalRegistry = new AgentRegistry(globalPath, true);
-          await globalRegistry.loadFromProject();
-
-          const globalAgents = globalRegistry.getAllAgents();
-          if (globalAgents.length > 0) {
-            logger.info("Global agents:");
-            for (const agent of globalAgents) {
-              logger.info(`  - ${agent.slug}: ${agent.name}`);
-              logger.info(`    Role: ${agent.role}`);
-              if (agent.description) {
-                logger.info(`    Description: ${agent.description}`);
-              }
-              if (agent.eventId) {
-                logger.info(`    Event ID: ${agent.eventId}`);
-              }
-            }
-            logger.info("");
-          } else {
-            logger.info("No global agents found.");
-            logger.info("");
-          }
-        } catch (error) {
-          logger.error("Failed to load global agents", { error });
-          if (showGlobal && !showProject) {
-            process.exit(1);
-          }
-        }
+      // Load project config to get projectNaddr
+      const { config } = await configService.loadConfig(projectPath);
+      if (!config.projectNaddr) {
+        logger.error("Project configuration missing projectNaddr");
+        process.exit(1);
       }
 
-      // Load and display project agents
-      if (showProject && isProject) {
-        try {
-          // Load global agents to check for overrides
-          const globalPath = configService.getGlobalPath().replace("/.tenex", "");
-          const globalRegistry = new AgentRegistry(globalPath, true);
-          await globalRegistry.loadFromProject();
-          const globalAgentSlugs = new Set(globalRegistry.getAllAgents().map((a) => a.slug));
+      // Initialize NDK and fetch project
+      await initNDK();
+      const ndk = getNDK();
+      const project = await ndk.fetchEvent(config.projectNaddr);
 
-          // Load project registry
-          const projectRegistry = new AgentRegistry(projectPath, false);
-          await projectRegistry.loadFromProject();
+      if (!project || !project.dTag) {
+        logger.error("Could not fetch project from Nostr");
+        process.exit(1);
+      }
 
-          const projectAgents = projectRegistry.getAllAgents();
-          const projectOnlyAgents: AgentInstance[] = [];
-          const overriddenAgents: AgentInstance[] = [];
+      // Initialize agent storage
+      await agentStorage.initialize();
 
-          // Categorize agents
-          for (const agent of projectAgents) {
-            if (globalAgentSlugs.has(agent.slug)) {
-              overriddenAgents.push(agent);
-            } else {
-              projectOnlyAgents.push(agent);
-            }
-          }
+      // Get agents for this project
+      const agents = await agentStorage.getProjectAgents(project.dTag);
 
-          if (projectOnlyAgents.length > 0 || overriddenAgents.length > 0) {
-            logger.info("Project agents:");
+      if (agents.length === 0) {
+        logger.info("No agents found for this project.");
+        logger.info("");
+        logger.info("To add an agent, use: tenex agent add <event-id>");
+        process.exit(0);
+      }
 
-            // Show project-specific agents first
-            for (const agent of projectOnlyAgents) {
-              logger.info(`  - ${agent.slug}: ${agent.name}`);
-              logger.info(`    Role: ${agent.role}`);
-              if (agent.description) {
-                logger.info(`    Description: ${agent.description}`);
-              }
-              if (agent.eventId) {
-                logger.info(`    Event ID: ${agent.eventId}`);
-              }
-            }
+      // Get first agent eventId from project tags to identify PM
+      const firstAgentEventId = project.tags
+        .find(t => t[0] === "agent" && t[1])?.[1];
 
-            // Show overridden agents
-            if (overriddenAgents.length > 0) {
-              logger.info("");
-              logger.info("  Overriding global agents:");
-              for (const agent of overriddenAgents) {
-                logger.info(`  - ${agent.slug}: ${agent.name} (overrides global)`);
-                logger.info(`    Role: ${agent.role}`);
-                if (agent.description) {
-                  logger.info(`    Description: ${agent.description}`);
-                }
-                if (agent.eventId) {
-                  logger.info(`    Event ID: ${agent.eventId}`);
-                }
-              }
-            }
-          } else {
-            logger.info("No project-specific agents found.");
-          }
-        } catch (error) {
-          logger.error("Failed to load project agents", { error });
-          if (showProject && !showGlobal) {
-            process.exit(1);
-          }
+      logger.info(`Agents for project "${project.tagValue("title") || project.dTag}":`);
+      logger.info("");
+
+      for (const agent of agents) {
+        const isPM = agent.eventId === firstAgentEventId;
+
+        logger.info(`  ${agent.slug}: ${agent.name}${isPM ? " [PM]" : ""}`);
+        logger.info(`    Role: ${agent.role}`);
+        if (agent.description) {
+          logger.info(`    Description: ${agent.description}`);
         }
+        if (agent.eventId) {
+          logger.info(`    Event ID: ${agent.eventId}`);
+        }
+        if (agent.llmConfig) {
+          logger.info(`    LLM Config: ${agent.llmConfig}`);
+        }
+        if (agent.tools && agent.tools.length > 0) {
+          logger.info(`    Tools: ${agent.tools.length} tool(s)`);
+        }
+        logger.info("");
       }
 
       process.exit(0);

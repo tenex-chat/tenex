@@ -1,22 +1,22 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RAGService, type RAGDocument } from '@/services/RAGService';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RAGService, type RAGDocument } from "@/services/RAGService";
 import { 
     executeToolWithErrorHandling,
     resolveAndValidatePath,
     type ToolResponse 
-} from '@/tools/utils';
-import { readFile, stat } from 'node:fs/promises';
-import { URL } from 'node:url';
-import * as path from 'node:path';
+} from "@/tools/utils";
+import { readFile, stat } from "node:fs/promises";
+import { URL } from "node:url";
+import * as path from "node:path";
 
 // Protocol Constants
-const PROTOCOL_FILE = 'file:';
-const PROTOCOL_HTTP = 'http:';
-const PROTOCOL_HTTPS = 'https:';
-const FILE_PROTOCOL_PREFIX = 'file://';
+const PROTOCOL_FILE = "file:";
+const PROTOCOL_HTTP = "http:";
+const PROTOCOL_HTTPS = "https:";
+const FILE_PROTOCOL_PREFIX = "file://";
 
 // Size and Timeout Constants
 const HTTP_TIMEOUT_MS = 30000; // 30 seconds
@@ -24,7 +24,7 @@ const MAX_FILE_SIZE_MB = 100; // 100MB max file size
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // User Agent for HTTP requests
-const HTTP_USER_AGENT = 'TENEX-RAG-Ingester/1.0';
+const HTTP_USER_AGENT = "TENEX-RAG-Ingester/1.0";
 
 // Type definitions for protocol handlers
 type ProtocolHandler = (uri: string, context: { workingDirectory: string }) => Promise<string>;
@@ -34,25 +34,25 @@ type ProtocolHandler = (uri: string, context: { workingDirectory: string }) => P
  */
 const ragAddDocumentsSchema = z.object({
     collection: z.string().describe(
-        'Name of the collection to add documents to'
+        "Name of the collection to add documents to"
     ),
     documents: z.array(z.union([
         // Option 1: Content with optional file_path
         z.object({
-            content: z.string().optional().describe('Text content of the document'),
-            file_path: z.string().optional().describe('Path to file to read content from'),
-            metadata: z.record(z.unknown()).optional().describe('Optional metadata for the document'),
-            source: z.string().optional().describe('Source identifier for the document'),
-            id: z.string().optional().describe('Optional unique identifier for the document'),
+            content: z.string().optional().describe("Text content of the document"),
+            file_path: z.string().optional().describe("Path to file to read content from"),
+            metadata: z.record(z.unknown()).optional().describe("Optional metadata for the document"),
+            source: z.string().optional().describe("Source identifier for the document"),
+            id: z.string().optional().describe("Optional unique identifier for the document"),
         }),
         // Option 2: URI-based
         z.object({
-            uri: z.string().describe('URI to fetch content from (file://, https://, etc.)'),
-            metadata: z.record(z.unknown()).optional().describe('Optional metadata for the document'),
-            source: z.string().optional().describe('Source identifier for the document'),
-            id: z.string().optional().describe('Optional unique identifier for the document'),
+            uri: z.string().describe("URI to fetch content from (file://, https://, etc.)"),
+            metadata: z.record(z.unknown()).optional().describe("Optional metadata for the document"),
+            source: z.string().optional().describe("Source identifier for the document"),
+            id: z.string().optional().describe("Optional unique identifier for the document"),
         })
-    ])).describe('Array of documents to add to the collection'),
+    ])).describe("Array of documents to add to the collection"),
 });
 
 /**
@@ -65,7 +65,7 @@ function validateURI(uri: string): URL {
     try {
         return new URL(uri);
     } catch (error) {
-        throw new Error(`Invalid URI format '${uri}': ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(`Invalid URI format '${uri}': ${error instanceof Error ? error.message : "Unknown error"}`);
     }
 }
 
@@ -101,11 +101,11 @@ function validateSize(sizeInBytes: number, sourceName: string): void {
  * make debugging easier and provide better user experience.
  */
 function handleFetchError(error: unknown, protocol: string): never {
-    if (error.name === 'AbortError') {
+    if (error.name === "AbortError") {
         throw new Error(`Request timeout after ${HTTP_TIMEOUT_MS / 1000} seconds`);
     }
     
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Failed to fetch from ${protocol} URI: ${message}`);
 }
 
@@ -134,7 +134,7 @@ function generateSourceField(doc: DocumentInput, resolvedPath?: string): string 
     }
     
     // URI-based document
-    if ('uri' in doc && doc.uri) {
+    if ("uri" in doc && doc.uri) {
         return doc.uri;
     }
     
@@ -158,19 +158,19 @@ function parseFilePathFromURI(uri: string): string {
     let filePath = uri.substring(FILE_PROTOCOL_PREFIX.length);
     
     // Handle different file:// formats
-    if (filePath.startsWith('//')) {
+    if (filePath.startsWith("//")) {
         // file:////absolute/path or file://host/path
         filePath = filePath.substring(2);
-    } else if (filePath.startsWith('/./')) {
+    } else if (filePath.startsWith("/./")) {
         // file://./relative/path - explicit relative
         filePath = filePath.substring(3);
-    } else if (filePath.startsWith('./')) {
+    } else if (filePath.startsWith("./")) {
         // file://./relative/path - explicit relative
         filePath = filePath.substring(2);
     }
     
     // On Windows, file:///C:/path becomes /C:/path, need to remove leading slash
-    if (process.platform === 'win32' && filePath.match(/^\/[a-zA-Z]:[\\/]/)) {
+    if (process.platform === "win32" && filePath.match(/^\/[a-zA-Z]:[\\/]/)) {
         filePath = filePath.slice(1);
     }
     
@@ -192,9 +192,9 @@ async function handleFileProtocolURI(uri: string, context: { workingDirectory: s
         
         // Check file size before reading
         const stats = await stat(resolvedPath);
-        validateSize(stats.size, 'File');
+        validateSize(stats.size, "File");
         
-        return await readFile(resolvedPath, 'utf-8');
+        return await readFile(resolvedPath, "utf-8");
     } catch (error) {
         handleFetchError(error, PROTOCOL_FILE);
     }
@@ -214,7 +214,7 @@ async function handleHttpProtocolURI(uri: string, _context: { workingDirectory: 
         const response = await fetch(uri, { 
             signal: controller.signal,
             headers: {
-                'User-Agent': HTTP_USER_AGENT
+                "User-Agent": HTTP_USER_AGENT
             }
         });
         
@@ -223,10 +223,10 @@ async function handleHttpProtocolURI(uri: string, _context: { workingDirectory: 
         }
         
         // Check content length before reading body
-        const contentLength = response.headers.get('content-length');
+        const contentLength = response.headers.get("content-length");
         if (contentLength) {
             const sizeInBytes = parseInt(contentLength, 10);
-            validateSize(sizeInBytes, 'Response');
+            validateSize(sizeInBytes, "Response");
         }
         
         // Read response body with streaming size check
@@ -236,7 +236,7 @@ async function handleHttpProtocolURI(uri: string, _context: { workingDirectory: 
         const decoder = new TextDecoder();
         
         if (!reader) {
-            throw new Error('Response body is not readable');
+            throw new Error("Response body is not readable");
         }
         
         while (true) {
@@ -244,12 +244,12 @@ async function handleHttpProtocolURI(uri: string, _context: { workingDirectory: 
             if (done) break;
             
             totalSize += value.length;
-            validateSize(totalSize, 'Response');
+            validateSize(totalSize, "Response");
             
             chunks.push(decoder.decode(value, { stream: true }));
         }
         
-        return chunks.join('');
+        return chunks.join("");
     } catch (error) {
         handleFetchError(error, uri.startsWith(PROTOCOL_HTTPS) ? PROTOCOL_HTTPS : PROTOCOL_HTTP);
     } finally {
@@ -288,7 +288,7 @@ async function fetchFromURI(uri: string, workingDirectory: string): Promise<stri
     if (!handler) {
         throw new Error(
             `Unsupported URI protocol '${parsedUrl.protocol}'. ` +
-            `Supported protocols: ${Array.from(PROTOCOL_HANDLERS.keys()).join(', ')}`
+            `Supported protocols: ${Array.from(PROTOCOL_HANDLERS.keys()).join(", ")}`
         );
     }
     
@@ -306,15 +306,15 @@ async function extractDocumentContentFromSource(
     doc: DocumentInput,
     workingDirectory: string
 ): Promise<{ content: string; source: string | undefined }> {
-    let content = '';
+    let content = "";
     let resolvedPath: string | undefined;
     
-    if ('uri' in doc && doc.uri) {
+    if ("uri" in doc && doc.uri) {
         // URI-based document
         content = await fetchFromURI(doc.uri, workingDirectory);
     } else {
         // Content/file_path based document
-        content = doc.content || '';
+        content = doc.content || "";
         
         // Read from file if file_path is provided
         if (doc.file_path) {
@@ -322,13 +322,13 @@ async function extractDocumentContentFromSource(
             
             // Check file size
             const stats = await stat(resolvedPath);
-            validateSize(stats.size, 'File');
+            validateSize(stats.size, "File");
             
             try {
-                content = await readFile(resolvedPath, 'utf-8');
+                content = await readFile(resolvedPath, "utf-8");
             } catch (error) {
                 if (!doc.content) {
-                    throw new Error(`Cannot read file '${doc.file_path}': ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    throw new Error(`Cannot read file '${doc.file_path}': ${error instanceof Error ? error.message : "Unknown error"}`);
                 }
                 // Fall back to provided content if file read fails but content exists
             }
@@ -345,7 +345,7 @@ async function extractDocumentContentFromSource(
  * Process documents and prepare them for insertion
  */
 async function processDocuments(
-    documents: z.infer<typeof ragAddDocumentsSchema>['documents'],
+    documents: z.infer<typeof ragAddDocumentsSchema>["documents"],
     workingDirectory: string
 ): Promise<RAGDocument[]> {
     const processedDocs: RAGDocument[] = [];
@@ -355,7 +355,7 @@ async function processDocuments(
             const { content, source } = await extractDocumentContentFromSource(doc, workingDirectory);
             
             // Validate content
-            validateContent(content, source || 'document');
+            validateContent(content, source || "document");
             
             processedDocs.push({
                 id: doc.id,
@@ -366,8 +366,8 @@ async function processDocuments(
             });
         } catch (error) {
             // Add context to error
-            const identifier = doc.id || ('uri' in doc ? doc.uri : doc.file_path) || 'unknown document';
-            throw new Error(`Error processing document '${identifier}': ${error instanceof Error ? error.message : 'Unknown error'}`);
+            const identifier = doc.id || ("uri" in doc ? doc.uri : doc.file_path) || "unknown document";
+            throw new Error(`Error processing document '${identifier}': ${error instanceof Error ? error.message : "Unknown error"}`);
         }
     }
     
@@ -423,11 +423,11 @@ async function executeAddDocuments(
  */
 export function createRAGAddDocumentsTool(context: ExecutionContext): AISdkTool {
     return tool({
-        description: 'Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).',
+        description: "Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).",
         inputSchema: ragAddDocumentsSchema,
         execute: async (input: z.infer<typeof ragAddDocumentsSchema>) => {
             return executeToolWithErrorHandling(
-                'rag_add_documents',
+                "rag_add_documents",
                 input,
                 context,
                 executeAddDocuments

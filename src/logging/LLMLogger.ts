@@ -112,7 +112,7 @@ export class LLMLogger {
     const minutes = now.getMinutes();
     // Round down to nearest 5-minute increment
     const roundedMinutes = Math.floor(minutes / 5) * 5;
-    const timeStr = `${hours.toString().padStart(2, '0')}:${roundedMinutes.toString().padStart(2, '0')}`;
+    const timeStr = `${hours.toString().padStart(2, "0")}:${roundedMinutes.toString().padStart(2, "0")}`;
     return `${date}_${timeStr}.jsonl`;
   }
 
@@ -147,7 +147,7 @@ export class LLMLogger {
 
     const agent = params.agent || this.agent;
     if (!agent) {
-      throw new Error('[LLMLogger] Agent name is required for logging');
+      throw new Error("[LLMLogger] Agent name is required for logging");
     }
     const logEntry: LLMLogEntry = {
       timestamp: new Date().toISOString(),
@@ -173,7 +173,7 @@ export class LLMLogger {
     
     try {
       // Append to JSONL file (one JSON object per line)
-      await fs.appendFile(filepath, JSON.stringify({ ...logEntry, type: 'request' }) + "\n", "utf-8");
+      await fs.appendFile(filepath, JSON.stringify({ ...logEntry, type: "request" }) + "\n", "utf-8");
     } catch (error) {
       console.error("[LLMLogger] Failed to write log:", error);
     }
@@ -199,7 +199,7 @@ export class LLMLogger {
 
     const agent = params.agent || this.agent;
     if (!agent) {
-      throw new Error('[LLMLogger] Agent name is required for logging');
+      throw new Error("[LLMLogger] Agent name is required for logging");
     }
     const responseEntry: Partial<LLMLogEntry> = {
       timestamp: new Date().toISOString(),
@@ -233,7 +233,7 @@ export class LLMLogger {
 
     try {
       // Append response entry
-      await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, type: 'response' }) + "\n", "utf-8");
+      await fs.appendFile(filepath, JSON.stringify({ ...responseEntry, type: "response" }) + "\n", "utf-8");
     } catch (error) {
       console.error("[LLMLogger] Failed to write response log:", error);
     }
@@ -297,7 +297,7 @@ export class LLMLogger {
       await this.ensureLogDirectory();
       const files = await fs.readdir(this.logDir);
       const jsonlFiles = files
-        .filter(f => f.endsWith('.jsonl'))
+        .filter(f => f.endsWith(".jsonl"))
         .sort()
         .reverse()
         .slice(0, limit);
@@ -315,7 +315,7 @@ export class LLMLogger {
     try {
       const filepath = this.getLogFilePath(filename);
       const content = await fs.readFile(filepath, "utf-8");
-      const lines = content.split('\n').filter(line => line.trim());
+      const lines = content.split("\n").filter(line => line.trim());
       return lines.map(line => JSON.parse(line));
     } catch (error) {
       console.error(`[LLMLogger] Failed to read log ${filename}:`, error);

@@ -51,9 +51,9 @@ export function createListScheduledTasksTool(_context: ExecutionContext): AISdkT
   });
 
   // Attach getHumanReadableContent as non-enumerable property
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: () => {
-      return `Listing all scheduled tasks`;
+      return "Listing all scheduled tasks";
     },
     enumerable: false,
     configurable: true

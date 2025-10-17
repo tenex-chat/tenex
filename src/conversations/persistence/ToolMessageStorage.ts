@@ -9,7 +9,7 @@ import { formatAnyError } from "@/utils/error-formatter";
  * Single Responsibility: Persist and retrieve tool execution messages
  */
 export class ToolMessageStorage {
-  private readonly storageDir = path.join('.tenex', 'tool-messages');
+  private readonly storageDir = path.join(".tenex", "tool-messages");
 
   /**
    * Store tool messages for later reconstruction
@@ -48,7 +48,7 @@ export class ToolMessageStorage {
             toolName: toolResult.toolName,
             output: {
               type: "text",
-              value: typeof toolResult.output === 'string' 
+              value: typeof toolResult.output === "string" 
                 ? toolResult.output 
                 : JSON.stringify(toolResult.output),
             },
@@ -68,12 +68,12 @@ export class ToolMessageStorage {
 
       await fs.writeFile(filePath, JSON.stringify(data, null, 2));
 
-      logger.debug('[ToolMessageStorage] Stored tool messages', {
+      logger.debug("[ToolMessageStorage] Stored tool messages", {
         eventId: eventId.substring(0, 8),
         filePath,
       });
     } catch (error) {
-      logger.error('[ToolMessageStorage] Failed to store tool messages', {
+      logger.error("[ToolMessageStorage] Failed to store tool messages", {
         error: formatAnyError(error),
         eventId,
       });
@@ -86,7 +86,7 @@ export class ToolMessageStorage {
   async load(eventId: string): Promise<ModelMessage[] | null> {
     try {
       const filePath = path.join(this.storageDir, `${eventId}.json`);
-      const data = await fs.readFile(filePath, 'utf-8');
+      const data = await fs.readFile(filePath, "utf-8");
       const parsed = JSON.parse(data);
       return parsed.messages;
     } catch {
@@ -104,21 +104,21 @@ export class ToolMessageStorage {
       const now = Date.now();
 
       for (const file of files) {
-        if (!file.endsWith('.json')) continue;
+        if (!file.endsWith(".json")) continue;
 
         const filePath = path.join(this.storageDir, file);
         const stats = await fs.stat(filePath);
         
         if (now - stats.mtimeMs > olderThanMs) {
           await fs.unlink(filePath);
-          logger.debug('[ToolMessageStorage] Cleaned up old tool message file', {
+          logger.debug("[ToolMessageStorage] Cleaned up old tool message file", {
             file,
             ageMs: now - stats.mtimeMs,
           });
         }
       }
     } catch (error) {
-      logger.error('[ToolMessageStorage] Failed to cleanup', {
+      logger.error("[ToolMessageStorage] Failed to cleanup", {
         error: formatAnyError(error),
       });
     }

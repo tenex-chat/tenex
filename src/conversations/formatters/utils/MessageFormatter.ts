@@ -1,4 +1,4 @@
-import { ThreadNode, FormatterOptions } from '../ThreadedConversationFormatter';
+import { ThreadNode, FormatterOptions } from "../ThreadedConversationFormatter";
 
 export class MessageFormatter {
   /**
@@ -22,7 +22,7 @@ export class MessageFormatter {
     
     // Clean up message for single-line display
     if (options.compactMode) {
-      message = message.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      message = message.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
     }
     
     return message;
@@ -35,12 +35,12 @@ export class MessageFormatter {
     
     // Try to truncate at a word boundary
     const truncated = text.substring(0, maxLength);
-    const lastSpace = truncated.lastIndexOf(' ');
+    const lastSpace = truncated.lastIndexOf(" ");
     
     if (lastSpace > maxLength * 0.7) {
-      return truncated.substring(0, lastSpace) + '...';
+      return truncated.substring(0, lastSpace) + "...";
     }
     
-    return truncated + '...';
+    return truncated + "...";
   }
 }

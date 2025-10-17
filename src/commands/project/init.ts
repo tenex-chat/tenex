@@ -29,12 +29,12 @@ export const projectInitCommand = new Command("init")
         try {
           // Decode naddr to get kind:pubkey:identifier format for 'a' tag
           const decoded = nip19.decode(naddr);
-          if (decoded.type !== 'naddr') {
+          if (decoded.type !== "naddr") {
             logger.error(`Invalid naddr provided: ${naddr}`);
           } else {
             const { kind, pubkey, identifier } = decoded.data;
             const formattedId = `${kind}:${pubkey}:${identifier}`;
-            const projectTag = ['a', formattedId];
+            const projectTag = ["a", formattedId];
             const changed = announcementService.addTag(projectTag);
             
             if (changed) {

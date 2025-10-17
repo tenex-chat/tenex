@@ -99,7 +99,7 @@ function formatMCPToolsAsMarkdown(tools: MCPToolInfo[]): string {
   lines.push("2. Send a message tagging the human user");
   lines.push("3. Include the tool reference using `nostr:<id>` format");
   lines.push("");
-  lines.push(`Example: "I'd like to install the Git Helper tool: nostr:note1xyz..."`);
+  lines.push("Example: \"I'd like to install the Git Helper tool: nostr:note1xyz...\"");
 
   return lines.join("\n");
 }

@@ -5,7 +5,7 @@ import type { AISdkTool } from "@/tools/registry";
 import { SchedulerService } from "@/services/SchedulerService";
 import { logger } from "@/utils/logger";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
-import * as cron from 'node-cron';
+import * as cron from "node-cron";
 
 /**
  * Creates a tool for scheduling tasks using cron notation
@@ -60,7 +60,7 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
           message: `Task scheduled successfully with ID: ${taskId}`,
           schedule,
           prompt,
-          targetAgent: targetAgent || 'self',
+          targetAgent: targetAgent || "self",
         };
       } catch (error: unknown) {
         logger.error("Failed to schedule task:", error);
@@ -74,9 +74,9 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
   });
 
   // Attach getHumanReadableContent as non-enumerable property
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: (args: { prompt: string; schedule: string; targetAgent?: string }) => {
-      const target = args.targetAgent ? ` for ${args.targetAgent}` : '';
+      const target = args.targetAgent ? ` for ${args.targetAgent}` : "";
       return `Scheduling task with cron '${args.schedule}'${target}: ${args.prompt}`;
     },
     enumerable: false,

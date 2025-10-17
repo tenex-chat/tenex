@@ -1,7 +1,7 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
 
 /**
  * Dynamic Tool Template
@@ -37,8 +37,8 @@ import type { AISdkTool } from '@/tools/registry';
 // Define the input schema for your tool using Zod
 const toolSchema = z.object({
     // TODO: Define your input parameters here
-    exampleParam: z.string().describe('An example parameter'),
-    optionalParam: z.number().optional().describe('An optional numeric parameter'),
+    exampleParam: z.string().describe("An example parameter"),
+    optionalParam: z.number().optional().describe("An optional numeric parameter"),
 });
 
 // Type for the tool input (inferred from schema)
@@ -52,7 +52,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
     // Create the tool using the AI SDK's tool function
     const aiTool = tool({
         // Tool description - this is shown to the LLM
-        description: 'TODO: Add a clear description of what this tool does',
+        description: "TODO: Add a clear description of what this tool does",
         
         // Input schema for validation
         inputSchema: toolSchema,
@@ -88,7 +88,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
                         );
                     }
                 } catch (error) {
-                    console.warn('Failed to publish status:', error);
+                    console.warn("Failed to publish status:", error);
                 }
             }
             
@@ -104,9 +104,9 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
     
     // Optionally add human-readable content generation
     // This is used for displaying tool calls in a user-friendly way
-    Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: (input: ToolInput) => {
-            return `Processing: ${input.exampleParam}${input.optionalParam ? ` with value ${input.optionalParam}` : ''}`;
+            return `Processing: ${input.exampleParam}${input.optionalParam ? ` with value ${input.optionalParam}` : ""}`;
         },
         enumerable: false,
         configurable: true

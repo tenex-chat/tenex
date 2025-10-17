@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { getNDK } from "@/nostr";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";

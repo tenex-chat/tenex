@@ -1,6 +1,4 @@
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
-import { AgentRegistry } from "../agents/AgentRegistry";
-import type { AgentInstance } from "../agents/types";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
 import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
@@ -66,9 +64,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
       return;
     }
 
-    // Load agent registry
-    const agentRegistry = new AgentRegistry(projectPath, false);
-    await agentRegistry.loadFromProject();
+    const ndkProject = event as NDKProject;
 
     // Track which agents need to be added or updated
     const currentAgentEventIds = new Set<string>();
@@ -97,18 +93,14 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
       logger.info(`Found ${agentsToRemove.length} agent(s) to remove`);
     }
 
-    // Handle agent removals first
-    for (const eventId of agentsToRemove) {
-      try {
-        await agentRegistry.removeAgentByEventId(eventId);
-      } catch (error) {
-        logger.error("Failed to remove agent", { error, eventId });
-      }
+    // Note: Agent removal is handled differently with new architecture
+    // Agents are removed from projects, not deleted entirely
+    if (agentsToRemove.length > 0) {
+      logger.warn(`Agent removal not implemented for new architecture - ${agentsToRemove.length} agent(s) may need manual removal`);
     }
 
     // Fetch and install new agent definitions using shared function
     if (newAgentEventIds.length > 0) {
-      const ndkProject = event as NDKProject;
       await installAgentsFromEvents(newAgentEventIds, projectPath, ndkProject, getNDK());
     }
 
@@ -168,23 +160,12 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
       await mcpService.reload(projectPath);
     }
 
-    // Reload the agent registry to get all agents including new ones
-    await agentRegistry.loadFromProject();
-
-    // Update the project context with new agents
-    const updatedAgents = new Map<string, AgentInstance>();
-    for (const agent of agentRegistry.getAllAgents()) {
-      updatedAgents.set(agent.slug, agent);
-    }
-
-    // Create NDKProject from the event
-    const ndkProject = event as NDKProject;
-
     // Update the existing project context atomically
-    await currentContext.updateProjectData(ndkProject, updatedAgents);
+    // This will reload agents from the project
+    await currentContext.updateProjectData(ndkProject);
 
     logger.info("Project context updated", {
-      totalAgents: updatedAgents.size,
+      totalAgents: currentContext.agents.size,
       newAgentsAdded: newAgentEventIds.length,
       agentsRemoved: agentsToRemove.length,
       newMCPToolsAdded: newMCPEventIds.length,

@@ -38,14 +38,10 @@ export interface AgentInstance {
   llmConfig: string;
   /** Tool names available to this agent (stored as strings, converted to tools at runtime) */
   tools: string[];
-  /** Whether this agent has access to MCP tools (defaults to true except for orchestrator) */
-  mcp?: boolean;
   /** NDKAgentDefinition event ID for persisted configuration */
   eventId?: string;
   /** Agent slug/key from agents.json configuration */
   slug: string;
-  /** Whether this agent is from the global configuration */
-  isGlobal?: boolean;
   /** Project phase this agent instance is for */
   phase?: string;
   /** Phase definitions for this agent - maps phase names to their instructions */
@@ -105,7 +101,6 @@ export interface StoredAgentData {
   useCriteria?: string;
   llmConfig?: string;
   tools?: string[]; // Tool names in storage - converted to Tool instances at runtime
-  mcp?: boolean; // Whether this agent has access to MCP tools
   phase?: string; // Project phase this agent definition is for
   phases?: Record<string, string>; // Phase definitions - maps phase names to their instructions
 }

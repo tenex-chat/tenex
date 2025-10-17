@@ -1,8 +1,8 @@
-import { NDKEvent } from '@nostr-dev-kit/ndk';
-import { TreeBuilder } from './utils/TreeBuilder';
-import { MessageFormatter } from './utils/MessageFormatter';
-import { TimestampFormatter } from './utils/TimestampFormatter';
-import { TreeRenderer } from './utils/TreeRenderer';
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { TreeBuilder } from "./utils/TreeBuilder";
+import { MessageFormatter } from "./utils/MessageFormatter";
+import { TimestampFormatter } from "./utils/TimestampFormatter";
+import { TreeRenderer } from "./utils/TreeRenderer";
 
 export interface ThreadNode {
   event: NDKEvent;
@@ -19,10 +19,10 @@ export interface ThreadNode {
 
 export interface FormatterOptions {
   includeTimestamps: boolean;
-  timestampFormat: 'relative' | 'absolute' | 'time-only';
+  timestampFormat: "relative" | "absolute" | "time-only";
   maxDepth?: number;
   includeToolCalls: boolean;
-  treeStyle: 'ascii' | 'unicode' | 'markdown';
+  treeStyle: "ascii" | "unicode" | "markdown";
   compactMode: boolean; // Single-line per message
   currentAgentPubkey?: string; // The agent we're formatting for (to show "you")
 }
@@ -52,7 +52,7 @@ export class ThreadedConversationFormatter {
    */
   formatThread(root: ThreadNode, options?: FormatterOptions): string {
     const opts = this.getDefaultOptions(options);
-    return this.renderNode(root, opts, '', true);
+    return this.renderNode(root, opts, "", true);
   }
 
 
@@ -98,9 +98,9 @@ export class ThreadedConversationFormatter {
     // 5. Format the branches into a string
     const options: FormatterOptions = {
       includeTimestamps: true,
-      timestampFormat: 'time-only',
+      timestampFormat: "time-only",
       includeToolCalls: true,
-      treeStyle: 'ascii',
+      treeStyle: "ascii",
       compactMode: true,
       currentAgentPubkey: agentPubkey // Pass the agent we're formatting for
     };
@@ -108,12 +108,12 @@ export class ThreadedConversationFormatter {
     const result: string[] = [];
     for (let i = 0; i < agentBranches.length; i++) {
       if (i > 0) {
-        result.push('\n' + '─'.repeat(60) + '\n');
+        result.push("\n" + "─".repeat(60) + "\n");
       }
       result.push(this.formatThread(agentBranches[i], options));
     }
     
-    return result.join('\n');
+    return result.join("\n");
   }
   
   /**
@@ -261,10 +261,10 @@ export class ThreadedConversationFormatter {
     const message = this.messageFormatter.format(node, options);
     const timestamp = options.includeTimestamps
       ? this.timestampFormatter.format(node.timestamp, options.timestampFormat)
-      : '';
+      : "";
 
     // Add "(you)" if this is the current agent
-    let agentName = node.agent || 'Unknown';
+    let agentName = node.agent || "Unknown";
     if (options.currentAgentPubkey && node.event.pubkey === options.currentAgentPubkey) {
       agentName = `${agentName} (you)`;
     }
@@ -272,7 +272,7 @@ export class ThreadedConversationFormatter {
     const connector = this.treeRenderer.getConnector(options.treeStyle, isLast);
 
     // Handle multi-line messages by joining with ⏎ separator
-    const inlineMessage = message.replace(/\n/g, ' ⏎ ');
+    const inlineMessage = message.replace(/\n/g, " ⏎ ");
     lines.push(`${prefix}${connector}${agentName}${timestamp}: ${inlineMessage}`);
 
     // Render children with appropriate prefixes
@@ -284,15 +284,15 @@ export class ThreadedConversationFormatter {
       }
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   private getDefaultOptions(options?: Partial<FormatterOptions>): FormatterOptions {
     return {
       includeTimestamps: true,
-      timestampFormat: 'time-only',
+      timestampFormat: "time-only",
       includeToolCalls: true,
-      treeStyle: 'ascii',
+      treeStyle: "ascii",
       compactMode: true,
       ...options
     };

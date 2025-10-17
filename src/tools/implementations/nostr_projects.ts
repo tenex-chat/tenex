@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { NDKProjectStatus } from "@/events/NDKProjectStatus";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";

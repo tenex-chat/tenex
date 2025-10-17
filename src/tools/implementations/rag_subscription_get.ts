@@ -1,16 +1,16 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
-import { executeToolWithErrorHandling, type ToolResponse } from '@/tools/utils';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
+import { executeToolWithErrorHandling, type ToolResponse } from "@/tools/utils";
 
 /**
  * Schema for getting a specific RAG subscription
  */
 const ragSubscriptionGetSchema = z.object({
   subscriptionId: z.string().describe(
-    'The ID of the subscription to retrieve'
+    "The ID of the subscription to retrieve"
   )
 });
 
@@ -18,8 +18,8 @@ const ragSubscriptionGetSchema = z.object({
  * Calculate uptime for a subscription
  */
 function calculateUptime(createdAt: number, status: string): string {
-  if (status !== 'RUNNING') {
-    return 'N/A';
+  if (status !== "RUNNING") {
+    return "N/A";
   }
   
   const uptimeMs = Date.now() - createdAt;
@@ -32,7 +32,7 @@ function calculateUptime(createdAt: number, status: string): string {
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
   
-  return parts.join(' ');
+  return parts.join(" ");
 }
 
 /**
@@ -46,7 +46,7 @@ async function executeGetSubscription(
   
   // Mandate agent identity - no compromises
   if (!context.agent?.pubkey) {
-    throw new Error('Agent identity is required. Cannot retrieve subscription without valid agent pubkey.');
+    throw new Error("Agent identity is required. Cannot retrieve subscription without valid agent pubkey.");
   }
   const agentPubkey = context.agent.pubkey;
   
@@ -60,7 +60,7 @@ async function executeGetSubscription(
     return {
       success: false,
       message: `Subscription '${subscriptionId}' not found`,
-      error: 'SUBSCRIPTION_NOT_FOUND'
+      error: "SUBSCRIPTION_NOT_FOUND"
     };
   }
   
@@ -108,11 +108,11 @@ async function executeGetSubscription(
  */
 export function createRAGSubscriptionGetTool(context: ExecutionContext): AISdkTool {
   return tool({
-    description: 'Get detailed status and metrics for a specific RAG subscription, including processing statistics and the last ingested document snippet.',
+    description: "Get detailed status and metrics for a specific RAG subscription, including processing statistics and the last ingested document snippet.",
     inputSchema: ragSubscriptionGetSchema,
     execute: async (input: z.infer<typeof ragSubscriptionGetSchema>) => {
       return executeToolWithErrorHandling(
-        'rag_subscription_get',
+        "rag_subscription_get",
         input,
         context,
         executeGetSubscription

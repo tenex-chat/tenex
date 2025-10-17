@@ -13,7 +13,6 @@ export const CONVERSATIONS_DIR = "conversations" as const;
  */
 export const CONFIG_FILE = "config.json" as const;
 export const MCP_CONFIG_FILE = "mcp.json" as const;
-export const AGENTS_FILE = "agents.json" as const;
 export const LLMS_FILE = "llms.json" as const;
 
 /**

@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { fileExists, readFile } from "@/lib/fs";
 import { logger } from "@/utils/logger";
 import * as path from "node:path";

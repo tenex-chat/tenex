@@ -1,10 +1,10 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
-import { RAGService } from '@/services/rag/RAGService';
+import { RAGService } from "@/services/rag/RAGService";
 
 const lessonGetSchema = z.object({
   title: z.string().describe("Title of the lesson to retrieve"),
@@ -36,7 +36,7 @@ async function executeLessonGet(input: LessonGetInput, context: ExecutionContext
     const ragService = RAGService.getInstance();
     
     // Query the lessons collection using semantic search
-    const searchResults = await ragService.query('lessons', title, 3);
+    const searchResults = await ragService.query("lessons", title, 3);
     
     if (searchResults && searchResults.length > 0) {
       // Use the best matching result
@@ -118,7 +118,7 @@ export function createLessonGetTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ title }: LessonGetInput) => {
       return `Reading lesson: ${title}`;
     },

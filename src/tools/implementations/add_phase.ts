@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
@@ -83,13 +83,13 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
         });
 
         // Check if agent needs delegate_phase tool now
-        const hasDelegate = agent.tools.includes('delegate');
-        const hasDelegatePhase = agent.tools.includes('delegate_phase');
+        const hasDelegate = agent.tools.includes("delegate");
+        const hasDelegatePhase = agent.tools.includes("delegate_phase");
 
         if (hasDelegate && !hasDelegatePhase) {
           // Switch from delegate to delegate_phase
-          agent.tools = agent.tools.filter(t => t !== 'delegate');
-          agent.tools.push('delegate_phase');
+          agent.tools = agent.tools.filter(t => t !== "delegate");
+          agent.tools.push("delegate_phase");
 
           logger.info(`Switched agent ${agent.name} from 'delegate' to 'delegate_phase' tool`);
         }
@@ -123,7 +123,7 @@ export function createAddPhaseTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ phaseName }: AddPhaseInput) => {
       return `Adding phase: ${phaseName}`;
     },

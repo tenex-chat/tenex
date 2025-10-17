@@ -1,9 +1,9 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { RagSubscriptionService } from '@/services/rag/RagSubscriptionService';
-import { executeToolWithErrorHandling, type ToolResponse } from '@/tools/utils';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
+import { executeToolWithErrorHandling, type ToolResponse } from "@/tools/utils";
 
 /**
  * Schema for creating a RAG subscription
@@ -17,14 +17,14 @@ const ragSubscriptionCreateSchema = z.object({
   ),
   resourceUri: z.string().describe(
     'The MCP resource URI to subscribe to (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ' +
-    'This must be an actual resource URI, NOT a tool name. If using a resource template, ' +
-    'you must first expand it with parameters to get the actual URI.'
+    "This must be an actual resource URI, NOT a tool name. If using a resource template, " +
+    "you must first expand it with parameters to get the actual URI."
   ),
   ragCollection: z.string().describe(
-    'Name of the RAG collection where data will be stored'
+    "Name of the RAG collection where data will be stored"
   ),
   description: z.string().describe(
-    'Human-readable description of what this subscription does'
+    "Human-readable description of what this subscription does"
   )
 });
 
@@ -39,7 +39,7 @@ async function executeCreateSubscription(
   
   // Mandate agent identity - no compromises
   if (!context.agent?.pubkey) {
-    throw new Error('Agent identity is required. Cannot create subscription without valid agent pubkey.');
+    throw new Error("Agent identity is required. Cannot create subscription without valid agent pubkey.");
   }
   const agentPubkey = context.agent.pubkey;
   
@@ -88,11 +88,11 @@ async function executeCreateSubscription(
  */
 export function createRAGSubscriptionCreateTool(context: ExecutionContext): AISdkTool {
   return tool({
-    description: 'Create a persistent subscription to stream data from an MCP resource into a RAG collection. The subscription will automatically pipe all updates from the specified resource to the RAG collection and persist across restarts.',
+    description: "Create a persistent subscription to stream data from an MCP resource into a RAG collection. The subscription will automatically pipe all updates from the specified resource to the RAG collection and persist across restarts.",
     inputSchema: ragSubscriptionCreateSchema,
     execute: async (input: z.infer<typeof ragSubscriptionCreateSchema>) => {
       return executeToolWithErrorHandling(
-        'rag_subscription_create',
+        "rag_subscription_create",
         input,
         context,
         executeCreateSubscription

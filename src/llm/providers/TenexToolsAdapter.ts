@@ -1,7 +1,7 @@
-import { tool, type SdkMcpServer, createSdkMcpServer } from 'ai-sdk-provider-claude-code';
-import type { AISdkTool } from '@/tools/registry';
-import { z } from 'zod';
-import { logger } from '@/utils/logger';
+import { tool, type SdkMcpServer, createSdkMcpServer } from "ai-sdk-provider-claude-code";
+import type { AISdkTool } from "@/tools/registry";
+import { z } from "zod";
+import { logger } from "@/utils/logger";
 
 /**
  * Converts TENEX tools to Claude Code SDK MCP tools
@@ -18,7 +18,7 @@ export class TenexToolsAdapter {
     ): SdkMcpServer | undefined {
         // Filter out MCP tools - they're handled separately
         const localTools = Object.entries(tools).filter(
-            ([name]) => !name.startsWith('mcp__')
+            ([name]) => !name.startsWith("mcp__")
         );
 
         if (localTools.length === 0) {
@@ -40,24 +40,24 @@ export class TenexToolsAdapter {
                         const result = await tenexTool.execute(args, { abortSignal: new AbortController().signal });
 
                         // Convert result to MCP format
-                        if (typeof result === 'string') {
+                        if (typeof result === "string") {
                             return {
-                                content: [{ type: 'text', text: result }]
+                                content: [{ type: "text", text: result }]
                             };
-                        } else if (result && typeof result === 'object') {
+                        } else if (result && typeof result === "object") {
                             return {
-                                content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+                                content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
                             };
                         } else {
                             return {
-                                content: [{ type: 'text', text: String(result) }]
+                                content: [{ type: "text", text: String(result) }]
                             };
                         }
                     } catch (error) {
                         logger.error(`Error executing tool ${name}:`, error);
                         return {
                             content: [{
-                                type: 'text',
+                                type: "text",
                                 text: `Error: ${error instanceof Error ? error.message : String(error)}`
                             }],
                             isError: true
@@ -67,18 +67,18 @@ export class TenexToolsAdapter {
             );
         });
 
-        logger.debug('[TenexToolsAdapter] Created SDK MCP server with tools:', {
+        logger.debug("[TenexToolsAdapter] Created SDK MCP server with tools:", {
             tools: localTools.map(([name]) => name)
         });
 
         // Create and return the SDK MCP server
         try {
             return createSdkMcpServer({
-                name: 'tenex',
+                name: "tenex",
                 tools: sdkTools
             });
         } catch (error) {
-            logger.warn('[TenexToolsAdapter] Could not create SDK MCP server:', error);
+            logger.warn("[TenexToolsAdapter] Could not create SDK MCP server:", error);
             return undefined;
         }
     }

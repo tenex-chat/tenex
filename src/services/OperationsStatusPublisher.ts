@@ -34,7 +34,7 @@ export class OperationsStatusPublisher {
     
     // Publish initial state if any operations exist
     this.publishNow().catch(err => {
-      logger.error('[OperationsStatusPublisher] Failed to publish initial state', {
+      logger.error("[OperationsStatusPublisher] Failed to publish initial state", {
         error: formatAnyError(err)
       });
     });
@@ -60,7 +60,7 @@ export class OperationsStatusPublisher {
     // Schedule new publish
     this.debounceTimer = setTimeout(() => {
       this.publishNow().catch(err => {
-        logger.error('[OperationsStatusPublisher] Failed to publish status', {
+        logger.error("[OperationsStatusPublisher] Failed to publish status", {
           error: formatAnyError(err)
         });
       });
@@ -69,7 +69,7 @@ export class OperationsStatusPublisher {
   
   private async publishNow(): Promise<void> {
     if (!isProjectContextInitialized()) {
-      logger.debug('[OperationsStatusPublisher] Project context not initialized, skipping publish');
+      logger.debug("[OperationsStatusPublisher] Project context not initialized, skipping publish");
       return;
     }
     
@@ -91,7 +91,7 @@ export class OperationsStatusPublisher {
     
     // Log current state for debugging
     if (operationsByEvent.size > 0 || eventsToCleanup.size > 0) {
-      logger.debug('[OperationsStatusPublisher] Current state', {
+      logger.debug("[OperationsStatusPublisher] Current state", {
         activeEvents: Array.from(currentEventIds).map(id => id.substring(0, 8)),
         previouslyPublished: Array.from(this.publishedEvents).map(id => id.substring(0, 8)),
         toCleanup: Array.from(eventsToCleanup).map(id => id.substring(0, 8))
@@ -108,7 +108,7 @@ export class OperationsStatusPublisher {
           this.lastPublishedState.set(eventId, new Set(operations.map(op => op.agentPubkey)));
         }
       } catch (err) {
-        logger.error('[OperationsStatusPublisher] Failed to publish event status', {
+        logger.error("[OperationsStatusPublisher] Failed to publish event status", {
           eventId: eventId.substring(0, 8),
           error: formatAnyError(err)
         });
@@ -118,21 +118,21 @@ export class OperationsStatusPublisher {
     // Publish cleanup events (empty p-tags) for completed events
     for (const eventId of eventsToCleanup) {
       try {
-        logger.debug('[OperationsStatusPublisher] Publishing cleanup event', {
+        logger.debug("[OperationsStatusPublisher] Publishing cleanup event", {
           eventId: eventId.substring(0, 8)
         });
         await this.publishEventStatus(eventId, [], projectCtx);
         this.publishedEvents.delete(eventId);
         this.lastPublishedState.delete(eventId);
       } catch (err) {
-        logger.error('[OperationsStatusPublisher] Failed to publish cleanup status', {
+        logger.error("[OperationsStatusPublisher] Failed to publish cleanup status", {
           eventId: eventId.substring(0, 8),
           error: formatAnyError(err)
         });
       }
     }
     
-    logger.debug('[OperationsStatusPublisher] Published status', {
+    logger.debug("[OperationsStatusPublisher] Published status", {
       activeEvents: operationsByEvent.size,
       cleanedEvents: eventsToCleanup.size,
       totalOperations: Array.from(operationsByEvent.values()).reduce((sum, ops) => sum + ops.length, 0)
@@ -184,11 +184,11 @@ export class OperationsStatusPublisher {
     }
     
     const isCleanup = operations.length === 0;
-    logger.debug('[OperationsStatusPublisher] Published event status', {
+    logger.debug("[OperationsStatusPublisher] Published event status", {
       eventId: eventId.substring(0, 8),
       agentCount: agentPubkeys.size,
       operationCount: operations.length,
-      type: isCleanup ? 'cleanup' : 'active',
+      type: isCleanup ? "cleanup" : "active",
       pTags: Array.from(agentPubkeys).map(p => p.substring(0, 8))
     });
   }

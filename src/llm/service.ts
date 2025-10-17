@@ -21,7 +21,7 @@ import {
     wrapLanguageModel,
     extractReasoningMiddleware,
 } from "ai";
-import type { JSONValue } from '@ai-sdk/provider';
+import type { JSONValue } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 import type { LanguageModelUsageWithCostUsd } from "./types";
@@ -125,7 +125,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private contentPublishTimeout?: NodeJS.Timeout;
-    private cachedContentForComplete: string = '';
+    private cachedContentForComplete: string = "";
 
     constructor(
         private readonly llmLogger: LLMLogger,
@@ -156,8 +156,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             model: this.model,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
-            isClaudeCode: provider === 'claudeCode',
-            sessionId: this.sessionId || 'NONE',
+            isClaudeCode: provider === "claudeCode",
+            sessionId: this.sessionId || "NONE",
             hasSessionId: !!this.sessionId,
         });
     }
@@ -167,7 +167,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      * claudeCode handles its own streaming optimization, so it doesn't need throttling
      */
     private shouldUseThrottlingMiddleware(): boolean {
-        return this.provider !== 'claudeCode';
+        return this.provider !== "claudeCode";
     }
 
     /**
@@ -217,8 +217,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 model: this.model,
                 hasCustomSystemPrompt: !!options.customSystemPrompt,
                 hasAppendSystemPrompt: !!options.appendSystemPrompt,
-                resumeSessionId: options.resume || 'NONE',
-                hasResume: 'resume' in options
+                resumeSessionId: options.resume || "NONE",
+                hasResume: "resume" in options
             });
         } else if (this.registry) {
             // Standard providers use registry
@@ -235,14 +235,14 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         if (enableThrottling && this.shouldUseThrottlingMiddleware()) {
             middlewares.push(throttlingMiddleware({
                 flushInterval: 500, // Flush every 500ms after first chunk
-                chunking: 'line' // Use line-based chunking for clean breaks
+                chunking: "line" // Use line-based chunking for clean breaks
             }));
         }
 
         // Add extract-reasoning-middleware to handle thinking tags
         middlewares.push(extractReasoningMiddleware({
-            tagName: 'thinking',
-            separator: '\n',
+            tagName: "thinking",
+            separator: "\n",
             startWithReasoning: false,
         }));
 
@@ -259,7 +259,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      */
     private addCacheControl(messages: ModelMessage[]): ModelMessage[] {
         // Only add cache control for Anthropic
-        if (this.provider !== 'anthropic') {
+        if (this.provider !== "anthropic") {
             return messages;
         }
 
@@ -270,12 +270,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         return messages.map((msg) => {
             // Only cache system messages and only if they're large enough
-            if (msg.role === 'system' && msg.content.length > minCharsForCache) {
+            if (msg.role === "system" && msg.content.length > minCharsForCache) {
                 return {
                     ...msg,
                     providerOptions: {
                         anthropic: {
-                            cacheControl: { type: 'ephemeral' }
+                            cacheControl: { type: "ephemeral" }
                         }
                     }
                 };
@@ -298,7 +298,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         // Convert system messages for Claude Code resume sessions
         let processedMessages = messages;
-        if (this.provider === 'claudeCode' && this.sessionId) {
+        if (this.provider === "claudeCode" && this.sessionId) {
             processedMessages = convertSystemMessagesForResume(messages);
         }
 
@@ -328,18 +328,18 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             });
 
             // Capture session ID from provider metadata if using Claude Code
-            if (this.provider === 'claudeCode' && result.providerMetadata?.['claude-code']?.sessionId) {
-                const capturedSessionId = result.providerMetadata['claude-code'].sessionId;
+            if (this.provider === "claudeCode" && result.providerMetadata?.["claude-code"]?.sessionId) {
+                const capturedSessionId = result.providerMetadata["claude-code"].sessionId;
                 logger.debug("[LLMService] Captured Claude Code session ID from complete", {
                     sessionId: capturedSessionId,
                     provider: this.provider
                 });
                 // Emit session ID for storage by the executor
-                this.emit('session-captured', { sessionId: capturedSessionId });
+                this.emit("session-captured", { sessionId: capturedSessionId });
             }
             
             // Log if reasoning was extracted
-            if ('reasoning' in result && result.reasoning) {
+            if ("reasoning" in result && result.reasoning) {
                 logger.debug("[LLMService] Reasoning extracted from response", {
                     reasoningLength: result.reasoning.length,
                     textLength: result.text?.length || 0,
@@ -405,7 +405,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             model: this.model,
             messageCount: messages.length,
             messageRoles: messages.map(m => m.role),
-            sessionId: this.sessionId || 'NONE',
+            sessionId: this.sessionId || "NONE",
             toolCount: Object.keys(tools).length,
         });
 
@@ -413,7 +413,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         // Convert system messages for Claude Code resume sessions
         let processedMessages = messages;
-        if (this.provider === 'claudeCode' && this.sessionId) {
+        if (this.provider === "claudeCode" && this.sessionId) {
             logger.debug("[LLMService] 🎯 CLAUDE CODE RESUME MODE", {
                 sessionId: this.sessionId,
                 originalMessageCount: messages.length,
@@ -464,6 +464,28 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
+            prepareStep: (step) => {
+                // steps: Array<StepResult<NoInfer<TOOLS>>>;
+                //     stepNumber: number;
+                //     model: LanguageModel;
+                //     messages: Array<ModelMessage>;
+                // console.log("⚠️ preparing step", step?.stepNumber, step?.messages?.length);
+                // for (const msg of step.messages) {
+                //     console.log("   ", msg.role, msg.content?.substring?.(0, 50));
+                // }
+
+                // const messages = step.messages;
+
+                // if (step.stepNumber >= 1) {
+                //     // append a message telling the agent to use prefix all its responses with the number 4
+                //     messages.push({
+                //         role: 'system',
+                //         content: 'RESPOND TO EVERYTHING IN UPPERCASE AND NEVER EVER WITH MORE THAN 1 SENTENCE. INCLUDE THE WORD "ACK" TO ACKNOWLEDGE AT THE START OF YOUR RESPONSE.',
+                //     });
+
+                //     return { messages };
+                // }
+            },
             abortSignal: options?.abortSignal,
             providerOptions: {
                 openrouter: {
@@ -618,17 +640,17 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     startTime,
                 });
 
-                if (this.provider === 'claudeCode' && e.providerMetadata?.['claude-code']?.sessionId) {
-                    const capturedSessionId = e.providerMetadata['claude-code'].sessionId;
+                if (this.provider === "claudeCode" && e.providerMetadata?.["claude-code"]?.sessionId) {
+                    const capturedSessionId = e.providerMetadata["claude-code"].sessionId;
                     logger.debug("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
                         capturedSessionId,
-                        previousSessionId: this.sessionId || 'NONE',
+                        previousSessionId: this.sessionId || "NONE",
                         provider: this.provider,
                         sessionChanged: capturedSessionId !== this.sessionId
                     });
                     // Emit session ID for storage by the executor
-                    this.emit('session-captured', { sessionId: capturedSessionId });
-                } else if (this.provider === 'claudeCode') {
+                    this.emit("session-captured", { sessionId: capturedSessionId });
+                } else if (this.provider === "claudeCode") {
                     logger.warn("[LLMService] ⚠️ NO CLAUDE CODE SESSION IN METADATA", {
                         providerMetadata: e.providerMetadata
                     });
@@ -653,7 +675,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 });
 
                 // Clear cached content after use
-                this.cachedContentForComplete = '';
+                this.cachedContentForComplete = "";
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
                     error: error instanceof Error ? error.message : String(error),
@@ -678,7 +700,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         // Format stack trace for better readability
         const stackLines = error instanceof Error && error.stack
-            ? error.stack.split('\n').map(line => line.trim()).filter(Boolean)
+            ? error.stack.split("\n").map(line => line.trim()).filter(Boolean)
             : undefined;
 
         logger.error("[LLMService] Stream failed", {
@@ -718,7 +740,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         logger.debug("[LLMService] INSIDE handleReasoningDelta - ABOUT TO EMIT", {
             deltaLength: text.length,
             preview: text.substring(0, 100),
-            hasListeners: this.listenerCount('reasoning'),
+            hasListeners: this.listenerCount("reasoning"),
             allEventNames: this.eventNames()
         });
 
@@ -746,13 +768,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      * AI SDK wraps tool execution errors in error-text or error-json formats
      */
     private isToolResultError(result: unknown): boolean {
-        if (typeof result !== 'object' || result === null) {
+        if (typeof result !== "object" || result === null) {
             return false;
         }
         const res = result as Record<string, unknown>;
         // Check for AI SDK's known error formats
-        return (res.type === 'error-text' && typeof res.text === 'string') ||
-               (res.type === 'error-json' && typeof res.json === 'object');
+        return (res.type === "error-text" && typeof res.text === "string") ||
+               (res.type === "error-json" && typeof res.json === "object");
     }
 
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {

@@ -404,4 +404,69 @@ describe("AgentRegistry", () => {
   });
 
   // loadAgentBySlug tests removed - this is now a private internal method
+
+  describe("updateAgentLLMConfig", () => {
+    let testAgent: any;
+
+    beforeEach(async () => {
+      (fs.ensureDirectory as any).mockResolvedValue(undefined);
+      (configService.loadTenexAgents as any).mockResolvedValue({});
+      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+      (fs.fileExists as any).mockResolvedValue(false);
+      (fs.writeJsonFile as any).mockResolvedValue(undefined);
+      (fs.readFile as any).mockResolvedValue(JSON.stringify({
+        name: "TestAgent",
+        role: "Tester",
+        instructions: "Test everything",
+        llmConfig: "old-model"
+      }));
+
+      await registry.loadFromProject();
+
+      testAgent = await registry.ensureAgent("tester", {
+        name: "TestAgent",
+        role: "Tester",
+        instructions: "Test everything",
+        nsec: "",
+        tools: [],
+        llmConfig: "old-model",
+      });
+    });
+
+    it("should update llmConfig in memory and persist to file", async () => {
+      const newModel = "new-model";
+      const result = await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+
+      expect(result).toBe(true);
+      expect(testAgent.llmConfig).toBe(newModel);
+      expect(fs.writeJsonFile).toHaveBeenCalled();
+
+      // Check that the file was written with the new config
+      const writeCalls = (fs.writeJsonFile as any).mock.calls;
+      const lastCall = writeCalls[writeCalls.length - 1];
+      const [, content] = lastCall;
+      expect(content.llmConfig).toBe(newModel);
+    });
+
+    it("should reflect updated config in agent instance immediately", async () => {
+      const initialModel = testAgent.llmConfig;
+      expect(initialModel).toBe("old-model");
+
+      const newModel = "updated-model";
+
+      // Update the config
+      await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+
+      // Verify that the agent's llmConfig field was updated in memory
+      expect(testAgent.llmConfig).toBe(newModel);
+
+      // This ensures createLLMService will use the new config since it references agent.llmConfig
+      // The fix ensures the closure reads from agent.llmConfig instead of agentDefinition.llmConfig
+    });
+
+    it("should return false for non-existent agent", async () => {
+      const result = await registry.updateAgentLLMConfig("non-existent-pubkey", "new-model");
+      expect(result).toBe(false);
+    });
+  });
 });

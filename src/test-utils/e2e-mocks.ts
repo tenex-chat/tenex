@@ -63,7 +63,7 @@ export async function setupMockModules(scenarios: string[] = [], defaultResponse
     
     // Initialize mock LLM
     const mockLLM = createMockLLMService(scenarios, {
-        debug: process.env.DEBUG === 'true',
+        debug: process.env.DEBUG === "true",
         defaultResponse: defaultResponse || { content: "Mock LLM: No matching response found" }
     });
     

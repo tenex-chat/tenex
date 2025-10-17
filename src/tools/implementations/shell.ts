@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ExecutionConfig } from "@/agents/execution/constants";
@@ -106,7 +106,7 @@ export function createShellTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ command }: ShellInput) => {
       return `Executing: ${command}`;
     },

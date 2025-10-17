@@ -60,7 +60,7 @@ export class EventHandler {
     if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
     // Debug: Check if event has proper NDKEvent methods
-    if (typeof event.getMatchingTags !== 'function') {
+    if (typeof event.getMatchingTags !== "function") {
       logger.error("Event is missing getMatchingTags method!", {
         eventId: event.id,
         eventKind: event.kind,

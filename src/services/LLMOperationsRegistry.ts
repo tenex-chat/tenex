@@ -53,11 +53,11 @@ class LLMOperationsRegistry {
     this.operationsByContext.set(this.getContextKey(context), operationId);
     
     // Auto-cleanup on abort (for cancellation cases)
-    operation.abortController.signal.addEventListener('abort', () => {
+    operation.abortController.signal.addEventListener("abort", () => {
       this.cleanupOperation(operationId);
     });
     
-    logger.debug('[LLMOpsRegistry] Registered operation', {
+    logger.debug("[LLMOpsRegistry] Registered operation", {
       operationId: operationId.substring(0, 8),
       rootEvent: rootEventId.substring(0, 8),
       triggeringEvent: context.triggeringEvent.id.substring(0, 8),
@@ -103,7 +103,7 @@ class LLMOperationsRegistry {
       this.unindexOperation(operationId, operation.eventId);
     }
     
-    logger.debug('[LLMOpsRegistry] Completed operation', {
+    logger.debug("[LLMOpsRegistry] Completed operation", {
       operationId: operationId.substring(0, 8),
       eventId: operation.eventId.substring(0, 8),
       conversationId: operation.conversationId.substring(0, 8),
@@ -132,7 +132,7 @@ class LLMOperationsRegistry {
     }
     
     if (stopped > 0) {
-      logger.info('[LLMOpsRegistry] Stopped operations', {
+      logger.info("[LLMOpsRegistry] Stopped operations", {
         eventId: eventId.substring(0, 8),
         count: stopped
       });

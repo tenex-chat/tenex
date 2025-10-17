@@ -28,7 +28,7 @@ export  class EventToModelMessage {
 
         // Check for phase transition before processing the event
         const phaseTag = event.tagValue("phase");
-        const phaseInstructionsTag = event.tagValue('phase-instructions');
+        const phaseInstructionsTag = event.tagValue("phase-instructions");
 
         if (phaseTag) {
             // This event marks a phase transition
@@ -179,7 +179,7 @@ export  class EventToModelMessage {
                 // Format as a system message showing it was directed to other agents
                 return {
                     role: "system",
-                    content: `[User (${userName}) → ${targetedAgentNames.join(', ')}]: ${processedContent}`
+                    content: `[User (${userName}) → ${targetedAgentNames.join(", ")}]: ${processedContent}`
                 };
             }
 
@@ -239,7 +239,7 @@ export  class EventToModelMessage {
                 // Use 'system' role since this agent is just observing
                 return {
                     role: "system",
-                    content: `[${sendingAgentName} → ${targetedAgentNames.join(', ')}]: ${processedContent}`
+                    content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`
                 };
             }
         }

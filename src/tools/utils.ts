@@ -45,7 +45,7 @@ export class ToolExecutionError extends Error {
     public readonly cause?: Error
   ) {
     super(message);
-    this.name = 'ToolExecutionError';
+    this.name = "ToolExecutionError";
   }
 }
 
@@ -77,7 +77,7 @@ export async function executeToolWithErrorHandling<T extends z.ZodType>(
     const errorMessage = handleError(
       error,
       `Tool execution failed: ${toolName}`,
-      { logLevel: 'error' }
+      { logLevel: "error" }
     );
     
     // Return standardized error response
@@ -105,7 +105,7 @@ export function validateRequiredFields<T extends Record<string, unknown>>(
   
   if (missingFields.length > 0) {
     throw new ToolExecutionError(
-      `Missing required fields: ${missingFields.join(', ')}`,
+      `Missing required fields: ${missingFields.join(", ")}`,
       toolName
     );
   }
@@ -218,7 +218,7 @@ export interface MappedRAGDocument {
  * Type guard to validate JSON object structure
  */
 export function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -228,17 +228,17 @@ export function isDocumentMetadata(value: unknown): value is DocumentMetadata {
   if (!isJsonObject(value)) return false;
   
   // Validate optional known fields if present
-  if (value.language !== undefined && typeof value.language !== 'string') return false;
-  if (value.type !== undefined && typeof value.type !== 'string') return false;
-  if (value.category !== undefined && typeof value.category !== 'string') return false;
-  if (value.author !== undefined && typeof value.author !== 'string') return false;
-  if (value.title !== undefined && typeof value.title !== 'string') return false;
-  if (value.uri !== undefined && typeof value.uri !== 'string') return false;
+  if (value.language !== undefined && typeof value.language !== "string") return false;
+  if (value.type !== undefined && typeof value.type !== "string") return false;
+  if (value.category !== undefined && typeof value.category !== "string") return false;
+  if (value.author !== undefined && typeof value.author !== "string") return false;
+  if (value.title !== undefined && typeof value.title !== "string") return false;
+  if (value.uri !== undefined && typeof value.uri !== "string") return false;
   
   // Deep validation for tags array - ensure all elements are strings
   if (value.tags !== undefined) {
     if (!Array.isArray(value.tags)) return false;
-    if (!value.tags.every((tag): tag is string => typeof tag === 'string')) return false;
+    if (!value.tags.every((tag): tag is string => typeof tag === "string")) return false;
   }
   
   return true;
@@ -252,22 +252,22 @@ export function parseDocumentMetadata(
 ): DocumentMetadata {
   if (!metadata) return {};
   
-  if (typeof metadata === 'string') {
+  if (typeof metadata === "string") {
     try {
       const parsed = JSON.parse(metadata);
       if (!isDocumentMetadata(parsed)) {
-        logger.warn('Parsed metadata does not match DocumentMetadata schema', { parsed });
+        logger.warn("Parsed metadata does not match DocumentMetadata schema", { parsed });
         return {};
       }
       return parsed;
     } catch (error) {
-      logger.warn('Failed to parse document metadata', { error, metadata });
+      logger.warn("Failed to parse document metadata", { error, metadata });
       return {};
     }
   }
   
   if (!isDocumentMetadata(metadata)) {
-    logger.warn('Metadata object does not match DocumentMetadata schema', { metadata });
+    logger.warn("Metadata object does not match DocumentMetadata schema", { metadata });
     return {};
   }
   
@@ -280,11 +280,11 @@ export function parseDocumentMetadata(
  */
 export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocument {
   return {
-    id: result.id ?? '',
-    content: result.content ?? '',
+    id: result.id ?? "",
+    content: result.content ?? "",
     metadata: parseDocumentMetadata(result.metadata),
     timestamp: result.timestamp ?? Date.now(),
-    source: result.source ?? 'unknown'
+    source: result.source ?? "unknown"
   };
 }
 

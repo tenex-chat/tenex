@@ -43,7 +43,7 @@ export class DelegationService {
       if (!intent.phase) {
         throw new Error(
           `Self-delegation is not permitted. Agent "${this.agent.slug}" cannot delegate to itself. ` +
-          `Self-delegation is only allowed when using the delegate_phase tool for phase transitions.`
+          "Self-delegation is only allowed when using the delegate_phase tool for phase transitions."
         );
       }
       

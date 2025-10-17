@@ -171,7 +171,7 @@ export class ThreadService {
      */
     getThreadRoot(thread: NDKEvent[]): string {
         // First event in thread path is the root
-        return thread[0]?.id || 'unknown';
+        return thread[0]?.id || "unknown";
     }
 
     /**
@@ -190,8 +190,8 @@ export class ThreadService {
 
         for (const event of history) {
             // An event is a root if it has no parent tag or if it has an E tag pointing to itself
-            const parentTag = event.tags.find(t => t[0] === 'e');
-            const rootTag = event.tags.find(t => t[0] === 'E');
+            const parentTag = event.tags.find(t => t[0] === "e");
+            const rootTag = event.tags.find(t => t[0] === "E");
 
             if (!parentTag || (rootTag && rootTag[1] === event.id)) {
                 roots.add(event.id);

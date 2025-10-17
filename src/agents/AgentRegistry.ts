@@ -1,17 +1,10 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type {
-  AgentConfig,
   AgentConfigOptionalNsec,
   AgentInstance,
-  StoredAgentData,
 } from "@/agents/types";
-import { ensureDirectory, fileExists, readFile, writeJsonFile } from "@/lib/fs";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { configService, getProjectContext } from "@/services";
-import type { TenexAgents } from "@/services/config/types";
-// Tool type removed - using AI SDK tools only
+import { getProjectContext } from "@/services";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { type NDKProject, type NDKEvent } from "@nostr-dev-kit/ndk";
@@ -20,602 +13,501 @@ import { CORE_AGENT_TOOLS, getDefaultToolsForAgent, DELEGATE_TOOLS, getDelegateT
 import { isValidToolName } from "@/tools/registry";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
-import { AgentMetadataStore } from '@/conversations/services/AgentMetadataStore';
+import { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
+import { agentStorage, type StoredAgent } from "./AgentStorage";
+import { configService } from "@/services";
+import { installAgentFromEvent } from "@/utils/agentInstaller";
+import { getNDK } from "@/nostr";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
- * Handles loading, saving, and publishing agents to the Nostr network.
+ * Uses the new simplified storage model where all agents are stored in ~/.tenex/agents/
  */
 export class AgentRegistry {
   private agents: Map<string, AgentInstance> = new Map();
   private agentsByPubkey: Map<string, AgentInstance> = new Map();
-  private agentsDir: string;
-  private registry: TenexAgents = {};
-  private globalRegistry: TenexAgents = {};
-  private isGlobal: boolean;
+  private projectDTag: string | undefined;
+  private projectPath: string;
+  private ndkProject?: NDKProject;
+  private pmPubkey?: string;
 
   /**
    * Creates a new AgentRegistry instance.
-   * @param basePath - Base directory path for the project
-   * @param isGlobal - Whether this is the global agent registry
+   * @param projectPath - Base directory path for the project
    */
-  constructor(
-    private basePath: string,
-    isGlobal = false
-  ) {
-    this.isGlobal = isGlobal;
-    // If basePath already includes .tenex, use it as is
-    if (basePath.endsWith(".tenex")) {
-      this.agentsDir = path.join(basePath, "agents");
-    } else {
-      this.agentsDir = path.join(basePath, ".tenex", "agents");
-    }
+  constructor(projectPath: string) {
+    this.projectPath = projectPath;
   }
 
   /**
-   * Get the base path for the project
+   * Get the base path for this project
    */
   getBasePath(): string {
-    // If basePath already includes .tenex, extract the project path
-    if (this.basePath.endsWith(".tenex")) {
-      return path.dirname(this.basePath);
-    }
-    return this.basePath;
+    return this.projectPath;
   }
 
-  async loadFromProject(ndkProject?: NDKProject): Promise<void> {
-    // Ensure .tenex directory exists
-    const tenexDir = this.basePath.endsWith(".tenex")
-      ? this.basePath
-      : path.join(this.basePath, ".tenex");
-    await ensureDirectory(tenexDir);
-    await ensureDirectory(this.agentsDir);
-
-    // Store the NDKProject for PM determination
+  /**
+   * Load agents for a project from storage and Nostr.
+   * This method handles the complete agent loading workflow:
+   * 1. Load agents from local storage
+   * 2. For missing agents, fetch from Nostr and install
+   * 3. Load newly installed agents
+   */
+  async loadFromProject(ndkProject: NDKProject): Promise<void> {
     this.ndkProject = ndkProject;
+    this.projectDTag = ndkProject.dTag;
 
-    // Load agents using ConfigService
-    try {
-      // Load global agents first if we're in a project context
-      if (!this.isGlobal) {
-        try {
-          this.globalRegistry = await configService.loadTenexAgents(configService.getGlobalPath());
-        } catch (error) {
-          logger.debug("No global agents found or failed to load", { error });
-          this.globalRegistry = {};
-        }
-      }
-
-      // Load project/local agents
-      this.registry = await configService.loadTenexAgents(tenexDir);
-
-      // Load global agents first (if in project context)
-      const loadedGlobalEventIds = new Set<string>();
-      const loadedGlobalSlugs = new Set<string>();
-      if (!this.isGlobal) {
-        for (const [slug, registryEntry] of Object.entries(this.globalRegistry)) {
-          logger.debug(`Loading global agent: ${slug}`, { registryEntry });
-          await this.loadAgentBySlugInternal(slug, true);
-          // Track global agent event IDs and slugs
-          if (registryEntry.eventId) {
-            loadedGlobalEventIds.add(registryEntry.eventId);
-          }
-          loadedGlobalSlugs.add(slug);
-        }
-      }
-
-      // Load project/local agents (skip if they match a global agent's event ID or slug)
-      for (const [slug, registryEntry] of Object.entries(this.registry)) {
-        // Check if this project agent matches a global agent (same event ID or same slug)
-        if (registryEntry.eventId && loadedGlobalEventIds.has(registryEntry.eventId)) {
-          logger.info(`Skipping project agent "${slug}" - using global agent with same event ID`, {
-            eventId: registryEntry.eventId,
-          });
-          continue;
-        }
-        if (loadedGlobalSlugs.has(slug)) {
-          logger.info(`Skipping project agent "${slug}" - using global agent with same slug`);
-          continue;
-        }
-        logger.debug(`Loading agent from registry: ${slug}`, { registryEntry });
-        await this.loadAgentBySlugInternal(slug, false);
-      }
-    } catch (error) {
-      logger.error("Failed to load agent registry", { error });
-      this.registry = {};
+    if (!this.projectDTag) {
+      logger.error("Project missing dTag", { projectId: ndkProject.id });
+      return;
     }
+
+    // Clear existing agents to ensure fresh load from project tags
+    this.agents.clear();
+    this.agentsByPubkey.clear();
+
+    // Initialize storage
+    await agentStorage.initialize();
+
+    // Get agent event IDs from project tags
+    const agentEventIds = ndkProject.tags
+      .filter((t) => t[0] === "agent" && t[1])
+      .map((t) => t[1])
+      .filter(Boolean) as string[];
+
+    logger.info(`Loading ${agentEventIds.length} agents for project ${this.projectDTag}`);
+
+    const ndk = getNDK();
+    const failedAgents: string[] = [];
+    const projectDTag = this.projectDTag; // Capture for type safety
+
+    // Load or install each agent
+    for (const eventId of agentEventIds) {
+      try {
+        let storedAgent = await agentStorage.getAgentByEventId(eventId);
+
+        // If agent not in storage, fetch from Nostr and install
+        if (!storedAgent) {
+          logger.debug(`Agent ${eventId} not in storage, installing from Nostr`);
+
+          const result = await installAgentFromEvent(
+            eventId,
+            this.projectPath,
+            ndkProject,
+            undefined,
+            ndk,
+            this
+          );
+
+          if (!result.success) {
+            logger.error(`Failed to install agent ${eventId}: ${result.error}`);
+            failedAgents.push(eventId);
+            continue;
+          }
+
+          // Now it should be in storage
+          storedAgent = await agentStorage.getAgentByEventId(eventId);
+        }
+
+        if (storedAgent) {
+          // Add project to agent if not already there
+          if (!storedAgent.projects.includes(projectDTag)) {
+            storedAgent.projects.push(projectDTag);
+            await agentStorage.saveAgent(storedAgent);
+          }
+
+          // Create agent instance
+          const instance = await this.createAgentInstance(storedAgent);
+          this.agents.set(storedAgent.slug, instance);
+          this.agentsByPubkey.set(instance.pubkey, instance);
+
+          logger.debug(`Loaded agent ${storedAgent.slug} for project ${this.projectDTag}`);
+        }
+      } catch (error) {
+        logger.error(`Failed to load agent ${eventId}`, { error });
+        failedAgents.push(eventId);
+      }
+    }
+
+    // Check if critical agents failed
+    if (failedAgents.length > 0) {
+      // PM is the first agent in tags
+      const pmEventId = agentEventIds[0];
+      if (failedAgents.includes(pmEventId)) {
+        throw new Error(
+          "Critical agent failed to load. " +
+          `Agent event ID ${pmEventId} could not be fetched. ` +
+          "This might be due to network issues or the event not being available on the configured relays."
+        );
+      }
+      logger.warn(`${failedAgents.length} agent(s) could not be installed but continuing with available agents`);
+    }
+
+    logger.info(`Loaded ${this.agents.size} agents for project ${this.projectDTag}`);
   }
 
+  /**
+   * Ensure an agent exists in the registry and storage
+   */
   async ensureAgent(
-    name: string,
+    slug: string,
     config: AgentConfigOptionalNsec,
-    ndkProject?: NDKProject,
-    fromGlobal = false
+    ndkProject?: NDKProject
   ): Promise<AgentInstance> {
     // Check if agent already exists in memory
-    const existingAgent = this.agents.get(name);
+    const existingAgent = this.agents.get(slug);
     if (existingAgent) {
       return existingAgent;
     }
 
-    // Check if we're in a project context and this agent exists globally
-    if (!this.isGlobal) {
-      // Check by slug first (exact match)
-      if (this.globalRegistry[name]) {
-        logger.info(`Agent "${name}" already exists globally, using global agent`);
-        // Load the global agent if not already loaded
-        const globalAgent = this.agents.get(name);
-        if (globalAgent) {
-          return globalAgent;
-        }
-        // Load the global agent - use internal method to avoid recursion
-        const loadedAgent = await this.loadAgentBySlugInternal(name, true);
-        if (loadedAgent) {
-          return loadedAgent;
-        }
-      }
+    // Check storage by slug
+    let storedAgent = await agentStorage.getAgentBySlug(slug);
 
+    if (!storedAgent) {
       // Check by eventId if provided
       if (config.eventId) {
-        for (const [globalSlug, globalEntry] of Object.entries(this.globalRegistry)) {
-          if (globalEntry.eventId === config.eventId) {
-            logger.info(
-              `Agent with eventId ${config.eventId} already exists globally as "${globalSlug}", using global agent`,
-              {
-                localSlug: name,
-                globalSlug,
-              }
-            );
-            // Load the global agent if not already loaded
-            const globalAgent = this.agents.get(globalSlug);
-            if (globalAgent) {
-              return globalAgent;
-            }
-            // Load the global agent - use internal method to avoid recursion
-            const loadedAgent = await this.loadAgentBySlugInternal(globalSlug, true);
-            if (loadedAgent) {
-              return loadedAgent;
-            }
-          }
-        }
-      }
-    }
-
-    // Check if we have it in local registry
-    let registryEntry = this.registry[name];
-    let agentDefinition: StoredAgentData;
-
-    if (!registryEntry) {
-      // Generate new nsec for agent
-      const signer = NDKPrivateKeySigner.generate();
-      const nsec = signer.nsec;
-
-      // Create new registry entry
-      const fileName = `${config.eventId || name.toLowerCase().replace(/[^a-z0-9]/g, "-")}.json`;
-      registryEntry = {
-        nsec,
-        file: fileName,
-      };
-
-      // Only add eventId if it exists
-      if (config.eventId) {
-        registryEntry.eventId = config.eventId;
+        storedAgent = await agentStorage.getAgentByEventId(config.eventId);
       }
 
+      if (!storedAgent) {
+        // Create new agent
+        const signer = config.nsec
+          ? new NDKPrivateKeySigner(config.nsec)
+          : NDKPrivateKeySigner.generate();
 
-      // Save agent definition to file
-      agentDefinition = {
-        name: config.name,
-        role: config.role,
-        description: config.description,
-        instructions: config.instructions,
-        useCriteria: config.useCriteria,
-        llmConfig: config.llmConfig,
-        phase: config.phase,
-        phases: config.phases,
-      };
-
-      // Include tools if explicitly provided
-      if (config.tools !== undefined) {
-        agentDefinition.tools = config.tools;
-      }
-
-      const definitionPath = path.join(this.agentsDir, fileName);
-      await writeJsonFile(definitionPath, agentDefinition);
-
-      this.registry[name] = registryEntry;
-      await this.saveRegistry();
-
-      logger.info(`Created new agent "${name}" with nsec`);
-
-      // Publish kind:0 and request events for new agent
-      const { nsec: _, ...configWithoutNsec } = config;
-      await this.publishAgentEvents(signer, configWithoutNsec, registryEntry.eventId, ndkProject);
-    } else {
-      // Load agent definition from file
-      const definitionPath = path.join(this.agentsDir, registryEntry.file);
-      if (await fileExists(definitionPath)) {
-        const content = await readFile(definitionPath, "utf-8");
-        try {
-          agentDefinition = JSON.parse(content);
-
-
-          this.validateAgentDefinition(agentDefinition);
-        } catch (error) {
-          logger.error("Failed to parse or validate agent definition", {
-            file: registryEntry.file,
-            error,
-          });
-          throw new Error(`Invalid agent definition in ${registryEntry.file}: ${error}`);
-        }
-      } else {
-
-        // Fallback: create definition from config if file doesn't exist (only include defined fields)
-        agentDefinition = {
+        storedAgent = {
+          eventId: config.eventId,
+          nsec: signer.nsec,
+          slug,
           name: config.name,
           role: config.role,
-          ...(config.description !== undefined && { description: config.description }),
-          ...(config.instructions !== undefined && { instructions: config.instructions }),
-          ...(config.useCriteria !== undefined && { useCriteria: config.useCriteria }),
-          ...(config.llmConfig !== undefined && { llmConfig: config.llmConfig }),
-          ...(config.phase !== undefined && { phase: config.phase }),
-          ...(config.phases !== undefined && { phases: config.phases }),
+          description: config.description,
+          instructions: config.instructions,
+          useCriteria: config.useCriteria,
+          llmConfig: config.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+          tools: config.tools || getDefaultToolsForAgent(config),
+          phase: config.phase,
+          phases: config.phases,
+          projects: this.projectDTag ? [this.projectDTag] : []
         };
-        await writeJsonFile(definitionPath, agentDefinition);
+
+        await agentStorage.saveAgent(storedAgent);
+        logger.info(`Created new agent "${slug}"`);
+
+        // Publish agent events if we have a project
+        if (ndkProject || this.ndkProject) {
+          const project = ndkProject || this.ndkProject;
+          await this.publishAgentEvents(signer, config, config.eventId, project);
+        }
       }
     }
 
-    // Create NDKPrivateKeySigner - generate new if nsec is empty
-    let nsec = registryEntry.nsec;
-    if (!nsec || nsec === "") {
-      logger.warn(`Agent "${name}" has empty nsec, generating new one`);
-      const newSigner = NDKPrivateKeySigner.generate();
-      nsec = newSigner.nsec;
-      
-      // Update the registry with the new nsec
-      registryEntry.nsec = nsec;
-      this.registry[name] = registryEntry;
-      await this.saveRegistry();
+    // Ensure agent is associated with this project
+    if (this.projectDTag && !storedAgent.projects.includes(this.projectDTag)) {
+      storedAgent.projects.push(this.projectDTag);
+      await agentStorage.saveAgent(storedAgent);
     }
-    const signer = new NDKPrivateKeySigner(nsec);
 
-    // Use the helper to build the agent instance
-    const agent = await this.buildAgentInstance(
-      name,
-      agentDefinition,
-      registryEntry,
-      signer,
-      fromGlobal
+    // Create and store agent instance
+    const instance = await this.createAgentInstance(storedAgent);
+    this.agents.set(slug, instance);
+    this.agentsByPubkey.set(instance.pubkey, instance);
+
+    return instance;
+  }
+
+  /**
+   * Create an AgentInstance from stored agent data
+   */
+  private async createAgentInstance(storedAgent: StoredAgent): Promise<AgentInstance> {
+    const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+    const pubkey = signer.pubkey;
+
+    // Normalize tools
+    const toolNames = this.normalizeAgentTools(
+      storedAgent.tools || [],
+      storedAgent
     );
 
-    // Store in both maps
-    this.agents.set(name, agent);
-    this.agentsByPubkey.set(agent.pubkey, agent);
+    // Validate and filter tools
+    const validToolNames: string[] = [];
+    const requestedMcpTools: string[] = [];
+
+    for (const toolName of toolNames) {
+      if (isValidToolName(toolName)) {
+        validToolNames.push(toolName);
+      } else if (toolName.startsWith("mcp__")) {
+        requestedMcpTools.push(toolName);
+      }
+    }
+
+    // Add MCP tools if available
+    if (requestedMcpTools.length > 0) {
+      try {
+        const allMcpTools = mcpService.getCachedTools();
+        for (const toolName of requestedMcpTools) {
+          if (allMcpTools[toolName]) {
+            validToolNames.push(toolName);
+          }
+        }
+      } catch (error) {
+        logger.debug(`Could not load MCP tools for agent "${storedAgent.slug}":`, error);
+      }
+    }
+
+    const agent: AgentInstance = {
+      name: storedAgent.name,
+      pubkey,
+      signer,
+      role: storedAgent.role,
+      description: storedAgent.description,
+      instructions: storedAgent.instructions,
+      useCriteria: storedAgent.useCriteria,
+      llmConfig: storedAgent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+      tools: validToolNames,
+      eventId: storedAgent.eventId,
+      slug: storedAgent.slug,
+      phase: storedAgent.phase,
+      phases: storedAgent.phases,
+      createMetadataStore: (conversationId: string) => {
+        return new AgentMetadataStore(conversationId, storedAgent.slug, this.projectPath);
+      },
+      createLLMService: (options) => {
+        const projectCtx = getProjectContext();
+        const llmLogger = projectCtx.llmLogger.withAgent(storedAgent.name);
+        return configService.createLLMService(
+          llmLogger,
+          agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+          {
+            tools: options?.tools ?? {},
+            agentName: storedAgent.name,
+            sessionId: options?.sessionId
+          }
+        );
+      },
+      sign: async (event: NDKEvent) => {
+        await event.sign(signer, { pTags: false });
+      }
+    };
 
     return agent;
   }
 
-  getAgent(name: string): AgentInstance | undefined {
-    return this.agents.get(name);
+  /**
+   * Get an agent by slug
+   */
+  getAgent(slug: string): AgentInstance | undefined {
+    return this.agents.get(slug);
   }
 
+  /**
+   * Get an agent by public key
+   */
   getAgentByPubkey(pubkey: string): AgentInstance | undefined {
     return this.agentsByPubkey.get(pubkey);
   }
 
+  /**
+   * Get all agents for the current project
+   */
   getAllAgents(): AgentInstance[] {
     return Array.from(this.agents.values());
   }
 
+  /**
+   * Get all agents as a map
+   */
   getAllAgentsMap(): Map<string, AgentInstance> {
     return new Map(this.agents);
   }
 
   /**
    * Get agents filtered by phase
-   * @param phase - The phase to filter by (undefined returns agents without a phase)
-   * @returns Array of agents matching the phase
    */
   getAgentsByPhase(phase: string | undefined): AgentInstance[] {
     const agents = Array.from(this.agents.values());
-    
+
     if (phase === undefined) {
       // Return agents without a specific phase (universal agents)
       return agents.filter(agent => !agent.phase);
     }
-    
+
     // Return agents matching the phase or universal agents
     const normalizedPhase = normalizePhase(phase);
-    
+
     return agents.filter(agent => {
       if (!agent.phase) return true; // Universal agents work in all phases
       const agentPhase = normalizePhase(agent.phase);
       return agentPhase === normalizedPhase;
     });
   }
-  
+
   /**
-   * Set the PM for this project - updates registry and reassigns delegate tools
-   * Note: This is synchronous. Call persistPMStatus() to save to disk.
+   * Get the Project Manager (PM) for this project
+   * PM is the first agent in the project's agent tags
+   */
+  getProjectPM(): AgentInstance | undefined {
+    if (!this.ndkProject) return undefined;
+
+    const firstAgentEventId = this.ndkProject.tags
+      .find(t => t[0] === "agent" && t[1])?.[1];
+
+    if (!firstAgentEventId) return undefined;
+
+    // Find agent with this eventId
+    for (const agent of this.agents.values()) {
+      if (agent.eventId === firstAgentEventId) {
+        return agent;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Set which agent is the Project Manager and update delegate tools accordingly
+   * This method is called by ProjectContext to inform the registry of the PM
    */
   setPMPubkey(pubkey: string): void {
-    // Clear any existing PM flags in both registries
-    for (const entry of Object.values(this.registry)) {
-      delete entry.isPM;
-    }
-    for (const entry of Object.values(this.globalRegistry)) {
-      delete entry.isPM;
-    }
-    
-    // Find the agent with this pubkey
-    const agentToSetAsPM = this.agentsByPubkey.get(pubkey);
-    if (!agentToSetAsPM) {
-      logger.error(`Failed to set PM - no agent found with pubkey ${pubkey}`);
-      return;
-    }
-    
-    // Find which registry contains this agent and set the flag
-    let foundPM = false;
-    for (const [slug, agent] of this.agents) {
+    this.pmPubkey = pubkey;
+
+    // Update delegate tools for all agents based on PM status
+    for (const agent of this.agents.values()) {
       if (agent.pubkey === pubkey) {
-        // Check both registries
-        const registry = agent.isGlobal ? this.globalRegistry : this.registry;
-        const registryEntry = registry[slug];
-        if (registryEntry) {
-          registryEntry.isPM = true;
-          foundPM = true;
-          break;
+        // This is the PM - ensure they have delegate tools based on phases
+        const delegateTools = getDelegateToolsForAgent(agent);
+
+        // Add delegate tools if not already present
+        for (const tool of delegateTools) {
+          if (!agent.tools.includes(tool)) {
+            agent.tools.push(tool);
+          }
         }
+      } else {
+        // Not the PM - remove delegate tools if present
+        agent.tools = agent.tools.filter(tool => !DELEGATE_TOOLS.includes(tool));
       }
     }
-    
-    if (!foundPM) {
-      logger.error(`Failed to set PM - agent not found in registry`);
-      return;
-    }
-    
-    // Reassign delegate tools for all loaded agents
-    for (const agent of this.agents.values()) {
-      agent.tools = agent.tools.filter(t => !DELEGATE_TOOLS.includes(t));
-      const delegateTools = getDelegateToolsForAgent(agent);
-      agent.tools.push(...delegateTools);
-    }
-    
-    logger.info(`Set PM to ${pubkey} and reassigned delegate tools`);
+
+    logger.debug(`Set PM pubkey: ${pubkey} and updated delegate tools`);
   }
-  
+
   /**
-   * Persist PM status to disk
+   * Persist PM status to storage
+   * In the new architecture, PM status is derived from project tags, not stored.
+   * However, we still need to persist the updated tool assignments for agents.
    */
   async persistPMStatus(): Promise<void> {
-    await this.saveRegistry();
-    if (!this.isGlobal) {
-      // Only save global registry if we modified it
-      for (const entry of Object.values(this.globalRegistry)) {
-        if (entry.isPM) {
-          await this.saveGlobalRegistry();
-          break;
+    if (!this.pmPubkey) {
+      logger.debug("No PM pubkey set, skipping persist");
+      return;
+    }
+
+    // Save updated tool assignments for all agents in this project
+    for (const agent of this.agents.values()) {
+      try {
+        const storedAgent = await agentStorage.loadAgent(agent.pubkey);
+        if (storedAgent) {
+          storedAgent.tools = agent.tools;
+          await agentStorage.saveAgent(storedAgent);
         }
+      } catch (error) {
+        logger.error(`Failed to persist tools for agent ${agent.slug}`, { error });
       }
     }
-  }
 
-
-  private async saveRegistry(): Promise<void> {
-    if (this.isGlobal) {
-      await configService.saveGlobalAgents(this.registry);
-    } else {
-      await configService.saveProjectAgents(this.basePath, this.registry);
-    }
-  }
-  
-  private async saveGlobalRegistry(): Promise<void> {
-    await configService.saveGlobalAgents(this.globalRegistry);
+    logger.debug("Persisted PM status and tool assignments");
   }
 
   /**
-   * Remove an agent by its event ID
-   * This removes the agent from memory and deletes its definition file
+   * Remove an agent from the current project
    */
-  async removeAgentByEventId(eventId: string): Promise<boolean> {
-    // Find the agent with this event ID
-    let agentSlugToRemove: string | undefined;
-    let agentToRemove: AgentInstance | undefined;
-
-    for (const [slug, agent] of this.agents) {
-      if (agent.eventId === eventId) {
-        agentSlugToRemove = slug;
-        agentToRemove = agent;
-        break;
-      }
-    }
-
-    if (!agentSlugToRemove || !agentToRemove) {
-      logger.warn(`Agent with eventId ${eventId} not found for removal`);
+  async removeAgentFromProject(slug: string): Promise<boolean> {
+    const agent = this.agents.get(slug);
+    if (!agent || !this.projectDTag) {
       return false;
     }
 
-
-    // Don't allow removing global agents from a project context
-    if (agentToRemove.isGlobal && !this.isGlobal) {
-      logger.warn(`Cannot remove global agent ${agentSlugToRemove} from project context. Remove it globally instead.`);
-      return false;
-    }
+    // Remove from storage
+    await agentStorage.removeAgentFromProject(agent.pubkey, this.projectDTag);
 
     // Remove from memory
-    this.agents.delete(agentSlugToRemove);
-    this.agentsByPubkey.delete(agentToRemove.pubkey);
+    this.agents.delete(slug);
+    this.agentsByPubkey.delete(agent.pubkey);
 
-    // Find registry info using pubkey to ensure we get the right registry
-    const registryInfo = this.findRegistryEntryByPubkey(agentToRemove.pubkey);
-    if (registryInfo) {
-      // Delete the agent definition file
-      try {
-        const filePath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
-        await fs.unlink(filePath);
-        logger.info(`Deleted agent definition file: ${filePath}`);
-      } catch (error) {
-        logger.warn("Failed to delete agent definition file", {
-          error,
-          slug: agentSlugToRemove,
-        });
-      }
-
-      // Remove from the appropriate registry and save
-      delete registryInfo.registry[agentSlugToRemove];
-      
-      // Save the appropriate registry
-      if (registryInfo.registry === this.globalRegistry) {
-        await this.saveGlobalRegistry();
-      } else {
-        await this.saveRegistry();
-      }
-    }
-
-    logger.info(`Removed agent ${agentSlugToRemove} (eventId: ${eventId})`);
+    logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
     return true;
   }
 
-
   /**
-   * Find registry entry and path for an agent by its public key
-   * Checks both local and global registries
-   */
-  private findRegistryEntryByPubkey(agentPubkey: string): {
-    entry: TenexAgents[string];
-    registry: TenexAgents;
-    agentsDir: string;
-    slug: string;
-  } | null {
-    // Check local registry first
-    for (const [slug, entry] of Object.entries(this.registry)) {
-      // Get the pubkey from the nsec
-      try {
-        const signer = new NDKPrivateKeySigner(entry.nsec);
-        if (signer.pubkey === agentPubkey) {
-          return {
-            entry,
-            registry: this.registry,
-            agentsDir: this.agentsDir,
-            slug,
-          };
-        }
-      } catch (error) {
-        logger.debug("Failed to decode nsec for registry entry", { slug, error });
-      }
-    }
-
-    // Check global registry if not found locally
-    if (!this.isGlobal) {
-      for (const [slug, entry] of Object.entries(this.globalRegistry)) {
-        try {
-          const signer = new NDKPrivateKeySigner(entry.nsec);
-          if (signer.pubkey === agentPubkey) {
-            const globalPath = configService.getGlobalPath();
-            return {
-              entry,
-              registry: this.globalRegistry,
-              agentsDir: path.join(globalPath, "agents"),
-              slug,
-            };
-          }
-        } catch (error) {
-          logger.debug("Failed to decode nsec for global registry entry", { slug, error });
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Update an agent's LLM configuration persistently
+   * Update an agent's LLM configuration
    */
   async updateAgentLLMConfig(agentPubkey: string, newLLMConfig: string): Promise<boolean> {
-    // Find the agent by pubkey
     const agent = this.agentsByPubkey.get(agentPubkey);
     if (!agent) {
-      logger.warn(`Agent with pubkey ${agentPubkey} not found for LLM config update`);
+      logger.warn(`Agent with pubkey ${agentPubkey} not found`);
       return false;
     }
 
-    // Update the agent in memory
+    // Update in memory
     agent.llmConfig = newLLMConfig;
 
-    // Find the registry entry by pubkey
-    const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
-    if (!registryInfo) {
-      logger.warn(`Registry entry not found for agent with pubkey ${agentPubkey}`);
-      return false;
-    }
-
-    // Update the agent definition file
-    try {
-      const definitionPath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
-
-      // Read existing definition
-      let agentDefinition: StoredAgentData;
-      try {
-        const content = await fs.readFile(definitionPath, "utf-8");
-        agentDefinition = JSON.parse(content);
-      } catch (error) {
-        logger.warn("Failed to read agent definition, creating from current state", {
-          file: registryInfo.entry.file,
-          error,
-        });
-        // Create definition from current agent state
-        agentDefinition = {
-          name: agent.name,
-          role: agent.role,
-          description: agent.description,
-          instructions: agent.instructions,
-          useCriteria: agent.useCriteria,
-          llmConfig: newLLMConfig,
-        };
-      }
-
-      // Update the llmConfig
-      agentDefinition.llmConfig = newLLMConfig;
-
-      // Save the updated definition
-      await writeJsonFile(definitionPath, agentDefinition);
-
-      logger.info(`Updated LLM config for agent ${agent.name} (${agent.slug})`, {
-        newLLMConfig,
-        file: registryInfo.entry.file,
-      });
-
+    // Update in storage
+    const storedAgent = await agentStorage.loadAgent(agentPubkey);
+    if (storedAgent) {
+      storedAgent.llmConfig = newLLMConfig;
+      await agentStorage.saveAgent(storedAgent);
+      logger.info(`Updated LLM config for agent ${agent.name}`);
       return true;
-    } catch (error) {
-      logger.error("Failed to update agent LLM config", {
-        agentSlug: agent.slug,
-        error: formatAnyError(error),
-      });
-      return false;
     }
+
+    return false;
   }
 
   /**
-   * Normalize agent tools by applying business rules:
-   * - Remove delegation and phase management tools from requested tools (they're added based on phases)
-   * - Add appropriate delegation and phase management tools based on phases
-   * - Ensure core tools are always present
-   * @param requestedTools - Tools requested/configured for the agent
-   * @param agent - The agent instance (or partial agent with phases)
-   * @returns Normalized array of tool names
+   * Update an agent's tools
+   */
+  async updateAgentTools(agentPubkey: string, newToolNames: string[]): Promise<boolean> {
+    const agent = this.agentsByPubkey.get(agentPubkey);
+    if (!agent) {
+      logger.warn(`Agent with pubkey ${agentPubkey} not found`);
+      return false;
+    }
+
+    // Normalize tools
+    const normalizedTools = this.normalizeAgentTools(newToolNames, agent);
+    const validToolNames = normalizedTools.filter(isValidToolName);
+
+    // Update in memory
+    agent.tools = validToolNames;
+
+    // Update in storage (save the original requested tools)
+    const storedAgent = await agentStorage.loadAgent(agentPubkey);
+    if (storedAgent) {
+      storedAgent.tools = newToolNames;
+      await agentStorage.saveAgent(storedAgent);
+      logger.info(`Updated tools for agent ${agent.name}`);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Normalize agent tools by applying business rules
    */
   private normalizeAgentTools(requestedTools: string[], agent: { phases?: Record<string, string> }): string[] {
-    // Filter out delegation and phase management tools - they should never be in configuration
+    // Filter out delegation and phase management tools
     const toolNames = requestedTools.filter(tool =>
       !DELEGATE_TOOLS.includes(tool) &&
       !PHASE_MANAGEMENT_TOOLS.includes(tool)
     );
 
-    // Add the correct delegation and phase management tools based on phases
+    // Add delegation tools based on phases
     const delegateTools = getDelegateToolsForAgent(agent);
     toolNames.push(...delegateTools);
 
-    // Ensure core tools are always included for ALL agents
+    // Ensure core tools are included
     for (const coreTool of CORE_AGENT_TOOLS) {
       if (!toolNames.includes(coreTool)) {
         toolNames.push(coreTool);
@@ -626,94 +518,17 @@ export class AgentRegistry {
   }
 
   /**
-   * Update an agent's tools configuration persistently
-   * @param agentPubkey - The public key of the agent to update
-   * @param newToolNames - Array of tool names the agent should have access to
-   * @returns true if successful, false otherwise
+   * Publish agent events to Nostr
    */
-  async updateAgentTools(agentPubkey: string, newToolNames: string[]): Promise<boolean> {
-    // Find the agent by pubkey
-    const agent = this.agentsByPubkey.get(agentPubkey);
-    if (!agent) {
-      logger.warn(`Agent with pubkey ${agentPubkey} not found for tools update`);
-      return false;
-    }
-
-    // Find the registry entry by pubkey to get PM status
-    const registryInfo = this.findRegistryEntryByPubkey(agentPubkey);
-    if (!registryInfo) {
-      logger.warn(`Registry entry not found for agent with pubkey ${agentPubkey}`);
-      return false;
-    }
-
-    // Normalize tools according to business rules (delegation tools, core tools, etc.)
-    const normalizedTools = this.normalizeAgentTools(newToolNames, agent);
-
-    // Validate the normalized tool names
-    const validToolNames = normalizedTools.filter(isValidToolName);
-    
-    // Update the agent tools in memory
-    agent.tools = validToolNames;
-
-    // Update the agent definition file
-    try {
-      const definitionPath = path.join(registryInfo.agentsDir, registryInfo.entry.file);
-
-      // Read existing definition
-      let agentDefinition: StoredAgentData;
-      try {
-        const content = await fs.readFile(definitionPath, "utf-8");
-        agentDefinition = JSON.parse(content);
-      } catch (error) {
-        logger.warn("Failed to read agent definition, creating from current state", {
-          file: registryInfo.entry.file,
-          error,
-        });
-        // Create definition from current agent state
-        agentDefinition = {
-          name: agent.name,
-          role: agent.role,
-          description: agent.description,
-          instructions: agent.instructions,
-          useCriteria: agent.useCriteria,
-          llmConfig: agent.llmConfig,
-          tools: newToolNames,
-        };
-      }
-
-      // Update the tools
-      agentDefinition.tools = newToolNames;
-
-      // Save the updated definition
-      await writeJsonFile(definitionPath, agentDefinition);
-
-      logger.debug(`Persisted tools to ${registryInfo.entry.file}`, {
-        agent: agent.slug,
-        toolCount: newToolNames.length,
-      });
-
-      return true;
-    } catch (error) {
-      logger.error("Failed to update agent tools", {
-        agentSlug: agent.slug,
-        error: formatAnyError(error),
-      });
-      return false;
-    }
-  }
-
   private async publishAgentEvents(
     signer: NDKPrivateKeySigner,
-    config: Omit<AgentConfig, "nsec">,
+    config: Omit<AgentConfigOptionalNsec, "nsec">,
     ndkAgentEventId?: string,
     ndkProject?: NDKProject
   ): Promise<void> {
     try {
-      // Require NDKProject to be passed
       if (!ndkProject) {
-        logger.warn(
-          "No NDKProject provided, skipping agent event publishing"
-        );
+        logger.warn("No NDKProject provided, skipping agent event publishing");
         return;
       }
 
@@ -721,11 +536,9 @@ export class AgentRegistry {
       const projectEvent = ndkProject;
 
       // Load whitelisted pubkeys from config
-      const { config: tenexConfig } = await configService.loadConfig(this.getBasePath());
+      const { config: tenexConfig } = await configService.loadConfig(this.projectPath);
       const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
 
-      // Publish agent profile (kind:0) and request event using static method
-      // The publishAgentCreation method now handles passing metadata for agents without eventId
       await AgentPublisher.publishAgentCreation(
         signer,
         config,
@@ -735,307 +548,15 @@ export class AgentRegistry {
         whitelistedPubkeys
       );
     } catch (error) {
-      logger.error("Failed to publish agent events", { error });
+      logger.error("Failed to publish agent events", { error: formatAnyError(error) });
       // Don't throw - agent creation should succeed even if publishing fails
-    }
-  }
-
-  private async loadAgentBySlugInternal(
-    slug: string,
-    fromGlobal = false
-  ): Promise<AgentInstance | null> {
-    const registryToUse = fromGlobal ? this.globalRegistry : this.registry;
-    const registryEntry = registryToUse[slug];
-    if (!registryEntry) {
-      return null;
-    }
-
-    // Determine the correct agents directory
-    const agentsDir = fromGlobal
-      ? path.join(configService.getGlobalPath(), "agents")
-      : this.agentsDir;
-
-    // Load agent definition from file
-    const definitionPath = path.join(agentsDir, registryEntry.file);
-    if (!(await fileExists(definitionPath))) {
-      // Missing file is not an error - it's a cache miss that will trigger fetch from Nostr
-      logger.debug(`Agent definition file not found (cache miss): ${definitionPath}`);
-      return null;
-    }
-
-    const content = await readFile(definitionPath, "utf-8");
-    let agentDefinition: StoredAgentData;
-    try {
-      agentDefinition = JSON.parse(content);
-
-
-      this.validateAgentDefinition(agentDefinition);
-    } catch (error) {
-      logger.error("Failed to parse or validate agent definition", {
-        file: definitionPath,
-        error,
-      });
-      throw new Error(`Invalid agent definition in ${definitionPath}: ${error}`);
-    }
-
-    // Create AgentConfig from definition
-    const config: AgentConfig = {
-      name: agentDefinition.name,
-      role: agentDefinition.role,
-      instructions: agentDefinition.instructions,
-      useCriteria: agentDefinition.useCriteria,
-      nsec: registryEntry.nsec,
-      eventId: registryEntry.eventId,
-      tools: agentDefinition.tools, // Preserve explicit tools configuration
-      mcp: agentDefinition.mcp, // Preserve MCP configuration
-      llmConfig: agentDefinition.llmConfig,
-      phase: agentDefinition.phase,
-    };
-
-    // If loading from global registry, create agent directly without recursive ensureAgent call
-    if (fromGlobal) {
-      return this.createAgentInstance(slug, config, registryEntry);
-    }
-
-    return this.ensureAgent(slug, config, undefined, fromGlobal);
-  }
-
-  /**
-   * Helper method to build an AgentInstance from configuration and registry data
-   * Centralizes the logic for creating agent instances to avoid duplication
-   */
-  private async buildAgentInstance(
-    slug: string,
-    agentDefinition: StoredAgentData,
-    registryEntry: TenexAgents[string],
-    signer: NDKPrivateKeySigner,
-    isGlobal: boolean
-  ): Promise<AgentInstance> {
-    const pubkey = signer.pubkey;
-
-    // Create Agent instance with all properties set
-    const agent: AgentInstance = {
-      name: agentDefinition.name,
-      pubkey,
-      signer,
-      role: agentDefinition.role,
-      description: agentDefinition.description,
-      instructions: agentDefinition.instructions,
-      useCriteria: agentDefinition.useCriteria,
-      llmConfig: agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-      tools: [], // Will be set next
-      mcp: agentDefinition.mcp ?? true, // Default to true for all agents
-      eventId: registryEntry.eventId,
-      slug: slug,
-      isGlobal: isGlobal,
-      phase: agentDefinition.phase,
-      phases: agentDefinition.phases,
-      createMetadataStore: (conversationId: string) => {
-        // Use the registry's basePath to get the project path
-        const projectPath = this.getBasePath();
-        return new AgentMetadataStore(conversationId, slug, projectPath);
-      },
-      createLLMService: (options) => {
-        const projectCtx = getProjectContext();
-        const llmLogger = projectCtx.llmLogger.withAgent(agentDefinition.name);
-        return configService.createLLMService(
-          llmLogger,
-          agentDefinition.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-          {
-            tools: options?.tools ?? {},
-            agentName: agentDefinition.name,
-            sessionId: options?.sessionId
-          }
-        );
-      },
-      sign: async (event: NDKEvent) => {
-        // Sign the event with pTags: false to prevent automatic p-tag addition
-        await event.sign(signer, { pTags: false });
-      }
-    };
-
-    // Set tools - use explicit tools if configured, otherwise use defaults
-    const requestedTools =
-      agentDefinition.tools !== undefined ? agentDefinition.tools : getDefaultToolsForAgent(agent);
-    
-    // Normalize tools according to business rules (delegation tools, core tools, etc.)
-    const toolNames = this.normalizeAgentTools(requestedTools, agent);
-
-    // Validate tool names - we now store tool names as strings, not instances
-    const validToolNames: string[] = [];
-    const unknownTools: string[] = [];
-    const requestedMcpTools: string[] = [];
-    const unknownNonMcpTools: string[] = [];
-    
-    for (const toolName of toolNames) {
-      if (isValidToolName(toolName)) {
-        validToolNames.push(toolName);
-      } else {
-        // Check if it's an MCP tool (starts with "mcp__")
-        if (toolName.startsWith("mcp__")) {
-          requestedMcpTools.push(toolName);
-        } else {
-          unknownNonMcpTools.push(toolName);
-          unknownTools.push(toolName);
-        }
-      }
-    }
-    
-    // Handle MCP tools if agent has MCP access
-    if (agent.mcp !== false && requestedMcpTools.length > 0) {
-      try {
-        const allMcpTools = mcpService.getCachedTools();
-        
-        // Check which requested MCP tools are available
-        const availableMcpToolNames: string[] = [];
-        const unavailableMcpTools: string[] = [];
-        
-        for (const toolName of requestedMcpTools) {
-          if (allMcpTools[toolName]) {
-            availableMcpToolNames.push(toolName);
-            validToolNames.push(toolName);
-          } else {
-            unavailableMcpTools.push(toolName);
-          }
-        }
-        
-        if (unavailableMcpTools.length > 0) {
-          logger.debug(`Agent "${slug}" requested MCP tools not yet available:`, unavailableMcpTools);
-        }
-      } catch (error) {
-        logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
-      }
-    } else if (agent.mcp !== false) {
-      // Agent has MCP access but didn't request specific tools - give access to all
-      try {
-        const allMcpTools = mcpService.getCachedTools();
-        for (const toolName of Object.keys(allMcpTools)) {
-          validToolNames.push(toolName);
-        }
-      } catch (error) {
-        logger.debug(`Could not load MCP tools for agent "${slug}":`, error);
-      }
-    }
-    
-    // Log warnings for unknown non-MCP tools
-    if (unknownNonMcpTools.length > 0) {
-      logger.warn(`Agent "${slug}" requested unknown tools:`, unknownNonMcpTools);
-    }
-    
-    agent.tools = validToolNames;
-    
-    // Store the full list of requested tools (including unknown ones) in the agent definition
-    // This ensures MCP tools are preserved even if not currently installed
-    if (agentDefinition.tools !== undefined) {
-      agentDefinition.tools = toolNames;
-    }
-
-    return agent;
-  }
-
-  /**
-   * Create an agent instance directly without going through ensureAgent
-   * Used to avoid infinite recursion when loading global agents
-   */
-  private async createAgentInstance(
-    slug: string,
-    config: AgentConfig,
-    registryEntry: TenexAgents[string]
-  ): Promise<AgentInstance> {
-    // Create NDKPrivateKeySigner - generate new if nsec is empty
-    let nsec = registryEntry.nsec;
-    if (!nsec || nsec === "") {
-      logger.warn(`Agent "${slug}" has empty nsec in createAgentInstance, generating new one`);
-      const newSigner = NDKPrivateKeySigner.generate();
-      nsec = newSigner.nsec;
-      
-      // Update the registry with the new nsec
-      registryEntry.nsec = nsec;
-      this.registry[slug] = registryEntry;
-      await this.saveRegistry();
-    }
-    const signer = new NDKPrivateKeySigner(nsec);
-
-    // Create agent definition from config (only include defined fields)
-    const agentDefinition: StoredAgentData = {
-      name: config.name,
-      role: config.role,
-      ...(config.description !== undefined && { description: config.description }),
-      ...(config.instructions !== undefined && { instructions: config.instructions }),
-      ...(config.useCriteria !== undefined && { useCriteria: config.useCriteria }),
-      ...(config.llmConfig !== undefined && { llmConfig: config.llmConfig }),
-      ...(config.tools !== undefined && { tools: config.tools }),
-      ...(config.mcp !== undefined && { mcp: config.mcp }),
-      ...(config.phase !== undefined && { phase: config.phase }),
-    };
-
-    // Use the helper to build the agent instance
-    const agent = await this.buildAgentInstance(
-      slug,
-      agentDefinition,
-      registryEntry,
-      signer,
-      true // createAgentInstance is only called for global agents
-    );
-
-    // Store in both maps
-    this.agents.set(slug, agent);
-    this.agentsByPubkey.set(agent.pubkey, agent);
-
-    return agent;
-  }
-
-  /**
-   * Validate an agent definition has all required fields
-   */
-  private validateAgentDefinition(definition: unknown): asserts definition is StoredAgentData {
-    if (!definition || typeof definition !== "object") {
-      throw new Error("Agent definition must be an object");
-    }
-
-    const def = definition as Record<string, unknown>;
-
-    if (!def.name || typeof def.name !== "string") {
-      throw new Error("Agent definition must have a name property");
-    }
-
-    if (!def.role || typeof def.role !== "string") {
-      throw new Error("Agent definition must have a role property");
-    }
-
-    // Optional fields with type validation (null is allowed for all nullable fields)
-    if (def.instructions !== undefined && def.instructions !== null && typeof def.instructions !== "string") {
-      throw new Error("Agent instructions must be a string");
-    }
-
-    if (def.useCriteria !== undefined && def.useCriteria !== null && typeof def.useCriteria !== "string") {
-      throw new Error("Agent useCriteria must be a string");
-    }
-
-    if (def.description !== undefined && def.description !== null && typeof def.description !== "string") {
-      throw new Error("Agent description must be a string");
-    }
-
-
-    if (def.tools !== undefined && def.tools !== null && !Array.isArray(def.tools)) {
-      throw new Error("Agent tools must be an array");
-    }
-
-    if (def.mcp !== undefined && def.mcp !== null && typeof def.mcp !== "boolean") {
-      throw new Error("Agent mcp must be a boolean");
-    }
-
-    if (def.llmConfig !== undefined && def.llmConfig !== null && typeof def.llmConfig !== "string") {
-      throw new Error("Agent llmConfig must be a string");
     }
   }
 
   /**
    * Republish kind:0 events for all agents
-   * This is called when the project boots to ensure agents are discoverable
    */
   async republishAllAgentProfiles(ndkProject: NDKProject): Promise<void> {
-    // NDKProject is required
     const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
     const projectEvent = ndkProject;
 
@@ -1046,14 +567,14 @@ export class AgentRegistry {
     }
 
     // Load whitelisted pubkeys from config
-    const { config } = await configService.loadConfig(this.getBasePath());
+    const { config } = await configService.loadConfig(this.projectPath);
     const whitelistedPubkeys = config.whitelistedPubkeys || [];
 
     // Combine project agents and whitelisted pubkeys for contact list
     const contactList = [...new Set([...projectAgentPubkeys, ...whitelistedPubkeys])];
 
     // Republish kind:0 and kind:3 for each agent
-    for (const [slug, agent] of Array.from(this.agents.entries())) {
+    for (const agent of this.agents.values()) {
       try {
         // Prepare metadata for agents without NDKAgentDefinition
         const agentMetadata = !agent.eventId ? {
@@ -1074,19 +595,17 @@ export class AgentRegistry {
           whitelistedPubkeys
         );
 
-        // Publish contact list so agent follows all project agents and whitelisted pubkeys
-        // Filter out the agent's own pubkey from the contact list
+        // Publish contact list
         const agentContactList = contactList.filter(pubkey => pubkey !== agent.pubkey);
         AgentPublisher.publishContactList(
           agent.signer,
           agentContactList
         );
       } catch (error) {
-        logger.error(`Failed to republish events for agent: ${slug}`, {
-          error,
+        logger.error(`Failed to republish events for agent: ${agent.slug}`, {
+          error: formatAnyError(error),
           agentName: agent.name,
         });
-        // Continue with other agents even if one fails
       }
     }
   }

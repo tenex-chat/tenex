@@ -251,13 +251,13 @@ export class ConversationalLogger {
   logMatchedResponse(mockResponse: MockLLMResponse): void {
     const timeStamp = this.formatTime();
     const trigger = mockResponse.trigger;
-    const agentName = typeof trigger.agentName === 'string' 
+    const agentName = typeof trigger.agentName === "string" 
       ? trigger.agentName 
       : (trigger.agentName?.toString() || this.currentAgent);
 
     let triggerDescription = "";
     if (trigger.agentName) {
-      const agentNameStr = typeof trigger.agentName === 'string' ? trigger.agentName : trigger.agentName.toString();
+      const agentNameStr = typeof trigger.agentName === "string" ? trigger.agentName : trigger.agentName.toString();
       triggerDescription += `Agent: ${this.formatAgentName(agentNameStr)}`;
     }
     if (trigger.phase) {

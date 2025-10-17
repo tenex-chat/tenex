@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { ReportManager } from "@/services/ReportManager";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -78,7 +78,7 @@ async function executeReportsList(input: ReportsListInput, context: ExecutionCon
       total: reports.length,
       byAgent,
     },
-    message: `Found ${reports.length} report${reports.length !== 1 ? 's' : ''}`,
+    message: `Found ${reports.length} report${reports.length !== 1 ? "s" : ""}`,
   };
 }
 

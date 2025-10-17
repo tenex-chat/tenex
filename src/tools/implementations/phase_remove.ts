@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
@@ -40,7 +40,7 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
   );
 
   if (!phaseToRemove) {
-    const availablePhases = Object.keys(agent.phases).join(', ');
+    const availablePhases = Object.keys(agent.phases).join(", ");
     return {
       success: false,
       message: `Phase '${phaseName}' not found. Available phases: ${availablePhases}`,
@@ -89,23 +89,23 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
 
         // Check if agent should switch back to delegate tool
         if (Object.keys(agent.phases).length === 0) {
-          const hasDelegatePhase = agent.tools.includes('delegate_phase');
-          const hasDelegate = agent.tools.includes('delegate');
+          const hasDelegatePhase = agent.tools.includes("delegate_phase");
+          const hasDelegate = agent.tools.includes("delegate");
 
           if (hasDelegatePhase && !hasDelegate) {
             // Switch from delegate_phase back to delegate
-            agent.tools = agent.tools.filter(t => t !== 'delegate_phase');
-            agent.tools.push('delegate');
+            agent.tools = agent.tools.filter(t => t !== "delegate_phase");
+            agent.tools.push("delegate");
 
             logger.info(`Switched agent ${agent.name} from 'delegate_phase' back to 'delegate' tool (no phases remaining)`);
           }
 
           // Also remove phase management tools if no phases remain
-          const hasAddPhase = agent.tools.includes('add_phase');
-          const hasRemovePhase = agent.tools.includes('remove_phase');
+          const hasAddPhase = agent.tools.includes("add_phase");
+          const hasRemovePhase = agent.tools.includes("remove_phase");
 
           if (hasAddPhase || hasRemovePhase) {
-            agent.tools = agent.tools.filter(t => t !== 'add_phase' && t !== 'remove_phase');
+            agent.tools = agent.tools.filter(t => t !== "add_phase" && t !== "remove_phase");
             logger.info(`Removed phase management tools from agent ${agent.name} (no phases remaining)`);
           }
         }
@@ -139,7 +139,7 @@ export function createRemovePhaseTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ phaseName }: RemovePhaseInput) => {
       return `Removing phase: ${phaseName}`;
     },

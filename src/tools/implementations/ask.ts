@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
@@ -76,10 +76,10 @@ export function createAskTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ content, suggestions }: AskInput) => {
       if (suggestions && suggestions.length > 0) {
-        return `Asking: "${content}" [${suggestions.join(', ')}]`;
+        return `Asking: "${content}" [${suggestions.join(", ")}]`;
       }
       return `Asking: "${content}"`;
     },

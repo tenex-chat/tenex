@@ -20,19 +20,19 @@ export class ProgressMonitor {
         try {
             const toolCallSummary = toolNames.map((name, i) =>
                 `${i + 1}. ${name}`
-            ).join('\n');
+            ).join("\n");
 
             const result = await generateText({
                 model: this.reviewModel,
                 messages: [{
-                    role: 'user',
+                    role: "user",
                     content: `Review these ${toolNames.length} tool calls. Is the agent making progress or stuck?\n\n${toolCallSummary}\n\nRespond with only "continue" or "stop":`
                 }],
                 maxOutputTokens: 10,
                 temperature: 0
             });
 
-            const shouldContinue = result.text.trim().toLowerCase().includes('continue');
+            const shouldContinue = result.text.trim().toLowerCase().includes("continue");
 
             logger.info("[ProgressMonitor] Review completed", {
                 shouldContinue,

@@ -29,7 +29,7 @@ export const handleNewConversation = async (
 
     // If no valid agents found (filtered by project context), return
     if (targetAgents.length === 0) {
-      logger.info(chalk.gray(`New conversation - no valid agents to route to (may have been filtered by project context)`));
+      logger.info(chalk.gray("New conversation - no valid agents to route to (may have been filtered by project context)"));
       return;
     }
 

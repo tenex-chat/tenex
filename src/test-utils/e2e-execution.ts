@@ -11,13 +11,13 @@ interface LLMHistoryEntry {
 }
 
 function isLLMHistoryEntry(value: unknown): value is LLMHistoryEntry {
-    if (!value || typeof value !== 'object') {
+    if (!value || typeof value !== "object") {
         return false;
     }
     
     const entry = value as Record<string, unknown>;
     
-    if (!('toolCalls' in entry)) {
+    if (!("toolCalls" in entry)) {
         return true;
     }
     
@@ -27,9 +27,9 @@ function isLLMHistoryEntry(value: unknown): value is LLMHistoryEntry {
     
     return entry.toolCalls.every(tc => 
         tc && 
-        typeof tc === 'object' && 
-        'name' in tc && 
-        typeof tc.name === 'string'
+        typeof tc === "object" && 
+        "name" in tc && 
+        typeof tc.name === "string"
     );
 }
 
@@ -119,8 +119,8 @@ Select appropriate agents for the task. Use ["END"] when conversation is complet
         // Process tool calls
         if (response.toolCalls && response.toolCalls.length > 0) {
             result.toolCalls = response.toolCalls.map(tc => ({
-                id: tc.name || 'mock-tool-call',
-                type: 'function' as const,
+                id: tc.name || "mock-tool-call",
+                type: "function" as const,
                 function: {
                     name: tc.name,
                     arguments: JSON.stringify(tc.params || {})
@@ -148,15 +148,15 @@ function extractRoutingDecision(orchestratorResult: AgentExecutionResult): Routi
         
         if (
             parsed &&
-            typeof parsed === 'object' &&
-            'agents' in parsed &&
+            typeof parsed === "object" &&
+            "agents" in parsed &&
             Array.isArray(parsed.agents)
         ) {
             return parsed as RoutingDecision;
         }
     } catch (error) {
         // Not a routing decision - invalid JSON or parsing error
-        console.debug('Failed to parse routing decision:', error);
+        console.debug("Failed to parse routing decision:", error);
     }
     return null;
 }
@@ -269,9 +269,9 @@ export async function executeConversationFlow(
                         // Standard OpenAI-style structure
                         toolName = toolCall.function.name;
                         try {
-                            toolArgs = JSON.parse(toolCall.function.arguments || '{}') as Record<string, unknown>;
+                            toolArgs = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
                         } catch (error) {
-                            console.warn('Failed to parse tool call arguments:', error);
+                            console.warn("Failed to parse tool call arguments:", error);
                             toolArgs = {};
                         }
                     } else if (toolCall.name) {
@@ -279,7 +279,7 @@ export async function executeConversationFlow(
                         toolName = toolCall.name;
                         toolArgs = toolCall.params || {};
                     } else {
-                        console.warn('Unknown tool call structure:', toolCall);
+                        console.warn("Unknown tool call structure:", toolCall);
                         continue;
                     }
                     
@@ -291,9 +291,9 @@ export async function executeConversationFlow(
                     });
                     
                     // Check for continue tool - means we need to go back to orchestrator
-                    if (toolName === 'continue') {
+                    if (toolName === "continue") {
                         // Update mock LLM context for next iteration
-                        if ('updateContext' in context.mockLLM && typeof context.mockLLM.updateContext === 'function') {
+                        if ("updateContext" in context.mockLLM && typeof context.mockLLM.updateContext === "function") {
                             context.mockLLM.updateContext({
                                 lastContinueCaller: targetAgent,
                                 iteration: iteration,
@@ -307,9 +307,9 @@ export async function executeConversationFlow(
                         const pmAgent = context.projectContext.getProjectManager();
                         const isPMAgent = targetAgent === pmAgent.slug;
                         
-                        if (targetAgent === 'orchestrator' || 
+                        if (targetAgent === "orchestrator" || 
                             (isPMAgent && 
-                             (routingDecision.phase === 'verification' || routingDecision.phase === 'plan'))) {
+                             (routingDecision.phase === "verification" || routingDecision.phase === "plan"))) {
                             return trace;
                         }
                     }
@@ -416,12 +416,12 @@ export function getToolCallsFromHistory(mockLLM: unknown): string[] {
     // Access the conversational logger from the mock LLM
     if (
         mockLLM &&
-        typeof mockLLM === 'object' &&
-        'conversationalLogger' in mockLLM &&
+        typeof mockLLM === "object" &&
+        "conversationalLogger" in mockLLM &&
         mockLLM.conversationalLogger &&
-        typeof mockLLM.conversationalLogger === 'object' &&
-        'getHistory' in mockLLM.conversationalLogger &&
-        typeof mockLLM.conversationalLogger.getHistory === 'function'
+        typeof mockLLM.conversationalLogger === "object" &&
+        "getHistory" in mockLLM.conversationalLogger &&
+        typeof mockLLM.conversationalLogger.getHistory === "function"
     ) {
         const history = mockLLM.conversationalLogger.getHistory();
         

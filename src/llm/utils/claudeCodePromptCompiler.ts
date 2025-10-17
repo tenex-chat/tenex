@@ -23,7 +23,7 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
     }
 
     // Find first system message for customSystemPrompt
-    const firstSystemIndex = messages.findIndex(m => m.role === 'system');
+    const firstSystemIndex = messages.findIndex(m => m.role === "system");
     const customSystemPrompt = firstSystemIndex !== -1 ? messages[firstSystemIndex].content : undefined;
 
     // Compile ALL remaining messages (after first system) preserving order
@@ -44,11 +44,11 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         // Process all messages after the first system message, preserving order
         for (let i = firstSystemIndex + 1; i < messages.length; i++) {
             const msg = messages[i];
-            const roleLabel = msg.role === 'system' ? '[System]' :
-                            msg.role === 'user' ? '[User]' : '[Assistant]';
+            const roleLabel = msg.role === "system" ? "[System]" :
+                            msg.role === "user" ? "[User]" : "[Assistant]";
             appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
 
-            const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
             logger.debug("[claudeCodePromptCompiler] Adding message to append", {
                 index: i,
                 role: msg.role,
@@ -70,15 +70,15 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         appendParts.push("=== Conversation History ===\n\n");
 
         for (const msg of messages) {
-            const roleLabel = msg.role === 'system' ? '[System]' :
-                            msg.role === 'user' ? '[User]' : '[Assistant]';
+            const roleLabel = msg.role === "system" ? "[System]" :
+                            msg.role === "user" ? "[User]" : "[Assistant]";
             appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
         }
 
         appendParts.push("=== End History ===\n");
     }
 
-    const appendSystemPrompt = appendParts.length > 0 ? appendParts.join('') : undefined;
+    const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("") : undefined;
 
     logger.info("[claudeCodePromptCompiler] 📦 COMPILED PROMPTS", {
         customSystemPromptLength: customSystemPrompt?.length || 0,
@@ -107,7 +107,7 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
     });
 
     // Find the first non-system message (start of conversation)
-    const conversationStartIndex = messages.findIndex(m => m.role !== 'system');
+    const conversationStartIndex = messages.findIndex(m => m.role !== "system");
 
     if (conversationStartIndex === -1) {
         // All messages are system messages, no conversion needed
@@ -122,14 +122,14 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
         }
 
         // Convert subsequent system messages to user messages with clear marker
-        if (msg.role === 'system') {
-            const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        if (msg.role === "system") {
+            const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
             logger.debug("[claudeCodePromptCompiler] Converting system message to user", {
                 index,
                 contentPreview: contentStr.substring(0, 100),
             });
             return {
-                role: 'user',
+                role: "user",
                 content: `[System Context]: ${msg.content}`
             };
         }
@@ -139,7 +139,7 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
     });
 
     const systemMessagesConverted = messages.filter((msg, index) =>
-        index >= conversationStartIndex && msg.role === 'system'
+        index >= conversationStartIndex && msg.role === "system"
     ).length;
 
     logger.info("[claudeCodePromptCompiler] ✅ RESUME CONVERSION COMPLETE", {

@@ -84,7 +84,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     ): Promise<void> {
         if (!isProjectContextInitialized()) {
             // In production, system prompt is required
-            if (process.env.NODE_ENV === 'production') {
+            if (process.env.NODE_ENV === "production") {
                 throw new Error("[BrainstormStrategy] Project context required for system prompt");
             }
             // In tests, skip gracefully

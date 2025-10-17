@@ -1,10 +1,10 @@
-import * as cron from 'node-cron';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { logger } from '../utils/logger';
-import { ConfigService } from './ConfigService';
-import NDK, { NDKEvent, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk';
-import { getProjectContext } from './ProjectContext';
+import * as cron from "node-cron";
+import * as fs from "fs/promises";
+import * as path from "path";
+import { logger } from "../utils/logger";
+import { ConfigService } from "./ConfigService";
+import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { getProjectContext } from "./ProjectContext";
 
 interface ScheduledTask {
   id: string;
@@ -25,8 +25,8 @@ export class SchedulerService {
   private projectPath: string | null = null;
 
   private constructor() {
-    const tenexDir = path.join(process.cwd(), '.tenex');
-    this.taskFilePath = path.join(tenexDir, 'scheduled_tasks.json');
+    const tenexDir = path.join(process.cwd(), ".tenex");
+    this.taskFilePath = path.join(tenexDir, "scheduled_tasks.json");
   }
 
   public static getInstance(): SchedulerService {
@@ -43,7 +43,7 @@ export class SchedulerService {
     this.ndk = ndk;
     this.projectPath = projectPath || process.cwd();
 
-    logger.info('Initializing SchedulerService');
+    logger.info("Initializing SchedulerService");
     
     // Ensure .tenex directory exists
     const tenexDir = path.dirname(this.taskFilePath);
@@ -133,16 +133,16 @@ export class SchedulerService {
     try {
       // Try to get NDK instance if not already set
       if (!this.ndk) {
-        logger.warn('NDK not available in SchedulerService, attempting to get instance');
+        logger.warn("NDK not available in SchedulerService, attempting to get instance");
         try {
-          const { getNDK } = await import('@/nostr/ndkClient');
+          const { getNDK } = await import("@/nostr/ndkClient");
           this.ndk = getNDK();
           if (!this.ndk) {
-            throw new Error('NDK instance not available');
+            throw new Error("NDK instance not available");
           }
         } catch (ndkError) {
-          logger.error('Failed to get NDK instance:', ndkError);
-          throw new Error('SchedulerService not properly initialized - NDK unavailable');
+          logger.error("Failed to get NDK instance:", ndkError);
+          throw new Error("SchedulerService not properly initialized - NDK unavailable");
         }
       }
 
@@ -161,7 +161,7 @@ export class SchedulerService {
 
   private async publishAgentTriggerEvent(task: ScheduledTask): Promise<void> {
     if (!this.ndk) {
-      throw new Error('NDK not initialized');
+      throw new Error("NDK not initialized");
     }
 
     const event = new NDKEvent(this.ndk);
@@ -172,13 +172,13 @@ export class SchedulerService {
 
     // Build tags
     const tags: string[][] = [
-      ['a', projectCtx.project.tagId()], // Project reference
-      ['p', task.toPubkey], // Target agent that should handle this task
+      ["a", projectCtx.project.tagId()], // Project reference
+      ["p", task.toPubkey], // Target agent that should handle this task
     ];
 
     // Add metadata about the scheduled task
-    tags.push(['scheduled-task-id', task.id]);
-    tags.push(['scheduled-task-cron', task.schedule]);
+    tags.push(["scheduled-task-id", task.id]);
+    tags.push(["scheduled-task-cron", task.schedule]);
 
     event.tags = tags;
 
@@ -217,7 +217,7 @@ export class SchedulerService {
 
   private async loadTasks(): Promise<void> {
     try {
-      const data = await fs.readFile(this.taskFilePath, 'utf-8');
+      const data = await fs.readFile(this.taskFilePath, "utf-8");
       const tasks = JSON.parse(data) as ScheduledTask[];
 
       for (const task of tasks) {
@@ -226,10 +226,10 @@ export class SchedulerService {
 
       logger.info(`Loaded ${tasks.length} scheduled tasks from disk`);
     } catch (error: unknown) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-        logger.info('No existing scheduled tasks file found, starting fresh');
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        logger.info("No existing scheduled tasks file found, starting fresh");
       } else {
-        logger.error('Failed to load scheduled tasks:', error);
+        logger.error("Failed to load scheduled tasks:", error);
       }
     }
   }
@@ -240,7 +240,7 @@ export class SchedulerService {
       await fs.writeFile(this.taskFilePath, JSON.stringify(tasks, null, 2));
       logger.debug(`Saved ${tasks.length} scheduled tasks to disk`);
     } catch (error) {
-      logger.error('Failed to save scheduled tasks:', error);
+      logger.error("Failed to save scheduled tasks:", error);
     }
   }
 
@@ -249,7 +249,7 @@ export class SchedulerService {
   }
 
   public shutdown(): void {
-    logger.info('Shutting down SchedulerService');
+    logger.info("Shutting down SchedulerService");
     
     // Stop all cron tasks
     for (const [taskId, cronTask] of this.tasks.entries()) {
@@ -259,7 +259,7 @@ export class SchedulerService {
     
     this.tasks.clear();
     this.taskMetadata.clear(); // Also clear metadata
-    logger.info('SchedulerService shutdown complete');
+    logger.info("SchedulerService shutdown complete");
   }
   
   public async clearAllTasks(): Promise<void> {
@@ -272,7 +272,7 @@ export class SchedulerService {
     try {
       await fs.writeFile(this.taskFilePath, JSON.stringify([], null, 2));
     } catch (error) {
-      logger.error('Failed to clear tasks file:', error);
+      logger.error("Failed to clear tasks file:", error);
     }
   }
 }

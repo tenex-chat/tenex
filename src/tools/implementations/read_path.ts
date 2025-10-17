@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { formatAnyError } from "@/utils/error-formatter";
 import { z } from "zod";
@@ -89,7 +89,7 @@ export function createReadPathTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(toolInstance, 'getHumanReadableContent', {
+  Object.defineProperty(toolInstance, "getHumanReadableContent", {
     value: ({ path }: { path: string }) => {
       return `Reading ${path}`;
     },

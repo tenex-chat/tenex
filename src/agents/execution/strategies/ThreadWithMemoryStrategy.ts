@@ -227,7 +227,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         }
 
         // Check if this is a tool event from this agent
-        const isToolEvent = event.tags.some(t => t[0] === 'tool');
+        const isToolEvent = event.tags.some(t => t[0] === "tool");
         const isThisAgent = event.pubkey === agentPubkey;
 
         if (isToolEvent) {
@@ -256,7 +256,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         }
 
         // Process regular message
-        const content = event.content || '';
+        const content = event.content || "";
 
         // Use EventToModelMessage for proper attribution
         const result = await EventToModelMessage.transform(
@@ -272,13 +272,13 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
         // If not from this agent and contains nostr entities, append system messages with entity content
         if (event.pubkey !== agentPubkey) {
-            const entities = extractNostrEntities(event.content || '');
+            const entities = extractNostrEntities(event.content || "");
             if (entities.length > 0) {
                 try {
                     const nameRepo = getPubkeyNameRepository();
                     const ndk = getNDK();
                     const entitySystemMessages = await resolveNostrEntitiesToSystemMessages(
-                        event.content || '',
+                        event.content || "",
                         ndk,
                         (pubkey) => nameRepo.getName(pubkey)
                     );

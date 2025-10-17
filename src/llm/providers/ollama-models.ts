@@ -12,11 +12,11 @@ export interface OllamaModel {
  */
 export async function fetchOllamaModels(): Promise<OllamaModel[]> {
   try {
-    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
     const response = await fetch(`${baseUrl}/api/tags`, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
     });
 
@@ -57,7 +57,7 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
  * Format bytes to human readable size
  */
 function formatSize(bytes: number): string {
-  if (!bytes) return 'unknown';
+  if (!bytes) return "unknown";
   const gb = bytes / (1024 * 1024 * 1024);
   if (gb >= 1) {
     return `${gb.toFixed(1)}GB`;

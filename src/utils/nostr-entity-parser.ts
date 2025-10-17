@@ -1,4 +1,4 @@
-import NDK, { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk';
+import NDK, { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -14,18 +14,18 @@ export function parseNostrUser(input: string | undefined): string | null {
     try {
         // Strip nostr: prefix if present
         let cleaned = input.trim();
-        if (cleaned.startsWith('nostr:')) {
+        if (cleaned.startsWith("nostr:")) {
             cleaned = cleaned.substring(6);
         }
         
         // Handle npub format
-        if (cleaned.startsWith('npub1')) {
+        if (cleaned.startsWith("npub1")) {
             const user = new NDKUser({ npub: cleaned });
             return user.pubkey;
         }
         
         // Handle nprofile format
-        if (cleaned.startsWith('nprofile1')) {
+        if (cleaned.startsWith("nprofile1")) {
             const user = new NDKUser({ nprofile: cleaned });
             return user.pubkey;
         }
@@ -47,7 +47,7 @@ export function parseNostrUser(input: string | undefined): string | null {
         
         return null;
     } catch (error) {
-        console.debug('Failed to parse Nostr user identifier:', input, error);
+        console.debug("Failed to parse Nostr user identifier:", input, error);
         return null;
     }
 }
@@ -66,12 +66,12 @@ export async function parseNostrEvent(input: string | undefined, ndk: NDK): Prom
     try {
         // Strip nostr: prefix if present
         let cleaned = input.trim();
-        if (cleaned.startsWith('nostr:')) {
+        if (cleaned.startsWith("nostr:")) {
             cleaned = cleaned.substring(6);
         }
         
         // Try to fetch directly - NDK handles various formats
-        if (cleaned.startsWith('nevent1') || cleaned.startsWith('note1') || cleaned.startsWith('naddr1')) {
+        if (cleaned.startsWith("nevent1") || cleaned.startsWith("note1") || cleaned.startsWith("naddr1")) {
             const event = await ndk.fetchEvent(cleaned);
             return event;
         }
@@ -86,7 +86,7 @@ export async function parseNostrEvent(input: string | undefined, ndk: NDK): Prom
         const event = await ndk.fetchEvent(cleaned);
         return event;
     } catch (error) {
-        console.debug('Failed to parse/fetch Nostr event:', input, error);
+        console.debug("Failed to parse/fetch Nostr event:", input, error);
         return null;
     }
 }
@@ -99,7 +99,7 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
     if (!input) return null;
     
     let cleaned = input.trim();
-    if (cleaned.startsWith('nostr:')) {
+    if (cleaned.startsWith("nostr:")) {
         cleaned = cleaned.substring(6);
     }
     
@@ -151,7 +151,7 @@ export async function resolveNostrEntitiesToSystemMessages(
                 // Get author name if getName function provided, otherwise use pubkey
                 const authorName = getName 
                     ? await getName(event.pubkey)
-                    : event.pubkey.substring(0, 8) + '...';
+                    : event.pubkey.substring(0, 8) + "...";
                 
                 // Format timestamp
                 const timestamp = new Date((event.created_at || 0) * 1000).toISOString();
@@ -162,7 +162,7 @@ export async function resolveNostrEntitiesToSystemMessages(
                 messages.push(systemContent);
             }
         } catch (error) {
-            console.debug('Failed to fetch nostr entity:', entity, error);
+            console.debug("Failed to fetch nostr entity:", entity, error);
             // Skip entity if fetch fails
         }
     }

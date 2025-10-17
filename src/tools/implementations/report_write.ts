@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { ReportManager } from "@/services/ReportManager";
 import { logger } from "@/utils/logger";
 import { z } from "zod";

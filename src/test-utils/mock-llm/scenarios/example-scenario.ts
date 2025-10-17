@@ -126,7 +126,7 @@ export const exampleScenario: MockLLMScenario = {
 export function createSimpleScenario(patterns: Record<string, string>): MockLLMScenario {
     const responses: MockLLMResponse[] = Object.entries(patterns).map(([pattern, response], index) => ({
         trigger: {
-            userMessage: new RegExp(pattern, 'i'),
+            userMessage: new RegExp(pattern, "i"),
         },
         response: {
             content: response,

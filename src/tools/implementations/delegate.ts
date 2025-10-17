@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -60,9 +60,9 @@ async function executeDelegate(input: DelegateInput, context: ExecutionContext):
   
   if (selfDelegationAttempts.length > 0) {
     throw new Error(
-      `Self-delegation is not permitted with the delegate tool. ` +
+      "Self-delegation is not permitted with the delegate tool. " +
       `Agent "${context.agent.slug}" cannot delegate to itself. ` +
-      `Use the delegate_phase tool if you need to transition phases within the same agent.`
+      "Use the delegate_phase tool if you need to transition phases within the same agent."
     );
   }
 
@@ -92,7 +92,7 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
     },
   });
 
-  Object.defineProperty(aiTool, 'getHumanReadableContent', {
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
     value: ({ recipients }: DelegateInput) => {
       if (recipients.length === 1) {
         return `Delegating to ${recipients[0]}`;

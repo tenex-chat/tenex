@@ -1,18 +1,18 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
-import { logger } from '@/utils/logger';
-import { getProjectContext } from '@/services/ProjectContext';
+import { tool } from "ai";
+import { z } from "zod";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/registry";
+import { writeFile, mkdir } from "fs/promises";
+import { join } from "path";
+import { logger } from "@/utils/logger";
+import { getProjectContext } from "@/services/ProjectContext";
 
 const createDynamicToolSchema = z.object({
-    name: z.string().regex(/^[a-z0-9_]+$/).describe('Tool name (lowercase, alphanumeric and underscores only)'),
-    description: z.string().describe('Clear description of what the tool does'),
+    name: z.string().regex(/^[a-z0-9_]+$/).describe("Tool name (lowercase, alphanumeric and underscores only)"),
+    description: z.string().describe("Clear description of what the tool does"),
     inputSchema: z.string().describe('Zod schema definition as TypeScript code (e.g., "z.object({ param: z.string() })")'),
-    implementation: z.string().describe('The async function body that implements the tool logic (without the function declaration)'),
-    humanReadableFormat: z.string().optional().describe('Optional template string for human-readable output (use ${input.paramName} for parameters)')
+    implementation: z.string().describe("The async function body that implements the tool logic (without the function declaration)"),
+    humanReadableFormat: z.string().optional().describe("Optional template string for human-readable output (use ${input.paramName} for parameters)")
 });
 
 type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;
@@ -22,7 +22,7 @@ type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;
  */
 export function createCreateDynamicToolTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: 'Create a new dynamic tool that can be used immediately by agents. The tool will be saved as a TypeScript file and automatically loaded.',
+        description: "Create a new dynamic tool that can be used immediately by agents. The tool will be saved as a TypeScript file and automatically loaded.",
         
         inputSchema: createDynamicToolSchema,
         
@@ -59,7 +59,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
         inputSchema: ${name}Schema,
         
         execute: async (input: ${name.charAt(0).toUpperCase() + name.slice(1)}Input) => {
-            ${implementation.split('\n').map(line => '            ' + line).join('\n').trim()}
+            ${implementation.split("\n").map(line => "            " + line).join("\n").trim()}
         },
     });
     
@@ -70,7 +70,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
         },
         enumerable: false,
         configurable: true
-    });` : ''}
+    });` : ""}
     
     return aiTool;
 };
@@ -79,17 +79,17 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
 export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
             // Determine the file path
-            const dynamicToolsDir = join(context.projectPath, '.tenex/tools');
-            const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${name}.ts`;
+            const dynamicToolsDir = join(context.projectPath, ".tenex/tools");
+            const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
             
             // Ensure the directory exists
             await mkdir(dynamicToolsDir, { recursive: true });
             
             // Write the tool file
-            await writeFile(filePath, toolCode, 'utf-8');
+            await writeFile(filePath, toolCode, "utf-8");
             
-            logger.info(`[CreateDynamicTool] Created new dynamic tool`, {
+            logger.info("[CreateDynamicTool] Created new dynamic tool", {
                 name,
                 agent: context.agent.name,
                 file: fileName,
@@ -132,7 +132,7 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                         );
                     }
                 } catch (error) {
-                    console.warn('Failed to publish status:', error);
+                    console.warn("Failed to publish status:", error);
                 }
             }
             
@@ -146,7 +146,7 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
         },
     });
     
-    Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: ({ name }: CreateDynamicToolInput) => {
             return `Creating dynamic tool: ${name}`;
         },

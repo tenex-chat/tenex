@@ -1,9 +1,9 @@
-import type { Table, VectorQuery } from '@lancedb/lancedb';
-import type { RAGDatabaseManager } from './RAGDatabaseManager';
-import type { EmbeddingProvider } from '../EmbeddingProvider';
-import { logger } from '@/utils/logger';
-import { handleError } from '@/utils/error-handler';
-import type { LanceDBResult, LanceDBStoredDocument, DocumentMetadata } from '@/tools/utils';
+import type { Table, VectorQuery } from "@lancedb/lancedb";
+import type { RAGDatabaseManager } from "./RAGDatabaseManager";
+import type { EmbeddingProvider } from "../EmbeddingProvider";
+import { logger } from "@/utils/logger";
+import { handleError } from "@/utils/error-handler";
+import type { LanceDBResult, LanceDBStoredDocument, DocumentMetadata } from "@/tools/utils";
 
 /**
  * Document structure for RAG operations
@@ -54,14 +54,14 @@ export interface RAGQueryResult {
 export class RAGValidationError extends Error {
     constructor(message: string) {
         super(message);
-        this.name = 'RAGValidationError';
+        this.name = "RAGValidationError";
     }
 }
 
 export class RAGOperationError extends Error {
     constructor(message: string, public readonly cause?: Error) {
         super(message);
-        this.name = 'RAGOperationError';
+        this.name = "RAGOperationError";
     }
 }
 
@@ -95,12 +95,12 @@ export class RAGOperations {
             
             // Build schema with vector column
             const defaultSchema = {
-                id: 'string',
-                content: 'string',
+                id: "string",
+                content: "string",
                 vector: `vector(${dimensions})`,
-                metadata: 'string', // JSON string
-                timestamp: 'int64',
-                source: 'string'
+                metadata: "string", // JSON string
+                timestamp: "int64",
+                source: "string"
             };
 
             const finalSchema = { ...defaultSchema, ...customSchema };
@@ -108,18 +108,18 @@ export class RAGOperations {
             // Create table with initial row (required by LanceDB)
             // Use regular array for vector to match document insertion format
             const initialRow = {
-                id: 'initial',
-                content: '',
+                id: "initial",
+                content: "",
                 vector: Array(dimensions).fill(0),
-                metadata: '{}',
+                metadata: "{}",
                 timestamp: Date.now(),
-                source: 'system'
+                source: "system"
             };
 
             const table = await this.dbManager.createTable(
                 name,
                 [initialRow],
-                { mode: 'overwrite' }
+                { mode: "overwrite" }
             );
 
             // Delete the initial row
@@ -146,7 +146,7 @@ export class RAGOperations {
      */
     async addDocuments(collectionName: string, documents: RAGDocument[]): Promise<void> {
         if (!documents || documents.length === 0) {
-            throw new RAGValidationError('Documents array cannot be empty');
+            throw new RAGValidationError("Documents array cannot be empty");
         }
 
         const table = await this.dbManager.getTable(collectionName);
@@ -192,7 +192,7 @@ export class RAGOperations {
                     vector: Array.from(vector),
                     metadata: JSON.stringify(doc.metadata || {}),
                     timestamp: doc.timestamp || Date.now(),
-                    source: doc.source || 'user'
+                    source: doc.source || "user"
                 };
                 
                 return storedDoc;
@@ -275,7 +275,7 @@ export class RAGOperations {
                 this.logQueryResults(results);
                 return results;
             },
-            'Vector search execution failed'
+            "Vector search execution failed"
         );
     }
 
@@ -283,7 +283,7 @@ export class RAGOperations {
      * Try executing query using toArray() method
      */
     private async tryToArrayQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
-        if (typeof searchQuery.toArray !== 'function') return null;
+        if (typeof searchQuery.toArray !== "function") return null;
         
         const queryResults = await searchQuery.toArray();
         logger.debug(`Query executed with toArray(), got ${queryResults.length} results`);
@@ -294,10 +294,10 @@ export class RAGOperations {
      * Try executing query using execute() method
      */
     private async tryExecuteQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
-        if (typeof searchQuery.execute !== 'function') return null;
+        if (typeof searchQuery.execute !== "function") return null;
         
         const queryResults = await searchQuery.execute();
-        logger.debug(`Query executed with execute()`);
+        logger.debug("Query executed with execute()");
         
         if (Array.isArray(queryResults)) {
             return queryResults;
@@ -318,7 +318,7 @@ export class RAGOperations {
      * Try executing query using direct iteration
      */
     private async tryIterateQuery(searchQuery: VectorQuery): Promise<LanceDBResult[]> {
-        logger.debug(`Trying direct iteration`);
+        logger.debug("Trying direct iteration");
         const results: LanceDBResult[] = [];
         
         for await (const item of searchQuery) {
@@ -351,7 +351,7 @@ export class RAGOperations {
         if (error instanceof RAGValidationError || error instanceof RAGOperationError) {
             throw error;
         }
-        handleError(error, message, { logLevel: 'error' });
+        handleError(error, message, { logLevel: "error" });
         throw new RAGOperationError(message, error as Error);
     }
 
@@ -363,7 +363,7 @@ export class RAGOperations {
         
         if (results.length > 0) {
             logger.debug(`First result structure: ${JSON.stringify(Object.keys(results[0]))}`);
-            logger.debug(`First result sample:`, {
+            logger.debug("First result sample:", {
                 id: results[0].id,
                 content_preview: results[0].content?.substring(0, 50),
                 has_vector: !!results[0].vector,
@@ -420,18 +420,18 @@ export class RAGOperations {
      * Validate collection name format
      */
     private validateCollectionName(name: string): void {
-        if (!name || typeof name !== 'string') {
-            throw new RAGValidationError('Collection name must be a non-empty string');
+        if (!name || typeof name !== "string") {
+            throw new RAGValidationError("Collection name must be a non-empty string");
         }
         
         if (!/^[a-zA-Z0-9_]+$/.test(name)) {
             throw new RAGValidationError(
-                'Collection name must be alphanumeric with underscores only'
+                "Collection name must be alphanumeric with underscores only"
             );
         }
         
         if (name.length > 64) {
-            throw new RAGValidationError('Collection name must be 64 characters or less');
+            throw new RAGValidationError("Collection name must be 64 characters or less");
         }
     }
 
@@ -446,11 +446,11 @@ export class RAGOperations {
         this.validateCollectionName(collectionName);
         
         if (!queryText || queryText.trim().length === 0) {
-            throw new RAGValidationError('Query text cannot be empty');
+            throw new RAGValidationError("Query text cannot be empty");
         }
         
         if (!Number.isInteger(topK) || topK < 1 || topK > 100) {
-            throw new RAGValidationError('topK must be an integer between 1 and 100');
+            throw new RAGValidationError("topK must be an integer between 1 and 100");
         }
     }
 
@@ -459,15 +459,15 @@ export class RAGOperations {
      */
     private validateDocument(doc: RAGDocument): void {
         if (!doc.content || doc.content.trim().length === 0) {
-            throw new RAGValidationError('Document content cannot be empty');
+            throw new RAGValidationError("Document content cannot be empty");
         }
         
-        if (doc.id && typeof doc.id !== 'string') {
-            throw new RAGValidationError('Document ID must be a string');
+        if (doc.id && typeof doc.id !== "string") {
+            throw new RAGValidationError("Document ID must be a string");
         }
         
-        if (doc.metadata && typeof doc.metadata !== 'object') {
-            throw new RAGValidationError('Document metadata must be an object');
+        if (doc.metadata && typeof doc.metadata !== "object") {
+            throw new RAGValidationError("Document metadata must be an object");
         }
     }
 }

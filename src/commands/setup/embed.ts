@@ -15,33 +15,33 @@ const EMBED_CONFIG_FILE = "embed.json";
 type RawEmbedConfig = 
     | string // Old format: just model name
     | { model: string; provider?: never } // Old format: object with just model
-    | { provider: 'local' | 'openai'; model: string; apiKey?: string }; // New format
+    | { provider: "local" | "openai"; model: string; apiKey?: string }; // New format
 
 function isRawEmbedConfig(value: unknown): value is RawEmbedConfig {
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
         return true;
     }
     
-    if (typeof value !== 'object' || value === null) {
+    if (typeof value !== "object" || value === null) {
         return false;
     }
     
     const obj = value as Record<string, unknown>;
     
     // Must have a model
-    if (!('model' in obj) || typeof obj.model !== 'string') {
+    if (!("model" in obj) || typeof obj.model !== "string") {
         return false;
     }
     
     // If provider is present, must be valid
-    if ('provider' in obj) {
-        if (obj.provider !== 'local' && obj.provider !== 'openai') {
+    if ("provider" in obj) {
+        if (obj.provider !== "local" && obj.provider !== "openai") {
             return false;
         }
     }
     
     // If apiKey is present, must be string
-    if ('apiKey' in obj && typeof obj.apiKey !== 'string') {
+    if ("apiKey" in obj && typeof obj.apiKey !== "string") {
         return false;
     }
     
@@ -69,9 +69,9 @@ async function loadEmbedConfig(dir: string): Promise<EmbeddingConfig | null> {
  */
 function parseEmbedConfig(raw: RawEmbedConfig): EmbeddingConfig {
     // Support both old format (just model string) and new format
-    if (typeof raw === 'string') {
+    if (typeof raw === "string") {
         return {
-            provider: 'local',
+            provider: "local",
             model: raw
         };
     }
@@ -79,21 +79,21 @@ function parseEmbedConfig(raw: RawEmbedConfig): EmbeddingConfig {
     if (raw.model && !raw.provider) {
         // Infer provider from model name
         const model = raw.model;
-        if (model.includes('text-embedding')) {
+        if (model.includes("text-embedding")) {
             return {
-                provider: 'openai',
+                provider: "openai",
                 model: model
             };
         }
         return {
-            provider: 'local',
+            provider: "local",
             model: model
         };
     }
     
     return {
-        provider: raw.provider || 'local',
-        model: raw.model || 'Xenova/all-MiniLM-L6-v2'
+        provider: raw.provider || "local",
+        model: raw.model || "Xenova/all-MiniLM-L6-v2"
     };
 }
 
@@ -135,41 +135,41 @@ export const embedCommand = new Command("embed")
             // Prompt for provider selection
             const { provider } = await inquirer.prompt([
                 {
-                    type: 'list',
-                    name: 'provider',
-                    message: 'Select embedding provider:',
+                    type: "list",
+                    name: "provider",
+                    message: "Select embedding provider:",
                     choices: [
-                        { name: 'Local Transformers (runs on your machine)', value: 'local' },
-                        { name: 'OpenAI (requires API key)', value: 'openai' }
+                        { name: "Local Transformers (runs on your machine)", value: "local" },
+                        { name: "OpenAI (requires API key)", value: "openai" }
                     ],
-                    default: existing?.provider || 'local'
+                    default: existing?.provider || "local"
                 }
             ]);
             
             let model: string;
             let apiKey: string | undefined;
             
-            if (provider === 'openai') {
+            if (provider === "openai") {
                 // OpenAI configuration
                 const openaiAnswers = await inquirer.prompt([
                     {
-                        type: 'list',
-                        name: 'model',
-                        message: 'Select OpenAI embedding model:',
+                        type: "list",
+                        name: "model",
+                        message: "Select OpenAI embedding model:",
                         choices: [
-                            { name: 'text-embedding-3-small (fast, good quality)', value: 'text-embedding-3-small' },
-                            { name: 'text-embedding-3-large (slower, best quality)', value: 'text-embedding-3-large' },
-                            { name: 'text-embedding-ada-002 (legacy)', value: 'text-embedding-ada-002' }
+                            { name: "text-embedding-3-small (fast, good quality)", value: "text-embedding-3-small" },
+                            { name: "text-embedding-3-large (slower, best quality)", value: "text-embedding-3-large" },
+                            { name: "text-embedding-ada-002 (legacy)", value: "text-embedding-ada-002" }
                         ],
-                        default: existing?.model || 'text-embedding-3-small'
+                        default: existing?.model || "text-embedding-3-small"
                     },
                     {
-                        type: 'input',
-                        name: 'apiKey',
-                        message: 'Enter OpenAI API key (leave empty to use OPENAI_API_KEY env var):',
+                        type: "input",
+                        name: "apiKey",
+                        message: "Enter OpenAI API key (leave empty to use OPENAI_API_KEY env var):",
                         validate: (input: string) => {
                             if (!input && !process.env.OPENAI_API_KEY) {
-                                return 'API key required (or set OPENAI_API_KEY environment variable)';
+                                return "API key required (or set OPENAI_API_KEY environment variable)";
                             }
                             return true;
                         }
@@ -182,38 +182,38 @@ export const embedCommand = new Command("embed")
                 // Local transformer configuration
                 const localAnswers = await inquirer.prompt([
                     {
-                        type: 'list',
-                        name: 'model',
-                        message: 'Select local embedding model:',
+                        type: "list",
+                        name: "model",
+                        message: "Select local embedding model:",
                         choices: [
                             { 
-                                name: 'all-MiniLM-L6-v2 (default, fast, good for general use)', 
-                                value: 'Xenova/all-MiniLM-L6-v2' 
+                                name: "all-MiniLM-L6-v2 (default, fast, good for general use)", 
+                                value: "Xenova/all-MiniLM-L6-v2" 
                             },
                             { 
-                                name: 'all-mpnet-base-v2 (larger, better quality)', 
-                                value: 'Xenova/all-mpnet-base-v2' 
+                                name: "all-mpnet-base-v2 (larger, better quality)", 
+                                value: "Xenova/all-mpnet-base-v2" 
                             },
                             { 
-                                name: 'paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)', 
-                                value: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2' 
+                                name: "paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)", 
+                                value: "Xenova/paraphrase-multilingual-MiniLM-L12-v2" 
                             },
                             {
-                                name: 'Custom model (enter HuggingFace model ID)',
-                                value: 'custom'
+                                name: "Custom model (enter HuggingFace model ID)",
+                                value: "custom"
                             }
                         ],
-                        default: existing?.model || 'Xenova/all-MiniLM-L6-v2'
+                        default: existing?.model || "Xenova/all-MiniLM-L6-v2"
                     }
                 ]);
                 
-                if (localAnswers.model === 'custom') {
+                if (localAnswers.model === "custom") {
                     const customAnswer = await inquirer.prompt([
                         {
-                            type: 'input',
-                            name: 'customModel',
-                            message: 'Enter HuggingFace model ID (e.g., sentence-transformers/all-MiniLM-L6-v2):',
-                            validate: (input: string) => input.trim().length > 0 || 'Model ID cannot be empty'
+                            type: "input",
+                            name: "customModel",
+                            message: "Enter HuggingFace model ID (e.g., sentence-transformers/all-MiniLM-L6-v2):",
+                            validate: (input: string) => input.trim().length > 0 || "Model ID cannot be empty"
                         }
                     ]);
                     model = customAnswer.customModel;
@@ -224,18 +224,18 @@ export const embedCommand = new Command("embed")
             
             // Save configuration
             const config: EmbeddingConfig = {
-                provider: provider as 'local' | 'openai',
+                provider: provider as "local" | "openai",
                 model,
                 apiKey
             };
             
             await EmbeddingProviderFactory.saveConfiguration(
                 config, 
-                isGlobal ? 'global' : 'project'
+                isGlobal ? "global" : "project"
             );
             
             logger.info(
-                `✅ Embedding configuration saved to ${isGlobal ? 'global' : 'project'} config\n` +
+                `✅ Embedding configuration saved to ${isGlobal ? "global" : "project"} config\n` +
                 `   Provider: ${provider}\n` +
                 `   Model: ${model}`
             );
@@ -243,7 +243,7 @@ export const embedCommand = new Command("embed")
         } catch (error: unknown) {
             // Handle SIGINT (Ctrl+C) gracefully
             const errorMessage = error instanceof Error ? error.message : String(error);
-            if (errorMessage?.includes('SIGINT') || errorMessage?.includes('force closed')) {
+            if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {
                 process.exit(0);
             }
             

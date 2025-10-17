@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { getNDK } from "@/nostr";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
 import { logger } from "@/utils/logger";

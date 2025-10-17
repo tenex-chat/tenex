@@ -117,12 +117,12 @@ export interface CompleteExecutionOptions {
  * Converts "mcp__repomix__pack_codebase" to "repomix's pack_codebase"
  */
 function formatMCPToolName(toolName: string): string {
-    if (!toolName.startsWith('mcp__')) {
+    if (!toolName.startsWith("mcp__")) {
         return toolName;
     }
 
     // Split the MCP tool name: mcp__<server>__<tool>
-    const parts = toolName.split('__');
+    const parts = toolName.split("__");
     if (parts.length !== 3) {
         return toolName;
     }
@@ -130,7 +130,7 @@ function formatMCPToolName(toolName: string): string {
     const [, serverName, toolMethod] = parts;
 
     // Simple format: server's tool_name
-    return `${serverName}'s ${toolMethod.replace(/_/g, ' ')}`;
+    return `${serverName}'s ${toolMethod.replace(/_/g, " ")}`;
 }
 
 /**
@@ -159,7 +159,7 @@ export class ToolExecutionTracker {
     async trackExecution(options: TrackExecutionOptions): Promise<void> {
         const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext } = options;
 
-        logger.info('[ToolExecutionTracker] Tracking new tool execution', {
+        logger.info("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
             toolCallId,
             currentTrackedCount: this.executions.size
@@ -173,7 +173,7 @@ export class ToolExecutionTracker {
         const execution: TrackedExecution = {
             toolCallId,
             toolName,
-            toolEventId: '', // Will be updated after publish
+            toolEventId: "", // Will be updated after publish
             input: args,
             completed: false
         };
@@ -193,7 +193,7 @@ export class ToolExecutionTracker {
         // Update the execution with the actual event ID
         execution.toolEventId = toolEvent.id;
 
-        logger.debug('[ToolExecutionTracker] Tool execution tracked', {
+        logger.debug("[ToolExecutionTracker] Tool execution tracked", {
             toolCallId,
             toolName,
             toolEventId: toolEvent.id,
@@ -219,7 +219,7 @@ export class ToolExecutionTracker {
     async completeExecution(options: CompleteExecutionOptions): Promise<void> {
         const { toolCallId, result, error, agentPubkey } = options;
 
-        logger.info('[ToolExecutionTracker] Completing tool execution', {
+        logger.info("[ToolExecutionTracker] Completing tool execution", {
             toolCallId,
             error,
             hasResult: result !== undefined
@@ -229,7 +229,7 @@ export class ToolExecutionTracker {
         const execution = this.executions.get(toolCallId);
 
         if (!execution) {
-            logger.warn('[ToolExecutionTracker] Attempted to complete unknown tool execution', {
+            logger.warn("[ToolExecutionTracker] Attempted to complete unknown tool execution", {
                 toolCallId,
                 availableExecutions: Array.from(this.executions.keys())
             });
@@ -238,7 +238,7 @@ export class ToolExecutionTracker {
 
         // Log errors explicitly for visibility
         if (error) {
-            logger.error('[ToolExecutionTracker] Tool execution failed', {
+            logger.error("[ToolExecutionTracker] Tool execution failed", {
                 toolName: execution.toolName,
                 toolCallId,
                 toolEventId: execution.toolEventId,
@@ -269,7 +269,7 @@ export class ToolExecutionTracker {
             agentPubkey
         );
 
-        logger.debug('[ToolExecutionTracker] Tool execution completed and persisted', {
+        logger.debug("[ToolExecutionTracker] Tool execution completed and persisted", {
             toolCallId,
             toolName: execution.toolName,
             toolEventId: execution.toolEventId,
@@ -350,7 +350,7 @@ export class ToolExecutionTracker {
         const previousSize = this.executions.size;
         this.executions.clear();
 
-        logger.debug('[ToolExecutionTracker] Cleared all tracked executions', {
+        logger.debug("[ToolExecutionTracker] Cleared all tracked executions", {
             previousSize
         });
     }
@@ -383,7 +383,7 @@ export class ToolExecutionTracker {
         }
 
         // Special formatting for MCP tools
-        if (toolName.startsWith('mcp__')) {
+        if (toolName.startsWith("mcp__")) {
             return `Executing ${formatMCPToolName(toolName)}`;
         }
 

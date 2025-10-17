@@ -29,7 +29,7 @@ export class LLMServiceFactory {
         this.claudeCodeApiKey = null;
 
         // Check if mock mode is enabled
-        if (process.env.USE_MOCK_LLM === 'true') {
+        if (process.env.USE_MOCK_LLM === "true") {
             logger.debug("[LLMServiceFactory] Mock LLM mode enabled via USE_MOCK_LLM environment variable");
 
             // Dynamically import MockProvider only when needed to avoid loading test dependencies
@@ -65,21 +65,21 @@ export class LLMServiceFactory {
                                 },
                             })
                         );
-                        logger.debug(`[LLMServiceFactory] Initialized OpenRouter provider`);
+                        logger.debug("[LLMServiceFactory] Initialized OpenRouter provider");
                         break;
                         
                     case "anthropic":
                         this.providers.set(name, createAnthropic({
                             apiKey: config.apiKey
                         }));
-                        logger.debug(`[LLMServiceFactory] Initialized Anthropic provider`);
+                        logger.debug("[LLMServiceFactory] Initialized Anthropic provider");
                         break;
 
                     case "openai":
                         this.providers.set(name, createOpenAI({
                             apiKey: config.apiKey
                         }));
-                        logger.debug(`[LLMServiceFactory] Initialized OpenAI provider`);
+                        logger.debug("[LLMServiceFactory] Initialized OpenAI provider");
                         break;
                         
                     case "ollama": {
@@ -91,23 +91,23 @@ export class LLMServiceFactory {
                             baseURL = undefined;
                         } else {
                             // Custom URL - ensure it ends with /api
-                            baseURL = config.apiKey.endsWith('/api') 
+                            baseURL = config.apiKey.endsWith("/api") 
                                 ? config.apiKey 
-                                : config.apiKey.replace(/\/$/, '') + '/api';
+                                : config.apiKey.replace(/\/$/, "") + "/api";
                         }
                         
                         // Create Ollama provider with custom base URL if provided
                         const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
 
                         this.providers.set(name, ollamaProvider as Provider);
-                        logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || 'default (http://localhost:11434)'}`);
+                        logger.debug(`[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || "default (http://localhost:11434)"}`);
                         break;
                     }
                     
                     case "claudeCode": {
                         // Store API key for runtime Claude Code creation
                         this.claudeCodeApiKey = config.apiKey;
-                        logger.debug(`[LLMServiceFactory] Stored Claude Code API key for runtime use`);
+                        logger.debug("[LLMServiceFactory] Stored Claude Code API key for runtime use");
                         break;
                     }
                         
@@ -130,7 +130,7 @@ export class LLMServiceFactory {
             this.registry = createProviderRegistry(providerObject);
             logger.debug(`[LLMServiceFactory] Created provider registry with ${this.providers.size} providers`);
         } else {
-            logger.warn(`[LLMServiceFactory] No providers were successfully initialized`);
+            logger.warn("[LLMServiceFactory] No providers were successfully initialized");
             // Create an empty registry to avoid null checks everywhere
             this.registry = createProviderRegistry({});
         }
@@ -159,30 +159,30 @@ export class LLMServiceFactory {
 
         // Convert agent name to slug format for logging
         const agentSlug = context?.agentName
-            ? context.agentName.toLowerCase().replace(/\s+/g, '-')
+            ? context.agentName.toLowerCase().replace(/\s+/g, "-")
             : undefined;
 
         // If mock mode is enabled, always use mock provider regardless of config
-        const actualProvider = process.env.USE_MOCK_LLM === 'true' ? 'mock' : config.provider;
+        const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
 
-        if (actualProvider === 'mock' && actualProvider !== config.provider) {
+        if (actualProvider === "mock" && actualProvider !== config.provider) {
             logger.debug(`[LLMServiceFactory] Using mock provider instead of ${config.provider} due to USE_MOCK_LLM=true`);
         }
 
         // Handle Claude Code provider specially
-        if (actualProvider === 'claudeCode') {
+        if (actualProvider === "claudeCode") {
             if (!this.claudeCodeApiKey) {
                 throw new Error("Claude Code API key not configured");
             }
 
             // Extract tool names from the provided tools
             const toolNames = context?.tools ? Object.keys(context.tools) : [];
-            const regularTools = toolNames.filter(name => !name.startsWith('mcp__'));
+            const regularTools = toolNames.filter(name => !name.startsWith("mcp__"));
 
             logger.info("[LLMServiceFactory] 🚀 CREATING CLAUDE CODE PROVIDER", {
                 agent: context?.agentName,
                 agentSlug,
-                sessionId: context?.sessionId || 'NONE',
+                sessionId: context?.sessionId || "NONE",
                 hasSessionId: !!context?.sessionId,
                 regularTools,
                 toolCount: regularTools.length
@@ -225,7 +225,7 @@ export class LLMServiceFactory {
             return new LLMService(
                 llmLogger,
                 null,
-                'claudeCode',
+                "claudeCode",
                 config.model,
                 config.temperature,
                 config.maxTokens,
@@ -269,7 +269,7 @@ export class LLMServiceFactory {
      */
     hasProvider(providerName: string): boolean {
         // Check standard providers or Claude Code
-        return this.providers.has(providerName) || (providerName === 'claudeCode' && !!this.claudeCodeApiKey);
+        return this.providers.has(providerName) || (providerName === "claudeCode" && !!this.claudeCodeApiKey);
     }
 
     /**
@@ -278,7 +278,7 @@ export class LLMServiceFactory {
     getAvailableProviders(): string[] {
         const providers = Array.from(this.providers.keys());
         if (this.claudeCodeApiKey) {
-            providers.push('claudeCode');
+            providers.push("claudeCode");
         }
         return providers;
     }

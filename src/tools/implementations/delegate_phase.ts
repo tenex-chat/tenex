@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -47,7 +47,7 @@ async function executeDelegatePhase(input: DelegatePhaseInput, context: Executio
   );
 
   if (!phaseEntry) {
-    const availablePhases = Object.keys(context.agent.phases).join(', ');
+    const availablePhases = Object.keys(context.agent.phases).join(", ");
     throw new Error(`Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`);
   }
 
@@ -137,15 +137,15 @@ export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, 'getHumanReadableContent', {
+    Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: ({ phase, recipients }: DelegatePhaseInput) => {
             if (!phase) {
-                return 'Switching phase';
+                return "Switching phase";
             }
             if (!recipients || recipients.length === 0) {
                 return `Switching to ${phase.toUpperCase()} phase`;
             }
-            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.join(', ')}`;
+            return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.join(", ")}`;
         },
         enumerable: false,
         configurable: true

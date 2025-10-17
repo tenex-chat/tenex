@@ -1,9 +1,9 @@
-import { tool } from 'ai';
+import { tool } from "ai";
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
-import { RAGService } from '@/services/rag/RAGService';
+import { RAGService } from "@/services/rag/RAGService";
 
 const lessonLearnSchema = z.object({
   title: z.string().describe("Brief title/description of what this lesson is about"),
@@ -97,15 +97,15 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
     
     // Ensure the lessons collection exists
     try {
-      await ragService.createCollection('lessons');
+      await ragService.createCollection("lessons");
     } catch (error) {
       // Collection might already exist, which is fine
-      logger.debug('Lessons collection might already exist', { error });
+      logger.debug("Lessons collection might already exist", { error });
     }
     
     // Add the lesson to the RAG collection
     const lessonContent = detailed || lesson;
-    await ragService.addDocuments('lessons', [
+    await ragService.addDocuments("lessons", [
       {
         id: lessonEvent.encode(),
         content: lessonContent,
@@ -117,19 +117,19 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
           agentName: context.agent.name,
           timestamp: Date.now(),
           hasDetailed: !!detailed,
-          type: 'lesson'
+          type: "lesson"
         }
       }
     ]);
     
-    logger.info('✅ Lesson added to RAG collection', {
+    logger.info("✅ Lesson added to RAG collection", {
       title,
       eventId: lessonEvent.encode(),
       agentName: context.agent.name
     });
   } catch (error) {
     // Don't fail the tool if RAG integration fails
-    logger.warn('Failed to add lesson to RAG collection', { error, title });
+    logger.warn("Failed to add lesson to RAG collection", { error, title });
   }
 
   const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
@@ -145,7 +145,7 @@ async function executeLessonLearn(input: LessonLearnInput, context: ExecutionCon
 // AI SDK tool factory
 export function createLessonLearnTool(context: ExecutionContext): ReturnType<typeof tool> {
   return tool({
-    description: `Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.`,
+    description: "Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.",
     inputSchema: lessonLearnSchema,
     execute: async (input: LessonLearnInput) => {
       return await executeLessonLearn(input, context);

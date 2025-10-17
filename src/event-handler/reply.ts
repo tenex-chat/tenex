@@ -212,7 +212,7 @@ async function handleReplyLogic(
   // Check if any of the filtered agents have delegate_phase tool
   const selfReplyAgentsWithDelegatePhase = targetAgents.filter(agent => {
     // Agent is p-tagging themselves AND has delegate_phase tool
-    return agent.pubkey === event.pubkey && agent.tools?.includes('delegate_phase');
+    return agent.pubkey === event.pubkey && agent.tools?.includes("delegate_phase");
   });
 
   // Allow agents with delegate_phase to continue even if they're self-replying
@@ -231,8 +231,8 @@ async function handleReplyLogic(
   // Log filtering actions
   if (nonSelfReplyAgents.length < targetAgents.length) {
     const filteredAgents = targetAgents.filter(a => !nonSelfReplyAgents.includes(a));
-    const allowedSelfReplies = filteredAgents.filter(a => a.tools?.includes('delegate_phase'));
-    const blockedSelfReplies = filteredAgents.filter(a => !a.tools?.includes('delegate_phase'));
+    const allowedSelfReplies = filteredAgents.filter(a => a.tools?.includes("delegate_phase"));
+    const blockedSelfReplies = filteredAgents.filter(a => !a.tools?.includes("delegate_phase"));
 
     if (allowedSelfReplies.length > 0) {
       logger.info(

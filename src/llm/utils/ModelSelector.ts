@@ -90,7 +90,7 @@ export class ModelSelector {
       // Group models by provider
       const modelsByProvider: Record<string, typeof openRouterModels> = {};
       for (const model of openRouterModels) {
-        const provider = model.id.split('/')[0] || 'other';
+        const provider = model.id.split("/")[0] || "other";
         if (!modelsByProvider[provider]) {
           modelsByProvider[provider] = [];
         }
@@ -108,7 +108,7 @@ export class ModelSelector {
         for (const model of providerModels) {
           const pricing = `$${model.pricing.prompt}/$${model.pricing.completion}/1M`;
           const context = `${Math.round(model.context_length / 1000)}k`;
-          const freeTag = model.id.endsWith(':free') ? chalk.green(' [FREE]') : '';
+          const freeTag = model.id.endsWith(":free") ? chalk.green(" [FREE]") : "";
           
           choices.push({
             name: `${model.id}${freeTag} ${chalk.gray(`- ${context} context, ${pricing}`)}`,
@@ -150,7 +150,7 @@ export class ModelSelector {
         ]
       }]);
       
-      if (selectionMethod === 'quick') {
+      if (selectionMethod === "quick") {
         const popular = getPopularModels();
         const choices = [];
         for (const [category, models] of Object.entries(popular)) {

@@ -212,7 +212,7 @@ export class ProjectDisplay {
 
         // Calculate next run time using cron-parser if possible
         try {
-          const cronParser = await import('cron-parser');
+          const cronParser = await import("cron-parser");
           const interval = cronParser.parseExpression(task.schedule);
           const nextRun = interval.next().toDate();
           logger.info(chalk.gray("Next Run:    ") + chalk.cyan(nextRun.toLocaleString()));

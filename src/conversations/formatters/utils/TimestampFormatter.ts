@@ -2,16 +2,16 @@ export class TimestampFormatter {
   /**
    * Format a timestamp according to the specified format
    */
-  format(timestamp: Date, format: 'relative' | 'absolute' | 'time-only'): string {
+  format(timestamp: Date, format: "relative" | "absolute" | "time-only"): string {
     switch (format) {
-      case 'relative':
+      case "relative":
         return this.formatRelative(timestamp);
-      case 'absolute':
+      case "absolute":
         return this.formatAbsolute(timestamp);
-      case 'time-only':
+      case "time-only":
         return this.formatTimeOnly(timestamp);
       default:
-        return '';
+        return "";
     }
   }
   
@@ -36,19 +36,19 @@ export class TimestampFormatter {
   
   private formatAbsolute(timestamp: Date): string {
     const year = timestamp.getFullYear();
-    const month = String(timestamp.getMonth() + 1).padStart(2, '0');
-    const day = String(timestamp.getDate()).padStart(2, '0');
-    const hour = String(timestamp.getHours()).padStart(2, '0');
-    const minute = String(timestamp.getMinutes()).padStart(2, '0');
-    const second = String(timestamp.getSeconds()).padStart(2, '0');
+    const month = String(timestamp.getMonth() + 1).padStart(2, "0");
+    const day = String(timestamp.getDate()).padStart(2, "0");
+    const hour = String(timestamp.getHours()).padStart(2, "0");
+    const minute = String(timestamp.getMinutes()).padStart(2, "0");
+    const second = String(timestamp.getSeconds()).padStart(2, "0");
     
     return ` [${year}-${month}-${day} ${hour}:${minute}:${second}]`;
   }
   
   private formatTimeOnly(timestamp: Date): string {
-    const hour = String(timestamp.getHours()).padStart(2, '0');
-    const minute = String(timestamp.getMinutes()).padStart(2, '0');
-    const second = String(timestamp.getSeconds()).padStart(2, '0');
+    const hour = String(timestamp.getHours()).padStart(2, "0");
+    const minute = String(timestamp.getMinutes()).padStart(2, "0");
+    const second = String(timestamp.getSeconds()).padStart(2, "0");
     
     return ` [${hour}:${minute}:${second}]`;
   }
