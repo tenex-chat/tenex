@@ -1,14 +1,9 @@
 import { tool } from "ai";
-import { fileExists, readFile } from "@/lib/fs";
 import { logger } from "@/utils/logger";
-import * as path from "node:path";
 import { z } from "zod";
+import { getProjectContext } from "@/services/ProjectContext";
+import { agentStorage } from "@/agents/AgentStorage";
 const agentsListSchema = z.object({
-  includeGlobal: z
-    .boolean()
-    .nullable()
-    .optional()
-    .describe("Whether to include global agents in the list (default: true)"),
   verbose: z
     .boolean()
     .nullable()
@@ -26,9 +21,9 @@ type AgentInfo = {
   instructions?: string;
   useCriteria?: string;
   tools?: string[];
-  mcp?: boolean;
-  isGlobal?: boolean;
+  phases?: Record<string, string>;
   eventId?: string;
+  pubkey: string;
 };
 
 type AgentsListOutput = {
@@ -38,8 +33,6 @@ type AgentsListOutput = {
   agents: AgentInfo[];
   summary?: {
     total: number;
-    project: number;
-    global: number;
   };
 };
 
@@ -49,113 +42,29 @@ type AgentsListOutput = {
 async function executeAgentsList(
   input: AgentsListInput
 ): Promise<AgentsListOutput> {
-  const { includeGlobal = true, verbose = false } = input;
+  const { verbose = false } = input;
 
-      const projectPath = process.cwd();
-      const agents: AgentInfo[] = [];
-      
-      // Load project agents
-      const projectAgentsDir = path.join(projectPath, ".tenex", "agents");
-      const projectRegistryPath = path.join(projectPath, ".tenex", "agents.json");
-      
-      let projectAgents = 0;
-      let globalAgents = 0;
+  // Get agents from project context
+  const projectCtx = getProjectContext();
+  const agentInstances = projectCtx.agentRegistry.getAllAgents();
 
-      // Read project registry
-      if (await fileExists(projectRegistryPath)) {
-        try {
-          const registryContent = await readFile(projectRegistryPath);
-          const registry = JSON.parse(registryContent);
-          
-          for (const [slug, entry] of Object.entries(registry as Record<string, { file: string; eventId?: string }>)) {
-            const agentFilePath = path.join(projectAgentsDir, entry.file);
-            
-            if (await fileExists(agentFilePath)) {
-              try {
-                const agentContent = await readFile(agentFilePath);
-                const agentDef = JSON.parse(agentContent);
-                
-                agents.push({
-                  slug,
-                  name: agentDef.name,
-                  role: agentDef.role,
-                  description: agentDef.description,
-                  instructions: verbose ? agentDef.instructions : undefined,
-                  useCriteria: agentDef.useCriteria,
-                  tools: agentDef.tools,
-                  mcp: agentDef.mcp,
-                  isGlobal: false,
-                  eventId: entry.eventId,
-                });
-                projectAgents++;
-              } catch (error) {
-                logger.warn(`Failed to read agent file: ${agentFilePath}`, { error });
-              }
-            }
-          }
-        } catch (error) {
-          logger.debug("Failed to read project agents registry", { error });
-        }
-      }
+  const agents: AgentInfo[] = agentInstances.map(agent => ({
+    slug: agent.slug,
+    name: agent.name,
+    role: agent.role,
+    description: agent.description,
+    instructions: verbose ? agent.instructions : undefined,
+    useCriteria: agent.useCriteria,
+    tools: agent.tools,
+    phases: agent.phases,
+    eventId: agent.eventId,
+    pubkey: agent.pubkey,
+  }));
 
-      // Load global agents if requested
-      if (includeGlobal) {
-        const homedir = process.env.HOME || process.env.USERPROFILE || "";
-        const globalAgentsDir = path.join(homedir, ".tenex", "agents");
-        const globalRegistryPath = path.join(homedir, ".tenex", "agents.json");
-        
-        if (await fileExists(globalRegistryPath)) {
-          try {
-            const registryContent = await readFile(globalRegistryPath);
-            const registry = JSON.parse(registryContent);
-            
-            for (const [slug, entry] of Object.entries(registry as Record<string, { file: string; eventId?: string }>)) {
-              // Skip if already loaded from project
-              if (agents.some(a => a.slug === slug)) {
-                continue;
-              }
-              
-              const agentFilePath = path.join(globalAgentsDir, entry.file);
-              
-              if (await fileExists(agentFilePath)) {
-                try {
-                  const agentContent = await readFile(agentFilePath);
-                  const agentDef = JSON.parse(agentContent);
-                  
-                  agents.push({
-                    slug,
-                    name: agentDef.name,
-                    role: agentDef.role,
-                    description: agentDef.description,
-                    instructions: verbose ? agentDef.instructions : undefined,
-                    useCriteria: agentDef.useCriteria,
-                    tools: agentDef.tools,
-                    mcp: agentDef.mcp,
-                    isGlobal: true,
-                    eventId: entry.eventId,
-                  });
-                  globalAgents++;
-                } catch (error) {
-                  logger.warn(`Failed to read global agent file: ${agentFilePath}`, { error });
-                }
-              }
-            }
-          } catch (error) {
-            logger.debug("Failed to read global agents registry", { error });
-          }
-        }
-      }
+  // Sort agents by name
+  agents.sort((a, b) => a.name.localeCompare(b.name));
 
-
-      // Sort agents by type (project first, then global) and name
-      agents.sort((a, b) => {
-        if (a.isGlobal !== b.isGlobal) return a.isGlobal ? 1 : -1;
-        return a.name.localeCompare(b.name);
-      });
-
-      logger.info(`Listed ${agents.length} agents`);
-      logger.info(`  Project: ${projectAgents}`);
-      logger.info(`  Global: ${globalAgents}`);
+  logger.info(`Listed ${agents.length} agents`);
 
   return {
     success: true,
@@ -163,8 +72,6 @@ async function executeAgentsList(
     agents,
     summary: {
       total: agents.length,
-      project: projectAgents,
-      global: globalAgents,
     },
   };
 }

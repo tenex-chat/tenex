@@ -115,13 +115,11 @@ async function executeAgentsHire(
   // Note: We don't update the project event here because:
   // 1. The project event is signed by the user, not the agents
   // 2. The backend doesn't have the user's private key
-  // 3. The agent is already installed locally in agents.json and .tenex/agents/
+  // 3. The agent is already installed in ~/.tenex/agents/<pubkey>.json
   // 4. The user can update their project event from the client if needed
 
-  // Update the ProjectContext with the new agent to trigger 24010 event
-  const updatedAgents = new Map(projectContext.agents);
-  updatedAgents.set(agentSlug, agent);
-  await projectContext.updateProjectData(projectContext.project, updatedAgents);
+  // The agent was already added to the registry by installAgentFromEvent,
+  // so it's now available in the project context
 
   logger.info(`Successfully hired agent "${agent.name}" (${agent.eventId})`);
   logger.info(`  Slug: ${agentSlug}`);
