@@ -27,6 +27,13 @@ export class ConversationCoordinator {
     projectPath: string,
     persistence?: ConversationPersistenceAdapter
   ) {
+    if (!projectPath || projectPath === "undefined") {
+      throw new Error(
+        "ConversationCoordinator requires a valid projectPath. " +
+        "Received: " + String(projectPath)
+      );
+    }
+
     // Create services
     this.store = new ConversationStore();
     this.persistence = new ConversationPersistenceService(

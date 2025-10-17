@@ -36,6 +36,12 @@ export class AgentRegistry {
    * @param projectPath - Base directory path for the project
    */
   constructor(projectPath: string) {
+    if (!projectPath || projectPath === "undefined") {
+      throw new Error(
+        "AgentRegistry requires a valid projectPath. " +
+        "Received: " + String(projectPath)
+      );
+    }
     this.projectPath = projectPath;
   }
 

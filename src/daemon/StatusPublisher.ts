@@ -5,10 +5,9 @@ import { logger } from "@/utils/logger";
 import type { ProjectContext } from "@/services/ProjectContext";
 
 /**
- * Publishes status events for all active projects in the unified daemon.
- * Replaces per-project status publishing with consolidated approach.
+ * Publishes status events for all active projects in the daemon.
  */
-export class UnifiedStatusPublisher {
+export class DaemonStatusPublisher {
   private intervalId: NodeJS.Timeout | null = null;
   private publishIntervalMs: number = 30000; // 30 seconds
 
@@ -21,7 +20,7 @@ export class UnifiedStatusPublisher {
       return;
     }
 
-    logger.info("Starting unified status publisher", {
+    logger.info("Starting daemon status publisher", {
       intervalMs: this.publishIntervalMs,
     });
 
@@ -49,7 +48,7 @@ export class UnifiedStatusPublisher {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      logger.info("Unified status publisher stopped");
+      logger.info("Daemon status publisher stopped");
     }
   }
 
@@ -184,8 +183,7 @@ export class UnifiedStatusPublisher {
     event.kind = 24010; // Ephemeral status event
     event.content = JSON.stringify({
       daemon: {
-        type: "unified",
-        version: "2.0.0", // Unified daemon version
+        version: "2.0.0",
         uptime: process.uptime(),
         memory: process.memoryUsage(),
       },
@@ -198,7 +196,7 @@ export class UnifiedStatusPublisher {
     });
 
     // Tag with daemon identifier
-    event.tags.push(["d", "tenex-unified-daemon"]);
+    event.tags.push(["d", "tenex-daemon"]);
 
     // Sign with first available signer
     for (const context of contexts.values()) {
@@ -207,7 +205,7 @@ export class UnifiedStatusPublisher {
         await event.sign(context.signer);
         await event.publish();
 
-        logger.debug("Published unified daemon status", {
+        logger.debug("Published daemon status", {
           projectCount: contexts.size,
           totalAgents: projects.reduce((sum, p) => sum + p.agentCount, 0),
         });

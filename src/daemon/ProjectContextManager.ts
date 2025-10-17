@@ -6,8 +6,16 @@ import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 import { type NDKProject } from "@nostr-dev-kit/ndk";
 
 /**
- * Manages multiple ProjectContext instances for the unified daemon.
- * Replaces the global singleton pattern with a multi-project architecture.
+ * ProjectContextManager is a REGISTRY for project contexts.
+ *
+ * Responsibilities:
+ * - Store/retrieve contexts by project ID
+ * - Track agent-to-project mappings
+ * - Provide lookup functions
+ *
+ * NOT responsible for:
+ * - Setting "active" context (use projectContextStore.run())
+ * - Global state management
  */
 export class ProjectContextManager {
   /**
@@ -15,11 +23,6 @@ export class ProjectContextManager {
    * Key format: "31933:authorPubkey:dTag"
    */
   private contexts = new Map<string, ProjectContext>();
-
-  /**
-   * Currently active context for operations
-   */
-  private activeContext: ProjectContext | null = null;
 
   /**
    * Track which agents belong to which projects for routing
@@ -86,37 +89,10 @@ export class ProjectContextManager {
   }
 
   /**
-   * Switch the active context to a specific project
-   */
-  switchContext(projectId: string): boolean {
-    const context = this.contexts.get(projectId);
-    if (!context) {
-      logger.warn(`Cannot switch to project ${projectId} - not loaded`);
-      return false;
-    }
-
-    this.activeContext = context;
-
-    // Update global reference for backward compatibility with tools
-    // This allows existing code to continue working during migration
-    (global as any).projectContext = context;
-
-    logger.debug(`Switched active context to project ${projectId}`);
-    return true;
-  }
-
-  /**
    * Get a specific project context
    */
   getContext(projectId: string): ProjectContext | undefined {
     return this.contexts.get(projectId);
-  }
-
-  /**
-   * Get the currently active context
-   */
-  getActiveContext(): ProjectContext | null {
-    return this.activeContext;
   }
 
   /**
@@ -164,12 +140,6 @@ export class ProjectContextManager {
 
     // Remove the context
     this.contexts.delete(projectId);
-
-    // If this was the active context, clear it
-    if (this.activeContext === context) {
-      this.activeContext = null;
-      (global as any).projectContext = undefined;
-    }
 
     logger.info(`Removed project context ${projectId}`);
     return true;
@@ -245,27 +215,21 @@ export class ProjectContextManager {
   getStats(): {
     totalProjects: number;
     totalAgents: number;
-    activeProject: string | null;
     projectDetails: Array<{
       id: string;
       title: string;
       agentCount: number;
-      isActive: boolean;
     }>;
   } {
     const projectDetails = Array.from(this.contexts.entries()).map(([id, ctx]) => ({
       id,
       title: ctx.project.tagValue("title") || "Untitled",
       agentCount: ctx.agents.size,
-      isActive: ctx === this.activeContext,
     }));
 
     return {
       totalProjects: this.contexts.size,
       totalAgents: this.agentToProjects.size,
-      activeProject: this.activeContext
-        ? this.getProjectId(this.activeContext.project)
-        : null,
       projectDetails,
     };
   }
@@ -289,5 +253,4 @@ export function getProjectContextManager(): ProjectContextManager {
  */
 export function resetProjectContextManager(): void {
   managerInstance = undefined;
-  (global as any).projectContext = undefined;
 }

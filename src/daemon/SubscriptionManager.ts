@@ -3,10 +3,9 @@ import type NDK from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 
 /**
- * Manages a single unified subscription for all projects and agents.
- * Replaces the per-project subscription model with a consolidated approach.
+ * Manages a single subscription for all projects and agents.
  */
-export class UnifiedSubscriptionManager {
+export class SubscriptionManager {
   private ndk: NDK;
   private subscription: NDKSubscription | null = null;
   private eventHandler: (event: NDKEvent) => Promise<void>;
@@ -44,10 +43,10 @@ export class UnifiedSubscriptionManager {
   }
 
   /**
-   * Start the unified subscription
+   * Start the subscription
    */
   async start(): Promise<void> {
-    logger.info("Starting unified subscription manager", {
+    logger.info("Starting subscription manager", {
       whitelistedPubkeys: Array.from(this.whitelistedPubkeys).map(p => p.slice(0, 8)),
       knownProjects: this.knownProjects.size,
       agentPubkeys: this.agentPubkeys.size,
@@ -68,7 +67,7 @@ export class UnifiedSubscriptionManager {
 
     const filters = this.buildFilters();
 
-    logger.info("Creating unified subscription with filters", {
+    logger.info("Creating subscription with filters", {
       filterCount: filters.length,
       whitelistedAuthors: this.whitelistedPubkeys.size,
       trackedProjects: this.knownProjects.size,
@@ -84,7 +83,7 @@ export class UnifiedSubscriptionManager {
       try {
         await this.handleEvent(event);
       } catch (error) {
-        logger.error("Error handling event in unified subscription", {
+        logger.error("Error handling event in subscription", {
           error: error instanceof Error ? error.message : String(error),
           eventId: event.id,
           eventKind: event.kind,
@@ -93,7 +92,7 @@ export class UnifiedSubscriptionManager {
     });
 
     this.subscription.on("eose", () => {
-      logger.debug("Unified subscription EOSE received");
+      logger.debug("Subscription EOSE received");
     });
   }
 
@@ -147,7 +146,7 @@ export class UnifiedSubscriptionManager {
    * Handle incoming events
    */
   private async handleEvent(event: NDKEvent): Promise<void> {
-    logger.debug("Unified subscription received event", {
+    logger.debug("Subscription received event", {
       id: event.id.slice(0, 8),
       kind: event.kind,
       author: event.pubkey.slice(0, 8),
@@ -305,7 +304,7 @@ export class UnifiedSubscriptionManager {
       this.subscription = null;
     }
 
-    logger.info("Unified subscription stopped");
+    logger.info("Subscription stopped");
   }
 
   /**

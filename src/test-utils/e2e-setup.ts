@@ -97,7 +97,7 @@ export async function setupE2ETest(scenarios: string[] = [], defaultResponse?: s
     const messageRepo = new ConversationMessageRepository(db);
     
     // Initialize agent registry with test agents
-    const agentRegistry = new AgentRegistry();
+    const agentRegistry = new AgentRegistry(projectPath);
     for (const agent of testAgents) {
         agentRegistry.registerAgent(agent);
     }

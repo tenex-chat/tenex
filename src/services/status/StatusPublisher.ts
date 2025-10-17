@@ -41,7 +41,7 @@ export class StatusPublisher {
   }
 
   async startPublishing(projectPath: string, projectContext?: ProjectContext): Promise<void> {
-    // Store the project context if provided (for unified daemon mode)
+    // Store the project context if provided (for daemon mode)
     this.projectContext = projectContext;
 
     await this.publishStatusEvent(projectPath);

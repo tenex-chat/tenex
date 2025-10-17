@@ -3,18 +3,18 @@ import NDK, { NDKProject } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
-import { UnifiedSubscriptionManager } from "./UnifiedSubscriptionManager";
+import { SubscriptionManager } from "./SubscriptionManager";
 import { ProjectRuntime } from "./ProjectRuntime";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 /**
- * Main unified daemon that manages all projects in a single process.
+ * Main daemon that manages all projects in a single process.
  * Uses lazy loading - projects only start when they receive events.
  */
-export class UnifiedDaemon {
+export class Daemon {
   private ndk: NDK | null = null;
-  private subscriptionManager: UnifiedSubscriptionManager | null = null;
+  private subscriptionManager: SubscriptionManager | null = null;
   private whitelistedPubkeys: Hexpubkey[] = [];
   private isRunning = false;
   private shutdownHandlers: Array<() => Promise<void>> = [];
@@ -24,15 +24,15 @@ export class UnifiedDaemon {
   private activeRuntimes = new Map<string, ProjectRuntime>(); // Only active projects
 
   /**
-   * Initialize and start the unified daemon
+   * Initialize and start the daemon
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      logger.warn("Unified daemon is already running");
+      logger.warn("Daemon is already running");
       return;
     }
 
-    logger.info("Starting TENEX Unified Daemon");
+    logger.info("Starting TENEX Daemon");
 
     try {
       // 1. Initialize base directories
@@ -58,7 +58,7 @@ export class UnifiedDaemon {
       await this.discoverProjects();
 
       // 5. Initialize subscription manager
-      this.subscriptionManager = new UnifiedSubscriptionManager(
+      this.subscriptionManager = new SubscriptionManager(
         this.ndk,
         this.handleIncomingEvent.bind(this), // Pass event handler
         this.whitelistedPubkeys
@@ -72,13 +72,13 @@ export class UnifiedDaemon {
 
       this.isRunning = true;
 
-      logger.info("TENEX Unified Daemon started successfully", {
+      logger.info("TENEX Daemon started successfully", {
         knownProjects: this.knownProjects.size,
         activeProjects: this.activeRuntimes.size,
       });
 
     } catch (error) {
-      logger.error("Failed to start unified daemon", {
+      logger.error("Failed to start daemon", {
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -201,12 +201,6 @@ export class UnifiedDaemon {
         logger.info(`Starting project runtime on demand: ${projectId}`);
         runtime = new ProjectRuntime(project);
 
-        // Set callback for when runtime stops due to inactivity
-        runtime.setOnInactiveStop((id) => {
-          logger.info(`Project runtime stopped due to inactivity: ${id}`);
-          this.activeRuntimes.delete(id);
-        });
-
         await runtime.start();
         this.activeRuntimes.set(projectId, runtime);
       }
@@ -256,9 +250,6 @@ export class UnifiedDaemon {
       // Stop old runtime and start new one with updated project
       await runtime.stop();
       const newRuntime = new ProjectRuntime(project);
-      newRuntime.setOnInactiveStop((id) => {
-        this.activeRuntimes.delete(id);
-      });
       await newRuntime.start();
       this.activeRuntimes.set(projectId, newRuntime);
     }
@@ -438,7 +429,7 @@ export class UnifiedDaemon {
       return;
     }
 
-    logger.info("Stopping unified daemon");
+    logger.info("Stopping daemon");
 
     this.isRunning = false;
 
@@ -460,19 +451,19 @@ export class UnifiedDaemon {
     this.activeRuntimes.clear();
     this.knownProjects.clear();
 
-    logger.info("Unified daemon stopped");
+    logger.info("Daemon stopped");
   }
 }
 
 // Singleton instance
-let daemonInstance: UnifiedDaemon | null = null;
+let daemonInstance: Daemon | null = null;
 
 /**
  * Get or create the daemon instance
  */
-export function getUnifiedDaemon(): UnifiedDaemon {
+export function getDaemon(): Daemon {
   if (!daemonInstance) {
-    daemonInstance = new UnifiedDaemon();
+    daemonInstance = new Daemon();
   }
   return daemonInstance;
 }
@@ -480,7 +471,7 @@ export function getUnifiedDaemon(): UnifiedDaemon {
 /**
  * Reset the daemon (mainly for testing)
  */
-export function resetUnifiedDaemon(): void {
+export function resetDaemon(): void {
   if (daemonInstance) {
     daemonInstance.stop().catch(error => {
       logger.error("Error stopping daemon during reset", {

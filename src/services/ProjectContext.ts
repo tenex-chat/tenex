@@ -273,46 +273,20 @@ export class ProjectContext {
 
 import { projectContextStore } from "./ProjectContextStore";
 
-// Module-level variable for backwards compatibility (single project mode)
-let projectContext: ProjectContext | undefined;
-
 /**
- * Initialize the project context. Should be called once during project startup.
- * In unified daemon mode, this is only used for backwards compatibility.
- */
-export async function setProjectContext(project: NDKProject, agentRegistry: AgentRegistry, llmLogger: LLMLogger): Promise<void> {
-  projectContext = new ProjectContext(project, agentRegistry, llmLogger);
-  // Persist the PM status to disk
-  await agentRegistry.persistPMStatus();
-  // Note: publishProjectStatus() should be called explicitly after context is set
-  // to avoid duplicate events during initialization
-}
-
-/**
- * Get the initialized project context
- * First checks AsyncLocalStorage, then falls back to global variable
- * @throws Error if not initialized
+ * Get the current project context from AsyncLocalStorage.
+ * This is the ONLY way to access project context - it must be set via
+ * projectContextStore.run(context, async () => {...})
+ *
+ * @throws Error if no context is available (not inside a .run() call)
  */
 export function getProjectContext(): ProjectContext {
-  // First try to get from AsyncLocalStorage (unified daemon mode)
-  const asyncContext = projectContextStore.getContext();
-  if (asyncContext) {
-    return asyncContext;
-  }
-
-  // Fallback to global variable (single project mode)
-  if (!projectContext) {
-    throw new Error(
-      "ProjectContext not initialized. Please call setProjectContext() first or ensure the project has been properly initialized."
-    );
-  }
-  return projectContext;
+  return projectContextStore.getContextOrThrow();
 }
 
 /**
- * Check if project context is initialized
- * Checks both AsyncLocalStorage and global variable
+ * Check if project context is initialized in current async context
  */
 export function isProjectContextInitialized(): boolean {
-  return projectContextStore.hasContext() || projectContext !== undefined;
+  return projectContextStore.hasContext();
 }

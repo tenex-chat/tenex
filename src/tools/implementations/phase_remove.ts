@@ -3,8 +3,6 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
-import * as path from "node:path";
 
 const removePhaseSchema = z.object({
   phaseName: z
@@ -51,74 +49,71 @@ async function executeRemovePhase(input: RemovePhaseInput, context: ExecutionCon
   const [actualPhaseName] = phaseToRemove;
   delete agent.phases[actualPhaseName];
 
-  // Persist to agent's JSON file
+  // Persist to agent's global storage file
   try {
-    const projectPath = context.projectPath;
-    const agentsDir = path.join(projectPath, ".tenex", "agents");
+    const { agentStorage } = await import("@/agents/AgentStorage");
+    await agentStorage.initialize();
 
-    // Get the agent's file name from registry
-    const registryPath = path.join(projectPath, ".tenex", "agents.json");
-    if (await fileExists(registryPath)) {
-      const registryContent = await readFile(registryPath);
-      const registry = JSON.parse(registryContent);
-      const registryEntry = registry[agent.slug];
+    // Load current agent data from global storage
+    const storedAgent = await agentStorage.loadAgent(agent.pubkey);
+    if (!storedAgent) {
+      throw new Error(`Agent ${agent.slug} not found in global storage`);
+    }
 
-      if (registryEntry && registryEntry.file) {
-        const agentFilePath = path.join(agentsDir, registryEntry.file);
+    // Update phases in stored data
+    if (Object.keys(agent.phases).length === 0) {
+      // Remove phases property if empty
+      delete storedAgent.phases;
+    } else {
+      storedAgent.phases = agent.phases;
+    }
 
-        // Read existing agent data
-        const agentContent = await readFile(agentFilePath);
-        const agentData = JSON.parse(agentContent);
+    // Save back to global storage
+    await agentStorage.saveAgent(storedAgent);
 
-        // Update phases
-        if (Object.keys(agent.phases).length === 0) {
-          // Remove phases property if empty
-          delete agentData.phases;
-        } else {
-          agentData.phases = agent.phases;
-        }
+    logger.info(`Removed phase '${actualPhaseName}' from agent ${agent.name}`, {
+      agent: agent.slug,
+      phaseName: actualPhaseName,
+      remainingPhases: Object.keys(agent.phases).length,
+    });
 
-        // Write back
-        await writeJsonFile(agentFilePath, agentData);
+    // Check if agent should switch back to delegate tool
+    if (Object.keys(agent.phases).length === 0) {
+      const hasDelegatePhase = agent.tools.includes("delegate_phase");
+      const hasDelegate = agent.tools.includes("delegate");
 
-        logger.info(`Removed phase '${actualPhaseName}' from agent ${agent.name}`, {
-          agent: agent.slug,
-          phaseName: actualPhaseName,
-          remainingPhases: Object.keys(agent.phases).length,
-        });
+      if (hasDelegatePhase && !hasDelegate) {
+        // Switch from delegate_phase back to delegate
+        agent.tools = agent.tools.filter(t => t !== "delegate_phase");
+        agent.tools.push("delegate");
 
-        // Check if agent should switch back to delegate tool
-        if (Object.keys(agent.phases).length === 0) {
-          const hasDelegatePhase = agent.tools.includes("delegate_phase");
-          const hasDelegate = agent.tools.includes("delegate");
+        // Update stored agent tools as well
+        storedAgent.tools = agent.tools;
+        await agentStorage.saveAgent(storedAgent);
 
-          if (hasDelegatePhase && !hasDelegate) {
-            // Switch from delegate_phase back to delegate
-            agent.tools = agent.tools.filter(t => t !== "delegate_phase");
-            agent.tools.push("delegate");
+        logger.info(`Switched agent ${agent.name} from 'delegate_phase' back to 'delegate' tool (no phases remaining)`);
+      }
 
-            logger.info(`Switched agent ${agent.name} from 'delegate_phase' back to 'delegate' tool (no phases remaining)`);
-          }
+      // Also remove phase management tools if no phases remain
+      const hasAddPhase = agent.tools.includes("add_phase");
+      const hasRemovePhase = agent.tools.includes("remove_phase");
 
-          // Also remove phase management tools if no phases remain
-          const hasAddPhase = agent.tools.includes("add_phase");
-          const hasRemovePhase = agent.tools.includes("remove_phase");
+      if (hasAddPhase || hasRemovePhase) {
+        agent.tools = agent.tools.filter(t => t !== "add_phase" && t !== "remove_phase");
 
-          if (hasAddPhase || hasRemovePhase) {
-            agent.tools = agent.tools.filter(t => t !== "add_phase" && t !== "remove_phase");
-            logger.info(`Removed phase management tools from agent ${agent.name} (no phases remaining)`);
-          }
-        }
+        // Update stored agent tools
+        storedAgent.tools = agent.tools;
+        await agentStorage.saveAgent(storedAgent);
 
-        return {
-          success: true,
-          message: `Successfully removed phase '${actualPhaseName}' from agent ${agent.name}`,
-          remainingPhases: Object.keys(agent.phases).length,
-        };
+        logger.info(`Removed phase management tools from agent ${agent.name} (no phases remaining)`);
       }
     }
 
-    throw new Error("Could not find agent configuration file");
+    return {
+      success: true,
+      message: `Successfully removed phase '${actualPhaseName}' from agent ${agent.name}`,
+      remainingPhases: Object.keys(agent.phases).length,
+    };
   } catch (error) {
     logger.error("Failed to persist phase removal", { error, agent: agent.slug });
     return {

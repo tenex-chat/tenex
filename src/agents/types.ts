@@ -40,7 +40,7 @@ export interface AgentInstance {
   tools: string[];
   /** NDKAgentDefinition event ID for persisted configuration */
   eventId?: string;
-  /** Agent slug/key from agents.json configuration */
+  /** Agent slug/key for identification */
   slug: string;
   /** Project phase this agent instance is for */
   phase?: string;
@@ -109,7 +109,7 @@ export interface StoredAgentData {
  * Agent configuration including sensitive data from registry
  */
 export interface AgentConfig extends StoredAgentData {
-  nsec: string; // Private key from agents.json registry
+  nsec: string; // Private key from global agent storage (~/.tenex/agents/<pubkey>.json)
   eventId?: string; // NDKAgentDefinition event ID if created from Nostr event
   pubkey?: string; // Public key derived from nsec
 }

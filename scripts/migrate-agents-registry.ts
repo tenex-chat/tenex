@@ -4,6 +4,9 @@
  * Migration script to populate the agents registry from existing projects.
  * This is a one-time migration that scans all TENEX projects and creates
  * registry entries for their agents.
+ *
+ * NOTE: This script intentionally references the old agents.json format
+ * as it's designed to migrate FROM the old format TO the new global storage.
  */
 
 import * as os from "node:os";

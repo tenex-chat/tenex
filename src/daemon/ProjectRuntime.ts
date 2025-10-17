@@ -25,9 +25,6 @@ export class ProjectRuntime {
   private statusPublisher: StatusPublisher | null = null;
   private conversationCoordinator: ConversationCoordinator | null = null;
 
-  private inactivityTimer: NodeJS.Timeout | null = null;
-  private readonly INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-
   private isRunning = false;
   private startTime: Date | null = null;
   private lastEventTime: Date | null = null;
@@ -93,9 +90,6 @@ export class ProjectRuntime {
         await this.statusPublisher!.startPublishing(this.projectPath, this.context);
       });
 
-      // Start inactivity timer
-      this.resetInactivityTimer();
-
       this.isRunning = true;
       this.startTime = new Date();
 
@@ -122,9 +116,6 @@ export class ProjectRuntime {
     if (!this.context) {
       throw new Error(`Project context not initialized: ${this.projectId}`);
     }
-
-    // Reset inactivity timer
-    this.resetInactivityTimer();
 
     // Update stats
     this.lastEventTime = new Date();
@@ -154,12 +145,6 @@ export class ProjectRuntime {
       eventsProcessed: this.eventCount,
     });
 
-    // Clear inactivity timer
-    if (this.inactivityTimer) {
-      clearTimeout(this.inactivityTimer);
-      this.inactivityTimer = null;
-    }
-
     // Stop status publisher
     if (this.statusPublisher) {
       await this.statusPublisher.stopPublishing();
@@ -184,28 +169,6 @@ export class ProjectRuntime {
     this.isRunning = false;
 
     logger.info(`Project runtime stopped: ${this.projectId}`);
-  }
-
-  /**
-   * Reset the inactivity timer
-   */
-  private resetInactivityTimer(): void {
-    if (this.inactivityTimer) {
-      clearTimeout(this.inactivityTimer);
-    }
-
-    this.inactivityTimer = setTimeout(() => {
-      logger.info(`Project ${this.projectId} inactive for ${this.INACTIVITY_TIMEOUT_MS / 1000}s, stopping...`);
-
-      this.stop().catch(error => {
-        logger.error(`Error stopping inactive project: ${this.projectId}`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-      // Notify daemon to remove this runtime
-      // This will be called from the daemon
-    }, this.INACTIVITY_TIMEOUT_MS);
   }
 
   /**
@@ -243,14 +206,5 @@ export class ProjectRuntime {
    */
   isActive(): boolean {
     return this.isRunning;
-  }
-
-  /**
-   * Set a callback for when the runtime stops due to inactivity
-   */
-  private onInactiveStop?: (projectId: string) => void;
-
-  setOnInactiveStop(callback: (projectId: string) => void): void {
-    this.onInactiveStop = callback;
   }
 }

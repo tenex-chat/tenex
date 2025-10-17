@@ -3,8 +3,6 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import { writeJsonFile, readFile, fileExists } from "@/lib/fs";
-import * as path from "node:path";
 
 const addPhaseSchema = z.object({
   phaseName: z
@@ -51,58 +49,50 @@ async function executeAddPhase(input: AddPhaseInput, context: ExecutionContext):
   // Add the new phase
   agent.phases[phaseName] = instructions;
 
-  // Persist to agent's JSON file
+  // Persist to agent's global storage file
   try {
-    const projectPath = context.projectPath;
-    const agentsDir = path.join(projectPath, ".tenex", "agents");
+    const { agentStorage } = await import("@/agents/AgentStorage");
+    await agentStorage.initialize();
 
-    // Get the agent's file name from registry
-    const registryPath = path.join(projectPath, ".tenex", "agents.json");
-    if (await fileExists(registryPath)) {
-      const registryContent = await readFile(registryPath);
-      const registry = JSON.parse(registryContent);
-      const registryEntry = registry[agent.slug];
-
-      if (registryEntry && registryEntry.file) {
-        const agentFilePath = path.join(agentsDir, registryEntry.file);
-
-        // Read existing agent data
-        const agentContent = await readFile(agentFilePath);
-        const agentData = JSON.parse(agentContent);
-
-        // Update phases
-        agentData.phases = agent.phases;
-
-        // Write back
-        await writeJsonFile(agentFilePath, agentData);
-
-        logger.info(`Added phase '${phaseName}' to agent ${agent.name}`, {
-          agent: agent.slug,
-          phaseName,
-          totalPhases: Object.keys(agent.phases).length,
-        });
-
-        // Check if agent needs delegate_phase tool now
-        const hasDelegate = agent.tools.includes("delegate");
-        const hasDelegatePhase = agent.tools.includes("delegate_phase");
-
-        if (hasDelegate && !hasDelegatePhase) {
-          // Switch from delegate to delegate_phase
-          agent.tools = agent.tools.filter(t => t !== "delegate");
-          agent.tools.push("delegate_phase");
-
-          logger.info(`Switched agent ${agent.name} from 'delegate' to 'delegate_phase' tool`);
-        }
-
-        return {
-          success: true,
-          message: `Successfully added phase '${phaseName}' to agent ${agent.name}`,
-          totalPhases: Object.keys(agent.phases).length,
-        };
-      }
+    // Load current agent data from global storage
+    const storedAgent = await agentStorage.loadAgent(agent.pubkey);
+    if (!storedAgent) {
+      throw new Error(`Agent ${agent.slug} not found in global storage`);
     }
 
-    throw new Error("Could not find agent configuration file");
+    // Update phases in stored data
+    storedAgent.phases = agent.phases;
+
+    // Save back to global storage
+    await agentStorage.saveAgent(storedAgent);
+
+    logger.info(`Added phase '${phaseName}' to agent ${agent.name}`, {
+      agent: agent.slug,
+      phaseName,
+      totalPhases: Object.keys(agent.phases).length,
+    });
+
+    // Check if agent needs delegate_phase tool now
+    const hasDelegate = agent.tools.includes("delegate");
+    const hasDelegatePhase = agent.tools.includes("delegate_phase");
+
+    if (hasDelegate && !hasDelegatePhase) {
+      // Switch from delegate to delegate_phase
+      agent.tools = agent.tools.filter(t => t !== "delegate");
+      agent.tools.push("delegate_phase");
+
+      // Update stored agent tools as well
+      storedAgent.tools = agent.tools;
+      await agentStorage.saveAgent(storedAgent);
+
+      logger.info(`Switched agent ${agent.name} from 'delegate' to 'delegate_phase' tool`);
+    }
+
+    return {
+      success: true,
+      message: `Successfully added phase '${phaseName}' to agent ${agent.name}`,
+      totalPhases: Object.keys(agent.phases).length,
+    };
   } catch (error) {
     logger.error("Failed to persist phase addition", { error, agent: agent.slug });
     return {

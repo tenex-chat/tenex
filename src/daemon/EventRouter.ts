@@ -11,10 +11,10 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 
 /**
- * Routes events to the appropriate project context in the unified daemon.
+ * Routes events to the appropriate project context.
  * Handles project discovery, initialization, and event dispatch.
  */
-export class UnifiedEventRouter {
+export class EventRouter {
   private projectManager: ProjectContextManager;
 
   /**
@@ -416,7 +416,7 @@ export class UnifiedEventRouter {
       }
     }
 
-    logger.info("Unified event router shut down");
+    logger.info("Event router shut down");
   }
 
   /**
