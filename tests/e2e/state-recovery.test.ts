@@ -62,8 +62,8 @@ describe("State Recovery E2E Tests", () => {
         // Mock project context to avoid complex initialization
         mock.module("@/services/ProjectContext", () => ({
             getProjectContext: () => ({
-                project: { 
-                    id: "test-project", 
+                project: {
+                    id: "test-project",
                     pubkey: "test-pubkey",
                     naddr: "test-naddr"
                 },
@@ -71,7 +71,6 @@ describe("State Recovery E2E Tests", () => {
                 projectPath,
                 tenexConfig: { conversations: { persistence: "filesystem" } }
             }),
-            setProjectContext: async () => {},
             isProjectContextInitialized: () => true
         }));
         

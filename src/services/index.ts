@@ -10,7 +10,6 @@ export {
   getProjectContext,
   isProjectContextInitialized,
   ProjectContext,
-  setProjectContext,
 } from "./ProjectContext";
 export { projectContextStore } from "./ProjectContextStore";
 export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyNameRepository";

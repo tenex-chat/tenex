@@ -57,8 +57,7 @@ class ProjectContextStore {
     if (!context) {
       throw new Error(
         "ProjectContext not available in current async context. " +
-        "Ensure this code is running within projectContextStore.run() or " +
-        "that setProjectContext() has been called."
+        "Ensure this code is running within projectContextStore.run()."
       );
     }
     return context;
