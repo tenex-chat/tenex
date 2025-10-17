@@ -335,8 +335,9 @@ export class EventRouter {
         count: eventIds.length,
       });
     } catch (error) {
-      // File doesn't exist yet, that's ok
-      if ((error as any).code !== "ENOENT") {
+      // File doesn't exist yet, that's ok - only log other errors
+      const isFileNotFound = error instanceof Error && "code" in error && error.code === "ENOENT";
+      if (!isFileNotFound) {
         logger.error("Failed to load processed events", {
           projectId,
           error: error instanceof Error ? error.message : String(error),
