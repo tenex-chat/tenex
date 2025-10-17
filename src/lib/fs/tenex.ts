@@ -6,7 +6,6 @@ import { directoryExists, ensureDirectory } from "./filesystem.js";
  */
 export function getTenexPaths(projectPath: string): {
   tenexDir: string;
-  agentsJson: string;
   configJson: string;
   llmsJson: string;
   agentsDir: string;
@@ -16,7 +15,6 @@ export function getTenexPaths(projectPath: string): {
   const tenexDir = path.join(projectPath, ".tenex");
   return {
     tenexDir,
-    agentsJson: path.join(tenexDir, "agents.json"),
     configJson: path.join(tenexDir, "config.json"),
     llmsJson: path.join(tenexDir, "llms.json"),
     agentsDir: path.join(tenexDir, "agents"),
