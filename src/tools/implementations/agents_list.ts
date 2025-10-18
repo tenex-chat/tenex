@@ -7,7 +7,6 @@ const agentsListSchema = z.object({
   verbose: z
     .boolean()
     .nullable()
-    .optional()
     .describe("Whether to include full instructions and details (default: false)"),
 });
 

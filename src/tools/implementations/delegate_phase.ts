@@ -24,7 +24,7 @@ const delegatePhaseSchema = z.object({
     ),
   title: z
     .string()
-    .optional()
+    .nullable()
     .describe("Title for this conversation (if not already set)."),
 });
 

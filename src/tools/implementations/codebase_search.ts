@@ -17,7 +17,7 @@ const codebaseSearchSchema = z.object({
   searchType: z.enum(["filename", "content", "both"])
     .default("both")
     .describe("Type of search: 'filename' for name matching, 'content' for text inside files, 'both' for combined"),
-  fileType: z.string().nullable().optional()
+  fileType: z.string().nullable()
     .describe("Optional file extension filter (e.g., '.tsx')"),
   maxResults: z.number().nullable()
     .default(50)

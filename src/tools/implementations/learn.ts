@@ -11,19 +11,16 @@ const lessonLearnSchema = z.object({
   detailed: z
     .string()
     .nullable()
-    .optional()
     .describe("Detailed version with richer explanation when deeper context is needed"),
   category: z
     .string()
     .nullable()
-    .optional()
     .describe(
       "Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"
     ),
   hashtags: z
     .array(z.string())
     .nullable()
-    .optional()
     .describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 

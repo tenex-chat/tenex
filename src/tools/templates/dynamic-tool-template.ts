@@ -21,7 +21,7 @@ import type { AISdkTool } from "@/tools/registry";
  *     description: 'My custom tool description',
  *     inputSchema: z.object({
  *       param1: z.string().describe('First parameter'),
- *       param2: z.number().optional().describe('Optional second parameter')
+ *       param2: z.number().nullable().describe('Optional second parameter')
  *     }),
  *     execute: async (input) => {
  *       // Tool implementation here
@@ -38,7 +38,7 @@ import type { AISdkTool } from "@/tools/registry";
 const toolSchema = z.object({
     // TODO: Define your input parameters here
     exampleParam: z.string().describe("An example parameter"),
-    optionalParam: z.number().optional().describe("An optional numeric parameter"),
+    optionalParam: z.number().nullable().describe("An optional numeric parameter"),
 });
 
 // Type for the tool input (inferred from schema)

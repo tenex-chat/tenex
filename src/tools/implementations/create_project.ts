@@ -8,12 +8,12 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { z } from "zod";
 const createProjectSchema = z.object({
   title: z.string().describe("The title/name of the project"),
-  description: z.string().nullable().optional().describe("Description of the project"),
-  repository: z.string().nullable().optional().describe("Repository URL for the project"),
-  image: z.string().nullable().optional().describe("Image URL for the project"),
-  tags: z.array(z.string()).nullable().optional().describe("Additional tags for the project"),
-  agents: z.array(z.string()).nullable().optional().describe("Array of agent definition event IDs to include in the project"),
-  mcpServers: z.array(z.string()).nullable().optional().describe("Array of MCP announcement event IDs to include in the project"),
+  description: z.string().nullable().describe("Description of the project"),
+  repository: z.string().nullable().describe("Repository URL for the project"),
+  image: z.string().nullable().describe("Image URL for the project"),
+  tags: z.array(z.string()).nullable().describe("Additional tags for the project"),
+  agents: z.array(z.string()).nullable().describe("Array of agent definition event IDs to include in the project"),
+  mcpServers: z.array(z.string()).nullable().describe("Array of MCP announcement event IDs to include in the project"),
 });
 
 type CreateProjectInput = z.infer<typeof createProjectSchema>;

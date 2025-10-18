@@ -15,7 +15,7 @@ const delegateExternalSchema = z.object({
   recipient: z.string().describe("The recipient's pubkey or npub (will be p-tagged)"),
   projectId: z
     .string()
-    .optional()
+    .nullable()
     .describe("Optional project event ID (naddr1...) to reference in the message. This should be the project the agent you are delegating TO works on (if you know it)"),
 });
 

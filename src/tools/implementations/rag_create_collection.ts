@@ -12,7 +12,7 @@ const ragCreateCollectionSchema = z.object({
     name: z.string().describe(
         "Name of the collection to create (alphanumeric with underscores)"
     ),
-    schema: z.record(z.any()).optional().describe(
+    schema: z.record(z.any()).nullable().describe(
         "Optional custom schema for the collection (default includes id, content, vector, metadata, timestamp, source)"
     ),
 });

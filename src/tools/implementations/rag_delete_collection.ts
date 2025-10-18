@@ -12,7 +12,7 @@ const ragDeleteCollectionSchema = z.object({
     name: z.string().describe(
         "Name of the collection to delete"
     ),
-    confirm: z.boolean().optional().default(false).describe(
+    confirm: z.boolean().nullable().default(false).describe(
         "Confirmation flag to prevent accidental deletion (must be true to proceed)"
     ),
 });

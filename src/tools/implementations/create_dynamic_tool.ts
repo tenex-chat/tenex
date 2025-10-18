@@ -12,7 +12,7 @@ const createDynamicToolSchema = z.object({
     description: z.string().describe("Clear description of what the tool does"),
     inputSchema: z.string().describe('Zod schema definition as TypeScript code (e.g., "z.object({ param: z.string() })")'),
     implementation: z.string().describe("The async function body that implements the tool logic (without the function declaration)"),
-    humanReadableFormat: z.string().optional().describe("Optional template string for human-readable output (use ${input.paramName} for parameters)")
+    humanReadableFormat: z.string().nullable().describe("Optional template string for human-readable output (use ${input.paramName} for parameters)")
 });
 
 type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;

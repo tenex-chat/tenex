@@ -12,7 +12,7 @@ const askSchema = z.object({
     .describe("The question to ask the project manager or human user"),
   suggestions: z
     .array(z.string())
-    .optional()
+    .nullable()
     .describe(
       "Optional suggestions for response. Empty/not provided for open-ended questions, ['Yes', 'No'] for yes/no questions, or any custom list for multiple choice"
     ),

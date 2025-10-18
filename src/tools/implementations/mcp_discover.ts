@@ -7,7 +7,7 @@ import type { NDKFilter } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
 // Define the input schema
 const mcpDiscoverSchema = z.object({
-  searchText: z.string().nullable().optional().describe("Text to search for in tool name/description"),
+  searchText: z.string().nullable().describe("Text to search for in tool name/description"),
   limit: z.coerce.number().default(50).describe("Maximum number of tools to return"),
 });
 

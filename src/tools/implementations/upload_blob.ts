@@ -13,11 +13,11 @@ const uploadBlobSchema = z.object({
       .string().describe("REQUIRED: The source to upload - can be a file path (e.g., /path/to/file.jpg), URL to download from (e.g., https://example.com/image.jpg), or base64-encoded blob data. This parameter must be named 'input', not 'url' or 'file'."),
   mimeType: z
     .string()
-    .optional()
+    .nullable()
     .describe("MIME type of the data (e.g., 'image/jpeg', 'video/mp4'). If not provided, it will be detected from the file extension, URL response headers, or data"),
   description: z
     .string()
-    .optional()
+    .nullable()
     .describe("Optional description of the upload for the authorization event"),
 });
 

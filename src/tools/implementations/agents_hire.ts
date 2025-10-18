@@ -12,7 +12,6 @@ const agentsHireSchema = z.object({
   slug: z
     .string()
     .nullable()
-    .optional()
     .describe("Optional custom slug for the agent (defaults to normalized name)"),
 });
 

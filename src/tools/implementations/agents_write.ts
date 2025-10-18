@@ -9,12 +9,12 @@ const agentsWriteSchema = z.object({
   slug: z.string().describe("The slug identifier for the agent"),
   name: z.string().describe("Display name of the agent"),
   role: z.string().describe("Primary role/function of the agent"),
-  description: z.string().nullable().optional().describe("Agent description"),
-  instructions: z.string().nullable().optional().describe("System instructions that guide agent behavior"),
-  useCriteria: z.string().nullable().optional().describe("Criteria for when this agent should be selected"),
-  llmConfig: z.string().nullable().optional().describe("LLM configuration identifier"),
-  tools: z.array(z.string()).nullable().optional().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned based on whether the agent has phases defined - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, claude_code, nostr_projects, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
-  phases: z.record(z.string(), z.string()).optional().nullable().describe("Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent gets delegate_phase tool instead of delegate tool."),
+  description: z.string().nullable().describe("Agent description"),
+  instructions: z.string().nullable().describe("System instructions that guide agent behavior"),
+  useCriteria: z.string().nullable().describe("Criteria for when this agent should be selected"),
+  llmConfig: z.string().nullable().describe("LLM configuration identifier"),
+  tools: z.array(z.string()).nullable().describe("List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned based on whether the agent has phases defined - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, claude_code, nostr_projects, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"),
+  phases: z.record(z.string(), z.string()).nullable().describe("Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent gets delegate_phase tool instead of delegate tool."),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;

@@ -9,7 +9,7 @@ import {
 } from "@/tools/utils";
 
 const ragListCollectionsSchema = z.object({
-    include_stats: z.boolean().optional().default(false).describe(
+    include_stats: z.boolean().nullable().default(false).describe(
         "Whether to include statistics for each collection (document count, size, etc.)"
     ),
 });

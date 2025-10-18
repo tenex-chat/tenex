@@ -16,7 +16,7 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
     inputSchema: z.object({
       prompt: z.string().describe("The prompt to execute when the task runs"),
       schedule: z.string().describe("Cron expression for scheduling (e.g., '0 9 * * *' for daily at 9am, '0 * * * *' for hourly)"),
-      targetAgent: z.string().optional().describe("Target agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"),
+      targetAgent: z.string().nullable().describe("Target agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"),
     }),
     execute: async ({ prompt, schedule, targetAgent }) => {
       try {

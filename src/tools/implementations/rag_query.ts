@@ -16,10 +16,10 @@ const ragQuerySchema = z.object({
     query_text: z.string().describe(
         "The text query for semantic search"
     ),
-    top_k: z.number().optional().default(5).describe(
+    top_k: z.number().nullable().default(5).describe(
         "Number of top results to return (default: 5)"
     ),
-    include_metadata: z.boolean().optional().default(true).describe(
+    include_metadata: z.boolean().nullable().default(true).describe(
         "Whether to include document metadata in results (default: true)"
     ),
 });
