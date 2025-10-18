@@ -65,7 +65,8 @@ export class ProjectRuntime {
       const agentRegistry = new AgentRegistry(this.projectPath);
       await agentRegistry.loadFromProject(this.project);
 
-      const llmLogger = new LLMLogger(path.join(this.projectPath, "logs", "llm.log"));
+      const llmLogger = new LLMLogger();
+      llmLogger.initialize(this.projectPath);
 
       // Create project context directly (don't use global singleton)
       this.context = new ProjectContext(this.project, agentRegistry, llmLogger);

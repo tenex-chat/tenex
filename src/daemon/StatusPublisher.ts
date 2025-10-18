@@ -68,8 +68,8 @@ export class DaemonStatusPublisher {
       projectCount: contexts.size,
     });
 
-    // Publish individual status for each project
-    // This maintains compatibility with existing clients expecting per-project status
+    // Publish individual status for each project.
+    // Maintains compatibility with existing clients expecting individual project status events.
     for (const [projectId, context] of contexts) {
       try {
         await this.publishProjectStatus(projectId, context);

@@ -1,10 +1,12 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
+import { EventEmitter } from "tseep";
 
 // Store essential operation metadata
 export interface LLMOperation {
   id: string;
   abortController: AbortController;
+  eventEmitter: EventEmitter;  // For message injection into running executions
   eventId: string;        // The event being processed
   agentPubkey: string;    // Agent doing the work
   conversationId: string; // Root event ID for conversation
@@ -34,6 +36,7 @@ class LLMOperationsRegistry {
     const operation: LLMOperation = {
       id: operationId,
       abortController: new AbortController(),
+      eventEmitter: new EventEmitter(),
       eventId: context.triggeringEvent.id,
       agentPubkey: context.agent.pubkey,
       conversationId: rootEventId,

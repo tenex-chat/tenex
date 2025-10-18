@@ -1,6 +1,7 @@
 import type { NDKEvent, NDKFilter, NDKSubscription, Hexpubkey } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
+import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 
 /**
  * Manages a single subscription for all projects and agents.
@@ -9,6 +10,7 @@ export class SubscriptionManager {
   private ndk: NDK;
   private subscription: NDKSubscription | null = null;
   private eventHandler: (event: NDKEvent) => Promise<void>;
+  private routingLogger: EventRoutingLogger;
 
   /**
    * Whitelisted pubkeys that can create/manage projects
@@ -35,11 +37,13 @@ export class SubscriptionManager {
   constructor(
     ndk: NDK,
     eventHandler: (event: NDKEvent) => Promise<void>,
-    whitelistedPubkeys: Hexpubkey[]
+    whitelistedPubkeys: Hexpubkey[],
+    routingLogger: EventRoutingLogger
   ) {
     this.ndk = ndk;
     this.eventHandler = eventHandler;
     this.whitelistedPubkeys = new Set(whitelistedPubkeys);
+    this.routingLogger = routingLogger;
   }
 
   /**
@@ -147,10 +151,14 @@ export class SubscriptionManager {
    */
   private async handleEvent(event: NDKEvent): Promise<void> {
     logger.debug("Subscription received event", {
-      id: event.id.slice(0, 8),
+      id: event.id,
       kind: event.kind,
-      author: event.pubkey.slice(0, 8),
-      tags: event.tags.slice(0, 3), // First 3 tags for debugging
+      author: event.pubkey,
+      tagCount: event.tags.length,
+      aTags: event.tags.filter(t => t[0] === "A" || t[0] === "a").map(t => t[1]),
+      pTags: event.tags.filter(t => t[0] === "p").map(t => t[1]?.slice(0, 8)),
+      eTags: event.tags.filter(t => t[0] === "e").map(t => t[1]?.slice(0, 8)),
+      contentLength: event.content?.length || 0,
     });
 
     // Route the event to the handler

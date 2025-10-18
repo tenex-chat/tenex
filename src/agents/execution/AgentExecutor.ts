@@ -272,6 +272,44 @@ export class AgentExecutor {
             eventFilter
         );
 
+        // Register operation with the LLM Operations Registry FIRST
+        // This must happen before we try to find it for message injection
+        const abortSignal = llmOpsRegistry.registerOperation(context);
+
+        // Setup message injection system
+        const injectedEvents: NDKEvent[] = [];
+
+        // Find this operation in the registry and listen for injected messages
+        const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
+        const activeOperations = operationsByEvent.get(context.conversationId) || [];
+        const thisOperation = activeOperations.find(op => op.agentPubkey === context.agent.pubkey);
+
+        if (thisOperation) {
+            logger.debug(`[AgentExecutor] Setting up message injection listener`, {
+                agent: context.agent.name,
+                conversationId: context.conversationId.substring(0, 8),
+                operationId: thisOperation.id.substring(0, 8)
+            });
+            thisOperation.eventEmitter.on('inject-message', (event: NDKEvent) => {
+                logger.info(`[AgentExecutor] Received injected message`, {
+                    agent: context.agent.name,
+                    eventId: event.id?.substring(0, 8),
+                    currentQueueSize: injectedEvents.length
+                });
+                injectedEvents.push(event);
+            });
+        } else {
+            logger.error(`[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!`, {
+                agent: context.agent.name,
+                agentPubkey: context.agent.pubkey.substring(0, 8),
+                conversationId: context.conversationId.substring(0, 8),
+                availableOperations: activeOperations.map(op => ({
+                    agentPubkey: op.agentPubkey.substring(0, 8),
+                    operationId: op.id.substring(0, 8)
+                }))
+            });
+        }
+
         // Add any additional system message from retry
         if (context.additionalSystemMessage) {
             messages = [...messages, {
@@ -449,10 +487,43 @@ export class AgentExecutor {
         });
 
         try {
-            // Register operation with the LLM Operations Registry
-            const abortSignal = llmOpsRegistry.registerOperation(context);
+            // Create prepareStep callback for message injection
+            const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }) => {
+                if (injectedEvents.length > 0) {
+                    logger.info(`[prepareStep] Injecting ${injectedEvents.length} new user message(s)`, {
+                        agent: context.agent.name,
+                        stepNumber: step.stepNumber
+                    });
 
-            await llmService.stream(messages, toolsObject, { abortSignal });
+                    const newMessages: ModelMessage[] = [];
+                    for (const injectedEvent of injectedEvents) {
+                        // Add a system message to signal the injection
+                        newMessages.push({
+                            role: 'system',
+                            content: '[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.'
+                        });
+                        // Add the actual user message
+                        newMessages.push({
+                            role: 'user',
+                            content: injectedEvent.content
+                        });
+                    }
+
+                    // Clear the queue after preparing them
+                    injectedEvents.length = 0;
+
+                    // Insert new messages after the system prompt but before the rest of history
+                    return {
+                        messages: [
+                            step.messages[0], // Keep the original system prompt
+                            ...newMessages,   // Inject new user messages
+                            ...step.messages.slice(1) // The rest of the conversation history
+                        ]
+                    };
+                }
+            };
+
+            await llmService.stream(messages, toolsObject, { abortSignal, prepareStep });
         } catch (streamError) {
             // Publish error event for stream errors
             try {

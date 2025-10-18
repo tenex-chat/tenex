@@ -58,7 +58,7 @@ export class LLMLogger {
    * Must be called before using the logger
    */
   initialize(projectPath: string): void {
-    this.logDir = join(projectPath, ".tenex", "logs", "llms");
+    this.logDir = join(projectPath, "logs", "llms");
   }
 
   /**

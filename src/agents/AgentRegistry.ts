@@ -21,7 +21,8 @@ import { getNDK } from "@/nostr";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
- * Uses the new simplified storage model where all agents are stored in ~/.tenex/agents/
+ * All agents are stored in unified ~/.tenex/agents/ storage (not per-project).
+ * Project-specific data (conversations, logs, events) stored in .tenex/projects/{projectId}/
  */
 export class AgentRegistry {
   private agents: Map<string, AgentInstance> = new Map();
@@ -53,11 +54,11 @@ export class AgentRegistry {
   }
 
   /**
-   * Load agents for a project from storage and Nostr.
-   * This method handles the complete agent loading workflow:
-   * 1. Load agents from local storage
-   * 2. For missing agents, fetch from Nostr and install
-   * 3. Load newly installed agents
+   * Load agents for a project from unified storage (~/.tenex/agents/) and Nostr.
+   * Complete agent loading workflow:
+   * 1. Load agents from unified ~/.tenex/agents/ storage by event ID
+   * 2. For missing agents, fetch from Nostr and install to unified storage
+   * 3. Load newly installed agents and associate with this project
    */
   async loadFromProject(ndkProject: NDKProject): Promise<void> {
     this.ndkProject = ndkProject;
@@ -399,9 +400,8 @@ export class AgentRegistry {
   }
 
   /**
-   * Persist PM status to storage
-   * In the new architecture, PM status is derived from project tags, not stored.
-   * However, we still need to persist the updated tool assignments for agents.
+   * Persist PM status and tool assignments to unified ~/.tenex/agents/ storage.
+   * PM status is derived from project tags at runtime, but tool assignments are stored.
    */
   async persistPMStatus(): Promise<void> {
     if (!this.pmPubkey) {

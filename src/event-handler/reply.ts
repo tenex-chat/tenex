@@ -12,6 +12,7 @@ import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { BrainstormService } from "../services/BrainstormService";
+import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 
 
 interface EventHandlerContext {
@@ -46,7 +47,20 @@ export const handleChatMessage = async (
   // Check if this message is directed to the system using centralized decoder
   const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(event, projectCtx.agents);
   const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
-  
+
+  // DEBUG: Log filtering decision for delegation events
+  const pTags = event.tags.filter(tag => tag[0] === "p").map(tag => tag[1]);
+  const systemPubkeys = Array.from(projectCtx.agents.values()).map(a => a.pubkey);
+  logger.debug(`[EventFilter] Checking event`, {
+    eventId: event.id?.substring(0, 8),
+    eventPubkey: event.pubkey?.substring(0, 8),
+    isDirectedToSystem,
+    isFromAgent,
+    willFilter: !isDirectedToSystem && isFromAgent,
+    pTags: pTags.map(pk => pk?.substring(0, 8)),
+    systemPubkeys: systemPubkeys.map(pk => pk.substring(0, 8))
+  });
+
   if (!isDirectedToSystem && isFromAgent) {
     // Agent event not directed to system - only add to conversation history, don't process
     logger.debug(`Agent event not directed to system - adding to history only: ${event.id?.substring(0, 8)}`);
@@ -194,7 +208,8 @@ async function handleReplyLogic(
     return;
   }
 
-  // 2. Add event to conversation history (if not new and not an internal message)
+  // 2. Add event to conversation history immediately (if not new and not an internal message)
+  // This ensures message persistence even if we inject it into a running execution
   if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
     await conversationCoordinator.addEvent(conversation.id, event);
   }
@@ -205,6 +220,46 @@ async function handleReplyLogic(
     logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
     return;
   }
+
+  // 3.5. Check for active operations and inject message instead of starting new execution
+  const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
+  const activeOperations = operationsByEvent.get(conversation.id) || [];
+
+  logger.debug(`[MessageInjection] Checking for active operations`, {
+    conversationId: conversation.id.substring(0, 8),
+    targetAgents: targetAgents.map(a => ({ name: a.name, pubkey: a.pubkey.substring(0, 8) })),
+    activeOperations: activeOperations.map(op => ({
+      agentPubkey: op.agentPubkey.substring(0, 8),
+      eventId: op.eventId.substring(0, 8)
+    }))
+  });
+
+  // Filter target agents to only those with active operations
+  const agentsToInject = targetAgents.filter(targetAgent => {
+    return activeOperations.some(op => op.agentPubkey === targetAgent.pubkey);
+  });
+
+  logger.debug(`[MessageInjection] Injection decision`, {
+    agentsToInject: agentsToInject.map(a => a.name),
+    willInject: agentsToInject.length > 0,
+    willStartNew: targetAgents.length - agentsToInject.length
+  });
+
+  // Inject message into active executions
+  for (const targetAgent of agentsToInject) {
+    const activeOp = activeOperations.find(op => op.agentPubkey === targetAgent.pubkey);
+    if (activeOp) {
+      logger.info(`[MessageInjection] Injecting message into active execution`, {
+        agent: targetAgent.name,
+        conversationId: conversation.id.substring(0, 8),
+        eventId: event.id?.substring(0, 8)
+      });
+      activeOp.eventEmitter.emit('inject-message', event);
+    }
+  }
+
+  // Remove agents that had active operations from the list to execute
+  targetAgents = targetAgents.filter(agent => !agentsToInject.includes(agent));
 
   // 4. Filter out self-replies (except for agents with delegate_phase tool)
   const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);

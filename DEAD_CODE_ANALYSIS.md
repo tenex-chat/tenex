@@ -81,7 +81,7 @@ Exports that are never imported:
 - `getProjectContextManager()` - unused
 - `resetProjectContextManager()` - testing only
 - `SubscriptionManager` - internal to daemon
-- `EventRouter` - internal to daemon
+- ~~`EventRouter` - internal to daemon~~ **DELETED** - was dead code, never used
 - `DaemonStatusPublisher` - internal to daemon
 
 **Recommendation**: Remove from index.ts exports, keep as internal modules

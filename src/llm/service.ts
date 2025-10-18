@@ -398,6 +398,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
+            prepareStep?: (step: { messages: ModelMessage[]; stepNumber: number }) => { messages?: ModelMessage[] } | void;
         }
     ): Promise<void> {
         logger.debug("[LLMService] 🚀 STARTING STREAM", {
@@ -464,28 +465,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
-            prepareStep: (step) => {
-                // steps: Array<StepResult<NoInfer<TOOLS>>>;
-                //     stepNumber: number;
-                //     model: LanguageModel;
-                //     messages: Array<ModelMessage>;
-                // console.log("⚠️ preparing step", step?.stepNumber, step?.messages?.length);
-                // for (const msg of step.messages) {
-                //     console.log("   ", msg.role, msg.content?.substring?.(0, 50));
-                // }
-
-                // const messages = step.messages;
-
-                // if (step.stepNumber >= 1) {
-                //     // append a message telling the agent to use prefix all its responses with the number 4
-                //     messages.push({
-                //         role: 'system',
-                //         content: 'RESPOND TO EVERYTHING IN UPPERCASE AND NEVER EVER WITH MORE THAN 1 SENTENCE. INCLUDE THE WORD "ACK" TO ACKNOWLEDGE AT THE START OF YOUR RESPONSE.',
-                //     });
-
-                //     return { messages };
-                // }
-            },
+            prepareStep: options?.prepareStep,
             abortSignal: options?.abortSignal,
             providerOptions: {
                 openrouter: {

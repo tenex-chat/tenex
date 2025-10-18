@@ -5,6 +5,7 @@ import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
 import { SubscriptionManager } from "./SubscriptionManager";
 import { ProjectRuntime } from "./ProjectRuntime";
+import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -15,6 +16,7 @@ import * as path from "node:path";
 export class Daemon {
   private ndk: NDK | null = null;
   private subscriptionManager: SubscriptionManager | null = null;
+  private routingLogger: EventRoutingLogger;
   private whitelistedPubkeys: Hexpubkey[] = [];
   private isRunning = false;
   private shutdownHandlers: Array<() => Promise<void>> = [];
@@ -22,6 +24,10 @@ export class Daemon {
   // Project management
   private knownProjects = new Map<string, NDKProject>(); // All discovered projects
   private activeRuntimes = new Map<string, ProjectRuntime>(); // Only active projects
+
+  constructor() {
+    this.routingLogger = new EventRoutingLogger();
+  }
 
   /**
    * Initialize and start the daemon
@@ -38,7 +44,10 @@ export class Daemon {
       // 1. Initialize base directories
       await this.initializeDirectories();
 
-      // 2. Load configuration
+      // 2. Initialize routing logger
+      this.routingLogger.initialize(".tenex/daemon");
+
+      // 3. Load configuration
       const { config } = await configService.loadConfig();
       this.whitelistedPubkeys = config.whitelistedPubkeys || [];
 
@@ -50,24 +59,25 @@ export class Daemon {
         whitelistedPubkeys: this.whitelistedPubkeys.map(p => p.slice(0, 8)),
       });
 
-      // 3. Initialize NDK
+      // 4. Initialize NDK
       await initNDK();
       this.ndk = getNDK();
 
-      // 4. Discover existing projects (but don't start them)
+      // 5. Discover existing projects (but don't start them)
       await this.discoverProjects();
 
-      // 5. Initialize subscription manager
+      // 6. Initialize subscription manager
       this.subscriptionManager = new SubscriptionManager(
         this.ndk,
         this.handleIncomingEvent.bind(this), // Pass event handler
-        this.whitelistedPubkeys
+        this.whitelistedPubkeys,
+        this.routingLogger
       );
 
-      // 6. Start subscription
+      // 7. Start subscription
       await this.subscriptionManager.start();
 
-      // 7. Setup graceful shutdown
+      // 8. Setup graceful shutdown
       this.setupShutdownHandlers();
 
       this.isRunning = true;
@@ -175,25 +185,52 @@ export class Daemon {
       // Handle project events (kind 31933)
       if (event.kind === 31933) {
         await this.handleProjectEvent(event);
-        return;
-      }
-
-      // Determine target project
-      const projectId = await this.determineTargetProject(event);
-      if (!projectId) {
-        logger.debug("Event has no target project, ignoring", {
-          eventId: event.id.slice(0, 8),
-          kind: event.kind,
+        await this.routingLogger.logRoutingDecision({
+          event,
+          routingDecision: "project_event",
+          targetProjectId: this.buildProjectId(event),
+          routingMethod: "none",
+          reason: "Project creation/update event",
         });
         return;
       }
 
+      // Determine target project
+      const routingResult = await this.determineTargetProject(event);
+      if (!routingResult.projectId) {
+        logger.debug("Event has no target project, ignoring", {
+          eventId: event.id.slice(0, 8),
+          kind: event.kind,
+          reason: routingResult.reason,
+        });
+        await this.routingLogger.logRoutingDecision({
+          event,
+          routingDecision: "dropped",
+          targetProjectId: null,
+          routingMethod: "none",
+          reason: routingResult.reason,
+        });
+        return;
+      }
+
+      const projectId = routingResult.projectId;
+
       // Get or start the project runtime
       let runtime = this.activeRuntimes.get(projectId);
+      let runtimeAction: "existing" | "started" = "existing";
+
       if (!runtime) {
         const project = this.knownProjects.get(projectId);
         if (!project) {
           logger.warn("Unknown project referenced", { projectId });
+          await this.routingLogger.logRoutingDecision({
+            event,
+            routingDecision: "dropped",
+            targetProjectId: projectId,
+            routingMethod: routingResult.method,
+            matchedTags: routingResult.matchedTags,
+            reason: "Project not found in known projects",
+          });
           return;
         }
 
@@ -203,7 +240,18 @@ export class Daemon {
 
         await runtime.start();
         this.activeRuntimes.set(projectId, runtime);
+        runtimeAction = "started";
       }
+
+      // Log successful routing
+      await this.routingLogger.logRoutingDecision({
+        event,
+        routingDecision: "routed",
+        targetProjectId: projectId,
+        routingMethod: routingResult.method,
+        matchedTags: routingResult.matchedTags,
+        runtimeAction,
+      });
 
       // Handle the event with crash isolation
       try {
@@ -283,20 +331,55 @@ export class Daemon {
   /**
    * Determine which project an event should be routed to
    */
-  private async determineTargetProject(event: NDKEvent): Promise<string | null> {
+  private async determineTargetProject(event: NDKEvent): Promise<{
+    projectId: string | null;
+    method: "a_tag" | "p_tag_agent" | "none";
+    matchedTags: string[];
+    reason: string;
+  }> {
     // Check for explicit project A-tags
     const aTags = event.tags.filter(t => t[0] === "A" || t[0] === "a");
-    for (const tag of aTags) {
+    const projectATags = aTags.filter(t => t[1]?.startsWith("31933:"));
+
+    logger.debug("Checking A-tags for project routing", {
+      eventId: event.id.slice(0, 8),
+      aTagsFound: projectATags.length,
+      aTags: projectATags.map(t => t[1]),
+    });
+
+    for (const tag of projectATags) {
       const aTagValue = tag[1];
-      if (aTagValue?.startsWith("31933:")) {
-        if (this.knownProjects.has(aTagValue)) {
-          return aTagValue;
-        }
+      if (aTagValue && this.knownProjects.has(aTagValue)) {
+        logger.debug("Matched project via A-tag", {
+          eventId: event.id.slice(0, 8),
+          projectId: aTagValue,
+        });
+        return {
+          projectId: aTagValue,
+          method: "a_tag",
+          matchedTags: [aTagValue],
+          reason: `Matched project A-tag: ${aTagValue}`,
+        };
       }
+    }
+
+    if (projectATags.length > 0) {
+      logger.debug("A-tags found but no matching known projects", {
+        eventId: event.id.slice(0, 8),
+        projectATags: projectATags.map(t => t[1]),
+        knownProjects: Array.from(this.knownProjects.keys()),
+      });
     }
 
     // Check for agent P-tags (find project by agent)
     const pTags = event.tags.filter(t => t[0] === "p");
+
+    logger.debug("Checking P-tags for agent routing", {
+      eventId: event.id.slice(0, 8),
+      pTagsFound: pTags.length,
+      pTags: pTags.map(t => t[1]?.slice(0, 8)),
+    });
+
     for (const tag of pTags) {
       const pubkey = tag[1] as Hexpubkey;
 
@@ -306,13 +389,39 @@ export class Daemon {
         for (const agentTag of agentTags) {
           const agentPubkey = agentTag[1]?.split(":")[1];
           if (agentPubkey === pubkey) {
-            return projectId;
+            logger.debug("Matched project via agent P-tag", {
+              eventId: event.id.slice(0, 8),
+              projectId,
+              agentPubkey: agentPubkey.slice(0, 8),
+            });
+            return {
+              projectId,
+              method: "p_tag_agent",
+              matchedTags: [pubkey],
+              reason: `Matched agent P-tag: ${pubkey.slice(0, 8)}`,
+            };
           }
         }
       }
     }
 
-    return null;
+    // No match found
+    const reason =
+      projectATags.length > 0 ? `A-tags found but no matching known projects: ${projectATags.map(t => t[1]).join(", ")}` :
+      pTags.length > 0 ? `P-tags found but no matching agents: ${pTags.map(t => t[1]?.slice(0, 8)).join(", ")}` :
+      "No A-tags or P-tags found";
+
+    logger.debug("No project match found", {
+      eventId: event.id.slice(0, 8),
+      reason,
+    });
+
+    return {
+      projectId: null,
+      method: "none",
+      matchedTags: [],
+      reason,
+    };
   }
 
   /**
@@ -418,6 +527,20 @@ export class Daemon {
       memory: process.memoryUsage(),
       uptime: process.uptime(),
     };
+  }
+
+  /**
+   * Get known projects
+   */
+  getKnownProjects(): Map<string, NDKProject> {
+    return this.knownProjects;
+  }
+
+  /**
+   * Get active runtimes
+   */
+  getActiveRuntimes(): Map<string, ProjectRuntime> {
+    return this.activeRuntimes;
   }
 
   /**
