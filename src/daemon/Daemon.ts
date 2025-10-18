@@ -8,9 +8,9 @@ import { SubscriptionManager } from "./SubscriptionManager";
 import { ProjectRuntime } from "./ProjectRuntime";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import * as fs from "node:fs/promises";
-import { trace, propagation, context as otelContext, ROOT_CONTEXT, SpanStatusCode } from '@opentelemetry/api';
+import { trace, propagation, context as otelContext, ROOT_CONTEXT, SpanStatusCode } from "@opentelemetry/api";
 
-const tracer = trace.getTracer('tenex.daemon');
+const tracer = trace.getTracer("tenex.daemon");
 
 /**
  * Event kinds that should never be routed to projects.
@@ -207,34 +207,34 @@ export class Daemon {
     }
 
     // Extract trace context from event tags if present (for delegation linking)
-    const traceContextTag = event.tags.find(t => t[0] === 'trace_context');
+    const traceContextTag = event.tags.find(t => t[0] === "trace_context");
 
     let parentContext = ROOT_CONTEXT;
     if (traceContextTag) {
       // Extract propagated context from delegating agent
-      const carrier = { 'traceparent': traceContextTag[1] };
+      const carrier = { "traceparent": traceContextTag[1] };
       parentContext = propagation.extract(ROOT_CONTEXT, carrier);
     }
 
     const span = tracer.startSpan(
-      'tenex.event.process',
+      "tenex.event.process",
       {
         attributes: {
-          'event.id': event.id,
-          'event.kind': event.kind || 0,
-          'event.pubkey': event.pubkey,
-          'event.created_at': event.created_at || 0,
+          "event.id": event.id,
+          "event.kind": event.kind || 0,
+          "event.pubkey": event.pubkey,
+          "event.created_at": event.created_at || 0,
 
           // FULL event content for debugging
-          'event.content': event.content,
-          'event.content_length': event.content.length,
+          "event.content": event.content,
+          "event.content_length": event.content.length,
 
           // All tags
-          'event.tags': JSON.stringify(event.tags),
-          'event.tag_count': event.tags.length,
+          "event.tags": JSON.stringify(event.tags),
+          "event.tag_count": event.tags.length,
 
           // Trace linking
-          'event.has_trace_context': !!traceContextTag,
+          "event.has_trace_context": !!traceContextTag,
         },
       },
       parentContext  // Link to parent span from delegating agent!
@@ -247,9 +247,9 @@ export class Daemon {
 
           // Handle project events (kind 31933)
           if (event.kind === 31933) {
-            span.addEvent('routing_decision', {
-              'decision': 'project_event',
-              'reason': 'kind_31933',
+            span.addEvent("routing_decision", {
+              "decision": "project_event",
+              "reason": "kind_31933",
             });
 
             await this.handleProjectEvent(event);
@@ -267,9 +267,9 @@ export class Daemon {
 
           // Filter out events published BY agents unless they explicitly p-tag someone in the system
           if (this.isAgentEvent(event) && !this.hasPTagsToSystemEntities(event)) {
-            span.addEvent('routing_decision', {
-              'decision': 'dropped',
-              'reason': 'agent_event_without_p_tags',
+            span.addEvent("routing_decision", {
+              "decision": "dropped",
+              "reason": "agent_event_without_p_tags",
             });
 
             logger.debug("Dropping agent event without p-tags", {
@@ -292,9 +292,9 @@ export class Daemon {
           // Determine target project
           const routingResult = await this.determineTargetProject(event);
           if (!routingResult.projectId) {
-            span.addEvent('routing_decision', {
-              'decision': 'dropped',
-              'reason': routingResult.reason,
+            span.addEvent("routing_decision", {
+              "decision": "dropped",
+              "reason": routingResult.reason,
             });
 
             logger.debug("Event has no target project, ignoring", {
@@ -317,9 +317,9 @@ export class Daemon {
           const projectId = routingResult.projectId;
 
           span.setAttributes({
-            'project.id': projectId,
-            'routing.decision': 'route_to_project',
-            'routing.method': routingResult.method,
+            "project.id": projectId,
+            "routing.decision": "route_to_project",
+            "routing.method": routingResult.method,
           });
 
           // Get or start the project runtime
@@ -336,7 +336,7 @@ export class Daemon {
               // Start the project runtime
               const project = this.knownProjects.get(projectId);
               if (!project) {
-                span.addEvent('error', { 'error': 'unknown_project' });
+                span.addEvent("error", { "error": "unknown_project" });
                 logger.warn("Unknown project referenced", { projectId });
                 await this.routingLogger.logRoutingDecision({
                   event,
@@ -352,8 +352,8 @@ export class Daemon {
 
               // Start the project runtime lazily
               const projectTitle = project.tagValue("title");
-              span.addEvent('project_runtime_start', {
-                'project.title': projectTitle || 'untitled',
+              span.addEvent("project_runtime_start", {
+                "project.title": projectTitle || "untitled",
               });
 
               // Create startup promise to prevent concurrent startups
@@ -397,7 +397,7 @@ export class Daemon {
             span.recordException(error as Error);
             span.setStatus({ code: SpanStatusCode.ERROR });
 
-            logger.error(`Project runtime crashed while handling event`, {
+            logger.error("Project runtime crashed while handling event", {
               projectId,
               eventId: event.id,
               error: error instanceof Error ? error.message : String(error),
@@ -425,7 +425,7 @@ export class Daemon {
   /**
    * Update subscription with agent pubkeys from all active runtimes
    */
-  private async updateSubscriptionWithProjectAgents(projectId: string, runtime: ProjectRuntime): Promise<void> {
+  private async updateSubscriptionWithProjectAgents(projectId: string, _runtime: ProjectRuntime): Promise<void> {
     if (!this.subscriptionManager) return;
 
     try {
@@ -665,7 +665,7 @@ export class Daemon {
    * Setup graceful shutdown handlers
    */
   private setupShutdownHandlers(): void {
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string): Promise<void> => {
       logger.info(`Received ${signal}, starting graceful shutdown`);
 
       if (!this.isRunning) {

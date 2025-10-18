@@ -62,7 +62,6 @@ async function executeAgentsWrite(
   if (!context?.projectPath) {
     throw new Error("ExecutionContext with projectPath is required for agents_write tool");
   }
-  const projectPath = context.projectPath;
 
   // Check if agent exists by slug
   const existingAgent = await agentStorage.getAgentBySlug(slug);

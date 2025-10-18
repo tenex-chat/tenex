@@ -1,5 +1,3 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-
 interface DelegationResponse {
     from: string;
     content: string;

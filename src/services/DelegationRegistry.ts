@@ -5,7 +5,7 @@ import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
-import { trace } from '@opentelemetry/api';
+import { trace } from "@opentelemetry/api";
 
 export interface DelegationRecord {
   // Core identifiers
@@ -276,12 +276,12 @@ export class DelegationRegistry extends EventEmitter {
     // Add telemetry
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {
-      activeSpan.addEvent('delegation.registered', {
-        'delegation.batch_id': batchId,
-        'delegation.event_id': params.delegationEventId,
-        'delegation.recipient_count': params.recipients.length,
-        'delegation.delegating_agent': params.delegatingAgent.slug,
-        'delegation.recipients': params.recipients.map(r => r.pubkey.substring(0, 8)).join(', '),
+      activeSpan.addEvent("delegation.registered", {
+        "delegation.batch_id": batchId,
+        "delegation.event_id": params.delegationEventId,
+        "delegation.recipient_count": params.recipients.length,
+        "delegation.delegating_agent": params.delegatingAgent.slug,
+        "delegation.recipients": params.recipients.map(r => r.pubkey.substring(0, 8)).join(", "),
       });
     }
 
@@ -352,11 +352,11 @@ export class DelegationRegistry extends EventEmitter {
       const delegation = this.findDelegationByEventAndResponder(delegationEventId, event.pubkey);
       if (delegation) {
         if (activeSpan) {
-          activeSpan.addEvent('delegation.response_received', {
-            'delegation.event_id': delegationEventId,
-            'delegation.batch_id': delegation.delegationBatchId,
-            'delegation.responding_agent': event.pubkey.substring(0, 8),
-            'delegation.delegating_agent': delegation.delegatingAgent.pubkey.substring(0, 8),
+          activeSpan.addEvent("delegation.response_received", {
+            "delegation.event_id": delegationEventId,
+            "delegation.batch_id": delegation.delegationBatchId,
+            "delegation.responding_agent": event.pubkey.substring(0, 8),
+            "delegation.delegating_agent": delegation.delegatingAgent.pubkey.substring(0, 8),
           });
         }
 

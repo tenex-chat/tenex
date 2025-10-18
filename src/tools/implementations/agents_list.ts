@@ -2,7 +2,6 @@ import { tool } from "ai";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
 import { getProjectContext } from "@/services/ProjectContext";
-import { agentStorage } from "@/agents/AgentStorage";
 const agentsListSchema = z.object({
   verbose: z
     .boolean()

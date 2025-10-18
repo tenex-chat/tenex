@@ -8,7 +8,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
-import { trace } from '@opentelemetry/api';
+import { trace } from "@opentelemetry/api";
 
 /**
  * AgentSupervisor - Monitors agent execution and validates completion
@@ -152,10 +152,10 @@ export class AgentSupervisor {
     });
 
     if (activeSpan) {
-      activeSpan.addEvent('supervisor.validation_start', {
-        'supervisor.continuation_attempts': this.continuationAttempts,
-        'supervisor.has_phases': !!this.agent.phases,
-        'supervisor.phase_count': this.agent.phases ? Object.keys(this.agent.phases).length : 0,
+      activeSpan.addEvent("supervisor.validation_start", {
+        "supervisor.continuation_attempts": this.continuationAttempts,
+        "supervisor.has_phases": !!this.agent.phases,
+        "supervisor.phase_count": this.agent.phases ? Object.keys(this.agent.phases).length : 0,
       });
     }
 
@@ -168,9 +168,9 @@ export class AgentSupervisor {
       });
 
       if (activeSpan) {
-        activeSpan.addEvent('supervisor.forced_completion', {
-          'reason': 'max_attempts_exceeded',
-          'attempts': this.continuationAttempts,
+        activeSpan.addEvent("supervisor.forced_completion", {
+          "reason": "max_attempts_exceeded",
+          "attempts": this.continuationAttempts,
         });
       }
 
@@ -187,9 +187,9 @@ export class AgentSupervisor {
       const reason = "The LLM did not return a completion event. Please try again.";
 
       if (activeSpan) {
-        activeSpan.addEvent('supervisor.validation_failed', {
-          'validation.type': 'missing_completion_event',
-          'validation.attempts': this.continuationAttempts,
+        activeSpan.addEvent("supervisor.validation_failed", {
+          "validation.type": "missing_completion_event",
+          "validation.attempts": this.continuationAttempts,
         });
       }
 
@@ -220,10 +220,10 @@ export class AgentSupervisor {
       const reason = "You didn't provide a response to the user. Please address their request.";
 
       if (activeSpan) {
-        activeSpan.addEvent('supervisor.validation_failed', {
-          'validation.type': 'empty_response',
-          'validation.attempts': this.continuationAttempts,
-          'validation.has_reasoning': !!completionEvent.reasoning,
+        activeSpan.addEvent("supervisor.validation_failed", {
+          "validation.type": "empty_response",
+          "validation.attempts": this.continuationAttempts,
+          "validation.has_reasoning": !!completionEvent.reasoning,
         });
       }
 
@@ -248,8 +248,8 @@ export class AgentSupervisor {
     });
 
     if (activeSpan) {
-      activeSpan.addEvent('supervisor.response_validated', {
-        'response.length': completionEvent.message.length,
+      activeSpan.addEvent("supervisor.response_validated", {
+        "response.length": completionEvent.message.length,
       });
     }
 

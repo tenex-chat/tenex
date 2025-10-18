@@ -4,7 +4,7 @@ import * as os from "node:os";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { ensureDirectory, fileExists } from "@/lib/fs";
 import { logger } from "@/utils/logger";
-import type { AgentInstance, StoredAgentData } from "@/agents/types";
+import type { StoredAgentData } from "@/agents/types";
 
 /**
  * Agent data stored in ~/.tenex/agents/<pubkey>.json

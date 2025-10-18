@@ -169,16 +169,16 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     private getFullTelemetryConfig(): any {
         return {
             isEnabled: true,
-            functionId: `${this.agentSlug || 'unknown'}.${this.provider}.${this.model}`,
+            functionId: `${this.agentSlug || "unknown"}.${this.provider}.${this.model}`,
 
             // Metadata for debugging context
             metadata: {
-                'agent.slug': this.agentSlug || 'unknown',
-                'llm.provider': this.provider,
-                'llm.model': this.model,
-                'llm.temperature': this.temperature,
-                'llm.max_tokens': this.maxTokens,
-                'session.id': this.sessionId,
+                "agent.slug": this.agentSlug || "unknown",
+                "llm.provider": this.provider,
+                "llm.model": this.model,
+                "llm.temperature": this.temperature,
+                "llm.max_tokens": this.maxTokens,
+                "session.id": this.sessionId,
             },
 
             // FULL DATA - no privacy filters for debugging
@@ -624,7 +624,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 providerMetadata: ProviderMetadata;
             }
         ): Promise<void> => {
-            const duration = Date.now() - startTime;
 
             try {
                 // Cancel any pending content publish timeout for non-streaming providers

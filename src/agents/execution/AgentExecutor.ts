@@ -18,9 +18,9 @@ import { AgentSupervisor } from "./AgentSupervisor";
 import { createEventContext } from "@/utils/phase-utils";
 import { BrainstormModerator, type BrainstormResponse, type ModerationResult } from "./BrainstormModerator";
 import { SessionManager } from "./SessionManager";
-import { trace, context as otelContext, SpanStatusCode } from '@opentelemetry/api';
+import { trace, context as otelContext, SpanStatusCode } from "@opentelemetry/api";
 
-const tracer = trace.getTracer('tenex.agent-executor');
+const tracer = trace.getTracer("tenex.agent-executor");
 
 export interface LLMCompletionRequest {
     messages: ModelMessage[];
@@ -89,14 +89,14 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
-        const span = tracer.startSpan('tenex.agent.execute', {
+        const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
-                'agent.slug': context.agent.slug,
-                'agent.pubkey': context.agent.pubkey,
-                'agent.role': context.agent.role || 'worker',
-                'conversation.id': context.conversationId,
-                'triggering_event.id': context.triggeringEvent.id,
-                'triggering_event.kind': context.triggeringEvent.kind || 0,
+                "agent.slug": context.agent.slug,
+                "agent.pubkey": context.agent.pubkey,
+                "agent.role": context.agent.role || "worker",
+                "conversation.id": context.conversationId,
+                "triggering_event.id": context.triggeringEvent.id,
+                "triggering_event.kind": context.triggeringEvent.kind || 0,
             },
         });
 
@@ -111,8 +111,8 @@ export class AgentExecutor {
                     const conversation = fullContext.getConversation();
                     if (conversation) {
                         span.setAttributes({
-                            'conversation.phase': conversation.phase,
-                            'conversation.message_count': conversation.history.length,
+                            "conversation.phase": conversation.phase,
+                            "conversation.message_count": conversation.history.length,
                         });
                     }
 
@@ -123,16 +123,16 @@ export class AgentExecutor {
                         phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0
                     });
 
-                    span.addEvent('execution.start', {
-                        'has_phases': !!context.agent.phases,
-                        'phase_count': context.agent.phases ? Object.keys(context.agent.phases).length : 0,
+                    span.addEvent("execution.start", {
+                        "has_phases": !!context.agent.phases,
+                        "phase_count": context.agent.phases ? Object.keys(context.agent.phases).length : 0,
                     });
 
                     try {
                         // Start execution with supervision
                         const result = await this.executeWithSupervisor(fullContext, supervisor, toolTracker, agentPublisher);
 
-                        span.addEvent('execution.complete');
+                        span.addEvent("execution.complete");
                         span.setStatus({ code: SpanStatusCode.OK });
                         return result;
                     } finally {
@@ -337,13 +337,13 @@ export class AgentExecutor {
         const thisOperation = activeOperations.find(op => op.agentPubkey === context.agent.pubkey);
 
         if (thisOperation) {
-            logger.debug(`[AgentExecutor] Setting up message injection listener`, {
+            logger.debug("[AgentExecutor] Setting up message injection listener", {
                 agent: context.agent.slug,
                 conversationId: context.conversationId.substring(0, 8),
                 operationId: thisOperation.id.substring(0, 8)
             });
-            thisOperation.eventEmitter.on('inject-message', (event: NDKEvent) => {
-                logger.info(`[AgentExecutor] Received injected message`, {
+            thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
+                logger.info("[AgentExecutor] Received injected message", {
                     agent: context.agent.slug,
                     eventId: event.id?.substring(0, 8),
                     currentQueueSize: injectedEvents.length
@@ -351,7 +351,7 @@ export class AgentExecutor {
                 injectedEvents.push(event);
             });
         } else {
-            logger.error(`[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!`, {
+            logger.error("[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!", {
                 agent: context.agent.slug,
                 agentPubkey: context.agent.pubkey.substring(0, 8),
                 conversationId: context.conversationId.substring(0, 8),
@@ -540,7 +540,7 @@ export class AgentExecutor {
 
         try {
             // Create prepareStep callback for message injection
-            const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }) => {
+            const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }): void => {
                 if (injectedEvents.length > 0) {
                     logger.info(`[prepareStep] Injecting ${injectedEvents.length} new user message(s)`, {
                         agent: context.agent.slug,
@@ -551,12 +551,12 @@ export class AgentExecutor {
                     for (const injectedEvent of injectedEvents) {
                         // Add a system message to signal the injection
                         newMessages.push({
-                            role: 'system',
-                            content: '[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.'
+                            role: "system",
+                            content: "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction."
                         });
                         // Add the actual user message
                         newMessages.push({
-                            role: 'user',
+                            role: "user",
                             content: injectedEvent.content
                         });
                     }

@@ -18,9 +18,9 @@ import { extractNostrEntities, resolveNostrEntitiesToSystemMessages } from "@/ut
 import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { DelegationXmlFormatter } from "@/conversations/formatters/DelegationXmlFormatter";
-import { trace, context as otelContext, SpanStatusCode } from '@opentelemetry/api';
+import { trace, context as otelContext, SpanStatusCode } from "@opentelemetry/api";
 
-const tracer = trace.getTracer('tenex.message-strategy');
+const tracer = trace.getTracer("tenex.message-strategy");
 
 interface EventWithContext {
     event: NDKEvent;
@@ -47,11 +47,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         triggeringEvent: NDKEvent,
         eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
-        const span = tracer.startSpan('tenex.strategy.build_messages', {
+        const span = tracer.startSpan("tenex.strategy.build_messages", {
             attributes: {
-                'strategy.name': 'FlattenedChronological',
-                'agent.slug': context.agent.slug,
-                'conversation.id': context.conversationId,
+                "strategy.name": "FlattenedChronological",
+                "agent.slug": context.agent.slug,
+                "conversation.id": context.conversationId,
             },
         });
 
@@ -62,11 +62,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     const conversation = context.getConversation();
 
                     if (!conversation) {
-                        span.addEvent('error', { 'reason': 'conversation_not_found' });
+                        span.addEvent("error", { "reason": "conversation_not_found" });
                         throw new Error(`Conversation ${context.conversationId} not found`);
                     }
 
-                    span.setAttribute('conversation.event_count', conversation.history.length);
+                    span.setAttribute("conversation.event_count", conversation.history.length);
 
                     const messages: ModelMessage[] = [];
 
@@ -74,15 +74,15 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     await this.addSystemPrompt(messages, context);
 
                     // CRITICAL: Capture the FULL compiled system prompt for debugging
-                    const systemMessage = messages.find(m => m.role === 'system');
+                    const systemMessage = messages.find(m => m.role === "system");
                     if (systemMessage) {
-                        const systemContent = typeof systemMessage.content === 'string'
+                        const systemContent = typeof systemMessage.content === "string"
                             ? systemMessage.content
                             : JSON.stringify(systemMessage.content);
 
-                        span.addEvent('system_prompt_compiled', {
-                            'prompt.length': systemContent.length,
-                            'prompt.content': systemContent, // FULL PROMPT for debugging
+                        span.addEvent("system_prompt_compiled", {
+                            "prompt.length": systemContent.length,
+                            "prompt.content": systemContent, // FULL PROMPT for debugging
                         });
                     }
 
@@ -93,9 +93,9 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         eventFilter
                     );
 
-                    span.addEvent('events_gathered', {
-                        'relevant_event_count': relevantEvents.length,
-                        'total_event_count': conversation.history.length,
+                    span.addEvent("events_gathered", {
+                        "relevant_event_count": relevantEvents.length,
+                        "total_event_count": conversation.history.length,
                     });
 
                     // Sort events chronologically
@@ -120,12 +120,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     );
 
                     span.setAttributes({
-                        'messages.total': messages.length,
-                        'messages.has_system': messages.some(m => m.role === 'system'),
+                        "messages.total": messages.length,
+                        "messages.has_system": messages.some(m => m.role === "system"),
                     });
 
-                    span.addEvent('messages_built', {
-                        'final_message_count': messages.length,
+                    span.addEvent("messages_built", {
+                        "final_message_count": messages.length,
                     });
 
                     span.setStatus({ code: SpanStatusCode.OK });
