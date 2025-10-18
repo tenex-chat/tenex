@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
-import { RAGService, type RAGQueryResult } from "@/services/RAGService";
+import { RAGService, type RAGQueryResult } from "@/services/rag/RAGService";
 import { 
     executeToolWithErrorHandling,
     parseNumericInput,
