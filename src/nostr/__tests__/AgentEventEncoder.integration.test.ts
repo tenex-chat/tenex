@@ -6,8 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { NDKKind } from "@nostr-dev-kit/ndk";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import type { AgentInstance } from "@/agents/types";
 import { 
   TENEXTestFixture,
@@ -130,7 +129,7 @@ describe("AgentEventEncoder Integration Tests", () => {
         const userRequest = await fixture.eventFactory.createSignedTextNote(
           "Analyze this document and create a summary",
           "dave",
-          EVENT_KINDS.TASK
+          NDKKind.Task
         );
         userRequest.tags.push(
           ["d", "task-001"],

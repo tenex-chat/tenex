@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
-import { EVENT_KINDS } from "@/llm/types";
-import { NDKEvent, NDKKind, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKKind } from "@/nostr/kinds";
+import { NDKEvent, type NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
 import { AgentEventDecoder } from "../AgentEventDecoder";
 import {

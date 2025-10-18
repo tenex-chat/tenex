@@ -23,7 +23,7 @@ import {
   type TypingIntent,
   type ToolUseIntent,
 } from "./AgentEventEncoder";
-import { trace, propagation, context as otelContext } from '@opentelemetry/api';
+import { trace, propagation, context as otelContext } from "@opentelemetry/api";
 
 /**
  * Comprehensive publisher for all agent-related Nostr events.
@@ -103,11 +103,11 @@ export class AgentPublisher {
 
       // Add trace context as a tag on the Nostr event
       for (const event of events) {
-        if (carrier['traceparent']) {
-          event.tags.push(['trace_context', carrier['traceparent']]);
-          logger.debug('[AgentPublisher] Injected trace context into delegation event', {
+        if (carrier["traceparent"]) {
+          event.tags.push(["trace_context", carrier["traceparent"]]);
+          logger.debug("[AgentPublisher] Injected trace context into delegation event", {
             eventId: event.id?.substring(0, 8),
-            traceparent: carrier['traceparent'].substring(0, 32) + '...',
+            traceparent: carrier["traceparent"].substring(0, 32) + "...",
           });
         }
       }
@@ -150,12 +150,12 @@ export class AgentPublisher {
 
     // Add telemetry for delegation
     if (activeSpan) {
-      activeSpan.addEvent('delegation_published', {
-        'delegation.batch_id': batchId,
-        'delegation.recipient_count': intent.recipients.length,
-        'delegation.recipients': intent.recipients.map(p => p.substring(0, 8)).join(', '),
-        'delegation.request_preview': intent.request.substring(0, 100),
-        'delegation.phase': intent.phase || 'none',
+      activeSpan.addEvent("delegation_published", {
+        "delegation.batch_id": batchId,
+        "delegation.recipient_count": intent.recipients.length,
+        "delegation.recipients": intent.recipients.map(p => p.substring(0, 8)).join(", "),
+        "delegation.request_preview": intent.request.substring(0, 100),
+        "delegation.phase": intent.phase || "none",
       });
     }
 
@@ -411,7 +411,7 @@ export class AgentPublisher {
 
   /**
    * Publish streaming delta from LLMService.
-   * Content is already throttled by the middleware, so we publish immediately as kind:21111.
+   * Content is already throttled by the middleware, so we publish immediately as TenexStreamingResponse.
    */
   async publishStreamingDelta(
     delta: string,
@@ -426,7 +426,7 @@ export class AgentPublisher {
       isReasoning,
     };
 
-    logger.debug("[AgentPublisher] Publishing streaming event (21111) for pre-buffered content", {
+    logger.debug("[AgentPublisher] Publishing streaming event for pre-buffered content", {
       contentLength: delta.length,
       sequence: streamingIntent.sequence,
       isReasoning,

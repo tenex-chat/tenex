@@ -5,7 +5,7 @@ import type { ParticipationIndex } from "@/conversations/services/ParticipationI
 import type { ThreadService } from "@/conversations/services/ThreadService";
 import type { Conversation } from "@/conversations/types";
 import type { ToolCall } from "@/llm/types";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -30,7 +30,7 @@ export class MockNostrEvent implements Partial<NDKEvent> {
     this.id = overrides?.id || `mock-event-${Math.random().toString(36).substr(2, 9)}`;
     this.pubkey = overrides?.pubkey || "mock-pubkey";
     this.created_at = overrides?.created_at || Math.floor(Date.now() / 1000);
-    this.kind = overrides?.kind || EVENT_KINDS.GENERIC_REPLY;
+    this.kind = overrides?.kind || NDKKind.GenericReply;
     this.tags = overrides?.tags || [];
     this.content = overrides?.content || "Mock event content";
     this.sig = overrides?.sig || "mock-signature";

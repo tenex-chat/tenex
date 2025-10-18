@@ -6,7 +6,7 @@ import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
-import { trace } from '@opentelemetry/api';
+import { trace } from "@opentelemetry/api";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 
 
@@ -34,11 +34,11 @@ export const handleNewConversation = async (
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {
       const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-      activeSpan.addEvent('agent_routing', {
-        'routing.mentioned_pubkeys_count': mentionedPubkeys.length,
-        'routing.resolved_agent_count': targetAgents.length,
-        'routing.agent_names': targetAgents.map(a => a.name).join(', '),
-        'routing.agent_roles': targetAgents.map(a => a.role).join(', '),
+      activeSpan.addEvent("agent_routing", {
+        "routing.mentioned_pubkeys_count": mentionedPubkeys.length,
+        "routing.resolved_agent_count": targetAgents.length,
+        "routing.agent_names": targetAgents.map(a => a.name).join(", "),
+        "routing.agent_roles": targetAgents.map(a => a.role).join(", "),
       });
     }
 
@@ -46,7 +46,7 @@ export const handleNewConversation = async (
     if (targetAgents.length === 0) {
       logger.info(chalk.gray("New conversation - no valid agents to route to (may have been filtered by project context)"));
       if (activeSpan) {
-        activeSpan.addEvent('agent_routing_failed', { 'reason': 'no_agents_resolved' });
+        activeSpan.addEvent("agent_routing_failed", { "reason": "no_agents_resolved" });
       }
       return;
     }

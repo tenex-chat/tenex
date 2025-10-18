@@ -4,7 +4,7 @@ import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
-import { trace } from '@opentelemetry/api';
+import { trace } from "@opentelemetry/api";
 
 
 export interface ConversationResolutionResult {
@@ -35,10 +35,10 @@ export class ConversationResolver {
 
     if (activeSpan) {
       if (result.conversation) {
-        activeSpan.addEvent('conversation.resolved', {
-          'resolution.type': 'found_existing',
-          'conversation.id': result.conversation.id,
-          'conversation.message_count': result.conversation.history.length,
+        activeSpan.addEvent("conversation.resolved", {
+          "resolution.type": "found_existing",
+          "conversation.id": result.conversation.id,
+          "conversation.message_count": result.conversation.history.length,
         });
       }
     }
@@ -48,18 +48,18 @@ export class ConversationResolver {
       const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
 
       if (activeSpan) {
-        activeSpan.addEvent('conversation.orphaned_reply_detected', {
-          'orphaned.mentioned_pubkeys_count': mentionedPubkeys.length,
+        activeSpan.addEvent("conversation.orphaned_reply_detected", {
+          "orphaned.mentioned_pubkeys_count": mentionedPubkeys.length,
         });
       }
 
       const newConversation = await this.handleOrphanedReply(event, mentionedPubkeys);
       if (newConversation) {
         if (activeSpan) {
-          activeSpan.addEvent('conversation.resolved', {
-            'resolution.type': 'created_from_orphan',
-            'conversation.id': newConversation.id,
-            'conversation.message_count': newConversation.history.length,
+          activeSpan.addEvent("conversation.resolved", {
+            "resolution.type": "created_from_orphan",
+            "conversation.id": newConversation.id,
+            "conversation.message_count": newConversation.history.length,
           });
         }
 
@@ -71,8 +71,8 @@ export class ConversationResolver {
     }
 
     if (!result.conversation && activeSpan) {
-      activeSpan.addEvent('conversation.resolution_failed', {
-        'reason': 'no_conversation_found',
+      activeSpan.addEvent("conversation.resolution_failed", {
+        "reason": "no_conversation_found",
       });
     }
 
@@ -126,8 +126,8 @@ export class ConversationResolver {
 
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {
-      activeSpan.addEvent('conversation.fetching_orphaned_thread', {
-        'root_event_id': rootEventId,
+      activeSpan.addEvent("conversation.fetching_orphaned_thread", {
+        "root_event_id": rootEventId,
       });
     }
 
@@ -146,9 +146,9 @@ export class ConversationResolver {
     if (!rootEvent) {
       logger.warn(chalk.yellow(`Could not fetch root event ${rootEventId} from network`));
       if (activeSpan) {
-        activeSpan.addEvent('conversation.fetch_failed', {
-          'reason': 'root_event_not_found',
-          'root_event_id': rootEventId,
+        activeSpan.addEvent("conversation.fetch_failed", {
+          "reason": "root_event_not_found",
+          "root_event_id": rootEventId,
         });
       }
       return undefined;
@@ -163,9 +163,9 @@ export class ConversationResolver {
     );
 
     if (activeSpan) {
-      activeSpan.addEvent('conversation.thread_fetched', {
-        'fetched.reply_count': replies.length,
-        'fetched.total_events': eventsArray.length,
+      activeSpan.addEvent("conversation.thread_fetched", {
+        "fetched.reply_count": replies.length,
+        "fetched.total_events": eventsArray.length,
       });
     }
 

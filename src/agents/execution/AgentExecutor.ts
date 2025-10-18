@@ -429,10 +429,10 @@ export class AgentExecutor {
             // Publish chunks for display
             if (supportsStreaming) {
                 contentBuffer += event.delta;
-                // For streaming providers, publish as streaming deltas (kind:21111)
+                // For streaming providers, publish as streaming deltas (TenexStreamingResponse)
                 await agentPublisher.publishStreamingDelta(event.delta, eventContext, false);
             } else {
-                // For non-streaming providers, publish as conversation events (kind:1111)
+                // For non-streaming providers, publish as conversation events (GenericReply)
                 await agentPublisher.conversation({ content: event.delta }, eventContext);
             }
         });
@@ -446,10 +446,10 @@ export class AgentExecutor {
 
             // Publish chunks for display
             if (supportsStreaming) {
-                // For streaming providers, publish as streaming deltas (kind:21111)
+                // For streaming providers, publish as streaming deltas (TenexStreamingResponse)
                 await agentPublisher.publishStreamingDelta(event.delta, eventContext, true);
             } else {
-                // For non-streaming providers, publish as conversation events (kind:1111)
+                // For non-streaming providers, publish as conversation events (GenericReply)
                 await agentPublisher.conversation({
                     content: event.delta,
                     isReasoning: true

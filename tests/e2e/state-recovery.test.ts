@@ -4,7 +4,7 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { TestPersistenceAdapter } from "@/test-utils/test-persistence-adapter";
 import { createMockLLMService } from "@/test-utils/mock-llm";
 import { createMockNDKEvent, createMockAgent } from "@/test-utils/mock-factories";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
 import fs from "fs/promises";
 import path from "path";
@@ -103,7 +103,7 @@ describe("State Recovery E2E Tests", () => {
         
         // Create initial event
         const triggeringEvent = createMockNDKEvent({
-            kind: EVENT_KINDS.TASK_ASSIGNMENT,
+            kind: NDKKind.Task,
             content: "Create a simple authentication system",
             tags: [["t", "task"]]
         });
@@ -147,7 +147,7 @@ describe("State Recovery E2E Tests", () => {
         
         // Create and execute initial conversation
         const triggeringEvent = createMockNDKEvent({
-            kind: EVENT_KINDS.TASK_ASSIGNMENT,
+            kind: NDKKind.Task,
             content: "Build a REST API",
             tags: [["t", "task"]]
         });
@@ -206,7 +206,7 @@ describe("State Recovery E2E Tests", () => {
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
-            kind: EVENT_KINDS.TASK_ASSIGNMENT,
+            kind: NDKKind.Task,
             content: "Implement error handling",
             tags: [["t", "task"]]
         });
@@ -263,7 +263,7 @@ describe("State Recovery E2E Tests", () => {
         
         // Create conversation
         const triggeringEvent = createMockNDKEvent({
-            kind: EVENT_KINDS.TASK_ASSIGNMENT,
+            kind: NDKKind.Task,
             content: "Build concurrent system",
             tags: [["t", "task"]]
         });
@@ -329,7 +329,7 @@ describe("State Recovery E2E Tests", () => {
         const conversations = [];
         for (let i = 0; i < 3; i++) {
             const event = createMockNDKEvent({
-                kind: EVENT_KINDS.TASK_ASSIGNMENT,
+                kind: NDKKind.Task,
                 content: `Task ${i}`,
                 tags: [["t", "task"]]
             });

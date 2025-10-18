@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, afterEach, mock } from "bun:test";
 import { createMockLLMProvider, type MockLLMProvider, type MockScenario } from "@/llm/providers/MockProvider";
 import { NDKProjectStatus } from "@/events/NDKProjectStatus";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKKind } from "@/nostr/kinds";
 import { createTempDir, cleanupTempDir } from "@/test-utils";
 import path from "node:path";
 
@@ -88,7 +89,7 @@ describe("iOS-Backend Compatibility", () => {
     it("should parse iOS project status event correctly", () => {
       // iOS event structure
       const iosEvent = {
-        kind: 24010,
+        kind: NDKKind.TenexProjectStatus,
         pubkey: "ios-app-pubkey",
         created_at: Math.floor(Date.now() / 1000),
         tags: [
@@ -167,7 +168,7 @@ describe("iOS-Backend Compatibility", () => {
     it("should create typing indicators with phase information", async () => {
       const typingStart = new NDKEvent(undefined);
       
-      typingStart.kind = 24111;
+      typingStart.kind = NDKKind.TenexAgentTypingStart;
       typingStart.content = "Working on your request...";
       typingStart.tags = [
         ["e", "conversation-id"],
@@ -176,20 +177,20 @@ describe("iOS-Backend Compatibility", () => {
       ];
       
       // Validate structure for iOS
-      expect(typingStart.kind).toBe(24111);
+      expect(typingStart.kind).toBe(NDKKind.TenexAgentTypingStart);
       expect(typingStart.tags.find(t => t[0] === "phase")?.[1]).toBe("implementing");
     });
 
     it("should handle typing stop events", () => {
       const typingStop = new NDKEvent(undefined);
       
-      typingStop.kind = 24112;
+      typingStop.kind = NDKKind.TenexAgentTypingStop;
       typingStop.tags = [
         ["e", "conversation-id"],
       ];
       
       // Stop events don't need phase
-      expect(typingStop.kind).toBe(24112);
+      expect(typingStop.kind).toBe(NDKKind.TenexAgentTypingStop);
       expect(typingStop.tags.find(t => t[0] === "phase")).toBeUndefined();
     });
   });
@@ -257,7 +258,7 @@ describe("iOS-Backend Compatibility", () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       // Check if status event was published
-      const statusEvent = publishedEvents.find(e => e.kind === 24010);
+      const statusEvent = publishedEvents.find(e => e.kind === NDKKind.TenexProjectStatus);
       if (statusEvent) {
         expect(statusEvent.tags.some(t => t[0] === "agent")).toBe(true);
         expect(statusEvent.tags.some(t => t[0] === "model")).toBe(true);
@@ -324,7 +325,7 @@ describe("iOS-Backend Compatibility", () => {
     it("should handle iOS malformed events gracefully", () => {
       // iOS sends malformed event
       const malformedEvent = {
-        kind: 24010,
+        kind: NDKKind.TenexProjectStatus,
         tags: [
           ["a"], // Missing project reference value
           ["agent", "pubkey"], // Missing slug

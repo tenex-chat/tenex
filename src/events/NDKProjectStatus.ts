@@ -3,7 +3,7 @@ import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 
 /**
- * NDKProjectStatus represents a kind 24010 event
+ * NDKProjectStatus represents a TenexProjectStatus event
  * Used to indicate project status including online agents and model configurations
  */
 export class NDKProjectStatus extends NDKEvent {

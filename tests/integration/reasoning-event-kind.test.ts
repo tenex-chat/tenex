@@ -1,16 +1,15 @@
 import { describe, expect, it } from "bun:test";
+import { NDKKind } from "@/nostr/kinds";
 
 // Simple test that doesn't require mocking NDK
 describe("Reasoning Events with Tags", () => {
     describe("Event Kinds", () => {
         it("should use the same event kinds for both content and reasoning", () => {
             // Both reasoning and content use the same kinds
-            const COMPLETION_EVENT_KIND = 1111; // GenericReply
-            const STREAMING_EVENT_KIND = 21111; // Streaming
-            
+
             // Verify we're using standard kinds
-            expect(COMPLETION_EVENT_KIND).toBe(1111);
-            expect(STREAMING_EVENT_KIND).toBe(21111);
+            expect(NDKKind.GenericReply).toBe(1111);
+            expect(NDKKind.TenexStreamingResponse).toBe(21111);
         });
     });
 

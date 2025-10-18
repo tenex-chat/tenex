@@ -280,7 +280,7 @@ export class StatusPublisher {
       const { getAllToolNames } = await import("@/tools/registry");
       const allToolNames = getAllToolNames();
       for (const toolName of allToolNames) {
-        // Skip delegate tools and core tools from kind 24010 events
+        // Skip delegate tools and core tools from TenexProjectStatus events
         // These are handled automatically by the system
         if (!DELEGATE_TOOLS.includes(toolName) && !CORE_AGENT_TOOLS.includes(toolName)) {
           toolAgentMap.set(toolName, new Set());
@@ -298,7 +298,7 @@ export class StatusPublisher {
             logger.warn(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
             continue;
           }
-          // Skip delegate tools and core tools - they're not included in kind 24010 events
+          // Skip delegate tools and core tools - they're not included in TenexProjectStatus events
           // These are handled automatically by the system
           if (DELEGATE_TOOLS.includes(toolName) || CORE_AGENT_TOOLS.includes(toolName)) {
             continue;

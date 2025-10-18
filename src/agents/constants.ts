@@ -46,7 +46,7 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
 }
 
 /**
- * Delegate tools that should be excluded from configuration and kind 24010 events
+ * Delegate tools that should be excluded from configuration and TenexProjectStatus events
  */
 export const DELEGATE_TOOLS = ["ask", "delegate", "delegate_phase", "delegate_external", "delegate_followup"] as const;
 

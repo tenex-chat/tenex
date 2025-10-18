@@ -13,7 +13,7 @@ import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
-import { trace } from '@opentelemetry/api';
+import { trace } from "@opentelemetry/api";
 
 
 interface EventHandlerContext {
@@ -52,7 +52,7 @@ export const handleChatMessage = async (
   // DEBUG: Log filtering decision for delegation events
   const pTags = event.tags.filter(tag => tag[0] === "p").map(tag => tag[1]);
   const systemPubkeys = Array.from(projectCtx.agents.values()).map(a => a.pubkey);
-  logger.debug(`[EventFilter] Checking event`, {
+  logger.debug("[EventFilter] Checking event", {
     eventId: event.id?.substring(0, 8),
     eventPubkey: event.pubkey?.substring(0, 8),
     isDirectedToSystem,
@@ -222,18 +222,18 @@ async function handleReplyLogic(
   const activeSpan = trace.getActiveSpan();
   if (activeSpan) {
     const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-    activeSpan.addEvent('agent_routing', {
-      'routing.mentioned_pubkeys_count': mentionedPubkeys.length,
-      'routing.resolved_agent_count': targetAgents.length,
-      'routing.agent_names': targetAgents.map(a => a.name).join(', '),
-      'routing.agent_roles': targetAgents.map(a => a.role).join(', '),
+    activeSpan.addEvent("agent_routing", {
+      "routing.mentioned_pubkeys_count": mentionedPubkeys.length,
+      "routing.resolved_agent_count": targetAgents.length,
+      "routing.agent_names": targetAgents.map(a => a.name).join(", "),
+      "routing.agent_roles": targetAgents.map(a => a.role).join(", "),
     });
   }
 
   if (targetAgents.length === 0) {
     logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
     if (activeSpan) {
-      activeSpan.addEvent('agent_routing_failed', { 'reason': 'no_agents_resolved' });
+      activeSpan.addEvent("agent_routing_failed", { "reason": "no_agents_resolved" });
     }
     return;
   }
@@ -242,7 +242,7 @@ async function handleReplyLogic(
   const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
   const activeOperations = operationsByEvent.get(conversation.id) || [];
 
-  logger.debug(`[MessageInjection] Checking for active operations`, {
+  logger.debug("[MessageInjection] Checking for active operations", {
     conversationId: conversation.id.substring(0, 8),
     targetAgents: targetAgents.map(a => ({ name: a.name, pubkey: a.pubkey.substring(0, 8) })),
     activeOperations: activeOperations.map(op => ({
@@ -256,7 +256,7 @@ async function handleReplyLogic(
     return activeOperations.some(op => op.agentPubkey === targetAgent.pubkey);
   });
 
-  logger.debug(`[MessageInjection] Injection decision`, {
+  logger.debug("[MessageInjection] Injection decision", {
     agentsToInject: agentsToInject.map(a => a.name),
     willInject: agentsToInject.length > 0,
     willStartNew: targetAgents.length - agentsToInject.length
@@ -266,12 +266,12 @@ async function handleReplyLogic(
   for (const targetAgent of agentsToInject) {
     const activeOp = activeOperations.find(op => op.agentPubkey === targetAgent.pubkey);
     if (activeOp) {
-      logger.info(`[MessageInjection] Injecting message into active execution`, {
+      logger.info("[MessageInjection] Injecting message into active execution", {
         agent: targetAgent.name,
         conversationId: conversation.id.substring(0, 8),
         eventId: event.id?.substring(0, 8)
       });
-      activeOp.eventEmitter.emit('inject-message', event);
+      activeOp.eventEmitter.emit("inject-message", event);
     }
   }
 

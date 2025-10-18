@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentContext, Conversation } from "@/conversations/types";
 import { pathExists } from "@/lib/fs/filesystem";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { cleanupTempDir, createMockNDKEvent, createTempDir } from "@/test-utils";
 import { FileSystemAdapter } from "../FileSystemAdapter";
 
@@ -122,22 +122,22 @@ describe("FileSystemAdapter State Persistence Tests", () => {
       phase: "execute",
       history: [
         createMockNDKEvent({
-          kind: EVENT_KINDS.TASK,
+          kind: NDKKind.Task,
           content: "Create an authentication system",
           created_at: Math.floor(Date.now() / 1000) - 60,
         }),
         createMockNDKEvent({
-          kind: EVENT_KINDS.GENERIC_REPLY,
+          kind: NDKKind.GenericReply,
           content: "I'll help you create an authentication system",
           created_at: Math.floor(Date.now() / 1000) - 50,
         }),
         createMockNDKEvent({
-          kind: EVENT_KINDS.TASK,
+          kind: NDKKind.Task,
           content: "Continue with implementation",
           created_at: Math.floor(Date.now() / 1000) - 40,
         }),
         createMockNDKEvent({
-          kind: EVENT_KINDS.GENERIC_REPLY,
+          kind: NDKKind.GenericReply,
           content: "Starting the implementation phase",
           created_at: Math.floor(Date.now() / 1000) - 30,
         }),
@@ -240,12 +240,12 @@ describe("FileSystemAdapter State Persistence Tests", () => {
         phase: i % 2 === 0 ? "chat" : "execute",
         history: [
           createMockNDKEvent({
-            kind: EVENT_KINDS.TASK,
+            kind: NDKKind.Task,
             content: `Task ${i} request`,
             created_at: Math.floor(Date.now() / 1000) - i * 10,
           }),
           createMockNDKEvent({
-            kind: EVENT_KINDS.GENERIC_REPLY,
+            kind: NDKKind.GenericReply,
             content: `Working on task ${i}`,
             created_at: Math.floor(Date.now() / 1000) - i * 10 + 5,
           }),
@@ -334,7 +334,7 @@ describe("FileSystemAdapter State Persistence Tests", () => {
     conversation.phase = "plan";
     conversation.history.push(
       createMockNDKEvent({
-        kind: EVENT_KINDS.TASK,
+        kind: NDKKind.Task,
         content: "Let's plan this out",
         created_at: Math.floor(Date.now() / 1000),
       })
@@ -373,7 +373,7 @@ describe("FileSystemAdapter State Persistence Tests", () => {
       phase: "chat",
       history: [
         createMockNDKEvent({
-          kind: EVENT_KINDS.TASK,
+          kind: NDKKind.Task,
           content: "Test with newlines\nand tabs\tand special chars: @#$%^&*()",
           created_at: Math.floor(Date.now() / 1000),
         }),

@@ -3,15 +3,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { StatusPublisher } from "../StatusPublisher";
-import { 
+import {
   TENEXTestFixture,
   withTestEnvironment,
   RelayMock,
-  getTestUserWithSigner 
+  getTestUserWithSigner
 } from "@/test-utils/ndk-test-helpers";
-import { NDKKind } from "@nostr-dev-kit/ndk";
 
 describe("StatusPublisher with NDK utilities", () => {
   let publisher: StatusPublisher;

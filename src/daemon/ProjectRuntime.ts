@@ -84,7 +84,7 @@ export class ProjectRuntime {
       this.eventHandler = new EventHandler(this.projectPath);
       await this.eventHandler.initialize();
 
-      // Start status publisher (publishes 24010 events)
+      // Start status publisher (publishes TenexProjectStatus events)
       // Wrap the initial publish in context
       this.statusPublisher = new StatusPublisher();
       await projectContextStore.run(this.context, async () => {

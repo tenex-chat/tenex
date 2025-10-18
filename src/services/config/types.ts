@@ -13,6 +13,7 @@ export interface TenexConfig {
   // Global fields
   whitelistedPubkeys?: string[];
   tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
+  projectsBase?: string; // Base directory for all projects (default: ~/tenex)
 
   // Project fields (optional for global config)
   description?: string;

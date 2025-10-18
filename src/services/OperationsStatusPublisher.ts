@@ -98,7 +98,7 @@ export class OperationsStatusPublisher {
       });
     }
     
-    // Publish one 24133 event per event being processed
+    // Publish one TenexOperationsStatus event per event being processed
     for (const [eventId, operations] of operationsByEvent) {
       try {
         // Only publish if state changed or not previously published

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { StatusPublisher } from "../StatusPublisher";
 
 
@@ -206,7 +206,7 @@ describe("StatusPublisher", () => {
       await publisher.startPublishing("/test/project");
 
       const eventInstance = mockNDKEvent.mock.results[0].value;
-      expect(eventInstance.kind).toBe(EVENT_KINDS.PROJECT_STATUS);
+      expect(eventInstance.kind).toBe(NDKKind.TenexProjectStatus);
     });
 
     it("should handle errors gracefully", async () => {

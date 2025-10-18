@@ -92,7 +92,7 @@ async function executeNostrProjects(input: NostrProjectsInput, context: Executio
       kinds: [31933],
       authors: [targetPubkey],
     }),
-    // Fetch 24010 events (project status - online agents)
+    // Fetch TenexProjectStatus events (online agents)
     // Only get status events from the last minute to determine if online
     ndk.fetchEvents({
       kinds: [NDKProjectStatus.kind],

@@ -38,7 +38,7 @@ function isReasoningDelta(chunk: LanguageModelV1StreamPart): chunk is ReasoningD
  *
  * This middleware is designed to work with the AI SDK's streamText function
  * and buffers text-delta chunks to reduce the frequency of Nostr events
- * (kind:21111) while maintaining smooth streaming.
+ * (TenexStreamingResponse) while maintaining smooth streaming.
  *
  * Includes line-based chunking to ensure clean breaks at line boundaries.
  */

@@ -54,7 +54,7 @@ export class EventHandler {
   }
 
   async handleEvent(event: NDKEvent): Promise<void> {
-    // Ignore kind 24010 (project status), 24111 (typing indicator), and 24112 (typing stop) events
+    // Ignore ephemeral status and typing indicator events
     if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
     // Debug: Check if event has proper NDKEvent methods
@@ -198,7 +198,7 @@ export class EventHandler {
         await this.handleMetadataEvent(event);
         break;
       
-      case NDKKind.TenexStopCommand: // kind 24134 - Stop LLM operations
+      case NDKKind.TenexStopCommand: // Stop LLM operations
         await this.handleStopEvent(event);
         break;
 
