@@ -34,7 +34,7 @@ export class AgentRegistry {
 
   /**
    * Creates a new AgentRegistry instance.
-   * @param projectPath - Base directory path for the project
+   * @param projectPath - The project working directory (e.g., ~/.tenex/projects/<dTag>/)
    */
   constructor(projectPath: string) {
     if (!projectPath || projectPath === "undefined") {
@@ -47,9 +47,10 @@ export class AgentRegistry {
   }
 
   /**
-   * Get the base path for this project
+   * Get the base path for this project (the project working directory)
    */
   getBasePath(): string {
+    // this.projectPath is already the project working directory
     return this.projectPath;
   }
 
@@ -288,7 +289,8 @@ export class AgentRegistry {
           {
             tools: options?.tools ?? {},
             agentName: storedAgent.name,
-            sessionId: options?.sessionId
+            sessionId: options?.sessionId,
+            projectPath: this.getBasePath()
           }
         );
       },
@@ -372,31 +374,27 @@ export class AgentRegistry {
   }
 
   /**
-   * Set which agent is the Project Manager and update delegate tools accordingly
+   * Set which agent is the Project Manager
    * This method is called by ProjectContext to inform the registry of the PM
+   * Note: Delegate tools are assigned per-agent based on their configuration (phases, etc.),
+   * not based on PM status. See getDelegateToolsForAgent() for delegation logic.
    */
   setPMPubkey(pubkey: string): void {
     this.pmPubkey = pubkey;
 
-    // Update delegate tools for all agents based on PM status
+    // Ensure all agents have correct delegate tools based on their configuration
     for (const agent of this.agents.values()) {
-      if (agent.pubkey === pubkey) {
-        // This is the PM - ensure they have delegate tools based on phases
-        const delegateTools = getDelegateToolsForAgent(agent);
+      const delegateTools = getDelegateToolsForAgent(agent);
 
-        // Add delegate tools if not already present
-        for (const tool of delegateTools) {
-          if (!agent.tools.includes(tool)) {
-            agent.tools.push(tool);
-          }
+      // Add delegate tools if not already present
+      for (const tool of delegateTools) {
+        if (!agent.tools.includes(tool)) {
+          agent.tools.push(tool);
         }
-      } else {
-        // Not the PM - remove delegate tools if present
-        agent.tools = agent.tools.filter(tool => !DELEGATE_TOOLS.includes(tool));
       }
     }
 
-    logger.debug(`Set PM pubkey: ${pubkey} and updated delegate tools`);
+    logger.debug(`Set PM pubkey: ${pubkey} and ensured delegate tools for all agents`);
   }
 
   /**
