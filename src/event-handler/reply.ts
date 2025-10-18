@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
+import { trace } from '@opentelemetry/api';
 
 
 interface EventHandlerContext {
@@ -216,8 +217,24 @@ async function handleReplyLogic(
 
   // 3. Determine target agents
   let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
+
+  // Add telemetry for routing decision
+  const activeSpan = trace.getActiveSpan();
+  if (activeSpan) {
+    const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+    activeSpan.addEvent('agent_routing', {
+      'routing.mentioned_pubkeys_count': mentionedPubkeys.length,
+      'routing.resolved_agent_count': targetAgents.length,
+      'routing.agent_names': targetAgents.map(a => a.name).join(', '),
+      'routing.agent_roles': targetAgents.map(a => a.role).join(', '),
+    });
+  }
+
   if (targetAgents.length === 0) {
     logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
+    if (activeSpan) {
+      activeSpan.addEvent('agent_routing_failed', { 'reason': 'no_agents_resolved' });
+    }
     return;
   }
 

@@ -163,6 +163,31 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     /**
+     * Get full telemetry configuration for AI SDK
+     * Captures EVERYTHING for debugging - no privacy filters
+     */
+    private getFullTelemetryConfig(): any {
+        return {
+            isEnabled: true,
+            functionId: `${this.agentSlug || 'unknown'}.${this.provider}.${this.model}`,
+
+            // Metadata for debugging context
+            metadata: {
+                'agent.slug': this.agentSlug || 'unknown',
+                'llm.provider': this.provider,
+                'llm.model': this.model,
+                'llm.temperature': this.temperature,
+                'llm.max_tokens': this.maxTokens,
+                'session.id': this.sessionId,
+            },
+
+            // FULL DATA - no privacy filters for debugging
+            recordInputs: true,   // Capture full prompts
+            recordOutputs: true,  // Capture full responses
+        };
+    }
+
+    /**
      * Determine if throttling middleware should be used for this provider
      * claudeCode handles its own streaming optimization, so it doesn't need throttling
      */
@@ -325,6 +350,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 tools,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
+
+                // ✨ Enable full AI SDK telemetry
+                experimental_telemetry: this.getFullTelemetryConfig(),
             });
 
             // Capture session ID from provider metadata if using Claude Code
@@ -467,6 +495,10 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             stopWhen,
             prepareStep: options?.prepareStep,
             abortSignal: options?.abortSignal,
+
+            // ✨ Enable full AI SDK telemetry
+            experimental_telemetry: this.getFullTelemetryConfig(),
+
             providerOptions: {
                 openrouter: {
                     usage: { include: true },
@@ -839,7 +871,10 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             schema,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
-            ...(tools && Object.keys(tools).length > 0 ? { tools } : {})
+            ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
+
+            // ✨ Enable full AI SDK telemetry
+            experimental_telemetry: this.getFullTelemetryConfig(),
         });
     }
 

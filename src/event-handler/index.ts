@@ -1,10 +1,10 @@
 import { formatAnyError } from "@/utils/error-formatter";
-import { NDKEvent, NDKKind, NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKKind } from "@/nostr/kinds";
 import chalk from "chalk";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
-import { EVENT_KINDS } from "../llm/types";
 import { getProjectContext } from "../services";
 import { DelegationRegistry } from "../services/DelegationRegistry";
 import { logger } from "../utils/logger";
@@ -18,14 +18,12 @@ import { BrainstormService } from "../services/BrainstormService";
 const IGNORED_EVENT_KINDS = [
   NDKKind.Metadata,
   NDKKind.Contacts,
-  EVENT_KINDS.PROJECT_STATUS as NDKKind,
-  EVENT_KINDS.STREAMING_RESPONSE as NDKKind,
-  EVENT_KINDS.TYPING_INDICATOR as NDKKind,
-  EVENT_KINDS.TYPING_INDICATOR_STOP as NDKKind,
-  EVENT_KINDS.OPERATIONS_STATUS as NDKKind,
+  NDKKind.TenexProjectStatus,
+  NDKKind.TenexStreamingResponse,
+  NDKKind.TenexAgentTypingStart,
+  NDKKind.TenexAgentTypingStop,
+  NDKKind.TenexOperationsStatus,
 ];
-
-const STOP_EVENT_KIND = 24134; // Ephemeral stop command for LLM operations
 
 export class EventHandler {
   private conversationCoordinator!: ConversationCoordinator;
@@ -192,7 +190,7 @@ export class EventHandler {
         }
         break;
 
-      case EVENT_KINDS.AGENT_CONFIG_UPDATE:
+      case NDKKind.TenexAgentConfigUpdate:
         await this.handleAgentConfigUpdate(event);
         break;
 
@@ -200,7 +198,7 @@ export class EventHandler {
         await this.handleMetadataEvent(event);
         break;
       
-      case STOP_EVENT_KIND: // kind 24134 - Stop LLM operations
+      case NDKKind.TenexStopCommand: // kind 24134 - Stop LLM operations
         await this.handleStopEvent(event);
         break;
 
@@ -271,13 +269,13 @@ export class EventHandler {
 
         if (updated) {
           logger.info("Updated and persisted model configuration for agent", {
-            agentName: agent.name,
+            agentName: agent.slug,
             agentPubkey: agent.pubkey,
             newModel,
           });
         } else {
           logger.warn("Failed to update model configuration", {
-            agentName: agent.name,
+            agentName: agent.slug,
             agentPubkey: agent.pubkey,
             newModel,
           });

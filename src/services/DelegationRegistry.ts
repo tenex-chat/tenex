@@ -5,6 +5,7 @@ import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { z } from "zod";
+import { trace } from '@opentelemetry/api';
 
 export interface DelegationRecord {
   // Core identifiers
@@ -272,6 +273,18 @@ export class DelegationRegistry extends EventEmitter {
       delegatingAgent: params.delegatingAgent.slug,
     });
 
+    // Add telemetry
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent('delegation.registered', {
+        'delegation.batch_id': batchId,
+        'delegation.event_id': params.delegationEventId,
+        'delegation.recipient_count': params.recipients.length,
+        'delegation.delegating_agent': params.delegatingAgent.slug,
+        'delegation.recipients': params.recipients.map(r => r.pubkey.substring(0, 8)).join(', '),
+      });
+    }
+
     return batchId;
   }
 
@@ -328,14 +341,25 @@ export class DelegationRegistry extends EventEmitter {
       throw new Error(`Event ${event.id} is not a delegation response`);
     }
 
+    const activeSpan = trace.getActiveSpan();
+
     // Find the delegation this is responding to
     const eTags = event.getMatchingTags("e");
     for (const eTagArray of eTags) {
       const delegationEventId = eTagArray[1];
       if (!delegationEventId) continue;
-      
+
       const delegation = this.findDelegationByEventAndResponder(delegationEventId, event.pubkey);
       if (delegation) {
+        if (activeSpan) {
+          activeSpan.addEvent('delegation.response_received', {
+            'delegation.event_id': delegationEventId,
+            'delegation.batch_id': delegation.delegationBatchId,
+            'delegation.responding_agent': event.pubkey.substring(0, 8),
+            'delegation.delegating_agent': delegation.delegatingAgent.pubkey.substring(0, 8),
+          });
+        }
+
         await this.recordDelegationCompletion({
           conversationId: delegation.delegatingAgent.rootConversationId,
           fromPubkey: delegation.delegatingAgent.pubkey,
@@ -749,13 +773,6 @@ export class DelegationRegistry extends EventEmitter {
 
       // Clean up old completed delegations (older than 24 hours)
       this.cleanupOldDelegations();
-
-      logger.info("Restored delegation registry", {
-        delegations: this.delegations.size,
-        batches: this.batches.size,
-        activeTasks: Array.from(this.delegations.values()).filter((d) => d.status === "pending")
-          .length,
-      });
     } catch (error) {
       logger.error("Failed to validate restored delegation data", {
         error,

@@ -1,4 +1,4 @@
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import type { ProjectContext } from "@/services/ProjectContext";
@@ -154,12 +154,12 @@ export class OperationsStatusPublisher {
   }
   
   private async publishEventStatus(
-    eventId: string, 
+    eventId: string,
     operations: LLMOperation[],
     projectCtx: ProjectContext
   ): Promise<void> {
     const event = new NDKEvent(getNDK());
-    event.kind = EVENT_KINDS.OPERATIONS_STATUS;
+    event.kind = NDKKind.TenexOperationsStatus;
     event.content = "";
     
     // Single e-tag for the event being processed

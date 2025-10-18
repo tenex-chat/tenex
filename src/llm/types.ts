@@ -44,19 +44,3 @@ export interface ModelConfig {
 
 export type LanguageModelUsageWithCostUsd = LanguageModelUsage & { costUsd?: number };
 
-/**
- * Event kinds used in the TENEX system
- * 
- * Don't add kinds here if they are defined in NDKKind or if we have NDKEvent wrappers (i.e. don't add NDKKind.GenericReply or NDKProject.kind)
- */
-export const EVENT_KINDS = {
-  PROJECT_STATUS: 24010, // Ephemeral event kind (not stored by relays) - consider regular/addressable kinds for persistence
-  AGENT_REQUEST: 4133,
-  TYPING_INDICATOR: 24111,
-  TYPING_INDICATOR_STOP: 24112,
-  STREAMING_RESPONSE: 21111,
-  FORCE_RELEASE: 24019,
-  AGENT_CONFIG_UPDATE: 24020,
-  OPERATIONS_STATUS: 24133, // LLM operations status (one per event being processed)
-} as const;
-

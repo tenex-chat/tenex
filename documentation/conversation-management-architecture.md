@@ -66,7 +66,7 @@ The ConversationCoordinator serves as the central hub for all conversation-relat
 
 ### Core Components
 
-#### ConversationCoordinator Class (src/conversations/ConversationCoordinator.ts)
+#### ConversationCoordinator Class (src/conversations/services/ConversationCoordinator.ts)
 
 The central class that manages all conversation lifecycle operations:
 

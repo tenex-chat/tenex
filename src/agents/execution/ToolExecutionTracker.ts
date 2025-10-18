@@ -59,6 +59,7 @@ import { logger } from "@/utils/logger";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
+import { trace } from '@opentelemetry/api';
 
 /**
  * Represents a tracked tool execution
@@ -165,6 +166,20 @@ export class ToolExecutionTracker {
             currentTrackedCount: this.executions.size
         });
 
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            // Truncate args for telemetry to prevent huge span attributes
+            const argsPreview = typeof args === 'object' && args !== null
+                ? JSON.stringify(args).substring(0, 200)
+                : String(args).substring(0, 200);
+
+            activeSpan.addEvent('tool.execution_start', {
+                'tool.name': toolName,
+                'tool.call_id': toolCallId,
+                'tool.args_preview': argsPreview,
+            });
+        }
+
         // Generate human-readable content for the tool execution
         const humanContent = this.getHumanReadableContent(toolName, args, toolsObject);
 
@@ -233,6 +248,14 @@ export class ToolExecutionTracker {
                 toolCallId,
                 availableExecutions: Array.from(this.executions.keys())
             });
+
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan) {
+                activeSpan.addEvent('tool.execution_unknown', {
+                    'tool.call_id': toolCallId,
+                });
+            }
+
             return;
         }
 
@@ -250,6 +273,22 @@ export class ToolExecutionTracker {
         execution.output = result;
         execution.error = error;
         execution.completed = true;
+
+        // Add telemetry for tool completion
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            // Truncate result for telemetry
+            const resultPreview = typeof result === 'object' && result !== null
+                ? JSON.stringify(result).substring(0, 200)
+                : String(result).substring(0, 200);
+
+            activeSpan.addEvent('tool.execution_complete', {
+                'tool.name': execution.toolName,
+                'tool.call_id': toolCallId,
+                'tool.error': error,
+                'tool.result_preview': resultPreview,
+            });
+        }
 
         // Persist the complete tool message to filesystem
         // This enables conversation reconstruction and audit trails

@@ -6,6 +6,8 @@ import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
+import { trace } from '@opentelemetry/api';
+import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 
 
 interface EventHandlerContext {
@@ -28,9 +30,24 @@ export const handleNewConversation = async (
     // Use AgentRouter to resolve target agents (includes project validation for global agents)
     const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
 
+    // Add telemetry for routing decision
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+      activeSpan.addEvent('agent_routing', {
+        'routing.mentioned_pubkeys_count': mentionedPubkeys.length,
+        'routing.resolved_agent_count': targetAgents.length,
+        'routing.agent_names': targetAgents.map(a => a.name).join(', '),
+        'routing.agent_roles': targetAgents.map(a => a.role).join(', '),
+      });
+    }
+
     // If no valid agents found (filtered by project context), return
     if (targetAgents.length === 0) {
       logger.info(chalk.gray("New conversation - no valid agents to route to (may have been filtered by project context)"));
+      if (activeSpan) {
+        activeSpan.addEvent('agent_routing_failed', { 'reason': 'no_agents_resolved' });
+      }
       return;
     }
 

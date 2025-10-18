@@ -1,7 +1,7 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { configService, getProjectContext, isProjectContextInitialized, type ProjectContext } from "@/services";
@@ -72,7 +72,7 @@ export class StatusPublisher {
    */
   private createStatusEvent(intent: StatusIntent): NDKEvent {
     const event = new NDKEvent(getNDK());
-    event.kind = EVENT_KINDS.PROJECT_STATUS;
+    event.kind = NDKKind.TenexProjectStatus;
     event.content = "";
 
     // Use stored context or fall back to global

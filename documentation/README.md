@@ -19,54 +19,37 @@ The foundational infrastructure that orchestrates multi-agent interactions, main
 
 ### Agent Systems
 
-#### 4. [Agent Execution Architecture](./agent-execution-architecture.md)
-The core execution framework that manages agent lifecycle, message building, tool execution, and response streaming. Provides the runtime environment for all agent operations through the unified ReasonActLoop implementation.
-
-#### 5. [Agent Context Management Internals](./agent-context-management-internals.md)
+#### 4. [Agent Context Management Internals](./agent-context-management-internals.md)
 Deep technical analysis of how agents maintain and utilize context across conversations. Covers memory management, context windows, state persistence, and cross-conversation learning mechanisms.
 
-#### 6. [Orchestrator Routing Architecture](./orchestrator-routing-architecture.md)
-The intelligent routing system that coordinates multi-agent collaboration. Implements the invisible orchestrator pattern with dynamic agent selection, phase-aware routing, and error recovery.
-
-#### 7. [Routing System Design](./routing-system-redesign.md)
+#### 5. [Routing System Design](./routing-system-redesign.md)
 Complete routing system design and implementation plan. Details the core principles of orchestrator as silent router, phase outputs, automatic quality control, and organic user communication.
-
-### Execution Infrastructure
-
-#### 8. [Streaming and State Management Architecture](./streaming-state-management-architecture.md)
-Critical component handling real-time LLM response streaming, tool execution coordination, and state consistency during agent interactions. Ensures reliable, low-latency communication.
 
 ### Tool and Integration Systems
 
-#### 9. [Tool System Architecture](./tool-system-architecture.md)
+#### 6. [Tool System Architecture](./tool-system-architecture.md)
 Type-safe, composable infrastructure for agent capabilities. Bridges agent intentions with concrete actions through comprehensive tools and MCP integration with validation and error handling.
 
-#### 10. [MCP Integration Architecture](./mcp-integration-architecture.md)
+#### 7. [MCP Integration Architecture](./mcp-integration-architecture.md)
 Model Context Protocol integration enabling dynamic tool loading from external servers. Provides seamless adapter layer between MCP tools and TENEX's internal tool system.
 
 ### Infrastructure Components
 
-#### 11. [Event-Driven Architecture](./event-driven-architecture.md)
+#### 8. [Event-Driven Architecture](./event-driven-architecture.md)
 The Nostr-based event system that forms the communication backbone. Handles event routing, subscription management, and distributed state synchronization across the system.
-
-#### 12. [Daemon Process Management Architecture](./daemon-process-management-architecture.md)
-Process lifecycle management for long-running services. Handles daemon spawning, monitoring, graceful shutdown, and crash recovery for system stability.
-
-#### 13. [LLM Routing Architecture](./llm-routing-architecture.md)
-Intelligent model selection and request routing system. Manages multiple LLM providers, handles failover, rate limiting, and optimizes model selection based on task requirements.
 
 ### Support Systems
 
-#### 14. [Prompt System Architecture](./prompt-system-architecture.md)
+#### 9. [Prompt System Architecture](./prompt-system-architecture.md)
 Sophisticated compositional engine for constructing context-aware system prompts. Uses fragment-based approach with priority ordering, conditional inclusion, and runtime composition for consistent agent behavior.
 
-#### 15. [Learning System Internals](./learning-system-internals.md)
+#### 10. [Learning System Internals](./learning-system-internals.md)
 Comprehensive analysis of the distributed learning infrastructure. Enables agents to capture, store, retrieve, and apply lessons learned across conversations for continuous improvement.
 
-#### 16. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
+#### 11. [Tracing and Observability Architecture](./tracing-observability-architecture.md)
 Comprehensive execution flow tracking, debugging capabilities, and structured logging. Implements hierarchical context propagation for detailed insight into system behavior and performance.
 
-#### 17. [User Preferences and Tooling Lessons](./user-preferences-and-tooling-lessons.md)
+#### 12. [User Preferences and Tooling Lessons](./user-preferences-and-tooling-lessons.md)
 Captured lessons learned from user interactions and tooling implementations. Documents development patterns, Nostr integration standards, and best practices for tool development within the TENEX ecosystem.
 
 ## Architecture Principles
@@ -175,10 +158,10 @@ Captured lessons learned from user interactions and tooling implementations. Doc
 To understand the system architecture:
 
 1. Start with [Workflow Management](./workflow-management-architecture.md) for the high-level overview
-2. Read [Agent Execution](./agent-execution-architecture.md) to understand agent operations
-3. Explore [Phase Management](./phase-management-architecture.md) for workflow control
-4. Study [Tool System](./tool-system-architecture.md) for capability implementation
-5. Review [Event-Driven Architecture](./event-driven-architecture.md) for communication patterns
+2. Explore [Phase Management](./phase-management-architecture.md) for workflow control
+3. Study [Tool System](./tool-system-architecture.md) for capability implementation
+4. Review [Event-Driven Architecture](./event-driven-architecture.md) for communication patterns
+5. Read [Routing System Design](./routing-system-redesign.md) for agent coordination patterns
 
 ## Contributing
 

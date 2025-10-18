@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk";
 
 type RoutingDecision = "routed" | "dropped" | "project_event";
 type RoutingMethod = "a_tag" | "p_tag_agent" | "none";
@@ -19,6 +19,16 @@ interface EventRoutingLogEntry {
   runtimeAction: RuntimeAction;
   reason: string | null;
   contentPreview?: string;
+}
+
+interface SubscriptionFilterLogEntry {
+  timestamp: string;
+  type: "subscription_filter_update";
+  filters: NDKFilter[];
+  filterCount: number;
+  whitelistedAuthors: number;
+  trackedProjects: number;
+  trackedAgents: number;
 }
 
 /**
@@ -115,6 +125,43 @@ export class EventRoutingLogger {
       await fs.appendFile(filepath, JSON.stringify(logEntry) + "\n", "utf-8");
     } catch (error) {
       console.error("[EventRoutingLogger] Failed to write log:", error);
+    }
+  }
+
+  /**
+   * Log subscription filter updates
+   */
+  async logSubscriptionFilters(params: {
+    filters: NDKFilter[];
+    whitelistedAuthors: number;
+    trackedProjects: number;
+    trackedAgents: number;
+  }): Promise<void> {
+    if (!this.isInitialized()) {
+      console.warn("[EventRoutingLogger] Not initialized. Skipping filter log.");
+      return;
+    }
+
+    await this.ensureLogDirectory();
+
+    const logEntry: SubscriptionFilterLogEntry = {
+      timestamp: new Date().toISOString(),
+      type: "subscription_filter_update",
+      filters: params.filters,
+      filterCount: params.filters.length,
+      whitelistedAuthors: params.whitelistedAuthors,
+      trackedProjects: params.trackedProjects,
+      trackedAgents: params.trackedAgents,
+    };
+
+    const filename = this.getLogFileName();
+    const filepath = this.getLogFilePath(filename);
+
+    try {
+      // Append to JSONL file (one JSON object per line)
+      await fs.appendFile(filepath, JSON.stringify(logEntry) + "\n", "utf-8");
+    } catch (error) {
+      console.error("[EventRoutingLogger] Failed to write filter log:", error);
     }
   }
 

@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 
+// MUST BE FIRST - Initialize OpenTelemetry before any other imports
+import { initializeTelemetry } from "./telemetry/setup";
+initializeTelemetry();
+
 import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
 import { Command } from "commander";

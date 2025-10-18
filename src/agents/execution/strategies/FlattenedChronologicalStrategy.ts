@@ -18,6 +18,9 @@ import { extractNostrEntities, resolveNostrEntitiesToSystemMessages } from "@/ut
 import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { DelegationXmlFormatter } from "@/conversations/formatters/DelegationXmlFormatter";
+import { trace, context as otelContext, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('tenex.message-strategy');
 
 interface EventWithContext {
     event: NDKEvent;
@@ -44,48 +47,98 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         triggeringEvent: NDKEvent,
         eventFilter?: (event: NDKEvent) => boolean
     ): Promise<ModelMessage[]> {
-        const conversation = context.getConversation();
+        const span = tracer.startSpan('tenex.strategy.build_messages', {
+            attributes: {
+                'strategy.name': 'FlattenedChronological',
+                'agent.slug': context.agent.slug,
+                'conversation.id': context.conversationId,
+            },
+        });
 
-        if (!conversation) {
-            throw new Error(`Conversation ${context.conversationId} not found`);
-        }
+        return otelContext.with(
+            trace.setSpan(otelContext.active(), span),
+            async () => {
+                try {
+                    const conversation = context.getConversation();
 
-        const messages: ModelMessage[] = [];
+                    if (!conversation) {
+                        span.addEvent('error', { 'reason': 'conversation_not_found' });
+                        throw new Error(`Conversation ${context.conversationId} not found`);
+                    }
 
-        // Add system prompt
-        await this.addSystemPrompt(messages, context);
+                    span.setAttribute('conversation.event_count', conversation.history.length);
 
-        // Get all events that involve this agent
-        const relevantEvents = await this.gatherRelevantEvents(
-            context,
-            conversation.history,
-            eventFilter
+                    const messages: ModelMessage[] = [];
+
+                    // Add system prompt
+                    await this.addSystemPrompt(messages, context);
+
+                    // CRITICAL: Capture the FULL compiled system prompt for debugging
+                    const systemMessage = messages.find(m => m.role === 'system');
+                    if (systemMessage) {
+                        const systemContent = typeof systemMessage.content === 'string'
+                            ? systemMessage.content
+                            : JSON.stringify(systemMessage.content);
+
+                        span.addEvent('system_prompt_compiled', {
+                            'prompt.length': systemContent.length,
+                            'prompt.content': systemContent, // FULL PROMPT for debugging
+                        });
+                    }
+
+                    // Get all events that involve this agent
+                    const relevantEvents = await this.gatherRelevantEvents(
+                        context,
+                        conversation.history,
+                        eventFilter
+                    );
+
+                    span.addEvent('events_gathered', {
+                        'relevant_event_count': relevantEvents.length,
+                        'total_event_count': conversation.history.length,
+                    });
+
+                    // Sort events chronologically
+                    relevantEvents.sort((a, b) => a.timestamp - b.timestamp);
+
+                    // Build the flattened view
+                    const flattenedContent = await this.buildFlattenedView(
+                        relevantEvents,
+                        context.agent.pubkey,
+                        context.conversationId,
+                        context.debug
+                    );
+
+                    messages.push(...flattenedContent);
+
+                    // Add special context instructions if needed
+                    await addAllSpecialContexts(
+                        messages,
+                        triggeringEvent,
+                        context.isDelegationCompletion || false,
+                        context.agent.slug
+                    );
+
+                    span.setAttributes({
+                        'messages.total': messages.length,
+                        'messages.has_system': messages.some(m => m.role === 'system'),
+                    });
+
+                    span.addEvent('messages_built', {
+                        'final_message_count': messages.length,
+                    });
+
+                    span.setStatus({ code: SpanStatusCode.OK });
+                    return messages;
+                } catch (error) {
+                    span.recordException(error as Error);
+                    span.setStatus({ code: SpanStatusCode.ERROR });
+                    throw error;
+                } finally {
+                    span.end();
+                }
+            }
         );
-
-
-        // Sort events chronologically
-        relevantEvents.sort((a, b) => a.timestamp - b.timestamp);
-
-        // Build the flattened view
-        const flattenedContent = await this.buildFlattenedView(
-            relevantEvents,
-            context.agent.pubkey,
-            context.conversationId,
-            context.debug
-        );
-
-        messages.push(...flattenedContent);
-
-        // Add special context instructions if needed
-        await addAllSpecialContexts(
-            messages,
-            triggeringEvent,
-            context.isDelegationCompletion || false,
-            context.agent.name
-        );
-
-
-        return messages;
     }
 
     /**
@@ -339,7 +392,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         });
                     } else {
                         // Add recipient to existing delegation (multi-recipient case)
-                        const delegation = delegationMap.get(eventContext.delegationId)!;
+                        const delegation = delegationMap.get(eventContext.delegationId);
+                        if (!delegation) {
+                            throw new Error(`Delegation ${eventContext.delegationId} not found in delegationMap after has() check`);
+                        }
                         if (toSlug && !delegation.recipients.includes(toSlug)) {
                             delegation.recipients.push(toSlug);
                         }

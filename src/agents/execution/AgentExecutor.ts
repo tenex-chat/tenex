@@ -18,6 +18,9 @@ import { AgentSupervisor } from "./AgentSupervisor";
 import { createEventContext } from "@/utils/phase-utils";
 import { BrainstormModerator, type BrainstormResponse, type ModerationResult } from "./BrainstormModerator";
 import { SessionManager } from "./SessionManager";
+import { trace, context as otelContext, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('tenex.agent-executor');
 
 export interface LLMCompletionRequest {
     messages: ModelMessage[];
@@ -86,16 +89,65 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
-        // Prepare execution context with all necessary components
-        const { fullContext, supervisor, toolTracker, agentPublisher, cleanup } = this.prepareExecution(context);
+        const span = tracer.startSpan('tenex.agent.execute', {
+            attributes: {
+                'agent.slug': context.agent.slug,
+                'agent.pubkey': context.agent.pubkey,
+                'agent.role': context.agent.role || 'worker',
+                'conversation.id': context.conversationId,
+                'triggering_event.id': context.triggeringEvent.id,
+                'triggering_event.kind': context.triggeringEvent.kind || 0,
+            },
+        });
 
-        try {
-            // Start execution with supervision
-            return await this.executeWithSupervisor(fullContext, supervisor, toolTracker, agentPublisher);
-        } finally {
-            // Always cleanup
-            await cleanup();
-        }
+        return otelContext.with(
+            trace.setSpan(otelContext.active(), span),
+            async () => {
+                try {
+                    // Prepare execution context with all necessary components
+                    const { fullContext, supervisor, toolTracker, agentPublisher, cleanup } = this.prepareExecution(context);
+
+                    // Add execution context to span
+                    const conversation = fullContext.getConversation();
+                    if (conversation) {
+                        span.setAttributes({
+                            'conversation.phase': conversation.phase,
+                            'conversation.message_count': conversation.history.length,
+                        });
+                    }
+
+                    logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
+                        agent: context.agent.slug,
+                        conversationId: context.conversationId.substring(0, 8),
+                        hasPhases: !!context.agent.phases,
+                        phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0
+                    });
+
+                    span.addEvent('execution.start', {
+                        'has_phases': !!context.agent.phases,
+                        'phase_count': context.agent.phases ? Object.keys(context.agent.phases).length : 0,
+                    });
+
+                    try {
+                        // Start execution with supervision
+                        const result = await this.executeWithSupervisor(fullContext, supervisor, toolTracker, agentPublisher);
+
+                        span.addEvent('execution.complete');
+                        span.setStatus({ code: SpanStatusCode.OK });
+                        return result;
+                    } finally {
+                        // Always cleanup
+                        await cleanup();
+                    }
+                } catch (error) {
+                    span.recordException(error as Error);
+                    span.setStatus({ code: SpanStatusCode.ERROR });
+                    throw error;
+                } finally {
+                    span.end();
+                }
+            }
+        );
     }
 
     /**
@@ -165,7 +217,7 @@ export class AgentExecutor {
         agentPublisher: AgentPublisher
     ): Promise<NDKEvent | undefined> {
         logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
-            agent: context.agent.name,
+            agent: context.agent.slug,
             conversationId: context.conversationId.substring(0, 8),
             hasPhases: !!context.agent.phases,
             phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0
@@ -180,7 +232,7 @@ export class AgentExecutor {
             // Streaming failed - error was already published in executeStreaming
             // Re-throw to let the caller handle it
             logger.error("[AgentExecutor] Streaming failed in executeWithSupervisor", {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 error: formatAnyError(streamError)
             });
             throw streamError;
@@ -193,14 +245,14 @@ export class AgentExecutor {
 
         if (!isComplete) {
             logger.info("[AgentExecutor] 🔁 RECURSION: Execution not complete, continuing", {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 reason: supervisor.getContinuationPrompt()
             });
 
             // Only publish intermediate if we had actual content
             if (completionEvent?.message?.trim()) {
                 logger.info("[AgentExecutor] Publishing intermediate conversation", {
-                    agent: context.agent.name,
+                    agent: context.agent.slug,
                     contentLength: completionEvent.message.length
                 });
                 await agentPublisher.conversation({
@@ -212,7 +264,7 @@ export class AgentExecutor {
             context.additionalSystemMessage = supervisor.getContinuationPrompt();
 
             logger.info("[AgentExecutor] 🔄 Resetting supervisor and recursing", {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 systemMessage: context.additionalSystemMessage
             });
 
@@ -222,7 +274,7 @@ export class AgentExecutor {
         }
 
         logger.info("[AgentExecutor] ✅ Execution complete, publishing final response", {
-            agent: context.agent.name,
+            agent: context.agent.slug,
             messageLength: completionEvent?.message?.length || 0
         });
 
@@ -233,7 +285,7 @@ export class AgentExecutor {
         }, eventContext);
 
         logger.info("[AgentExecutor] 🎯 Published final completion event", {
-            agent: context.agent.name,
+            agent: context.agent.slug,
             eventId: finalResponseEvent?.id,
             usage: completionEvent.usage
         });
@@ -286,13 +338,13 @@ export class AgentExecutor {
 
         if (thisOperation) {
             logger.debug(`[AgentExecutor] Setting up message injection listener`, {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 conversationId: context.conversationId.substring(0, 8),
                 operationId: thisOperation.id.substring(0, 8)
             });
             thisOperation.eventEmitter.on('inject-message', (event: NDKEvent) => {
                 logger.info(`[AgentExecutor] Received injected message`, {
-                    agent: context.agent.name,
+                    agent: context.agent.slug,
                     eventId: event.id?.substring(0, 8),
                     currentQueueSize: injectedEvents.length
                 });
@@ -300,7 +352,7 @@ export class AgentExecutor {
             });
         } else {
             logger.error(`[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!`, {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 agentPubkey: context.agent.pubkey.substring(0, 8),
                 conversationId: context.conversationId.substring(0, 8),
                 availableOperations: activeOperations.map(op => ({
@@ -371,7 +423,7 @@ export class AgentExecutor {
                 deltaLength: event.delta?.length,
                 supportsStreaming,
                 preview: event.delta?.substring(0, 100),
-                agentName: context.agent.name,
+                agentName: context.agent.slug,
             });
 
             // Publish chunks for display
@@ -407,7 +459,7 @@ export class AgentExecutor {
 
         llmService.on("chunk-type-change", async (event) => {
             logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
-                agentName: context.agent.name,
+                agentName: context.agent.slug,
                 hasReasoningBuffer: reasoningBuffer.length > 0,
                 hasContentBuffer: contentBuffer.length > 0
             });
@@ -425,7 +477,7 @@ export class AgentExecutor {
             console.log("complete event", event.message);
 
             logger.info("[AgentExecutor] LLM complete event received", {
-                agent: context.agent.name,
+                agent: context.agent.slug,
                 messageLength: event.message?.length || 0,
                 hasMessage: !!event.message,
                 hasReasoning: !!event.reasoning,
@@ -449,7 +501,7 @@ export class AgentExecutor {
                 }, eventContext);
 
                 logger.info("Stream error event published via stream-error handler", {
-                    agent: context.agent.name,
+                    agent: context.agent.slug,
                     errorType,
                 });
             } catch (publishError) {
@@ -491,7 +543,7 @@ export class AgentExecutor {
             const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }) => {
                 if (injectedEvents.length > 0) {
                     logger.info(`[prepareStep] Injecting ${injectedEvents.length} new user message(s)`, {
-                        agent: context.agent.name,
+                        agent: context.agent.slug,
                         stepNumber: step.stepNumber
                     });
 
@@ -535,12 +587,12 @@ export class AgentExecutor {
                 }, eventContext);
 
                 logger.info("Stream error event published to Nostr", {
-                    agent: context.agent.name,
+                    agent: context.agent.slug,
                     errorType,
                 });
             } catch (publishError) {
                 logger.error("Failed to publish stream error event", {
-                    agent: context.agent.name,
+                    agent: context.agent.slug,
                     error: formatAnyError(publishError),
                 });
             }
@@ -557,7 +609,7 @@ export class AgentExecutor {
 
         // After streaming, handle cleanup and post-processing
         logger.debug("[AgentExecutor] 🏃 Stream completed, handling post-processing", {
-            agent: context.agent.name,
+            agent: context.agent.slug,
             hasCompletionEvent: !!completionEvent,
             hasReasoningBuffer: reasoningBuffer.trim().length > 0
         });

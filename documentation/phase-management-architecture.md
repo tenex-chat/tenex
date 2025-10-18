@@ -211,7 +211,7 @@ interface PhaseTransition {
 
 ### Routing Decision Structure
 
-The orchestrator makes phase-aware routing decisions (src/agents/execution/ReasonActLoop.ts:18-24):
+The orchestrator makes phase-aware routing decisions:
 
 ```typescript
 interface RoutingDecision {
@@ -341,7 +341,7 @@ Quality phases are rarely skipped:
 
 ### END Agent Mechanism
 
-The system uses a special "END" agent to terminate conversations (src/agents/execution/ReasonActLoop.ts:95-110):
+The system uses a special "END" agent to terminate conversations:
 - Detected in routing decisions
 - Cleanly terminates conversation
 - Typically used after REFLECTION phase
@@ -412,7 +412,7 @@ Phase information flows through prompt construction:
 
 ### Invalid Agent Routing Recovery
 
-When orchestrator routes to non-existent agent (src/agents/execution/ReasonActLoop.ts:165-256):
+When orchestrator routes to non-existent agent:
 1. System detects invalid agent slug
 2. Sends corrective feedback to orchestrator
 3. Records lesson for future reference

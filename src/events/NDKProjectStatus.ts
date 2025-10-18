@@ -1,17 +1,18 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
+import { NDKKind } from "@/nostr/kinds";
 
 /**
  * NDKProjectStatus represents a kind 24010 event
  * Used to indicate project status including online agents and model configurations
  */
 export class NDKProjectStatus extends NDKEvent {
-  static kind = 24010;
-  static kinds = [24010];
+  static kind = NDKKind.TenexProjectStatus;
+  static kinds = [NDKKind.TenexProjectStatus];
 
   constructor(ndk?: NDK, event?: NDKEvent | NDKRawEvent) {
     super(ndk, event);
-    this.kind ??= 24010;
+    this.kind ??= NDKKind.TenexProjectStatus;
   }
 
   static from(event: NDKEvent): NDKProjectStatus {

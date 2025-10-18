@@ -13,7 +13,7 @@ The MCP integration follows a layered architecture:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Agent Execution Layer                 │
-│              (AgentExecutor, ReasonActLoop)              │
+│            (Execution Strategies & Agents)               │
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────┴───────────────────────────────────┐
@@ -22,8 +22,8 @@ The MCP integration follows a layered architecture:
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────┴───────────────────────────────────┐
-│                  MCP Service Layer                       │
-│                    (MCPService)                          │
+│                  MCP Manager Layer                       │
+│                    (MCPManager)                          │
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────┴───────────────────────────────────┐
@@ -34,10 +34,10 @@ The MCP integration follows a layered architecture:
 
 ### Key Components
 
-#### 1. MCPService (Core Service)
-**Location**: `src/services/mcp/MCPService.ts`
+#### 1. MCPManager (Core Service)
+**Location**: `src/services/mcp/MCPManager.ts`
 
-The singleton service that manages the lifecycle of MCP servers:
+The singleton service that manages the lifecycle of MCP servers using AI SDK's experimental MCP client:
 
 - **Server Management**: Starts, monitors, and stops MCP server processes
 - **Tool Discovery**: Fetches available tools from connected servers
@@ -46,25 +46,23 @@ The singleton service that manages the lifecycle of MCP servers:
 - **Security Enforcement**: Implements path restrictions and environment isolation
 
 **Critical Implementation Details**:
-- Uses StdioClientTransport for process communication
-- Implements graceful shutdown with SIGTERM/SIGKILL fallback
+- Uses AI SDK's `Experimental_StdioMCPTransport` for process communication
+- Uses AI SDK's `experimental_createMCPClient` for MCP protocol handling
 - Maintains a tool cache for synchronous access during prompt generation
 - Each server runs in an isolated subprocess with controlled environment
+- Supports resources as tools through `includeResourcesInTools` flag
+- Tools are exposed as AI SDK `CoreTool` objects natively
 
-#### 2. MCPToolAdapter
-**Location**: `src/services/mcp/MCPToolAdapter.ts`
+#### 2. Tool Integration
+**Implementation**: Direct AI SDK integration
 
-Bridges the gap between MCP's JSON Schema-based tools and TENEX's Zod-based type system:
+The MCPManager integrates MCP tools directly into the AI SDK tool system:
 
-- **Schema Translation**: Converts MCP input schemas to Zod schemas
-- **Type Safety**: Provides compile-time type checking for tool parameters
-- **Namespacing**: Prefixes tool names with `mcp__<server>__<tool>`
-- **Error Handling**: Wraps MCP tool execution with proper error boundaries
-
-**Key Functions**:
-- `adaptMCPTool()`: Converts raw MCP tools to TENEX Tool interface
-- `mcpSchemaToZod()`: Translates JSON Schema to Zod schema
-- `createTypedMCPTool()`: Creates strongly-typed tool wrappers
+- **Native Integration**: MCP tools are exposed as AI SDK `CoreTool` objects
+- **Namespacing**: Tools are prefixed with `mcp__<server>__<tool>`
+- **Type Safety**: AI SDK handles schema validation and type checking
+- **Resource Support**: MCP resources can be exposed as tools when enabled
+- **Error Handling**: Wrapped execution with proper error boundaries
 
 #### 3. Configuration System
 **Location**: `src/services/config/types.ts`
@@ -93,11 +91,11 @@ Configuration is layered:
 When a TENEX project starts:
 
 ```typescript
-// MCPService initialization sequence
+// MCPManager initialization sequence
 1. Load configuration (global + project)
-2. Filter servers by allowedPaths (security check)
-3. Start each server process in parallel
-4. Perform health check (5-second timeout)
+2. Start each server process in parallel
+3. Refresh tool cache from all connected servers
+4. Mark as initialized
 5. Fetch available tools from each server
 6. Cache tools for synchronous access
 7. Register tools with the tool registry
@@ -109,7 +107,7 @@ MCP servers expose their tools through the `tools/list` RPC method:
 
 ```typescript
 // Tool discovery flow
-Server Process → tools/list → MCPService
+Server Process → tools/list → MCPManager
                                   ↓
                           Parse & Validate
                                   ↓
@@ -135,7 +133,7 @@ Agent calls tool → ToolStreamHandler
                         ↓
                   MCPToolAdapter.execute()
                         ↓
-                  MCPService.executeTool()
+                  MCPManager.executeTool()
                         ↓
                   RPC: tools/call to server
                         ↓
@@ -159,7 +157,7 @@ buildSystemPrompt() → FragmentRegistry
                            ↓
                     mcpToolsFragment
                            ↓
-                    MCPService.getCachedTools()
+                    MCPManager.getCachedTools()
                            ↓
                     Generate markdown documentation
 ```
@@ -518,7 +516,7 @@ For testing without real MCP servers:
 
 4. **Parallel Startup Limits**: No limit on parallel server startups. System resource constraints need consideration.
 
-5. **Method Naming Inconsistency**: The codebase references `getAvailableTools()` in multiple places (AgentExecutor, tests) but MCPService only exposes `getCachedTools()`. This suggests either:
+5. **Method Naming Inconsistency**: The codebase references `getAvailableTools()` in multiple places (AgentExecutor, tests) but MCPManager only exposes `getCachedTools()`. This suggests either:
    - A missing public async method that should wrap `fetchAvailableTools()`
    - Incorrect usage throughout the codebase that should use `getCachedTools()`
    - An interface change that wasn't fully propagated

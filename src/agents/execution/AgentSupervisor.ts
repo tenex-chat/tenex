@@ -8,6 +8,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
+import { trace } from '@opentelemetry/api';
 
 /**
  * AgentSupervisor - Monitors agent execution and validates completion
@@ -37,7 +38,7 @@ export class AgentSupervisor {
   checkPhaseCompletion(): { skipped: boolean; unusedPhases: string[] } {
     if (!this.agent.phases) {
       logger.info("[AgentSupervisor] No phases defined for agent", {
-        agent: this.agent.name
+        agent: this.agent.slug
       });
       return { skipped: false, unusedPhases: [] };
     }
@@ -67,7 +68,7 @@ export class AgentSupervisor {
     const unusedPhases = definedPhases.filter(p => !allExecutedPhases.has(p.toLowerCase()));
 
     logger.info("[AgentSupervisor] Phase check complete", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       defined: definedPhases,
       executedThisTurn: Array.from(executedPhases),
       executedHistorically: Array.from(historicalPhases),
@@ -135,8 +136,10 @@ export class AgentSupervisor {
     agentPublisher: AgentPublisher,
     eventContext: EventContext
   ): Promise<boolean> {
+    const activeSpan = trace.getActiveSpan();
+
     logger.info("[AgentSupervisor] Starting execution completion check", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       hasCompletionEvent: !!completionEvent,
       hasMessage: !!completionEvent?.message,
       messageLength: completionEvent?.message?.length || 0,
@@ -148,29 +151,52 @@ export class AgentSupervisor {
       maxAttempts: this.maxContinuationAttempts
     });
 
+    if (activeSpan) {
+      activeSpan.addEvent('supervisor.validation_start', {
+        'supervisor.continuation_attempts': this.continuationAttempts,
+        'supervisor.has_phases': !!this.agent.phases,
+        'supervisor.phase_count': this.agent.phases ? Object.keys(this.agent.phases).length : 0,
+      });
+    }
+
     // Check if we've exceeded max continuation attempts
     if (this.continuationAttempts >= this.maxContinuationAttempts) {
       logger.warn("[AgentSupervisor] ⚠️ Max continuation attempts reached, forcing completion", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         attempts: this.continuationAttempts,
         lastReason: this.lastInvalidReason
       });
+
+      if (activeSpan) {
+        activeSpan.addEvent('supervisor.forced_completion', {
+          'reason': 'max_attempts_exceeded',
+          'attempts': this.continuationAttempts,
+        });
+      }
+
       return true;
     }
 
     // First validation: Check if we received a completion event at all
     if (!completionEvent) {
       logger.error("[AgentSupervisor] ❌ INVALID: No completion event received from LLM", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         attempts: this.continuationAttempts
       });
 
       const reason = "The LLM did not return a completion event. Please try again.";
 
+      if (activeSpan) {
+        activeSpan.addEvent('supervisor.validation_failed', {
+          'validation.type': 'missing_completion_event',
+          'validation.attempts': this.continuationAttempts,
+        });
+      }
+
       // Check if we're stuck in a loop with the same issue
       if (this.lastInvalidReason === reason) {
         logger.warn("[AgentSupervisor] ⚠️ Agent stuck with no completion events, forcing completion", {
-          agent: this.agent.name,
+          agent: this.agent.slug,
           attempts: this.continuationAttempts
         });
         return true;
@@ -185,7 +211,7 @@ export class AgentSupervisor {
     // Second validation: Check if there's an actual response (not just reasoning)
     if (!completionEvent.message?.trim()) {
       logger.info("[AgentSupervisor] ❌ INVALID: No response content from agent", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         hasReasoning: !!completionEvent.reasoning,
         reasoningLength: completionEvent.reasoning?.length || 0,
         attempts: this.continuationAttempts
@@ -193,10 +219,18 @@ export class AgentSupervisor {
 
       const reason = "You didn't provide a response to the user. Please address their request.";
 
+      if (activeSpan) {
+        activeSpan.addEvent('supervisor.validation_failed', {
+          'validation.type': 'empty_response',
+          'validation.attempts': this.continuationAttempts,
+          'validation.has_reasoning': !!completionEvent.reasoning,
+        });
+      }
+
       // Check if we're stuck in a loop with the same issue
       if (this.lastInvalidReason === reason) {
         logger.warn("[AgentSupervisor] ⚠️ Agent stuck responding with empty content, forcing completion", {
-          agent: this.agent.name,
+          agent: this.agent.slug,
           attempts: this.continuationAttempts
         });
         return true;
@@ -209,14 +243,20 @@ export class AgentSupervisor {
     }
 
     logger.info("[AgentSupervisor] ✓ Response validation passed", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       messagePreview: completionEvent.message.substring(0, 100)
     });
+
+    if (activeSpan) {
+      activeSpan.addEvent('supervisor.response_validated', {
+        'response.length': completionEvent.message.length,
+      });
+    }
 
     // Third validation: Check phase completion if applicable
     if (this.agent.phases && Object.keys(this.agent.phases).length > 0) {
       logger.info("[AgentSupervisor] Checking phase completion", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         definedPhases: Object.keys(this.agent.phases)
       });
 
@@ -224,7 +264,7 @@ export class AgentSupervisor {
 
       if (phaseCheck.skipped) {
         logger.info("[AgentSupervisor] Phases were skipped, validating if intentional", {
-          agent: this.agent.name,
+          agent: this.agent.slug,
         });
 
         // Validate if skipping was intentional
@@ -234,7 +274,7 @@ export class AgentSupervisor {
           // Check if we're stuck in a loop asking to execute phases
           if (this.lastInvalidReason === shouldContinue) {
             logger.warn("[AgentSupervisor] ⚠️ Agent stuck ignoring phase execution request, forcing completion", {
-              agent: this.agent.name,
+              agent: this.agent.slug,
               attempts: this.continuationAttempts,
               unusedPhases: phaseCheck.unusedPhases
             });
@@ -242,7 +282,7 @@ export class AgentSupervisor {
           }
 
           logger.info("[AgentSupervisor] ❌ INVALID: Phases need to be executed", {
-            agent: this.agent.name,
+            agent: this.agent.slug,
             unusedPhases: phaseCheck.unusedPhases,
             attempts: this.continuationAttempts
           });
@@ -253,12 +293,12 @@ export class AgentSupervisor {
         }
 
         logger.info("[AgentSupervisor] ✓ Phase skipping was intentional", {
-          agent: this.agent.name,
+          agent: this.agent.slug,
           skippedPhases: phaseCheck.unusedPhases
         });
       } else {
         logger.info("[AgentSupervisor] ✓ All phases executed or no phases skipped", {
-          agent: this.agent.name
+          agent: this.agent.slug
         });
       }
     }
@@ -266,7 +306,7 @@ export class AgentSupervisor {
     // All validations passed - publish any decisions before completing
     if (this.phaseValidationDecision) {
       logger.info("[AgentSupervisor] 📝 Publishing phase validation decision", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         decisionLength: this.phaseValidationDecision.length
       });
       await agentPublisher.conversation({
@@ -276,7 +316,7 @@ export class AgentSupervisor {
     }
 
     logger.info("[AgentSupervisor] ✅ EXECUTION COMPLETE: All validations passed", {
-      agent: this.agent.name
+      agent: this.agent.slug
     });
     return true;
   }
@@ -290,13 +330,13 @@ export class AgentSupervisor {
     const phaseCheck = this.checkPhaseCompletion();
     if (!phaseCheck.skipped) {
       logger.info("[AgentSupervisor] No phase validation needed - no phases skipped", {
-        agent: this.agent.name
+        agent: this.agent.slug
       });
       return ""; // No phases skipped, no need to continue
     }
 
     logger.info("[AgentSupervisor] 🔍 Starting phase validation with conversation snapshot", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       unusedPhases: phaseCheck.unusedPhases,
       responseLength: completionContent.length
     });
@@ -343,7 +383,7 @@ export class AgentSupervisor {
       const isDone = responseLower.includes("i'm done") || responseLower.includes("im done");
 
       logger.info("[AgentSupervisor] 📊 Phase validation LLM response", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         llmResponse: response,
         interpretation: shouldContinue ? "CONTINUE WITH PHASES" : (isDone ? "INTENTIONALLY DONE" : "SKIP WAS INTENTIONAL"),
       });
@@ -354,7 +394,7 @@ export class AgentSupervisor {
       return shouldContinue ? response : "";
     } catch (error) {
       logger.error("[AgentSupervisor] ❌ Phase validation failed", {
-        agent: this.agent.name,
+        agent: this.agent.slug,
         error: error instanceof Error ? error.message : String(error),
         defaulting: "Assuming phases were intentionally skipped"
       });

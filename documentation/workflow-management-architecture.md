@@ -63,7 +63,7 @@ The TENEX workflow management system implements a sophisticated phase-based mult
 
 ### Component Responsibilities
 
-1. **ConversationCoordinator** (`src/conversations/ConversationCoordinator.ts`)
+1. **ConversationCoordinator** (`src/conversations/services/ConversationCoordinator.ts`)
    - Maintains conversation state and history
    - Builds agent-specific message contexts
    - Tracks phase transitions and orchestrator turns
@@ -75,16 +75,11 @@ The TENEX workflow management system implements a sophisticated phase-based mult
    - Coordinates multi-agent collaboration
    - Never directly interacts with users
 
-3. **AgentExecutor** (`src/agents/execution/AgentExecutor.ts`)
-   - Instantiates ReasonActLoop backend
-   - Manages agent lifecycle
+3. **Agent Execution Strategies** (`src/agents/execution/strategies/`)
+   - Manages agent lifecycle through execution strategies
    - Handles streaming and tool execution
    - Enforces termination requirements
-
-4. **ReasonActLoop Backend**
-   - Unified streaming execution with tool support for all agents
-   - Handles orchestrator routing through delegate tool
-   - Manages Claude session continuity
+   - Multiple strategies: ThreadWithMemoryStrategy, BrainstormStrategy, FlattenedChronologicalStrategy
 
 ## Phase-Based State Machine
 
@@ -146,7 +141,7 @@ This sequence cannot be bypassed, ensuring consistent quality control.
    - Initialize tracing context
    - Log conversation start
    ↓
-3. Orchestrator Analysis (ReasonActLoop)
+3. Orchestrator Analysis (Execution Strategy)
    - Parse routing context JSON
    - Determine target agents and phase
    - Start orchestrator turn
@@ -156,7 +151,7 @@ This sequence cannot be bypassed, ensuring consistent quality control.
    - Create execution contexts
    - Execute via AgentExecutor
    ↓
-5. Streaming Execution (ReasonActLoop)
+5. Streaming Execution (Execution Strategy)
    - Stream LLM responses
    - Execute tools in parallel
    - Handle termination
@@ -461,8 +456,8 @@ The orchestrator learns from routing mistakes:
 
 ```typescript
 // AgentExecutor uses a single unified execution model for all agents
-// All agents execute through ReasonActLoop
-const executor = new ReasonActLoop(this.llmService);
+// All agents execute through execution strategies
+const strategy = executionContext.agent.executionStrategy;
 ```
 
 ### Stream Processing Pattern

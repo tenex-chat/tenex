@@ -43,21 +43,21 @@ export class SchedulerService {
     this.ndk = ndk;
     this.projectPath = projectPath || process.cwd();
 
-    logger.info("Initializing SchedulerService");
-    
+    logger.debug("Initializing SchedulerService");
+
     // Ensure .tenex directory exists
     const tenexDir = path.dirname(this.taskFilePath);
     await fs.mkdir(tenexDir, { recursive: true });
 
     // Load existing tasks
     await this.loadTasks();
-    
+
     // Start all loaded tasks
     for (const task of this.taskMetadata.values()) {
       this.startTask(task);
     }
-    
-    logger.info(`SchedulerService initialized with ${this.taskMetadata.size} tasks`);
+
+    logger.debug(`SchedulerService initialized with ${this.taskMetadata.size} tasks`);
   }
 
   public async addTask(
@@ -224,10 +224,10 @@ export class SchedulerService {
         this.taskMetadata.set(task.id, task);
       }
 
-      logger.info(`Loaded ${tasks.length} scheduled tasks from disk`);
+      logger.debug(`Loaded ${tasks.length} scheduled tasks from disk`);
     } catch (error: unknown) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        logger.info("No existing scheduled tasks file found, starting fresh");
+        logger.debug("No existing scheduled tasks file found, starting fresh");
       } else {
         logger.error("Failed to load scheduled tasks:", error);
       }

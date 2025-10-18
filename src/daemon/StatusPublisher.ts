@@ -1,5 +1,6 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { getNDK } from "@/nostr/ndkClient";
+import { NDKKind } from "@/nostr/kinds";
 import { getProjectContextManager } from "./ProjectContextManager";
 import { logger } from "@/utils/logger";
 import type { ProjectContext } from "@/services/ProjectContext";
@@ -123,7 +124,7 @@ export class DaemonStatusPublisher {
 
     // Create status event
     const event = new NDKEvent(ndk);
-    event.kind = 24010; // Ephemeral status event
+    event.kind = NDKKind.TenexProjectStatus;
     event.content = JSON.stringify({
       project: {
         id: projectId,
@@ -180,7 +181,7 @@ export class DaemonStatusPublisher {
 
     // Create daemon status event
     const event = new NDKEvent(ndk);
-    event.kind = 24010; // Ephemeral status event
+    event.kind = NDKKind.TenexProjectStatus;
     event.content = JSON.stringify({
       daemon: {
         version: "2.0.0",

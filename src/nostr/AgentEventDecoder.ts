@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services";
 import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 
@@ -173,7 +173,7 @@ export class AgentEventDecoder {
    * Check if event is a status event
    */
   static isStatusEvent(event: NDKEvent): boolean {
-    return event.kind === EVENT_KINDS.PROJECT_STATUS;
+    return event.kind === NDKKind.TenexProjectStatus;
   }
 
   /**
@@ -213,7 +213,7 @@ export class AgentEventDecoder {
    * Check if this is a streaming event
    */
   static isStreamingEvent(event: NDKEvent): boolean {
-    return event.kind === EVENT_KINDS.STREAMING_RESPONSE;
+    return event.kind === NDKKind.TenexStreamingResponse;
   }
 
   /**

@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentInstance } from "@/agents/types";
-import { EVENT_KINDS } from "@/llm/types";
+import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { agentsRegistryService } from "@/services/AgentsRegistryService";
@@ -23,6 +23,7 @@ import {
   type TypingIntent,
   type ToolUseIntent,
 } from "./AgentEventEncoder";
+import { trace, propagation, context as otelContext } from '@opentelemetry/api';
 
 /**
  * Comprehensive publisher for all agent-related Nostr events.
@@ -49,7 +50,7 @@ export class AgentPublisher {
       logger.warn(`Failed to publish ${context}`, {
         error,
         eventId: event.id?.substring(0, 8),
-        agent: this.agent.name,
+        agent: this.agent.slug,
       });
     }
   }
@@ -61,7 +62,7 @@ export class AgentPublisher {
    */
   async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching completion", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       contentLength: intent.content.length,
       summary: intent.summary,
     });
@@ -74,7 +75,7 @@ export class AgentPublisher {
 
     logger.debug("Completion event published", {
       eventId: event.id,
-      agent: this.agent.name,
+      agent: this.agent.slug,
     });
 
     return event;
@@ -93,15 +94,34 @@ export class AgentPublisher {
   }> {
     const events = this.encoder.encodeDelegation(intent, context);
 
+    // CRITICAL: Inject trace context into delegation event for distributed tracing
+    // This allows the delegated agent to link their execution back to this delegation
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      const carrier: Record<string, string> = {};
+      propagation.inject(otelContext.active(), carrier);
+
+      // Add trace context as a tag on the Nostr event
+      for (const event of events) {
+        if (carrier['traceparent']) {
+          event.tags.push(['trace_context', carrier['traceparent']]);
+          logger.debug('[AgentPublisher] Injected trace context into delegation event', {
+            eventId: event.id?.substring(0, 8),
+            traceparent: carrier['traceparent'].substring(0, 32) + '...',
+          });
+        }
+      }
+    }
+
     // Sign the event (should be single event now)
     for (const event of events) {
       await this.agent.sign(event);
     }
-    
+
     // Register delegation using the new clean interface
     const registry = DelegationRegistry.getInstance();
     const mainEvent = events[0]; // Should only be one event now
-    
+
     // Removed redundant logging - registration is logged in DelegationRegistry
     
     const batchId = await registry.registerDelegation({
@@ -125,6 +145,17 @@ export class AgentPublisher {
         eventIdTruncated: event.id?.substring(0, 8),
         kind: event.kind,
         assignedTo: event.tagValue("p")?.substring(0, 16),
+      });
+    }
+
+    // Add telemetry for delegation
+    if (activeSpan) {
+      activeSpan.addEvent('delegation_published', {
+        'delegation.batch_id': batchId,
+        'delegation.recipient_count': intent.recipients.length,
+        'delegation.recipients': intent.recipients.map(p => p.substring(0, 8)).join(', '),
+        'delegation.request_preview': intent.request.substring(0, 100),
+        'delegation.phase': intent.phase || 'none',
       });
     }
 
@@ -152,7 +183,7 @@ export class AgentPublisher {
     const recipientPubkey = intent.recipients[0]; // Follow-ups are always to single recipient
     
     logger.debug("[AgentPublisher] Creating follow-up event", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       recipientPubkey: recipientPubkey.substring(0, 8),
       responseEventId: responseEvent.id?.substring(0, 8),
     });
@@ -201,7 +232,7 @@ export class AgentPublisher {
     batchId: string;
   }> {
     logger.debug("[AgentPublisher] Publishing ask event", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       content: intent.content,
       hasSuggestions: !!intent.suggestions,
       suggestionCount: intent.suggestions?.length,
@@ -250,7 +281,7 @@ export class AgentPublisher {
    */
   async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching conversation response", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       contentLength: intent.content.length,
     });
 
@@ -270,7 +301,7 @@ export class AgentPublisher {
    */
   async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching error", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       error: intent.message,
     });
 
@@ -282,7 +313,7 @@ export class AgentPublisher {
 
     logger.debug("Error event published", {
       eventId: event.id,
-      agent: this.agent.name,
+      agent: this.agent.slug,
       error: intent.message,
     });
 
@@ -295,7 +326,7 @@ export class AgentPublisher {
   async typing(intent: TypingIntent, context: EventContext): Promise<NDKEvent> {
     // Note: Don't flush stream for typing indicators as they're transient
     logger.debug("Dispatching typing indicator", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       state: intent.state,
     });
 
@@ -335,7 +366,7 @@ export class AgentPublisher {
    */
   async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching lesson", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
     });
 
     const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
@@ -346,7 +377,7 @@ export class AgentPublisher {
 
     logger.debug("Lesson event published", {
       eventId: lessonEvent.id,
-      agent: this.agent.name,
+      agent: this.agent.slug,
     });
 
     return lessonEvent;
@@ -358,7 +389,7 @@ export class AgentPublisher {
    */
   async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
     logger.debug("Dispatching tool usage", {
-      agent: this.agent.name,
+      agent: this.agent.slug,
       tool: intent.toolName,
       contentLength: intent.content.length,
     });
@@ -371,7 +402,7 @@ export class AgentPublisher {
 
     logger.debug("Tool usage event published", {
       eventId: event.id,
-      agent: this.agent.name,
+      agent: this.agent.slug,
       tool: intent.toolName,
     });
 
@@ -400,7 +431,7 @@ export class AgentPublisher {
       sequence: streamingIntent.sequence,
       isReasoning,
       contentPreview: delta.substring(0, 50) + (delta.length > 50 ? "..." : ""),
-      agentName: this.agent.name
+      agentName: this.agent.slug
     });
 
     await this.streaming(streamingIntent, context);
@@ -440,7 +471,7 @@ export class AgentPublisher {
     logger.debug("Created task", {
       taskId: task.id,
       title,
-      agent: this.agent.name,
+      agent: this.agent.slug,
       sessionId: claudeSessionId,
     });
 
@@ -473,7 +504,7 @@ export class AgentPublisher {
     logger.debug("Published task update", {
       taskId: task.id,
       contentLength: content.length,
-      agent: this.agent.name,
+      agent: this.agent.slug,
     });
 
     return update;
@@ -609,7 +640,7 @@ export class AgentPublisher {
   ): Promise<NDKEvent> {
     try {
       const requestEvent = new NDKEvent(getNDK(), {
-        kind: EVENT_KINDS.AGENT_REQUEST,
+        kind: NDKKind.AgentRequest,
         content: "",
         tags: [],
       });

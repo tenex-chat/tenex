@@ -25,7 +25,6 @@ export class ConversationPersistenceService implements IConversationPersistenceS
 
   async initialize(): Promise<void> {
     await this.adapter.initialize();
-    logger.info("[ConversationPersistenceService] Initialized");
   }
 
   async save(conversation: Conversation): Promise<void> {
@@ -54,7 +53,6 @@ export class ConversationPersistenceService implements IConversationPersistenceS
       }
     }
 
-    logger.info(`[ConversationPersistenceService] Loaded ${conversations.length} conversations`);
     return conversations;
   }
 

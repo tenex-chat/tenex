@@ -1,9 +1,10 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { EVENT_KINDS, LanguageModelUsageWithCostUsd } from "@/llm/types";
+import { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { getNDK } from "@/nostr/ndkClient";
+import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKKind, NDKTask } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
 
 /**
@@ -424,11 +425,11 @@ export class AgentEventEncoder {
 
         // Use appropriate event kind based on state
         if (intent.state === "start") {
-            event.kind = EVENT_KINDS.TYPING_INDICATOR;
+            event.kind = NDKKind.TenexAgentTypingStart;
             event.content = `${agent.name} is typing`;
         } else {
             // Stop event uses different kind
-            event.kind = EVENT_KINDS.TYPING_INDICATOR_STOP;
+            event.kind = NDKKind.TenexAgentTypingStop;
             event.content = "";
         }
 
@@ -446,7 +447,7 @@ export class AgentEventEncoder {
      */
     encodeStreamingContent(intent: StreamingIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = EVENT_KINDS.STREAMING_RESPONSE;
+        event.kind = NDKKind.TenexStreamingResponse;
         event.content = intent.content;
 
         // Add conversation tags for proper threading

@@ -39,10 +39,10 @@ export class DynamicToolService {
      * Initialize the service and start watching for dynamic tools
      */
     public async initialize(): Promise<void> {
-        logger.info("[DynamicToolService] Initializing dynamic tool service", {
+        logger.debug("[DynamicToolService] Initializing dynamic tool service", {
             path: this.dynamicToolsPath
         });
-        
+
         // Ensure the dynamic tools directory exists
         try {
             await stat(this.dynamicToolsPath);
@@ -50,14 +50,14 @@ export class DynamicToolService {
             // Directory doesn't exist, create it
             const { mkdir } = await import("fs/promises");
             await mkdir(this.dynamicToolsPath, { recursive: true });
-            logger.info("[DynamicToolService] Created dynamic tools directory", {
+            logger.debug("[DynamicToolService] Created dynamic tools directory", {
                 path: this.dynamicToolsPath
             });
         }
-        
+
         // Initial scan for existing tools
         await this.scanDirectory();
-        
+
         // Set up file watcher with debouncing
         this.setupWatcher();
     }
@@ -69,12 +69,12 @@ export class DynamicToolService {
         try {
             const files = await readdir(this.dynamicToolsPath);
             const tsFiles = files.filter(f => f.endsWith(".ts"));
-            
-            logger.info("[DynamicToolService] Found dynamic tool files", {
+
+            logger.debug("[DynamicToolService] Found dynamic tool files", {
                 count: tsFiles.length,
                 files: tsFiles
             });
-            
+
             for (const file of tsFiles) {
                 const filePath = join(this.dynamicToolsPath, file);
                 await this.loadTool(filePath);
@@ -113,8 +113,8 @@ export class DynamicToolService {
                 handleFileChange(filename);
             }
         });
-        
-        logger.info("[DynamicToolService] File watcher initialized");
+
+        logger.debug("[DynamicToolService] File watcher initialized");
     }
     
     /**

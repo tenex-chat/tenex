@@ -38,7 +38,7 @@ export  class AgentRouter {
         if (agent) {
           // Check if this is a global agent that needs project validation
           if (agent.isGlobal && !this.validateProjectContext(event, projectContext)) {
-            logger.info(chalk.gray(`Skipping global agent ${agent.name} - event not for this project context`));
+            logger.info(chalk.gray(`Skipping global agent ${agent.slug} - event not for this project context`));
             continue;
           }
           targetAgents.push(agent);

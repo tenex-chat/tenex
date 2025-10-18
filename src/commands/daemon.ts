@@ -100,8 +100,6 @@ export const daemonCommand = new Command("daemon")
       console.log(chalk.gray(`   Memory: ${Math.round(status.memory.heapUsed / 1024 / 1024)} MB`));
       console.log();
 
-      logger.info("TENEX daemon is running. Press Ctrl+C to stop.");
-
       // Keep the process alive
       await new Promise(() => {
         // This promise never resolves, keeping the daemon running
