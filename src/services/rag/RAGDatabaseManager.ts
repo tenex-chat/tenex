@@ -1,5 +1,6 @@
 import { connect, type Connection, type Table } from "@lancedb/lancedb";
 import * as path from "path";
+import * as os from "os";
 import { logger } from "@/utils/logger";
 import { handleError } from "@/utils/error-handler";
 
@@ -23,10 +24,10 @@ export class RAGDatabaseManager {
     private tableCache: Map<string, Table> = new Map();
 
     constructor(dataDir?: string) {
-        // Use provided directory or environment variable, fallback to default
+        // Use provided directory or environment variable, fallback to global location
         this.dataDir = dataDir ||
                       process.env.LANCEDB_DATA_DIR ||
-                      path.join(process.cwd(), ".tenex", "data", "lancedb");
+                      path.join(os.homedir(), ".tenex", "data", "lancedb");
 
         logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
     }

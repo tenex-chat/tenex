@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -139,7 +140,8 @@ export class DelegationRegistry extends EventEmitter {
 
   private constructor() {
     super();
-    this.persistencePath = path.join(process.cwd(), ".tenex", "delegations.json");
+    // Use global location for delegations since it's a singleton
+    this.persistencePath = path.join(os.homedir(), ".tenex", "delegations.json");
   }
 
   /**

@@ -1,6 +1,7 @@
 import { watch } from "fs";
 import { readdir, stat } from "fs/promises";
 import { join, basename } from "path";
+import { homedir } from "os";
 import { logger } from "@/utils/logger";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
@@ -16,7 +17,8 @@ export type DynamicToolFactory = (context: ExecutionContext) => AISdkTool<unknow
  */
 export class DynamicToolService {
     private static instance: DynamicToolService;
-    private readonly dynamicToolsPath = join(process.cwd(), ".tenex/tools");
+    // Use global location for dynamic tools since it's a singleton
+    private readonly dynamicToolsPath = join(homedir(), ".tenex", "tools");
     private dynamicTools = new Map<string, DynamicToolFactory>();
     private watcher: ReturnType<typeof watch> | null = null;
     private fileHashes = new Map<string, string>();

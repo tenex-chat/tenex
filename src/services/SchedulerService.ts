@@ -1,6 +1,7 @@
 import * as cron from "node-cron";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as os from "os";
 import { logger } from "../utils/logger";
 import { ConfigService } from "./ConfigService";
 import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -25,7 +26,8 @@ export class SchedulerService {
   private projectPath: string | null = null;
 
   private constructor() {
-    const tenexDir = path.join(process.cwd(), ".tenex");
+    // Use global location for scheduled tasks since it's a singleton
+    const tenexDir = path.join(os.homedir(), ".tenex");
     this.taskFilePath = path.join(tenexDir, "scheduled_tasks.json");
   }
 

@@ -15,7 +15,8 @@ export class AgentMetadataStore {
     private agentSlug: string,
     projectPath: string
   ) {
-    this.filePath = path.join(projectPath, ".tenex", "metadata", `${conversationId}-${agentSlug}.json`);
+    // projectPath is already the full path (e.g., ~/.tenex/projects/<dTag>/)
+    this.filePath = path.join(projectPath, "metadata", `${conversationId}-${agentSlug}.json`);
     this.load();
   }
 

@@ -20,7 +20,8 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
   private metadataLock: Promise<void> = Promise.resolve();
 
   constructor(projectPath: string) {
-    this.conversationsDir = path.join(projectPath, ".tenex", "conversations");
+    // projectPath is already the full path (e.g., ~/.tenex/projects/<dTag>/)
+    this.conversationsDir = path.join(projectPath, "conversations");
     this.metadataPath = path.join(this.conversationsDir, "metadata.json");
     this.archiveDir = path.join(this.conversationsDir, "archive");
   }

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import type { ModelMessage } from "ai";
 import { logger } from "@/utils/logger";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -9,7 +10,7 @@ import { formatAnyError } from "@/utils/error-formatter";
  * Single Responsibility: Persist and retrieve tool execution messages
  */
 export class ToolMessageStorage {
-  private readonly storageDir = path.join(".tenex", "tool-messages");
+  private readonly storageDir = path.join(os.homedir(), ".tenex", "tool-messages");
 
   /**
    * Store tool messages for later reconstruction

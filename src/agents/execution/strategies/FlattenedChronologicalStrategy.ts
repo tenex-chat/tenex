@@ -40,7 +40,7 @@ interface EventWithContext {
 export class FlattenedChronologicalStrategy implements MessageGenerationStrategy {
 
     /**
-     * Build messages with flattened chronological context
+     * Build messages with flattened chronological context (telemetry wrapper)
      */
     async buildMessages(
         context: ExecutionContext,
@@ -59,75 +59,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             trace.setSpan(otelContext.active(), span),
             async () => {
                 try {
-                    const conversation = context.getConversation();
-
-                    if (!conversation) {
-                        span.addEvent("error", { "reason": "conversation_not_found" });
-                        throw new Error(`Conversation ${context.conversationId} not found`);
-                    }
-
-                    span.setAttribute("conversation.event_count", conversation.history.length);
-
-                    const messages: ModelMessage[] = [];
-
-                    // Add system prompt
-                    await this.addSystemPrompt(messages, context);
-
-                    // CRITICAL: Capture the FULL compiled system prompt for debugging
-                    const systemMessage = messages.find(m => m.role === "system");
-                    if (systemMessage) {
-                        const systemContent = typeof systemMessage.content === "string"
-                            ? systemMessage.content
-                            : JSON.stringify(systemMessage.content);
-
-                        span.addEvent("system_prompt_compiled", {
-                            "prompt.length": systemContent.length,
-                            "prompt.content": systemContent, // FULL PROMPT for debugging
-                        });
-                    }
-
-                    // Get all events that involve this agent
-                    const relevantEvents = await this.gatherRelevantEvents(
-                        context,
-                        conversation.history,
-                        eventFilter
-                    );
-
-                    span.addEvent("events_gathered", {
-                        "relevant_event_count": relevantEvents.length,
-                        "total_event_count": conversation.history.length,
-                    });
-
-                    // Sort events chronologically
-                    relevantEvents.sort((a, b) => a.timestamp - b.timestamp);
-
-                    // Build the flattened view
-                    const flattenedContent = await this.buildFlattenedView(
-                        relevantEvents,
-                        context.agent.pubkey,
-                        context.conversationId,
-                        context.debug
-                    );
-
-                    messages.push(...flattenedContent);
-
-                    // Add special context instructions if needed
-                    await addAllSpecialContexts(
-                        messages,
-                        triggeringEvent,
-                        context.isDelegationCompletion || false,
-                        context.agent.slug
-                    );
-
-                    span.setAttributes({
-                        "messages.total": messages.length,
-                        "messages.has_system": messages.some(m => m.role === "system"),
-                    });
-
-                    span.addEvent("messages_built", {
-                        "final_message_count": messages.length,
-                    });
-
+                    const messages = await this.buildMessagesCore(context, triggeringEvent, eventFilter, span);
                     span.setStatus({ code: SpanStatusCode.OK });
                     return messages;
                 } catch (error) {
@@ -139,6 +71,87 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 }
             }
         );
+    }
+
+    /**
+     * Build messages core logic (pure business logic)
+     */
+    private async buildMessagesCore(
+        context: ExecutionContext,
+        triggeringEvent: NDKEvent,
+        eventFilter: ((event: NDKEvent) => boolean) | undefined,
+        span: ReturnType<typeof tracer.startSpan>
+    ): Promise<ModelMessage[]> {
+        const conversation = context.getConversation();
+
+        if (!conversation) {
+            span.addEvent("error", { "reason": "conversation_not_found" });
+            throw new Error(`Conversation ${context.conversationId} not found`);
+        }
+
+        span.setAttribute("conversation.event_count", conversation.history.length);
+
+        const messages: ModelMessage[] = [];
+
+        // Add system prompt
+        await this.addSystemPrompt(messages, context);
+
+        // Capture system prompt for debugging
+        const systemMessage = messages.find(m => m.role === "system");
+        if (systemMessage) {
+            const systemContent = typeof systemMessage.content === "string"
+                ? systemMessage.content
+                : JSON.stringify(systemMessage.content);
+
+            span.addEvent("system_prompt_compiled", {
+                "prompt.length": systemContent.length,
+                "prompt.content": systemContent,
+            });
+        }
+
+        // Get all events that involve this agent
+        const relevantEvents = await this.gatherRelevantEvents(
+            context,
+            conversation.history,
+            eventFilter
+        );
+
+        span.addEvent("events_gathered", {
+            "relevant_event_count": relevantEvents.length,
+            "total_event_count": conversation.history.length,
+        });
+
+        // Sort events chronologically
+        relevantEvents.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Build the flattened view
+        const flattenedContent = await this.buildFlattenedView(
+            relevantEvents,
+            context.agent.pubkey,
+            context.conversationId,
+            context.debug
+        );
+
+        messages.push(...flattenedContent);
+
+        // Add special context instructions if needed
+        await addAllSpecialContexts(
+            messages,
+            triggeringEvent,
+            context.isDelegationCompletion || false,
+            context.agent.slug
+        );
+
+        span.setAttributes({
+            "messages.total": messages.length,
+            "messages.has_system": messages.some(m => m.role === "system"),
+        });
+
+        span.addEvent("messages_built", {
+            "final_message_count": messages.length,
+        });
+
+        return messages;
     }
 
     /**
@@ -610,6 +623,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             const systemMessages = await buildSystemPromptMessages({
                 agent: context.agent,
                 project,
+                projectPath: context.projectPath,
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,

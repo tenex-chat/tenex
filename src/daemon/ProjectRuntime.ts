@@ -8,6 +8,8 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { LLMLogger } from "@/logging/LLMLogger";
 import { ConversationCoordinator } from "@/conversations";
 import { logger } from "@/utils/logger";
+import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
+import { trace } from "@opentelemetry/api";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 
@@ -18,6 +20,7 @@ import * as fs from "node:fs/promises";
 export class ProjectRuntime {
   public readonly projectId: string;
   public readonly projectPath: string;
+  private readonly dTag: string;
 
   private project: NDKProject;
   private context: ProjectContext | null = null;
@@ -30,7 +33,7 @@ export class ProjectRuntime {
   private lastEventTime: Date | null = null;
   private eventCount = 0;
 
-  constructor(project: NDKProject) {
+  constructor(project: NDKProject, projectsBase: string) {
     this.project = project;
 
     // Build project ID: "31933:authorPubkey:dTag"
@@ -38,8 +41,12 @@ export class ProjectRuntime {
     if (!dTag) {
       throw new Error("Project missing required d tag");
     }
+    this.dTag = dTag;
     this.projectId = `31933:${project.pubkey}:${dTag}`;
-    this.projectPath = path.join(".tenex", "projects", this.projectId);
+
+    // Project working directory: projectsBase/dTag
+    // Contains: conversations/, logs/, and git repo contents
+    this.projectPath = path.join(projectsBase, dTag);
   }
 
   /**
@@ -56,12 +63,23 @@ export class ProjectRuntime {
     });
 
     try {
-      // Create project directories
+      // Create project directory and metadata subdirectories
+      // Note: projectPath is ~/.tenex/projects/<dTag>/
       await fs.mkdir(this.projectPath, { recursive: true });
       await fs.mkdir(path.join(this.projectPath, "conversations"), { recursive: true });
       await fs.mkdir(path.join(this.projectPath, "logs"), { recursive: true });
 
-      // Initialize components
+      // Clone git repository if project has one, otherwise initialize a new repo
+      const repoUrl = this.project.repo;
+      if (repoUrl) {
+        logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
+        await cloneGitRepository(repoUrl, this.projectPath);
+      } else {
+        logger.info(`Initializing new git repository`, { projectId: this.projectId });
+        await initializeGitRepository(this.projectPath);
+      }
+
+      // Initialize components (projectPath is the project working directory)
       const agentRegistry = new AgentRegistry(this.projectPath);
       await agentRegistry.loadFromProject(this.project);
 
@@ -73,15 +91,18 @@ export class ProjectRuntime {
       await agentRegistry.persistPMStatus();
 
       // Initialize conversation coordinator
-      this.conversationCoordinator = new ConversationCoordinator(
-        path.join(this.projectPath, "conversations")
-      );
+      // Pass projectPath - FileSystemAdapter will add "conversations" subdirectory
+      this.conversationCoordinator = new ConversationCoordinator(this.projectPath);
 
       // Set conversation coordinator in context
       this.context.conversationCoordinator = this.conversationCoordinator;
 
-      // Initialize event handler
-      this.eventHandler = new EventHandler(this.projectPath);
+      // Initialize event handler with project working directory
+      // EventHandler uses the conversations directory from ConversationCoordinator
+      this.eventHandler = new EventHandler(
+        this.projectPath,  // Project working directory for execution context
+        this.projectPath   // Base path - EventHandler will resolve conversations path
+      );
       await this.eventHandler.initialize();
 
       // Start status publisher (publishes TenexProjectStatus events)
@@ -121,6 +142,12 @@ export class ProjectRuntime {
     // Update stats
     this.lastEventTime = new Date();
     this.eventCount++;
+
+    // Set project.dtag on active span for trace filtering
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.setAttribute("project.dtag", this.dTag);
+    }
 
     // Run event handler with the project context
     // AsyncLocalStorage ensures all async operations within this scope

@@ -1,6 +1,7 @@
 import { logger } from "@/utils/logger";
 import { handleError } from "@/utils/error-handler";
 import * as path from "path";
+import * as os from "os";
 import * as fs from "fs/promises";
 import { RAGService } from "./RAGService";
 
@@ -53,7 +54,8 @@ export class RagSubscriptionService {
   private resourceListeners: Map<string, (notification: Notification) => void> = new Map();
 
   private constructor() {
-    const tenexDir = path.join(process.cwd(), ".tenex");
+    // Use global location for RAG subscriptions since it's a singleton
+    const tenexDir = path.join(os.homedir(), ".tenex");
     this.persistencePath = path.join(tenexDir, "rag_subscriptions.json");
     this.ragService = RAGService.getInstance();
   }
