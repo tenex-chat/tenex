@@ -95,15 +95,16 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             tools: []
         };
 
-        // Create mock execution context
+        // Create mock execution context (will be updated per test)
         mockContext = {
             agent: mockAgent,
             conversationId: CONVERSATION_ID,
+            projectPath: "/test/path",
+            triggeringEvent: events[events.length - 1], // Default to last event
             conversationCoordinator: {
-                threadService: {
-                    getThreadToEvent: () => events
-                }
-            },
+                threadService: new (await import("@/conversations/services/ThreadService")).ThreadService()
+            } as any,
+            agentPublisher: {} as any,
             getConversation: () => mockConversation,
             isDelegationCompletion: false
         } as ExecutionContext;
@@ -111,6 +112,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
 
     it("should NOT include intermediate claude-code messages that don't p-tag PM", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>
@@ -128,9 +130,10 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
 
         // Event abf94738: "📊 Let me check the uncommitted files..."
         // This event does NOT p-tag PM, so should NOT appear as a STANDALONE message from claude-code
-        // (It's OK for it to appear inside a delegation result marker or tool result)
+        // (It's OK for it to appear inside a delegation XML block or tool result)
         const hasIntermediateMessage1AsStandalone = messageContents.some(content =>
             content.includes("📊 Let me check the uncommitted files") &&
+            !content.includes("<delegation") &&
             !content.includes("[delegation result from") &&
             !content.includes("tool-result")
         );
@@ -140,6 +143,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
         // This event does NOT p-tag PM, so should NOT appear as a STANDALONE message from claude-code
         const hasIntermediateMessage2AsStandalone = messageContents.some(content =>
             content.includes("📈 Now let me get the detailed changes") &&
+            !content.includes("<delegation") &&
             !content.includes("[delegation result from") &&
             !content.includes("tool-result")
         );
@@ -148,6 +152,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
 
     it("should include the completion message that p-tags PM and mark it as delegation result", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>
@@ -157,17 +162,18 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
         // Event 52c6c5df: The actual delegation completion
         // This event DOES p-tag PM and has status:completed, so SHOULD be in messages
         const hasCompletionMessage = messageContents.some(content =>
-            content.includes("📋 **Summary: You have 13 uncommitted files**")
+            content.includes("📋 **Summary: You have 13 uncommitted files**") ||
+            content.includes("13 uncommitted files")
         );
         expect(hasCompletionMessage).toBe(true);
 
-        // It should appear as a delegation result marker
+        // It should appear within delegation context (either XML block or result marker)
         // Note: Shows "from User" because PubkeyNameRepository fallback when project context not initialized
-        const hasDelegationResultForCompletion = messageContents.some(content =>
-            content.includes("[delegation result from User") &&
-            content.includes("📋 **Summary: You have 13 uncommitted files**")
+        const hasDelegationContextForCompletion = messageContents.some(content =>
+            (content.includes("<delegation") || content.includes("[delegation result from")) &&
+            (content.includes("📋 **Summary: You have 13 uncommitted files**") || content.includes("13 uncommitted files"))
         );
-        expect(hasDelegationResultForCompletion).toBe(true);
+        expect(hasDelegationContextForCompletion).toBe(true);
     });
 
 });

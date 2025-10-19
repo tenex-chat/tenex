@@ -168,18 +168,94 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const relevantEvents: EventWithContext[] = [];
         const delegationRegistry = DelegationRegistry.getInstance();
 
-
         // Track delegations this agent has made
         const outgoingDelegations = new Map<string, { content: string, targets: string[] }>();
+
+        // STEP 1: Build thread path set for inclusion
+        // Build the parent chain from triggering event to root
+        const triggeringEvent = context.triggeringEvent;
+        const eventMap = new Map(allEvents.map(e => [e.id, e]));
+
+        // Build parent chain
+        const parentChain: NDKEvent[] = [];
+        let current: NDKEvent | undefined = triggeringEvent;
+        const visited = new Set<string>();
+
+        while (current) {
+            if (visited.has(current.id)) {
+                break; // Circular reference protection
+            }
+            visited.add(current.id);
+            parentChain.unshift(current); // Add to front to maintain order
+
+            const parentId = current.tagValue("e");
+            if (!parentId) break; // Reached root
+
+            current = eventMap.get(parentId);
+        }
+
+        // Determine thread path based on depth
+        let threadPath: NDKEvent[];
+        const rootEvent = parentChain[0];
+        const rootId = rootEvent?.id;
+
+        // Special case: If triggering event is a direct reply to root,
+        // include ALL sibling replies to root (for collaborative root-level discussions)
+        if (parentChain.length === 2 && rootId) {
+            // Add root
+            threadPath = [rootEvent];
+
+            // Add ALL direct replies to root (sorted chronologically)
+            const rootReplies = allEvents
+                .filter(e => {
+                    if (e.id === rootId) return false; // Skip root itself
+                    const parentId = e.tagValue("e");
+                    return parentId === rootId;
+                })
+                .sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+            threadPath.push(...rootReplies);
+        } else {
+            // For deeper threads, only include direct parent chain (no siblings)
+            threadPath = parentChain;
+        }
+
+        const threadPathIds = new Set(threadPath.map(e => e.id));
+
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            activeSpan.addEvent("thread_path_computed", {
+                "thread_path.event_count": threadPath.length,
+                "thread_path.parent_chain_depth": parentChain.length,
+                "thread_path.is_root_level_reply": parentChain.length === 2,
+                "thread_path.includes_root_siblings": parentChain.length === 2,
+                "thread_path.root_id": threadPath[0]?.id?.substring(0, 8),
+                "thread_path.triggering_id": triggeringEvent.id?.substring(0, 8)
+            });
+        }
 
         for (const event of allEvents) {
             // Apply event filter if provided
             if (eventFilter && !eventFilter(event)) {
+                if (activeSpan) {
+                    activeSpan.addEvent("event.filtered_by_external", {
+                        "event.id": event.id?.substring(0, 8),
+                        "event.content": event.content?.substring(0, 50),
+                        "filter.reason": "external_filter"
+                    });
+                }
                 continue;
             }
 
             // Skip reasoning events
             if (hasReasoningTag(event)) {
+                if (activeSpan) {
+                    activeSpan.addEvent("event.filtered_by_reasoning", {
+                        "event.id": event.id?.substring(0, 8),
+                        "event.content": event.content?.substring(0, 50),
+                        "filter.reason": "reasoning_event"
+                    });
+                }
                 continue;
             }
 
@@ -220,12 +296,28 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 }
             }
 
-            // Include event if:
-            // 1. It's from this agent
-            // 2. It's targeted to this agent
-            // 3. It's a public broadcast from user (no specific agent targets)
-            // 4. It's a delegation response to this agent
-            if (!isFromAgent && !isTargetedToAgent && !isPublicBroadcast && !eventWithContext.isDelegationResponse) {
+            // HYBRID INCLUSION LOGIC:
+            // Include event if EITHER:
+            // A. It's in the thread path (root → triggering event) - ensures full conversation context
+            // B. It's directly relevant to this agent (for awareness of parallel branches)
+
+            const isInThreadPath = threadPathIds.has(event.id);
+            const isDirectlyRelevant = isFromAgent || isTargetedToAgent || isPublicBroadcast || eventWithContext.isDelegationResponse;
+
+            if (!isInThreadPath && !isDirectlyRelevant) {
+                if (activeSpan) {
+                    activeSpan.addEvent("event.filtered_out", {
+                        "event.id": event.id?.substring(0, 8),
+                        "event.content": event.content?.substring(0, 50),
+                        "event.pubkey": event.pubkey.substring(0, 8),
+                        "filter.is_in_thread_path": false,
+                        "filter.is_from_agent": isFromAgent,
+                        "filter.is_targeted_to_agent": isTargetedToAgent,
+                        "filter.is_public_broadcast": isPublicBroadcast,
+                        "filter.is_delegation_response": eventWithContext.isDelegationResponse || false,
+                        "filter.reason": "not_in_thread_and_not_relevant"
+                    });
+                }
                 continue;
             }
 
@@ -284,6 +376,22 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
                     }
                 }
+            }
+
+            // Event passed all filters - include it
+            if (activeSpan) {
+                activeSpan.addEvent("event.included", {
+                    "event.id": event.id?.substring(0, 8),
+                    "event.content": event.content?.substring(0, 50),
+                    "event.pubkey": event.pubkey.substring(0, 8),
+                    "inclusion.is_in_thread_path": isInThreadPath,
+                    "inclusion.is_from_agent": isFromAgent,
+                    "inclusion.is_targeted_to_agent": isTargetedToAgent,
+                    "inclusion.is_public_broadcast": isPublicBroadcast,
+                    "inclusion.is_delegation_response": eventWithContext.isDelegationResponse || false,
+                    "inclusion.is_delegation_request": eventWithContext.isDelegationRequest || false,
+                    "inclusion.reason": isInThreadPath ? "in_thread_path" : "directly_relevant"
+                });
             }
 
             relevantEvents.push(eventWithContext);

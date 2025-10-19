@@ -148,15 +148,20 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         // Create strategy
         strategy = new FlattenedChronologicalStrategy();
 
+        // Create ThreadService
+        const { ThreadService } = await import("@/conversations/services/ThreadService");
+        const threadService = new ThreadService();
+
         // Create mock execution context
         mockContext = {
             agent: pmAgent,
             conversationId: CONVERSATION_ID,
+            projectPath: "/test/path",
+            triggeringEvent: events[events.length - 1], // Default to last event
             conversationCoordinator: {
-                threadService: {
-                    getThreadToEvent: () => events
-                }
-            },
+                threadService
+            } as any,
+            agentPublisher: {} as any,
             getConversation: () => mockConversation,
             isDelegationCompletion: false,
             debug: true // Enable debug mode to see event IDs
@@ -165,6 +170,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
 
     it("should condense delegation into single XML block with phase attribute", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>
@@ -198,6 +204,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
 
     it("should NOT include separate phase transition message", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>
@@ -214,6 +221,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
 
     it("should NOT include delegation request event as separate assistant message", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>
@@ -231,6 +239,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
 
     it("should NOT include delegation response as separate message", async () => {
         const triggeringEvent = events[events.length - 1];
+        mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
         const messageContents = messages.map(m =>

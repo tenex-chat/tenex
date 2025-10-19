@@ -26,13 +26,12 @@ const IGNORED_EVENT_KINDS = [
 ];
 
 export class EventHandler {
-  private conversationCoordinator!: ConversationCoordinator;
   private agentExecutor!: AgentExecutor;
   private isUpdatingProject = false;
 
   constructor(
     private projectPath: string,
-    private conversationsPath: string,
+    private conversationCoordinator: ConversationCoordinator,
   ) {}
 
   async initialize(): Promise<void> {
@@ -40,14 +39,7 @@ export class EventHandler {
     await DelegationRegistry.initialize();
 
     // Initialize components directly
-    this.conversationCoordinator = new ConversationCoordinator(
-      this.conversationsPath,
-      undefined
-    );
     this.agentExecutor = new AgentExecutor();
-
-    // Initialize components
-    await this.conversationCoordinator.initialize();
   }
 
   getConversationCoordinator(): ConversationCoordinator {

@@ -11,6 +11,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { trace, propagation, context as otelContext, ROOT_CONTEXT, SpanStatusCode } from "@opentelemetry/api";
+import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 
 const tracer = trace.getTracer("tenex.daemon");
 
@@ -215,7 +217,14 @@ export class Daemon {
       parentContext = propagation.extract(ROOT_CONTEXT, carrier);
     }
 
-    // Create telemetry span
+    // Determine conversation ID for tagging
+    const conversationSpanManager = getConversationSpanManager();
+    let conversationId = AgentEventDecoder.getConversationRoot(event);
+    if (!conversationId && event.id) {
+      conversationId = event.id;
+    }
+
+    // Create telemetry span with conversation attributes
     const span = tracer.startSpan(
       "tenex.event.process",
       {
@@ -229,10 +238,18 @@ export class Daemon {
           "event.tags": JSON.stringify(event.tags),
           "event.tag_count": event.tags.length,
           "event.has_trace_context": !!traceContextTag,
+          // Add conversation tracking attributes
+          "conversation.id": conversationId || "unknown",
+          "conversation.is_root": !AgentEventDecoder.getConversationRoot(event),
         },
       },
       parentContext
     );
+
+    // Track message sequence in conversation
+    if (conversationId) {
+      conversationSpanManager.incrementMessageCount(conversationId, span);
+    }
 
     // Execute business logic within telemetry context
     return otelContext.with(
@@ -681,6 +698,10 @@ export class Daemon {
           await handler();
         }
 
+        // Shutdown conversation span manager
+        const conversationSpanManager = getConversationSpanManager();
+        conversationSpanManager.shutdown();
+
         logger.info("Graceful shutdown complete");
         process.exit(0);
       } catch (error) {
@@ -794,6 +815,10 @@ export class Daemon {
     // Clear state
     this.activeRuntimes.clear();
     this.knownProjects.clear();
+
+    // Shutdown conversation span manager
+    const conversationSpanManager = getConversationSpanManager();
+    conversationSpanManager.shutdown();
 
     logger.info("Daemon stopped");
   }

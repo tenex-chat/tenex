@@ -2,6 +2,26 @@
 
 This directory contains reusable test utilities for the TENEX backend.
 
+## E2E Testing (Under Reconstruction)
+
+**Status:** The e2e testing infrastructure is being rebuilt from scratch.
+
+**Available Now:**
+- ✅ `mock-llm/` - Mock LLM Service (fully functional, ready to use)
+  - Deterministic LLM responses for testing
+  - Pre-built scenarios for common workflows
+  - Context-aware trigger matching
+  - See `mock-llm/README.md` for usage
+
+**Planned:**
+- ❌ E2E test harness - Not yet implemented
+- ❌ Execution flow utilities - Not yet implemented
+- ❌ Assertion helpers - Not yet implemented
+
+**Documentation:**
+- See `E2E_TESTING_ARCHITECTURE.md` in project root for the complete architecture design
+- See `E2E_TESTING_STATUS.md` for current status and what was fixed
+
 ## Mock Setup Helpers
 
 The `mock-setup.ts` file provides common mock setup functions to reduce duplication across test files:

@@ -93,14 +93,15 @@ export class ProjectRuntime {
 
       // Initialize conversation coordinator with metadata path
       this.conversationCoordinator = new ConversationCoordinator(this.metadataPath);
+      await this.conversationCoordinator.initialize();
 
       // Set conversation coordinator in context
       this.context.conversationCoordinator = this.conversationCoordinator;
 
-      // Initialize event handler
+      // Initialize event handler with the conversation coordinator
       this.eventHandler = new EventHandler(
-        this.projectPath,    // Git repo path for code execution
-        this.metadataPath    // Metadata path for conversations
+        this.projectPath,              // Git repo path for code execution
+        this.conversationCoordinator   // Shared conversation coordinator
       );
       await this.eventHandler.initialize();
 
