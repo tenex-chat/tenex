@@ -22,6 +22,7 @@ import { createDelegateTool } from "./implementations/delegate";
 import { createDelegatePhaseTool } from "./implementations/delegate_phase";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createNostrProjectsTool } from "./implementations/nostr_projects";
+import { createGeminiCliTool } from "./implementations/gemini_cli";
 import { createClaudeCodeTool } from "./implementations/claude_code";
 import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateExternalTool } from "./implementations/delegate_external";
@@ -69,6 +70,7 @@ export type ToolName =
   | "ask"
   | "nostr_projects"
   | "claude_code"
+  | "gemini_cli"
   | "create_project"
   | "delegate_external"
   | "report_write"
@@ -124,6 +126,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
   // Claude code
   claude_code: createClaudeCodeTool,
+  gemini_cli: createGeminiCliTool,
   
   // Codebase search
   codebase_search: createCodebaseSearchTool,
