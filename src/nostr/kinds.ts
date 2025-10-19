@@ -18,7 +18,6 @@ export const NDKKind = {
     // Tenex custom kinds (2xxxx range)
     TenexStreamingResponse: 21111,
     TenexProjectStatus: 24010,
-    TenexForceRelease: 24019,
     TenexAgentConfigUpdate: 24020,
     TenexAgentTypingStart: 24111,
     TenexAgentTypingStop: 24112,
