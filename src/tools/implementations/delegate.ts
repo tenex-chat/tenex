@@ -93,7 +93,18 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
   });
 
   Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: ({ recipients }: DelegateInput) => {
+    value: (args: unknown) => {
+      // Defensive: handle cases where args might not be properly typed
+      if (!args || typeof args !== "object" || !("recipients" in args)) {
+        return "Delegating to agent(s)";
+      }
+
+      const { recipients } = args as DelegateInput;
+
+      if (!recipients || !Array.isArray(recipients)) {
+        return "Delegating to agent(s)";
+      }
+
       if (recipients.length === 1) {
         return `Delegating to ${recipients[0]}`;
       } else {

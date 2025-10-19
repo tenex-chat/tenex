@@ -183,7 +183,18 @@ When using this tool, provide context to the recipient, introduce yourself and e
   });
 
   Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: ({ recipient, projectId }: DelegateExternalInput) => {
+    value: (args: unknown) => {
+      // Defensive: handle cases where args might not be properly typed
+      if (!args || typeof args !== "object") {
+        return "Delegating to external agent";
+      }
+
+      const { recipient, projectId } = args as Partial<DelegateExternalInput>;
+
+      if (!recipient) {
+        return "Delegating to external agent";
+      }
+
       let message = `Delegating to external agent ${recipient}`;
       if (projectId) {
         message += ` in project ${projectId}`;
