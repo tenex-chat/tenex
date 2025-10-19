@@ -3,6 +3,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import { ToolCallSpanProcessor } from "./ToolCallSpanProcessor.js";
 
 const resource = resourceFromAttributes({
   [SEMRESATTRS_SERVICE_NAME]: "tenex-daemon",
@@ -14,8 +15,19 @@ const traceExporter = new OTLPTraceExporter({
   url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces",
 });
 
-// Batch processor for performance (collect spans, send in batches)
-const spanProcessor = new BatchSpanProcessor(traceExporter, {
+// Create a wrapper processor that enriches span names before exporting
+class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
+  private enricher = new ToolCallSpanProcessor();
+
+  onEnd(span: any): void {
+    // First enrich the span name
+    this.enricher.onEnd(span);
+    // Then pass to batch processor
+    super.onEnd(span);
+  }
+}
+
+const spanProcessor = new EnrichedBatchSpanProcessor(traceExporter, {
   maxQueueSize: 2048,
   maxExportBatchSize: 512,
   scheduledDelayMillis: 5000, // Send every 5 seconds

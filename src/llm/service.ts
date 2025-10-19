@@ -26,6 +26,7 @@ import type { ModelMessage } from "ai";
 import { EventEmitter } from "tseep";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import type { z } from "zod";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 /**
  * Content delta event
@@ -355,6 +356,50 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 experimental_telemetry: this.getFullTelemetryConfig(),
             });
 
+            // Check for invalid tool calls and mark span as error
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan && result.steps) {
+                const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
+
+                for (const step of result.steps) {
+                    if (step.toolCalls) {
+                        for (const toolCall of step.toolCalls) {
+                            const tc = toolCall as any;
+                            if (tc.dynamic === true && tc.invalid === true && tc.error) {
+                                invalidToolCalls.push({
+                                    toolName: tc.toolName || 'unknown',
+                                    error: tc.error.name || 'Unknown error'
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if (invalidToolCalls.length > 0) {
+                    activeSpan.setStatus({
+                        code: SpanStatusCode.ERROR,
+                        message: `Invalid tool calls: ${invalidToolCalls.map(tc => tc.toolName).join(', ')}`
+                    });
+                    activeSpan.setAttribute('error', true);
+                    activeSpan.setAttribute('error.type', 'AI_InvalidToolCall');
+                    activeSpan.setAttribute('error.invalid_tool_count', invalidToolCalls.length);
+                    activeSpan.setAttribute('error.invalid_tools', invalidToolCalls.map(tc => tc.toolName).join(', '));
+
+                    for (const invalidTool of invalidToolCalls) {
+                        activeSpan.addEvent('invalid_tool_call', {
+                            'tool.name': invalidTool.toolName,
+                            'error.type': invalidTool.error
+                        });
+                    }
+
+                    logger.error("[LLMService] Invalid tool calls detected in complete()", {
+                        invalidToolCalls,
+                        model: this.model,
+                        provider: this.provider
+                    });
+                }
+            }
+
             // Capture session ID from provider metadata if using Claude Code
             if (this.provider === "claudeCode" && result.providerMetadata?.["claude-code"]?.sessionId) {
                 const capturedSessionId = result.providerMetadata["claude-code"].sessionId;
@@ -365,7 +410,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 // Emit session ID for storage by the executor
                 this.emit("session-captured", { sessionId: capturedSessionId });
             }
-            
+
             // Log if reasoning was extracted
             if ("reasoning" in result && result.reasoning) {
                 logger.debug("[LLMService] Reasoning extracted from response", {
@@ -626,6 +671,55 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         ): Promise<void> => {
 
             try {
+                // Check for invalid tool calls and mark span as error
+                const activeSpan = trace.getActiveSpan();
+                if (activeSpan) {
+                    const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
+
+                    for (const step of e.steps) {
+                        if (step.toolCalls) {
+                            for (const toolCall of step.toolCalls) {
+                                // Check if this is a dynamic tool call that's invalid
+                                const tc = toolCall as any;
+                                if (tc.dynamic === true && tc.invalid === true && tc.error) {
+                                    invalidToolCalls.push({
+                                        toolName: tc.toolName || 'unknown',
+                                        error: tc.error.name || 'Unknown error'
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    if (invalidToolCalls.length > 0) {
+                        // Mark span as error
+                        activeSpan.setStatus({
+                            code: SpanStatusCode.ERROR,
+                            message: `Invalid tool calls: ${invalidToolCalls.map(tc => tc.toolName).join(', ')}`
+                        });
+
+                        // Add error attributes
+                        activeSpan.setAttribute('error', true);
+                        activeSpan.setAttribute('error.type', 'AI_InvalidToolCall');
+                        activeSpan.setAttribute('error.invalid_tool_count', invalidToolCalls.length);
+                        activeSpan.setAttribute('error.invalid_tools', invalidToolCalls.map(tc => tc.toolName).join(', '));
+
+                        // Add span event for each invalid tool
+                        for (const invalidTool of invalidToolCalls) {
+                            activeSpan.addEvent('invalid_tool_call', {
+                                'tool.name': invalidTool.toolName,
+                                'error.type': invalidTool.error
+                            });
+                        }
+
+                        logger.error("[LLMService] Invalid tool calls detected in response", {
+                            invalidToolCalls,
+                            model: this.model,
+                            provider: this.provider
+                        });
+                    }
+                }
+
                 // Cancel any pending content publish timeout for non-streaming providers
                 if (this.contentPublishTimeout) {
                     clearTimeout(this.contentPublishTimeout);
