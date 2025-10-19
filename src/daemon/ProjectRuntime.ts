@@ -19,7 +19,8 @@ import * as fs from "node:fs/promises";
  */
 export class ProjectRuntime {
   public readonly projectId: string;
-  public readonly projectPath: string;
+  public readonly projectPath: string; // User's git repo path
+  private readonly metadataPath: string; // TENEX metadata path
   private readonly dTag: string;
 
   private project: NDKProject;
@@ -44,9 +45,11 @@ export class ProjectRuntime {
     this.dTag = dTag;
     this.projectId = `31933:${project.pubkey}:${dTag}`;
 
-    // Project working directory: projectsBase/dTag
-    // Contains: conversations/, logs/, and git repo contents
+    // User's git repository: {projectsBase}/{dTag}
     this.projectPath = path.join(projectsBase, dTag);
+
+    // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
+    this.metadataPath = path.join(path.dirname(projectsBase), ".tenex", "projects", dTag);
   }
 
   /**
@@ -63,13 +66,11 @@ export class ProjectRuntime {
     });
 
     try {
-      // Create project directory and metadata subdirectories
-      // Note: projectPath is ~/.tenex/projects/<dTag>/
-      await fs.mkdir(this.projectPath, { recursive: true });
-      await fs.mkdir(path.join(this.projectPath, "conversations"), { recursive: true });
-      await fs.mkdir(path.join(this.projectPath, "logs"), { recursive: true });
+      // Create TENEX metadata directories: ~/.tenex/projects/<dTag>/{conversations,logs}
+      await fs.mkdir(path.join(this.metadataPath, "conversations"), { recursive: true });
+      await fs.mkdir(path.join(this.metadataPath, "logs"), { recursive: true });
 
-      // Clone git repository if project has one, otherwise initialize a new repo
+      // Clone git repository to user-facing location: ~/tenex/<dTag>/
       const repoUrl = this.project.repo;
       if (repoUrl) {
         logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
@@ -79,34 +80,31 @@ export class ProjectRuntime {
         await initializeGitRepository(this.projectPath);
       }
 
-      // Initialize components (projectPath is the project working directory)
-      const agentRegistry = new AgentRegistry(this.projectPath);
+      // Initialize components
+      const agentRegistry = new AgentRegistry(this.projectPath, this.metadataPath);
       await agentRegistry.loadFromProject(this.project);
 
       const llmLogger = new LLMLogger();
-      llmLogger.initialize(this.projectPath);
+      llmLogger.initialize(this.metadataPath);
 
       // Create project context directly (don't use global singleton)
       this.context = new ProjectContext(this.project, agentRegistry, llmLogger);
       await agentRegistry.persistPMStatus();
 
-      // Initialize conversation coordinator
-      // Pass projectPath - FileSystemAdapter will add "conversations" subdirectory
-      this.conversationCoordinator = new ConversationCoordinator(this.projectPath);
+      // Initialize conversation coordinator with metadata path
+      this.conversationCoordinator = new ConversationCoordinator(this.metadataPath);
 
       // Set conversation coordinator in context
       this.context.conversationCoordinator = this.conversationCoordinator;
 
-      // Initialize event handler with project working directory
-      // EventHandler uses the conversations directory from ConversationCoordinator
+      // Initialize event handler
       this.eventHandler = new EventHandler(
-        this.projectPath,  // Project working directory for execution context
-        this.projectPath   // Base path - EventHandler will resolve conversations path
+        this.projectPath,    // Git repo path for code execution
+        this.metadataPath    // Metadata path for conversations
       );
       await this.eventHandler.initialize();
 
-      // Start status publisher (publishes TenexProjectStatus events)
-      // Wrap the initial publish in context
+      // Start status publisher
       this.statusPublisher = new StatusPublisher();
       await projectContextStore.run(this.context, async () => {
         await this.statusPublisher!.startPublishing(this.projectPath, this.context);

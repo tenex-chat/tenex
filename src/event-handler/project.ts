@@ -93,10 +93,29 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
       logger.info(`Found ${agentsToRemove.length} agent(s) to remove`);
     }
 
-    // Note: Agent removal is handled differently with new architecture
-    // Agents are removed from projects, not deleted entirely
+    // Handle agent removals first
     if (agentsToRemove.length > 0) {
-      logger.warn(`Agent removal not implemented for new architecture - ${agentsToRemove.length} agent(s) may need manual removal`);
+      const agentRegistry = currentContext.agentRegistry;
+
+      for (const eventId of agentsToRemove) {
+        // Find agent by eventId
+        const agent = Array.from(currentContext.agents.values()).find(
+          (a) => a.eventId === eventId
+        );
+
+        if (agent) {
+          try {
+            const removed = await agentRegistry.removeAgentFromProject(agent.slug);
+            if (removed) {
+              logger.info(`Removed agent ${agent.slug} from project`);
+            } else {
+              logger.warn(`Failed to remove agent ${agent.slug} from project`);
+            }
+          } catch (error) {
+            logger.error(`Error removing agent ${agent.slug}`, { error });
+          }
+        }
+      }
     }
 
     // Fetch and install new agent definitions using shared function

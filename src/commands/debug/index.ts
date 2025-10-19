@@ -27,9 +27,8 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 
 /**
  * Load and initialize project context for debug commands.
- * Works with daemon-managed projects in ~/.tenex/projects/
  */
-async function loadProjectContext(projectNaddr: string): Promise<{ context: ProjectContext; projectPath: string }> {
+async function loadProjectContext(projectNaddr: string): Promise<{ context: ProjectContext; projectPath: string; metadataPath: string }> {
   // Initialize NDK if not already initialized
   await initNDK();
   const ndk = getNDK();
@@ -62,14 +61,15 @@ async function loadProjectContext(projectNaddr: string): Promise<{ context: Proj
   await configService.loadConfig(); // Load global config
   const projectsBase = configService.getProjectsBase();
   const projectPath = path.join(projectsBase, dTag);
+  const metadataPath = path.join(path.dirname(projectsBase), ".tenex", "projects", dTag);
 
   // Load agents using AgentRegistry
-  const agentRegistry = new AgentRegistry(projectPath);
+  const agentRegistry = new AgentRegistry(projectPath, metadataPath);
   await agentRegistry.loadFromProject(project);
 
   // Create LLM logger
   const llmLogger = new LLMLogger();
-  llmLogger.initialize(projectPath);
+  llmLogger.initialize(metadataPath);
 
   // Create and return ProjectContext
   const context = new ProjectContext(project, agentRegistry, llmLogger);
@@ -78,10 +78,11 @@ async function loadProjectContext(projectNaddr: string): Promise<{ context: Proj
     projectId,
     projectTitle: project.tagValue("title"),
     projectPath,
+    metadataPath,
     agentCount: agentRegistry.getAllAgents().length,
   });
 
-  return { context, projectPath };
+  return { context, projectPath, metadataPath };
 }
 
 // Trim content to max length if needed
@@ -138,8 +139,8 @@ interface DebugThreadedFormatterOptions {
 
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
   try {
-    // Load project context from daemon-managed projects
-    const { context, projectPath } = await loadProjectContext(options.project);
+    // Load project context
+    const { context, projectPath, metadataPath } = await loadProjectContext(options.project);
 
     // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
     await projectContextStore.run(context, async () => {
@@ -246,8 +247,8 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
 
 export async function runDebugThreadedFormatter(options: DebugThreadedFormatterOptions): Promise<void> {
   try {
-    // Load project context from daemon-managed projects
-    const { context, projectPath } = await loadProjectContext(options.project);
+    // Load project context
+    const { context, projectPath, metadataPath } = await loadProjectContext(options.project);
 
     // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
     await projectContextStore.run(context, async () => {
@@ -341,7 +342,7 @@ export async function runDebugThreadedFormatter(options: DebugThreadedFormatterO
       await DelegationRegistry.initialize();
 
       // Create a mock execution context
-      const conversationCoordinator = new ConversationCoordinator(projectPath);
+      const conversationCoordinator = new ConversationCoordinator(metadataPath);
       await conversationCoordinator.initialize();
 
       // Check if conversation exists, if not create it

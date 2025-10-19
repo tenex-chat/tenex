@@ -13,10 +13,11 @@ export class AgentMetadataStore {
   constructor(
     private conversationId: string,
     private agentSlug: string,
-    projectPath: string
+    metadataPath: string
   ) {
-    // projectPath is already the full path (e.g., ~/.tenex/projects/<dTag>/)
-    this.filePath = path.join(projectPath, "metadata", `${conversationId}-${agentSlug}.json`);
+    // metadataPath is ~/.tenex/projects/<dTag>/
+    const metadataDir = path.join(metadataPath, "metadata");
+    this.filePath = path.join(metadataDir, `${conversationId}-${agentSlug}.json`);
     this.load();
   }
 

@@ -203,9 +203,9 @@ export class MCPManager {
           // Log the tool structure for debugging
           logger.debug(`MCP tool '${namespacedName}' registered`, {
             hasDescription: !!tool.description,
-            hasParameters: !!tool.parameters,
+            hasInputSchema: !!tool.inputSchema,
             hasExecute: typeof tool.execute === "function",
-            parametersType: tool.parameters ? typeof tool.parameters : "undefined",
+            inputSchemaType: tool.inputSchema ? typeof tool.inputSchema : "undefined",
             isResourceTool: toolName.startsWith("resource_")
           });
         }

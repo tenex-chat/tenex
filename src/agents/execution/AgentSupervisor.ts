@@ -431,6 +431,7 @@ export class AgentSupervisor {
       const systemMessages = await buildSystemPromptMessages({
         agent: this.context.agent,
         project,
+        projectPath: this.context.projectPath,
         availableAgents,
         conversation,
         agentLessons: agentLessonsMap,

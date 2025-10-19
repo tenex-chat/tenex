@@ -22,35 +22,43 @@ import { getNDK } from "@/nostr";
 /**
  * AgentRegistry manages agent configuration and instances for a project.
  * All agents are stored in unified ~/.tenex/agents/ storage (not per-project).
- * Project-specific data (conversations, logs, events) stored in .tenex/projects/{projectId}/
+ * Project-specific data (conversations, logs, events) stored in ~/.tenex/projects/{dTag}/
  */
 export class AgentRegistry {
   private agents: Map<string, AgentInstance> = new Map();
   private agentsByPubkey: Map<string, AgentInstance> = new Map();
   private projectDTag: string | undefined;
-  private projectPath: string;
+  private projectPath: string; // Git repo path
+  private metadataPath: string; // TENEX metadata path
   private ndkProject?: NDKProject;
   private pmPubkey?: string;
 
   /**
    * Creates a new AgentRegistry instance.
-   * @param projectPath - The project working directory (e.g., ~/.tenex/projects/<dTag>/)
+   * @param projectPath - The git repository path (e.g., ~/tenex/<dTag>/)
+   * @param metadataPath - The metadata path (e.g., ~/.tenex/projects/<dTag>/)
    */
-  constructor(projectPath: string) {
+  constructor(projectPath: string, metadataPath: string) {
     if (!projectPath || projectPath === "undefined") {
       throw new Error(
         "AgentRegistry requires a valid projectPath. " +
         "Received: " + String(projectPath)
       );
     }
+    if (!metadataPath || metadataPath === "undefined") {
+      throw new Error(
+        "AgentRegistry requires a valid metadataPath. " +
+        "Received: " + String(metadataPath)
+      );
+    }
     this.projectPath = projectPath;
+    this.metadataPath = metadataPath;
   }
 
   /**
-   * Get the base path for this project (the project working directory)
+   * Get the base path for this project (the git repository)
    */
   getBasePath(): string {
-    // this.projectPath is already the project working directory
     return this.projectPath;
   }
 
@@ -278,7 +286,7 @@ export class AgentRegistry {
       phase: storedAgent.phase,
       phases: storedAgent.phases,
       createMetadataStore: (conversationId: string) => {
-        return new AgentMetadataStore(conversationId, storedAgent.slug, this.projectPath);
+        return new AgentMetadataStore(conversationId, storedAgent.slug, this.metadataPath);
       },
       createLLMService: (options) => {
         const projectCtx = getProjectContext();

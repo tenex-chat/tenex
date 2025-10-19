@@ -24,6 +24,7 @@ export class ProgressMonitor {
 
             const result = await generateText({
                 model: this.reviewModel,
+                ...('tools' in this.reviewModel && this.reviewModel.tools ? { tools: this.reviewModel.tools } : {}),
                 messages: [{
                     role: "user",
                     content: `Review these ${toolNames.length} tool calls. Is the agent making progress or stuck?\n\n${toolCallSummary}\n\nRespond with only "continue" or "stop":`

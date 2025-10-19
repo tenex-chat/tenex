@@ -12,6 +12,7 @@ export interface BuildSystemPromptOptions {
   // Required data
   agent: AgentInstance;
   project: NDKProject;
+  projectPath?: string; // Absolute path to the project working directory
 
   // Optional runtime data
   availableAgents?: AgentInstance[];
@@ -140,6 +141,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
   const {
     agent,
     project,
+    projectPath,
     availableAgents = [],
     conversation,
     agentLessons,
@@ -152,6 +154,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     agent,
     projectTitle: project.tagValue("title") || "Unknown Project",
     projectOwnerPubkey: project.pubkey,
+    projectPath,
   });
 
   // Add agent phases awareness if agent has phases defined

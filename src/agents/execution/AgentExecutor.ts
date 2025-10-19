@@ -216,13 +216,6 @@ export class AgentExecutor {
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentPublisher
     ): Promise<NDKEvent | undefined> {
-        logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
-            agent: context.agent.slug,
-            conversationId: context.conversationId.substring(0, 8),
-            hasPhases: !!context.agent.phases,
-            phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0
-        });
-
         let completionEvent: CompleteEvent | undefined;
 
         try {
@@ -342,12 +335,34 @@ export class AgentExecutor {
                 conversationId: context.conversationId.substring(0, 8),
                 operationId: thisOperation.id.substring(0, 8)
             });
+
+            // Add trace event for listener setup
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan) {
+                activeSpan.addEvent("message_injection.listener_setup", {
+                    "agent.slug": context.agent.slug,
+                    "conversation.id": context.conversationId,
+                    "operation.id": thisOperation.id,
+                });
+            }
+
             thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
                 logger.info("[AgentExecutor] Received injected message", {
                     agent: context.agent.slug,
                     eventId: event.id?.substring(0, 8),
                     currentQueueSize: injectedEvents.length
                 });
+
+                // Add trace event for received injection
+                const activeSpan = trace.getActiveSpan();
+                if (activeSpan) {
+                    activeSpan.addEvent("message_injection.received", {
+                        "event.id": event.id || "",
+                        "queue.size": injectedEvents.length + 1,
+                        "agent.slug": context.agent.slug,
+                    });
+                }
+
                 injectedEvents.push(event);
             });
         } else {
@@ -474,7 +489,6 @@ export class AgentExecutor {
         llmService.on("complete", (event) => {
             // Store the completion event
             completionEvent = event;
-            console.log("complete event", event.message);
 
             logger.info("[AgentExecutor] LLM complete event received", {
                 agent: context.agent.slug,
@@ -542,6 +556,17 @@ export class AgentExecutor {
             // Create prepareStep callback for message injection
             const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }): void => {
                 if (injectedEvents.length > 0) {
+                    // Add trace event for message injection processing
+                    const activeSpan = trace.getActiveSpan();
+                    if (activeSpan) {
+                        activeSpan.addEvent("message_injection.process", {
+                            "injection.message_count": injectedEvents.length,
+                            "injection.step_number": step.stepNumber,
+                            "injection.event_ids": injectedEvents.map(e => e.id || "").join(","),
+                            "agent.slug": context.agent.slug,
+                        });
+                    }
+
                     logger.info(`[prepareStep] Injecting ${injectedEvents.length} new user message(s)`, {
                         agent: context.agent.slug,
                         stepNumber: step.stepNumber

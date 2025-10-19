@@ -181,12 +181,18 @@ export class StatusPublisher {
       // Create and publish the status event directly
       const event = this.createStatusEvent(intent);
 
-      // Sign and publish with project signer if available
-      if (projectCtx.signer) {
-        await event.sign(projectCtx.signer, { pTags: false });
+      // Sign and publish with TENEX backend private key
+      try {
+        const backendPrivateKey = await configService.ensureBackendPrivateKey();
+        const { NDKPrivateKeySigner } = await import("@nostr-dev-kit/ndk");
+        const backendSigner = new NDKPrivateKeySigner(backendPrivateKey);
+
+        await event.sign(backendSigner, { pTags: false });
         await event.publish();
-      } else {
-        logger.warn("No project signer available, cannot publish status event");
+      } catch (error) {
+        logger.error("Failed to sign and publish status event", {
+          error: formatAnyError(error)
+        });
       }
     } catch (err) {
       const errorMessage = formatAnyError(err);

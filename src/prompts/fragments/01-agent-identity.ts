@@ -9,12 +9,13 @@ interface AgentIdentityArgs {
   agent: AgentInstance;
   projectTitle: string;
   projectOwnerPubkey: string;
+  projectPath?: string;
 }
 
 export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
   id: "agent-identity",
   priority: 1,
-  template: ({ agent, projectTitle, projectOwnerPubkey }) => {
+  template: ({ agent, projectTitle, projectOwnerPubkey, projectPath }) => {
     const parts: string[] = [];
 
     // Identity
@@ -37,7 +38,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
       [
         "## Project Context",
         `- Title: "${projectTitle}"`,
-        `- Absolute Path: ${process.cwd()}`,
+        `- Absolute Path: ${projectPath || process.cwd()}`,
         `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
       ].join("\n")
     );

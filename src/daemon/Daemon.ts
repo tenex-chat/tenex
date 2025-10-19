@@ -468,17 +468,17 @@ export class Daemon {
     // Update known projects
     this.knownProjects.set(projectId, project);
 
-    // If project is active, update it
+    // If project is active, route to runtime's EventHandler for incremental update
     const runtime = this.activeRuntimes.get(projectId);
     if (runtime) {
-      // Stop old runtime and start new one with updated project
-      await runtime.stop();
-      const newRuntime = new ProjectRuntime(project, this.projectsBase);
-      await newRuntime.start();
-      this.activeRuntimes.set(projectId, newRuntime);
+      logger.info("Routing project update to runtime's EventHandler for incremental update");
 
-      // Update subscription with new agent pubkeys from reloaded project
-      await this.updateSubscriptionWithProjectAgents(projectId, newRuntime);
+      // Route the project event to the runtime's event handler
+      // This will trigger incremental updates (add/remove agents, MCP tools, etc.)
+      await runtime.handleEvent(event);
+
+      // Update subscription with potentially new agent pubkeys
+      await this.updateSubscriptionWithProjectAgents(projectId, runtime);
     }
   }
 

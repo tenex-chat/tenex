@@ -28,7 +28,7 @@ export class TenexToolsAdapter {
         // Convert each TENEX tool to an SDK MCP tool
         const sdkTools = localTools.map(([name, tenexTool]) => {
             // Convert the Zod schema or use a generic one if not available
-            const schema = tenexTool.parameters || z.record(z.any());
+            const schema = tenexTool.inputSchema || z.record(z.any());
 
             return tool(
                 name,

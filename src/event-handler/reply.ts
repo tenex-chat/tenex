@@ -13,8 +13,9 @@ import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
-import { trace } from "@opentelemetry/api";
+import { trace, context as otelContext } from "@opentelemetry/api";
 
+const tracer = trace.getTracer("tenex.event-handler");
 
 interface EventHandlerContext {
   conversationCoordinator: ConversationCoordinator;
@@ -266,12 +267,30 @@ async function handleReplyLogic(
   for (const targetAgent of agentsToInject) {
     const activeOp = activeOperations.find(op => op.agentPubkey === targetAgent.pubkey);
     if (activeOp) {
-      logger.info("[MessageInjection] Injecting message into active execution", {
-        agent: targetAgent.name,
-        conversationId: conversation.id.substring(0, 8),
-        eventId: event.id?.substring(0, 8)
+      const span = tracer.startSpan("tenex.message_injection.emit", {
+        attributes: {
+          "agent.name": targetAgent.name,
+          "agent.pubkey": targetAgent.pubkey,
+          "conversation.id": conversation.id,
+          "event.id": event.id || "",
+          "event.kind": event.kind || 0,
+          "operation.id": activeOp.id,
+        },
       });
-      activeOp.eventEmitter.emit("inject-message", event);
+
+      otelContext.with(
+        trace.setSpan(otelContext.active(), span),
+        () => {
+          logger.info("[MessageInjection] Injecting message into active execution", {
+            agent: targetAgent.name,
+            conversationId: conversation.id.substring(0, 8),
+            eventId: event.id?.substring(0, 8)
+          });
+          activeOp.eventEmitter.emit("inject-message", event);
+          span.addEvent("message.injected");
+          span.end();
+        }
+      );
     }
   }
 

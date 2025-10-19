@@ -32,6 +32,7 @@ export class EventHandler {
 
   constructor(
     private projectPath: string,
+    private conversationsPath: string,
   ) {}
 
   async initialize(): Promise<void> {
@@ -40,7 +41,7 @@ export class EventHandler {
 
     // Initialize components directly
     this.conversationCoordinator = new ConversationCoordinator(
-      this.projectPath,
+      this.conversationsPath,
       undefined
     );
     this.agentExecutor = new AgentExecutor();
@@ -56,22 +57,6 @@ export class EventHandler {
   async handleEvent(event: NDKEvent): Promise<void> {
     // Ignore ephemeral status and typing indicator events
     if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
-
-    // Debug: Check if event has proper NDKEvent methods
-    if (typeof event.getMatchingTags !== "function") {
-      logger.error("Event is missing getMatchingTags method!", {
-        eventId: event.id,
-        eventKind: event.kind,
-        hasGetMatchingTags: typeof event.getMatchingTags,
-        hasEncode: typeof event.encode,
-        eventConstructor: event.constructor?.name,
-        eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
-        eventKeys: Object.keys(event),
-        isNDKEvent: event instanceof NDKEvent,
-      });
-      // Don't mask the issue - let it fail so we can trace it
-      process.exit(1);
-    }
 
     // Try to get agent slug if the event is from an agent
     let fromIdentifier = event.pubkey;
