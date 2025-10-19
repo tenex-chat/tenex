@@ -94,27 +94,6 @@ async function executeClaudeCode(
     // Get existing session from metadata
     const existingSessionId = metadataStore.get<string>("sessionId");
 
-    logger.info("[claude_code] 🔍 SESSION CHECK:", {
-      existingSessionId: existingSessionId || "NONE",
-      agent: context.agent.slug,
-      conversationId: context.conversationId.substring(0, 8),
-      mode,
-      hasExistingSession: !!existingSessionId,
-    });
-
-    if (existingSessionId) {
-      logger.info("[claude_code] ✅ FOUND EXISTING SESSION", {
-        sessionId: existingSessionId,
-        agent: context.agent.slug,
-        conversationId: context.conversationId.substring(0, 8),
-      });
-    } else {
-      logger.info("[claude_code] 🆕 NO EXISTING SESSION - Will create new", {
-        agent: context.agent.slug,
-        conversationId: context.conversationId.substring(0, 8),
-      });
-    }
-
     // Get conversation for other purposes
     const conversation = context.getConversation();
 
@@ -179,24 +158,12 @@ async function executeClaudeCode(
     const registry = createProviderRegistry({
       "claude-code": {
         languageModel: (modelId: string) => {
-          logger.info("[claude_code] 🔧 CREATING CLAUDE CODE OPTIONS:", {
-            existingSessionId: existingSessionId || "NONE",
-            willResume: !!existingSessionId,
-            cwd: context.projectPath,
-          });
-
           const options: ClaudeCodeSettings = {
             cwd: context.projectPath,
             permissionMode: "bypassPermissions",
             // Resume existing session if we have one
             resume: existingSessionId,
           };
-
-          logger.info("[claude_code] 📋 FINAL PROVIDER OPTIONS:", {
-            hasResume: "resume" in options,
-            resumeValue: options.resume || "UNDEFINED",
-            optionsKeys: Object.keys(options),
-          });
           
           // Add tool restrictions based on mode
           if (allowedTools) {
@@ -272,34 +239,11 @@ async function executeClaudeCode(
     });
 
     llmService.on("complete", ({ message, steps, usage }) => {
-      console.log("ai sdk cc complete", chalk.green(message));
-
-      logger.info("[claude_code] 🏁 STREAM COMPLETE EVENT:", {
-        stepCount: steps?.length || 0,
-        hasSteps: !!steps,
-        lastStepHasProviderMetadata: !!steps?.[steps.length - 1]?.providerMetadata,
-      });
       // Try to extract session ID from the last step's provider metadata
       const lastStep = steps[steps.length - 1];
 
-      logger.info("[claude_code] 🔎 CHECKING FOR SESSION IN PROVIDER METADATA:", {
-        hasLastStep: !!lastStep,
-        hasProviderMetadata: !!lastStep?.providerMetadata,
-        providerMetadataKeys: lastStep?.providerMetadata ? Object.keys(lastStep.providerMetadata) : [],
-        claudeCodeMetadata: lastStep?.providerMetadata?.["claude-code"],
-      });
-
       if (lastStep?.providerMetadata?.["claude-code"]?.sessionId) {
         capturedSessionId = lastStep.providerMetadata["claude-code"].sessionId;
-        logger.info("[claude_code] ✨ CAPTURED NEW SESSION ID FROM PROVIDER", {
-          capturedSessionId,
-          previousSessionId: existingSessionId || "NONE",
-          sessionChanged: capturedSessionId !== existingSessionId,
-        });
-      } else {
-        logger.warn("[claude_code] ⚠️ NO SESSION ID IN PROVIDER METADATA", {
-          providerMetadata: lastStep?.providerMetadata,
-        });
       }
       
       logger.info("[claude_code] Stream completed", {
@@ -320,18 +264,6 @@ async function executeClaudeCode(
       content: prompt
     });
 
-    logger.info("[claude_code] 📩 MESSAGES TO SEND", {
-      messageCount: messages.length,
-      messageRoles: messages.map(m => m.role),
-      promptLength: prompt.length,
-      promptPreview: prompt.substring(0, 500),
-      sessionMode: existingSessionId ? "RESUME" : "NEW",
-      existingSessionId: existingSessionId || "NONE",
-      EXPLANATION: existingSessionId
-        ? "Session already has context, only sending new user message"
-        : "New session, sending complete prompt",
-    });
-
     try {
       // Execute stream with LLMService, passing abort signal from registry
       // Claude Code provider handles its own tools internally based on mode
@@ -349,32 +281,12 @@ async function executeClaudeCode(
     }
 
     try {
-
       // Only use real session IDs from Claude Code provider
       const sessionId = capturedSessionId || existingSessionId;
-
-      logger.info("[claude_code] 📊 SESSION RESOLUTION:", {
-        capturedSessionId: capturedSessionId || "NONE",
-        existingSessionId: existingSessionId || "NONE",
-        finalSessionId: sessionId || "NONE",
-        source: capturedSessionId ? "NEW_FROM_PROVIDER" : (existingSessionId ? "EXISTING" : "NONE"),
-      });
 
       // Store session ID for future resumption
       if (sessionId) {
         metadataStore.set("sessionId", sessionId);
-
-        logger.info("[claude_code] 💾 STORED SESSION FOR FUTURE USE", {
-          sessionId,
-          agent: context.agent.slug,
-          conversationId: context.conversationId.substring(0, 8),
-          wasUpdate: capturedSessionId && capturedSessionId !== existingSessionId,
-        });
-      } else {
-        logger.warn("[claude_code] ⚠️ NO SESSION ID TO STORE", {
-          capturedSessionId: capturedSessionId || "NONE",
-          existingSessionId: existingSessionId || "NONE",
-        });
       }
 
       // Return appropriate response

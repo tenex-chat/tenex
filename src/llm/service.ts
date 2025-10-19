@@ -151,16 +151,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         if (!registry && !claudeCodeProviderFunction) {
             throw new Error("LLMService requires either a registry or Claude Code provider function");
         }
-
-        logger.debug("[LLMService] 🆕 INITIALIZED", {
-            provider: this.provider,
-            model: this.model,
-            temperature: this.temperature,
-            maxTokens: this.maxTokens,
-            isClaudeCode: provider === "claudeCode",
-            sessionId: this.sessionId || "NONE",
-            hasSessionId: !!this.sessionId,
-        });
     }
 
     /**
@@ -212,13 +202,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             if (this.sessionId) {
                 // When resuming, only pass the resume option
                 options.resume = this.sessionId;
-                logger.debug("[LLMService] 🔄 RESUMING CLAUDE CODE SESSION", {
-                    sessionId: this.sessionId,
-                    model: this.model,
-                    optionsKeys: Object.keys(options),
-                    messagesProvided: messages?.length || 0,
-                    messageRoles: messages?.map(m => m.role),
-                });
             } else if (messages) {
                 // When NOT resuming, compile all messages
                 const { customSystemPrompt, appendSystemPrompt } = compileMessagesForClaudeCode(messages);
@@ -227,25 +210,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 if (appendSystemPrompt) {
                     options.appendSystemPrompt = appendSystemPrompt;
                 }
-
-                logger.debug("[LLMService] 🆕 NEW CLAUDE CODE SESSION (no resume)", {
-                    model: this.model,
-                    hasCustomPrompt: !!customSystemPrompt,
-                    hasAppendPrompt: !!appendSystemPrompt,
-                    appendPromptLength: appendSystemPrompt?.length || 0,
-                    optionsKeys: Object.keys(options)
-                });
             }
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
-
-            logger.debug("[LLMService] 🎯 CREATED CLAUDE CODE MODEL", {
-                model: this.model,
-                hasCustomSystemPrompt: !!options.customSystemPrompt,
-                hasAppendSystemPrompt: !!options.appendSystemPrompt,
-                resumeSessionId: options.resume || "NONE",
-                hasResume: "resume" in options
-            });
         } else if (this.registry) {
             // Standard providers use registry
             baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
@@ -482,24 +449,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             prepareStep?: (step: { messages: ModelMessage[]; stepNumber: number }) => { messages?: ModelMessage[] } | void;
         }
     ): Promise<void> {
-        logger.debug("[LLMService] 🚀 STARTING STREAM", {
-            provider: this.provider,
-            model: this.model,
-            messageCount: messages.length,
-            messageRoles: messages.map(m => m.role),
-            sessionId: this.sessionId || "NONE",
-            toolCount: Object.keys(tools).length,
-        });
-
         const model = this.getLanguageModel(messages);
 
         // Convert system messages for Claude Code resume sessions
         let processedMessages = messages;
         if (this.provider === "claudeCode" && this.sessionId) {
-            logger.debug("[LLMService] 🎯 CLAUDE CODE RESUME MODE", {
-                sessionId: this.sessionId,
-                originalMessageCount: messages.length,
-            });
             processedMessages = convertSystemMessagesForResume(messages);
         }
 
@@ -603,22 +557,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 }
                 const reasoningChunk = chunk as ReasoningDeltaChunk;
                 const reasoningContent = reasoningChunk.delta || reasoningChunk.text;
-                logger.debug("[LLMService] Processing reasoning-delta chunk - DETAILED", {
-                    deltaLength: reasoningChunk.delta?.length,
-                    textLength: reasoningChunk.text?.length,
-                    reasoningContent: reasoningContent?.substring(0, 100),
-                    willCallHandleReasoningDelta: !!reasoningContent
-                });
                 if (reasoningContent) {
-                    logger.debug("[LLMService] CALLING handleReasoningDelta NOW", {
-                        contentLength: reasoningContent.length
-                    });
                     this.handleReasoningDelta(reasoningContent);
-                    logger.debug("[LLMService] FINISHED calling handleReasoningDelta");
-                } else {
-                    logger.error("[LLMService] NO REASONING CONTENT FOUND IN CHUNK", {
-                        chunk: JSON.stringify(chunk)
-                    });
                 }
                 break;
             }
@@ -765,27 +705,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
                 if (this.provider === "claudeCode" && e.providerMetadata?.["claude-code"]?.sessionId) {
                     const capturedSessionId = e.providerMetadata["claude-code"].sessionId;
-                    logger.debug("[LLMService] 🎉 CAPTURED CLAUDE CODE SESSION ID FROM STREAM", {
-                        capturedSessionId,
-                        previousSessionId: this.sessionId || "NONE",
-                        provider: this.provider,
-                        sessionChanged: capturedSessionId !== this.sessionId
-                    });
                     // Emit session ID for storage by the executor
                     this.emit("session-captured", { sessionId: capturedSessionId });
-                } else if (this.provider === "claudeCode") {
-                    logger.warn("[LLMService] ⚠️ NO CLAUDE CODE SESSION IN METADATA", {
-                        providerMetadata: e.providerMetadata
-                    });
                 }
-
-                logger.debug("[LLMService] Stream onFinish - emitting complete event", {
-                    hasText: !!e.text,
-                    textLength: e.text?.length || 0,
-                    textPreview: e.text?.substring(0, 100),
-                    finishReason: e.finishReason,
-                    usingCachedContent: !supportsStreaming && !!this.cachedContentForComplete,
-                });
 
                 this.emit("complete", {
                     message: finalMessage,
@@ -860,16 +782,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
     }
 
     private handleReasoningDelta(text: string): void {
-        logger.debug("[LLMService] INSIDE handleReasoningDelta - ABOUT TO EMIT", {
-            deltaLength: text.length,
-            preview: text.substring(0, 100),
-            hasListeners: this.listenerCount("reasoning"),
-            allEventNames: this.eventNames()
-        });
-
         this.emit("reasoning", { delta: text });
-
-        logger.debug("[LLMService] EMITTED reasoning event SUCCESSFULLY");
     }
 
     private handleToolCall(toolCallId: string, toolName: string, args: unknown): void {
