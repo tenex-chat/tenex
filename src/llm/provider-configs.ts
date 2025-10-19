@@ -29,6 +29,10 @@ export const PROVIDER_CONFIGS: Record<AISdkProvider, ProviderConfig> = {
     provider: "claudeCode",
     streaming: false, // Claude Code doesn't support true streaming - sends complete response
   },
+  "gemini-cli": {
+    provider: "gemini-cli",
+    streaming: true, // Gemini CLI supports streaming
+  },
 };
 
 /**

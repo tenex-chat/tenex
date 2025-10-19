@@ -34,6 +34,10 @@ export const KNOWN_MODELS = {
   claudeCode: [
     "opus",
     "sonnet",
+  ],
+  "gemini-cli": [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
   ]
 };
 

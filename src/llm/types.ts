@@ -16,7 +16,7 @@ export type { ExecutionContext };
 /**
  * AI SDK supported providers
  */
-export const AI_SDK_PROVIDERS = ["openrouter", "anthropic", "openai", "ollama", "claudeCode"] as const;
+export const AI_SDK_PROVIDERS = ["openrouter", "anthropic", "openai", "ollama", "claudeCode", "gemini-cli"] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 
 /**

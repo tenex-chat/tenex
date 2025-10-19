@@ -273,10 +273,18 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }));
 
         // Wrap with all middlewares
-        return wrapLanguageModel({
+        const wrappedModel = wrapLanguageModel({
             model: baseModel,
             middleware: middlewares,
         });
+
+        // Preserve tools property from baseModel if it exists
+        // wrapLanguageModel doesn't preserve custom properties, so we need to manually copy them
+        if ('tools' in baseModel && (baseModel as any).tools) {
+            (wrappedModel as any).tools = (baseModel as any).tools;
+        }
+
+        return wrappedModel;
     }
 
     /**
@@ -285,7 +293,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      */
     private addCacheControl(messages: ModelMessage[]): ModelMessage[] {
         // Only add cache control for Anthropic
-        if (this.provider !== "anthropic") {
+        if (this.provider !== "anthropic" && this.provider !== "gemini-cli") {
             return messages;
         }
 
@@ -348,7 +356,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             const result = await generateText({
                 model,
                 messages: processedMessages,
-                tools,
+                tools: 'tools' in model && model.tools ? { ...model.tools, ...tools } : tools,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
 
@@ -493,7 +501,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 originalMessageCount: messages.length,
             });
             processedMessages = convertSystemMessagesForResume(messages);
-            console.log("processed messages for claude resume", processedMessages);
         }
 
         // Add provider-specific cache control
@@ -534,7 +541,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            tools: tools,
+            tools: 'tools' in model && model.tools ? { ...model.tools, ...tools } : tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -647,8 +654,19 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 });
                 break;
             case "error":
-                logger.error("[LLMService] Error chunk received", {
-                    error: chunk.error
+                // Extract detailed error information
+                const errorMsg = chunk.error instanceof Error
+                    ? chunk.error.message
+                    : String(chunk.error);
+                const errorStack = chunk.error instanceof Error
+                    ? chunk.error.stack
+                    : undefined;
+
+                logger.error("[LLMService] ❌ Error chunk received", {
+                    errorMessage: errorMsg,
+                    errorStack,
+                    errorType: chunk.error?.constructor?.name,
+                    fullError: chunk.error
                 });
                 this.emit("stream-error", { error: chunk.error });
                 break;
@@ -882,13 +900,39 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                (res.type === "error-json" && typeof res.json === "object");
     }
 
+    /**
+     * Extract error details from tool result for better logging
+     */
+    private extractErrorDetails(result: unknown): { message: string; type: string } | null {
+        if (typeof result !== "object" || result === null) {
+            return null;
+        }
+        const res = result as Record<string, unknown>;
+
+        if (res.type === "error-text" && typeof res.text === "string") {
+            return { message: res.text, type: "error-text" };
+        }
+
+        if (res.type === "error-json" && typeof res.json === "object") {
+            const errorJson = res.json as Record<string, unknown>;
+            const message = errorJson.message || errorJson.error || JSON.stringify(errorJson);
+            return { message: String(message), type: "error-json" };
+        }
+
+        return null;
+    }
+
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
         const hasError = this.isToolResultError(result);
 
         if (hasError) {
-            logger.warn(`[LLMService] Tool '${toolName}' reported an error in its result`, {
+            const errorDetails = this.extractErrorDetails(result);
+            logger.error(`[LLMService] ❌ Tool '${toolName}' execution failed`, {
                 toolCallId,
-                result
+                toolName,
+                errorType: errorDetails?.type || "unknown",
+                errorMessage: errorDetails?.message || "No error details available",
+                fullResult: result
             });
         } else {
             logger.debug("[LLMService] Emitting tool-did-execute", {
@@ -958,13 +1002,18 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         schema: z.ZodSchema<T>,
         tools: Record<string, AISdkTool> | undefined
     ): Promise<{ object: T; usage: LanguageModelUsage }> {
+        // Merge model.tools with provided tools if model has built-in tools
+        const mergedTools = 'tools' in languageModel && languageModel.tools
+            ? { ...languageModel.tools, ...(tools || {}) }
+            : tools;
+
         return await generateObject({
             model: languageModel,
             messages,
             schema,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
-            ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
+            ...(mergedTools && Object.keys(mergedTools).length > 0 ? { tools: mergedTools } : {}),
 
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getFullTelemetryConfig(),

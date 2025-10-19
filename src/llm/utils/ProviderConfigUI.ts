@@ -16,7 +16,8 @@ export class ProviderConfigUI {
       anthropic: "Anthropic (Claude)",
       openai: "OpenAI (GPT)",
       ollama: "Ollama (Local models)",
-      claudeCode: "Claude Code"
+      claudeCode: "Claude Code",
+      "gemini-cli": "Gemini CLI (via GCloud)"
     };
     return names[provider] || provider;
   }
@@ -25,10 +26,10 @@ export class ProviderConfigUI {
    * Configure a specific provider interactively
    */
   static async configureProvider(provider: string, currentConfig?: TenexLLMs): Promise<{ apiKey: string }> {
-    if (provider === "claudeCode") {
-      // Claude Code doesn't require an API key
-      console.log(chalk.green("✓ Claude Code provider configured (no API key required)"));
-      return { apiKey: "none" }; // Claude Code doesn't use API keys
+    if (provider === "claudeCode" || provider === "gemini-cli") {
+      // Claude Code and Gemini CLI don't require an API key
+      console.log(chalk.green(`✓ ${this.getProviderDisplayName(provider)} provider configured (no API key required)`));
+      return { apiKey: "none" }; // Doesn't use API keys
     } else if (provider === "ollama") {
       // For Ollama, ask for base URL instead of API key
       const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";

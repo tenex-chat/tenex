@@ -6,10 +6,10 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
+import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createProviderRegistry, type Provider, type ProviderRegistry } from "ai";
 import { LLMService } from "./service";
 import { createClaudeCode, type ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
-import { PermissionMode } from "@anthropic-ai/claude-code";
 import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
 
 /**
@@ -19,6 +19,7 @@ export class LLMServiceFactory {
     private providers: Map<string, Provider> = new Map();
     private registry: ProviderRegistry | null = null;
     private claudeCodeApiKey: string | null = null; // Store Claude Code API key for runtime use
+    private geminiCliEnabled = false;
     private initialized = false;
 
     /**
@@ -27,6 +28,7 @@ export class LLMServiceFactory {
     async initializeProviders(providerConfigs: Record<string, { apiKey: string }>): Promise<void> {
         this.providers.clear();
         this.claudeCodeApiKey = null;
+        this.geminiCliEnabled = false;
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
@@ -110,6 +112,13 @@ export class LLMServiceFactory {
                         logger.debug("[LLMServiceFactory] Stored Claude Code API key for runtime use");
                         break;
                     }
+
+                    case "gemini-cli": {
+                        this.providers.set(name, createGeminiProvider({ authType: "oauth-personal" }) as Provider);
+                        this.geminiCliEnabled = true;
+                        logger.debug("[LLMServiceFactory] Initialized Gemini CLI provider");
+                        break;
+                    }
                         
                     default:
                         logger.warn(`[LLMServiceFactory] Unknown provider type: ${name}`);
@@ -151,6 +160,7 @@ export class LLMServiceFactory {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
             sessionId?: string;
+            projectPath?: string;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -207,10 +217,11 @@ export class LLMServiceFactory {
             // Create Claude Code provider with runtime configuration
             const claudeCodeConfig = {
                 defaultSettings: {
-                    permissionMode: "bypassPermissions" as PermissionMode,
+                    permissionMode: "bypassPermissions",
+                    cwd: context?.projectPath,
                 },
                 mcpServers: mcpServersConfig,
-                allowedTools: allowedTools,
+                allowedTools,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),
@@ -269,7 +280,7 @@ export class LLMServiceFactory {
      */
     hasProvider(providerName: string): boolean {
         // Check standard providers or Claude Code
-        return this.providers.has(providerName) || (providerName === "claudeCode" && !!this.claudeCodeApiKey);
+        return this.providers.has(providerName) || (providerName === "claudeCode" && !!this.claudeCodeApiKey) || (providerName === "gemini-cli" && this.geminiCliEnabled);
     }
 
     /**
@@ -279,6 +290,9 @@ export class LLMServiceFactory {
         const providers = Array.from(this.providers.keys());
         if (this.claudeCodeApiKey) {
             providers.push("claudeCode");
+        }
+        if (this.geminiCliEnabled) {
+            providers.push("gemini-cli");
         }
         return providers;
     }

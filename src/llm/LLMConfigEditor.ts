@@ -86,45 +86,23 @@ export class LLMConfigEditor {
   }
 
   private async configureProviders(llmsConfig: TenexLLMs): Promise<void> {
-    const configured = AI_SDK_PROVIDERS.filter(p => !!llmsConfig.providers[p]?.apiKey);
-    const unconfigured = AI_SDK_PROVIDERS.filter(p => !llmsConfig.providers[p]?.apiKey);
-    
-    let providers: string[];
-    
-    if (unconfigured.length === 0) {
-      // All configured, ask if they want to reconfigure
-      const { reconfigure } = await inquirer.prompt([{
-        type: "confirm",
-        name: "reconfigure",
-        message: "All providers configured. Reconfigure existing?",
-        default: false
-      }]);
-      
-      if (!reconfigure) return;
-      
-      const { selected } = await inquirer.prompt([{
-        type: "checkbox",
-        name: "selected",
-        message: "Select providers to reconfigure:",
-        choices: configured.map(p => ({
-          name: ProviderConfigUI.getProviderDisplayName(p),
-          value: p
-        }))
-      }]);
-      providers = selected;
-    } else {
-      // Select unconfigured providers
-      const { selected } = await inquirer.prompt([{
-        type: "checkbox",
-        name: "selected",
-        message: "Select providers to configure:",
-        choices: unconfigured.map(p => ({
-          name: ProviderConfigUI.getProviderDisplayName(p),
-          value: p
-        }))
-      }]);
-      providers = selected;
-    }
+    const choices = AI_SDK_PROVIDERS.map(p => {
+      const isConfigured = llmsConfig.providers[p]?.apiKey && llmsConfig.providers[p]?.apiKey !== "none";
+      const name = ProviderConfigUI.getProviderDisplayName(p);
+      return {
+        name: isConfigured ? `${name} (configured)` : name,
+        value: p,
+      };
+    });
+
+    const { selected } = await inquirer.prompt([{
+      type: "checkbox",
+      name: "selected",
+      message: "Select providers to configure:",
+      choices: choices
+    }]);
+
+    const providers = selected;
     
     for (const provider of providers) {
       const config = await ProviderConfigUI.configureProvider(provider, llmsConfig);
