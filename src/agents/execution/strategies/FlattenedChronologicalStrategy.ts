@@ -19,6 +19,8 @@ import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { DelegationXmlFormatter } from "@/conversations/formatters/DelegationXmlFormatter";
 import { trace, context as otelContext, SpanStatusCode } from "@opentelemetry/api";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { NudgeService } from "@/services/NudgeService";
 
 const tracer = trace.getTracer("tenex.message-strategy");
 
@@ -94,7 +96,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const messages: ModelMessage[] = [];
 
         // Add system prompt
-        await this.addSystemPrompt(messages, context);
+        await this.addSystemPrompt(messages, context, span);
 
         // Capture system prompt for debugging
         const systemMessage = messages.find(m => m.role === "system");
@@ -601,7 +603,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
      */
     private async addSystemPrompt(
         messages: ModelMessage[],
-        context: ExecutionContext
+        context: ExecutionContext,
+        span: ReturnType<typeof tracer.startSpan>
     ): Promise<void> {
         const conversation = context.getConversation();
         if (!conversation) return;
@@ -633,6 +636,39 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             for (const systemMsg of systemMessages) {
                 messages.push(systemMsg.message);
+            }
+
+            // Add nudges if present on triggering event
+            const nudgeIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+            if (nudgeIds.length > 0) {
+                span.addEvent("nudge.injection_start", {
+                    "nudge.count": nudgeIds.length,
+                    "agent.slug": context.agent.slug
+                });
+
+                const nudgeService = NudgeService.getInstance();
+                const nudgeContent = await nudgeService.fetchNudges(nudgeIds);
+                if (nudgeContent) {
+                    messages.push({
+                        role: "system",
+                        content: nudgeContent
+                    });
+
+                    span.addEvent("nudge.injection_success", {
+                        "nudge.content_length": nudgeContent.length
+                    });
+
+                    span.setAttributes({
+                        "nudge.injected": true,
+                        "nudge.count": nudgeIds.length,
+                        "nudge.content_length": nudgeContent.length
+                    });
+                } else {
+                    span.addEvent("nudge.injection_empty");
+                    span.setAttribute("nudge.injected", false);
+                }
+            } else {
+                span.setAttribute("nudge.injected", false);
             }
         } else {
             // Fallback minimal prompt

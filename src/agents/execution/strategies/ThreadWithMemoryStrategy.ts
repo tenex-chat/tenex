@@ -16,6 +16,8 @@ import { ThreadedConversationFormatter } from "@/conversations/formatters/Thread
 import { hasReasoningTag } from "@/conversations/utils/content-utils";
 import { extractNostrEntities, resolveNostrEntitiesToSystemMessages } from "@/utils/nostr-entity-parser";
 import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { NudgeService } from "@/services/NudgeService";
 
 /**
  * Message generation strategy that includes thread context and agent memory
@@ -331,6 +333,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             const systemMessages = await buildSystemPromptMessages({
                 agent: context.agent,
                 project,
+                projectPath: context.projectPath,
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,
@@ -340,6 +343,36 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
             for (const systemMsg of systemMessages) {
                 messages.push(systemMsg.message);
+            }
+
+            // Add nudges if present on triggering event
+            const nudgeIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+            if (nudgeIds.length > 0) {
+                logger.debug("[ThreadWithMemoryStrategy] Injecting nudges", {
+                    agent: context.agent.slug,
+                    nudgeCount: nudgeIds.length,
+                    conversationId: context.conversationId.substring(0, 8)
+                });
+
+                const nudgeService = NudgeService.getInstance();
+                const nudgeContent = await nudgeService.fetchNudges(nudgeIds);
+                if (nudgeContent) {
+                    messages.push({
+                        role: "system",
+                        content: nudgeContent
+                    });
+
+                    logger.info("[ThreadWithMemoryStrategy] Nudges injected successfully", {
+                        agent: context.agent.slug,
+                        nudgeCount: nudgeIds.length,
+                        contentLength: nudgeContent.length
+                    });
+                } else {
+                    logger.debug("[ThreadWithMemoryStrategy] Nudge content was empty", {
+                        agent: context.agent.slug,
+                        nudgeCount: nudgeIds.length
+                    });
+                }
             }
         } else {
             // Fallback minimal prompt

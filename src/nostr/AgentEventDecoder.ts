@@ -240,4 +240,15 @@ export class AgentEventDecoder {
     return participantTags.map(tag => tag[1]).filter(pubkey => !!pubkey);
   }
 
+  /**
+   * Extract nudge event IDs from event tags
+   * Returns an array of event IDs from all ['nudge', '<id>'] tags
+   */
+  static extractNudgeEventIds(event: NDKEvent): string[] {
+    return event.tags
+      .filter((tag) => tag[0] === "nudge")
+      .map((tag) => tag[1])
+      .filter((id): id is string => !!id);
+  }
+
 }

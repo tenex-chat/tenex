@@ -14,6 +14,7 @@ export const NDKKind = {
 
     // Standard NIP kinds not in NDK
     AgentRequest: 4133, // NIP-90 Agent Request
+    AgentNudge: 4201, // Agent Nudge - system prompt injection
 
     // Tenex custom kinds (2xxxx range)
     TenexStreamingResponse: 21111,

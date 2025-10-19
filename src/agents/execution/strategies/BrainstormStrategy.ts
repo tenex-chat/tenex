@@ -8,6 +8,8 @@ import { NostrKind, NostrTag, TagValue, isBrainstormEvent } from "@/nostr/consta
 import { isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { NudgeService } from "@/services/NudgeService";
 
 /**
  * Message generation strategy for brainstorming sessions.
@@ -102,6 +104,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         const systemMessages = await buildSystemPromptMessages({
             agent: context.agent,
             project,
+            projectPath: context.projectPath,
             availableAgents: Array.from(projectCtx.agents.values()),
             conversation,
             agentLessons: new Map(),
@@ -112,6 +115,36 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         // Add all system messages
         for (const systemMsg of systemMessages) {
             messages.push(systemMsg.message);
+        }
+
+        // Add nudges if present on triggering event
+        const nudgeIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+        if (nudgeIds.length > 0) {
+            logger.debug("[BrainstormStrategy] Injecting nudges", {
+                agent: context.agent.slug,
+                nudgeCount: nudgeIds.length,
+                conversationId: context.conversationId.substring(0, 8)
+            });
+
+            const nudgeService = NudgeService.getInstance();
+            const nudgeContent = await nudgeService.fetchNudges(nudgeIds);
+            if (nudgeContent) {
+                messages.push({
+                    role: "system",
+                    content: nudgeContent
+                });
+
+                logger.info("[BrainstormStrategy] Nudges injected successfully", {
+                    agent: context.agent.slug,
+                    nudgeCount: nudgeIds.length,
+                    contentLength: nudgeContent.length
+                });
+            } else {
+                logger.debug("[BrainstormStrategy] Nudge content was empty", {
+                    agent: context.agent.slug,
+                    nudgeCount: nudgeIds.length
+                });
+            }
         }
     }
     
