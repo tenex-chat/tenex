@@ -14,6 +14,7 @@ export interface TenexConfig {
   whitelistedPubkeys?: string[];
   tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
   projectsBase?: string; // Base directory for all projects (default: ~/tenex)
+  relays?: string[]; // Nostr relay URLs
 
   // Project fields (optional for global config)
   description?: string;
@@ -24,6 +25,8 @@ export interface TenexConfig {
 export const TenexConfigSchema = z.object({
   whitelistedPubkeys: z.array(z.string()).optional(),
   tenexPrivateKey: z.string().optional(),
+  projectsBase: z.string().optional(),
+  relays: z.array(z.string()).optional(),
   description: z.string().optional(),
   repoUrl: z.string().optional(),
   projectNaddr: z.string().optional(),

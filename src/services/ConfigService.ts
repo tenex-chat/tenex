@@ -54,6 +54,17 @@ export class ConfigService {
     return path.join(projectPath, TENEX_DIR);
   }
 
+  /**
+   * Get the base directory for all projects
+   * Defaults to ~/.tenex/projects if not configured
+   */
+  getProjectsBase(): string {
+    const config = this.loadedConfig?.config;
+    return config?.projectsBase
+      ? path.resolve(config.projectsBase)
+      : path.join(os.homedir(), ".tenex", "projects");
+  }
+
   private getConfigFilePath(basePath: string, configFile: ConfigFile): string {
     return path.join(basePath, configFile);
   }
@@ -260,6 +271,7 @@ export class ConfigService {
     context?: {
       tools?: Record<string, unknown>;
       agentName?: string;
+      projectPath?: string;
     }
   ): LLMService {
     const config = this.getLLMConfig(configName);

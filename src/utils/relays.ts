@@ -1,3 +1,5 @@
+import { configService } from "@/services/ConfigService";
+
 /**
  * Default Nostr relay URLs for TENEX
  */
@@ -19,9 +21,11 @@ function isValidWebSocketUrl(url: string): boolean {
 
 /**
  * Get relay URLs for NDK connection
+ * Priority: environment variable > config file > defaults
  * @returns Array of validated WebSocket relay URLs
  */
 export function getRelayUrls(): string[] {
+  // First check environment variable (highest priority)
   const relaysEnv = process.env.RELAYS;
   if (relaysEnv?.trim()) {
     const urls = relaysEnv
@@ -29,12 +33,24 @@ export function getRelayUrls(): string[] {
       .map((url) => url.trim())
       .filter((url) => url.length > 0 && isValidWebSocketUrl(url));
 
-    // If after filtering we have no valid URLs, return defaults
-    if (urls.length === 0) {
-      return DEFAULT_RELAY_URLS;
+    if (urls.length > 0) {
+      return urls;
     }
-    return urls;
   }
 
+  // Then check config file
+  try {
+    const config = configService.getConfig();
+    if (config.relays && config.relays.length > 0) {
+      const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
+      if (urls.length > 0) {
+        return urls;
+      }
+    }
+  } catch {
+    // Config not loaded yet, fall through to defaults
+  }
+
+  // Finally fall back to defaults
   return DEFAULT_RELAY_URLS;
 }
