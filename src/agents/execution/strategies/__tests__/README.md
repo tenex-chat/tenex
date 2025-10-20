@@ -42,7 +42,17 @@ In a multi-agent Nostr system with complex threading:
   - Simulates delegation chains, code reviews, parallel branches
 
 #### Visualization Tools
-- **`interactive-tui.tsx`** - **⭐ INTERACTIVE TUI** (RECOMMENDED)
+
+- **`nostr-conversation-viewer.tsx`** - **🌐 LIVE NOSTR VIEWER** (Production Data!)
+  - Fetches REAL conversations from Nostr relays
+  - Pass any event ID to analyze the thread
+  - Shows agent perspectives using ACTUAL strategy
+  - Looks up agent names from AgentRegistry + PubkeyNameRepository
+  - Reddit-style threaded display
+  - **Usage**: `bun run src/agents/execution/strategies/__tests__/nostr-conversation-viewer.tsx <event-id> [relay-urls...]`
+  - **Example**: `bun run src/agents/execution/strategies/__tests__/nostr-conversation-viewer.tsx 1e19502b9d3febac577d3b7ce3bd5888c945b2261ff0480f45c870228bac4fde`
+
+- **`interactive-tui.tsx`** - **⭐ INTERACTIVE TUI** (Test Scenarios)
   - Fully interactive terminal UI with Ink
   - Uses ACTUAL `FlattenedChronologicalStrategy` (not simplified!)
   - Navigate scenarios with ←/→ arrows
