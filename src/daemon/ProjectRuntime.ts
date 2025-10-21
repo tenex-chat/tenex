@@ -12,6 +12,10 @@ import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { trace } from "@opentelemetry/api";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { mcpService } from "@/services/mcp/MCPManager";
+import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
+import { NDKMCPTool } from "@/events/NDKMCPTool";
+import { getNDK } from "@/nostr";
 
 /**
  * Self-contained runtime for a single project.
@@ -90,6 +94,9 @@ export class ProjectRuntime {
       // Create project context directly (don't use global singleton)
       this.context = new ProjectContext(this.project, agentRegistry, llmLogger);
       await agentRegistry.persistPMStatus();
+
+      // Load MCP tools from project event
+      await this.initializeMCPTools();
 
       // Initialize conversation coordinator with metadata path
       this.conversationCoordinator = new ConversationCoordinator(this.metadataPath);
@@ -233,5 +240,96 @@ export class ProjectRuntime {
    */
   isActive(): boolean {
     return this.isRunning;
+  }
+
+  /**
+   * Initialize MCP tools from the project event
+   * Extracts MCP tool event IDs from "mcp" tags, fetches and installs them
+   */
+  private async initializeMCPTools(): Promise<void> {
+    try {
+      // Extract MCP tool event IDs from the project
+      const mcpEventIds = this.project.tags
+        .filter((tag) => tag[0] === "mcp" && tag[1])
+        .map((tag) => tag[1])
+        .filter((id): id is string => typeof id === "string");
+
+      logger.debug(`[ProjectRuntime] Found ${mcpEventIds.length} MCP tool(s) in project tags`, {
+        projectId: this.projectId,
+        mcpEventIds: mcpEventIds.map(id => id.substring(0, 12)),
+      });
+
+      if (mcpEventIds.length === 0) {
+        logger.debug("[ProjectRuntime] No MCP tools defined in project, skipping MCP initialization");
+        return;
+      }
+
+      const ndk = getNDK();
+      const installedCount = { success: 0, failed: 0 };
+
+      // Fetch and install each MCP tool
+      for (const eventId of mcpEventIds) {
+        try {
+          logger.debug(`[ProjectRuntime] Fetching MCP tool event: ${eventId.substring(0, 12)}...`);
+          const mcpEvent = await ndk.fetchEvent(eventId);
+
+          if (!mcpEvent) {
+            logger.warn(`[ProjectRuntime] MCP tool event not found: ${eventId.substring(0, 12)}`);
+            installedCount.failed++;
+            continue;
+          }
+
+          const mcpTool = NDKMCPTool.from(mcpEvent);
+          logger.debug(`[ProjectRuntime] Installing MCP tool: ${mcpTool.name || 'unnamed'}`, {
+            eventId: eventId.substring(0, 12),
+            command: mcpTool.command,
+          });
+
+          await installMCPServerFromEvent(this.projectPath, mcpTool);
+          installedCount.success++;
+
+          logger.info(`[ProjectRuntime] Installed MCP tool: ${mcpTool.name}`, {
+            eventId: eventId.substring(0, 12),
+            slug: mcpTool.slug,
+          });
+        } catch (error) {
+          logger.error(`[ProjectRuntime] Failed to install MCP tool`, {
+            eventId: eventId.substring(0, 12),
+            error: error instanceof Error ? error.message : String(error),
+          });
+          installedCount.failed++;
+        }
+      }
+
+      logger.info(`[ProjectRuntime] MCP tool installation complete`, {
+        total: mcpEventIds.length,
+        success: installedCount.success,
+        failed: installedCount.failed,
+      });
+
+      // Initialize MCP service if any tools were installed
+      if (installedCount.success > 0) {
+        logger.info(`[ProjectRuntime] Initializing MCP service with ${installedCount.success} tool(s)`);
+        await mcpService.initialize(this.projectPath);
+
+        const runningServers = mcpService.getRunningServers();
+        const availableTools = Object.keys(mcpService.getCachedTools());
+
+        logger.info(`[ProjectRuntime] MCP service initialized`, {
+          runningServers: runningServers.length,
+          runningServerNames: runningServers,
+          availableTools: availableTools.length,
+          toolNames: availableTools,
+        });
+      } else {
+        logger.warn("[ProjectRuntime] No MCP tools were successfully installed, skipping MCP service initialization");
+      }
+    } catch (error) {
+      logger.error("[ProjectRuntime] Failed to initialize MCP tools", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      // Don't throw - allow project to start even if MCP initialization fails
+    }
   }
 }
