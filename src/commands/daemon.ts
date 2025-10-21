@@ -8,6 +8,7 @@ import { Command } from "commander";
 import { SchedulerService } from "@/services/SchedulerService";
 import { getNDK } from "@/nostr/ndkClient";
 import chalk from "chalk";
+import { TerminalInputManager } from "@/daemon/TerminalInputManager";
 
 /**
  * Daemon command - runs all projects in a single process
@@ -68,9 +69,15 @@ export const daemonCommand = new Command("daemon")
     // Get the daemon instance
     const daemon = getDaemon();
 
+    // Initialize terminal input manager
+    const terminalInputManager = new TerminalInputManager(daemon);
+
     // Set up graceful shutdown
     setupGracefulShutdown(async () => {
       logger.info("Shutting down daemon...");
+
+      // Stop terminal input manager
+      terminalInputManager.stop();
 
       // Stop the daemon
       await daemon.stop();
@@ -89,6 +96,7 @@ export const daemonCommand = new Command("daemon")
       console.log(chalk.green("✅ Daemon started successfully"));
       console.log(chalk.gray("   Managing all projects in a single process"));
       console.log(chalk.gray("   Press Ctrl+C to stop"));
+      console.log(chalk.gray("   Press 'p' to view running projects"));
       console.log();
 
       // Log initial status
@@ -99,6 +107,9 @@ export const daemonCommand = new Command("daemon")
       console.log(chalk.gray(`   Total Agents: ${status.agents}`));
       console.log(chalk.gray(`   Memory: ${Math.round(status.memory.heapUsed / 1024 / 1024)} MB`));
       console.log();
+
+      // Start terminal input manager
+      terminalInputManager.start();
 
       // Keep the process alive
       await new Promise(() => {
