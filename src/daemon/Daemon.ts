@@ -13,6 +13,7 @@ import * as os from "node:os";
 import { trace, propagation, context as otelContext, ROOT_CONTEXT, SpanStatusCode } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { Lockfile } from "@/utils/lockfile";
 
 const tracer = trace.getTracer("tenex.daemon");
 
@@ -41,6 +42,7 @@ export class Daemon {
   private daemonDir: string = "";
   private isRunning = false;
   private shutdownHandlers: Array<() => Promise<void>> = [];
+  private lockfile: Lockfile | null = null;
 
   // Project management
   private knownProjects = new Map<string, NDKProject>(); // All discovered projects
@@ -69,10 +71,13 @@ export class Daemon {
       // 1. Initialize base directories
       await this.initializeDirectories();
 
-      // 2. Initialize routing logger
+      // 2. Acquire lockfile to prevent multiple daemon instances
+      await this.acquireDaemonLock();
+
+      // 3. Initialize routing logger
       this.routingLogger.initialize(this.daemonDir);
 
-      // 3. Load configuration
+      // 4. Load configuration
       const { config } = await configService.loadConfig();
       this.whitelistedPubkeys = config.whitelistedPubkeys || [];
       this.projectsBase = configService.getProjectsBase();
@@ -86,11 +91,11 @@ export class Daemon {
         projectsBase: this.projectsBase,
       });
 
-      // 4. Initialize NDK
+      // 5. Initialize NDK
       await initNDK();
       this.ndk = getNDK();
 
-      // 5. Initialize subscription manager (before discovery)
+      // 6. Initialize subscription manager (before discovery)
       this.subscriptionManager = new SubscriptionManager(
         this.ndk,
         this.handleIncomingEvent.bind(this), // Pass event handler
@@ -98,14 +103,14 @@ export class Daemon {
         this.routingLogger
       );
 
-      // 6. Discover existing projects (but don't start them)
+      // 7. Discover existing projects (but don't start them)
       // This will update the subscription manager with projects and agents
       await this.discoverProjects();
 
-      // 7. Start subscription (now it has projects and agents)
+      // 8. Start subscription (now it has projects and agents)
       await this.subscriptionManager.start();
 
-      // 8. Setup graceful shutdown
+      // 9. Setup graceful shutdown
       this.setupShutdownHandlers();
 
       this.isRunning = true;
@@ -119,6 +124,16 @@ export class Daemon {
       logger.error("Failed to start daemon", {
         error: error instanceof Error ? error.message : String(error),
       });
+
+      // Release lockfile on startup failure
+      if (this.lockfile) {
+        await this.lockfile.release().catch(releaseError => {
+          logger.warn("Failed to release lockfile during error cleanup", {
+            error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+          });
+        });
+      }
+
       throw error;
     }
   }
@@ -143,48 +158,86 @@ export class Daemon {
   }
 
   /**
+   * Acquire daemon lockfile to prevent multiple instances
+   */
+  private async acquireDaemonLock(): Promise<void> {
+    this.lockfile = new Lockfile(Lockfile.getDefaultPath());
+    await this.lockfile.acquire();
+  }
+
+  /**
    * Discover existing projects from Nostr (but don't start them)
+   * Uses subscribe() with EOSE to wait for initial load, but keeps subscription active
+   * for continuous updates
    */
   private async discoverProjects(): Promise<void> {
     logger.debug("Discovering existing projects from whitelisted pubkeys");
 
     const ndk = getNDK();
-    const projectEvents = await ndk.fetchEvents({
-      kinds: [31933],
-      authors: this.whitelistedPubkeys,
-    });
 
-    logger.debug(`Found ${projectEvents.size} projects`);
+    // Use subscribe instead of fetchEvents to get initial projects + continuous updates
+    return new Promise<void>((resolve, reject) => {
+      const subscription = ndk.subscribe(
+        {
+          kinds: [31933],
+          authors: this.whitelistedPubkeys,
+        },
+        {
+          closeOnEose: true, // Close after initial load since SubscriptionManager will handle ongoing updates
+        }
+      );
 
-    // Just store project metadata, don't initialize
-    for (const event of projectEvents) {
-      try {
-        const projectId = this.buildProjectId(event);
-        const project = NDKProject.from(event);
-        this.knownProjects.set(projectId, project);
+      subscription.on("event", (event: NDKEvent) => {
+        try {
+          const projectId = this.buildProjectId(event);
+          const project = NDKProject.from(event);
+          this.knownProjects.set(projectId, project);
 
-        logger.debug(`Discovered project: ${projectId}`, {
-          title: project.tagValue("title"),
+          logger.debug(`Discovered project: ${projectId}`, {
+            title: project.tagValue("title"),
+          });
+        } catch (error) {
+          logger.error("Failed to process project", {
+            error: error instanceof Error ? error.message : String(error),
+            eventId: event.id,
+          });
+        }
+      });
+
+      subscription.on("eose", () => {
+        logger.debug(`Found ${this.knownProjects.size} projects during initial discovery`);
+
+        // Update subscription manager with discovered projects
+        const projectIds = Array.from(this.knownProjects.keys());
+
+        if (this.subscriptionManager) {
+          this.subscriptionManager.updateKnownProjects(projectIds);
+          // Agent pubkeys will be added when projects start and load their agents
+        }
+
+        logger.debug("Known projects updated", {
+          old: 0,
+          new: this.knownProjects.size,
         });
-      } catch (error) {
-        logger.error("Failed to process project", {
-          error: error instanceof Error ? error.message : String(error),
-          eventId: event.id,
-        });
-      }
-    }
 
-    // Update subscription manager with discovered projects
-    const projectIds = Array.from(this.knownProjects.keys());
+        resolve();
+      });
 
-    if (this.subscriptionManager) {
-      this.subscriptionManager.updateKnownProjects(projectIds);
-      // Agent pubkeys will be added when projects start and load their agents
-    }
+      // Add error handling
+      subscription.on("close", () => {
+        logger.debug("Project discovery subscription closed after EOSE");
+      });
 
-    logger.debug("Known projects updated", {
-      old: 0,
-      new: this.knownProjects.size,
+      // Set a timeout to prevent hanging forever
+      const timeout = setTimeout(() => {
+        logger.warn("Project discovery timed out after 30s");
+        subscription.stop();
+        resolve(); // Resolve anyway, we'll work with what we got
+      }, 30000);
+
+      subscription.on("eose", () => {
+        clearTimeout(timeout);
+      });
     });
   }
 
@@ -475,15 +528,27 @@ export class Daemon {
   private async handleProjectEvent(event: NDKEvent): Promise<void> {
     const projectId = this.buildProjectId(event);
     const project = new NDKProject(getNDK(), event.rawEvent());
+    const isNewProject = !this.knownProjects.has(projectId);
 
     logger.info("Processing project event", {
       projectId,
       title: project.tagValue("title"),
-      isUpdate: this.knownProjects.has(projectId),
+      isUpdate: !isNewProject,
+      isNewProject,
     });
 
     // Update known projects
     this.knownProjects.set(projectId, project);
+
+    // If this is a new project, update the subscription manager
+    if (isNewProject && this.subscriptionManager) {
+      logger.info("New project discovered, updating subscription manager", {
+        projectId,
+        title: project.tagValue("title"),
+      });
+      const projectIds = Array.from(this.knownProjects.keys());
+      this.subscriptionManager.updateKnownProjects(projectIds);
+    }
 
     // If project is active, route to runtime's EventHandler for incremental update
     const runtime = this.activeRuntimes.get(projectId);
@@ -698,6 +763,11 @@ export class Daemon {
           await handler();
         }
 
+        // Release lockfile
+        if (this.lockfile) {
+          await this.lockfile.release();
+        }
+
         // Shutdown conversation span manager
         const conversationSpanManager = getConversationSpanManager();
         conversationSpanManager.shutdown();
@@ -786,6 +856,111 @@ export class Daemon {
   }
 
   /**
+   * Kill a specific project runtime
+   * @param projectId - The project ID to kill
+   * @throws Error if the runtime is not found or not running
+   */
+  async killRuntime(projectId: string): Promise<void> {
+    const runtime = this.activeRuntimes.get(projectId);
+
+    if (!runtime) {
+      throw new Error(`Runtime not found: ${projectId}`);
+    }
+
+    logger.info(`Killing project runtime: ${projectId}`);
+
+    try {
+      await runtime.stop();
+      this.activeRuntimes.delete(projectId);
+
+      // Update subscription to remove this project's agent pubkeys
+      await this.updateSubscriptionAfterRuntimeRemoved(projectId);
+
+      logger.info(`Project runtime killed: ${projectId}`);
+    } catch (error) {
+      logger.error(`Failed to kill project runtime: ${projectId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Restart a specific project runtime
+   * @param projectId - The project ID to restart
+   * @throws Error if the runtime is not found or restart fails
+   */
+  async restartRuntime(projectId: string): Promise<void> {
+    const runtime = this.activeRuntimes.get(projectId);
+
+    if (!runtime) {
+      throw new Error(`Runtime not found: ${projectId}`);
+    }
+
+    logger.info(`Restarting project runtime: ${projectId}`);
+
+    try {
+      // Stop the runtime
+      await runtime.stop();
+
+      // Start it again
+      await runtime.start();
+
+      // Update subscription with potentially new agent pubkeys
+      await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+
+      logger.info(`Project runtime restarted: ${projectId}`);
+    } catch (error) {
+      logger.error(`Failed to restart project runtime: ${projectId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Update subscription after a runtime has been removed
+   */
+  private async updateSubscriptionAfterRuntimeRemoved(projectId: string): Promise<void> {
+    if (!this.subscriptionManager) return;
+
+    try {
+      // Rebuild agent pubkey mapping without the removed project
+      this.agentPubkeyToProjects.forEach((projectSet, agentPubkey) => {
+        projectSet.delete(projectId);
+        // If this agent no longer belongs to any project, remove it
+        if (projectSet.size === 0) {
+          this.agentPubkeyToProjects.delete(agentPubkey);
+        }
+      });
+
+      // Collect all agent pubkeys from remaining active runtimes
+      const allAgentPubkeys = new Set<Hexpubkey>();
+      for (const [_pid, rt] of this.activeRuntimes) {
+        const context = rt.getContext();
+        if (context) {
+          const agents = context.agentRegistry.getAllAgents();
+          for (const agent of agents) {
+            allAgentPubkeys.add(agent.pubkey);
+          }
+        }
+      }
+
+      logger.debug("Updating subscription after runtime removed", {
+        removedProject: projectId,
+        remainingAgents: allAgentPubkeys.size,
+      });
+
+      this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
+    } catch (error) {
+      logger.error("Failed to update subscription after runtime removed", {
+        projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Stop the daemon
    */
   async stop(): Promise<void> {
@@ -815,6 +990,11 @@ export class Daemon {
     // Clear state
     this.activeRuntimes.clear();
     this.knownProjects.clear();
+
+    // Release lockfile
+    if (this.lockfile) {
+      await this.lockfile.release();
+    }
 
     // Shutdown conversation span manager
     const conversationSpanManager = getConversationSpanManager();
