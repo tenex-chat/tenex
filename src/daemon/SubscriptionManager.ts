@@ -114,6 +114,15 @@ export class SubscriptionManager {
   private buildFilters(): NDKFilter[] {
     const filters: NDKFilter[] = [];
 
+    // Filter 0: Project events (kind 31933) from whitelisted pubkeys
+    // This ensures we receive project creation and update events
+    if (this.whitelistedPubkeys.size > 0) {
+      filters.push({
+        kinds: [31933],
+        authors: Array.from(this.whitelistedPubkeys),
+      });
+    }
+
     // Filter 1: Events tagging our known projects
     if (this.knownProjects.size > 0) {
       filters.push({
@@ -158,35 +167,12 @@ export class SubscriptionManager {
   /**
    * Check if an event requires updating our subscription
    * Note: Project events (kind 31933) are handled by Daemon.handleProjectEvent
-   * This just tracks new projects being added to the subscription
+   * which calls updateKnownProjects() to update the subscription.
+   * This method is kept for potential future use with other event types.
    */
-  private async checkForSubscriptionUpdates(event: NDKEvent): Promise<void> {
-    let needsRestart = false;
-
-    // New project event (kind 31933) - just track the project ID
-    if (event.kind === 31933) {
-      const projectId = this.buildProjectId(event);
-      if (!this.knownProjects.has(projectId)) {
-        logger.info(`New project discovered: ${projectId}`);
-        this.knownProjects.add(projectId);
-        needsRestart = true;
-      }
-    }
-
-    if (needsRestart) {
-      this.scheduleRestart();
-    }
-  }
-
-  /**
-   * Build project ID from event
-   */
-  private buildProjectId(event: NDKEvent): string {
-    const dTag = event.tags.find(t => t[0] === "d")?.[1];
-    if (!dTag) {
-      throw new Error("Project event missing d tag");
-    }
-    return `31933:${event.pubkey}:${dTag}`;
+  private async checkForSubscriptionUpdates(_event: NDKEvent): Promise<void> {
+    // Project discovery is now handled by Daemon.handleProjectEvent
+    // which will call updateKnownProjects() when new projects are discovered
   }
 
   /**
