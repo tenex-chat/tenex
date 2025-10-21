@@ -160,7 +160,7 @@ export class ToolExecutionTracker {
     async trackExecution(options: TrackExecutionOptions): Promise<void> {
         const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext } = options;
 
-        logger.info("[ToolExecutionTracker] Tracking new tool execution", {
+        logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
             toolCallId,
             currentTrackedCount: this.executions.size
@@ -234,7 +234,7 @@ export class ToolExecutionTracker {
     async completeExecution(options: CompleteExecutionOptions): Promise<void> {
         const { toolCallId, result, error, agentPubkey } = options;
 
-        logger.info("[ToolExecutionTracker] Completing tool execution", {
+        logger.debug("[ToolExecutionTracker] Completing tool execution", {
             toolCallId,
             error,
             hasResult: result !== undefined
