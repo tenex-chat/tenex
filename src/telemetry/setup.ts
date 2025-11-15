@@ -11,9 +11,42 @@ const resource = resourceFromAttributes({
   "deployment.environment": process.env.NODE_ENV || "development",
 });
 
+const exporterUrl = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
 const traceExporter = new OTLPTraceExporter({
-  url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces",
+  url: exporterUrl,
 });
+
+let collectorAvailable = true;
+
+class ErrorHandlingExporterWrapper {
+  private hasLoggedError = false;
+
+  export(spans: any[], resultCallback: (result: any) => void): void {
+    traceExporter.export(spans, (result) => {
+      if (result.error && collectorAvailable) {
+        const errorMessage = result.error?.message || String(result.error);
+        if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect')) {
+          if (!this.hasLoggedError) {
+            console.warn(`[Telemetry] ⚠️  Collector not available at ${exporterUrl}`);
+            console.warn('[Telemetry] Traces will be collected locally but not exported');
+            this.hasLoggedError = true;
+            collectorAvailable = false;
+          }
+        } else if (!this.hasLoggedError) {
+          console.error('[Telemetry] Export error:', errorMessage);
+          this.hasLoggedError = true;
+        }
+      }
+      resultCallback(result);
+    });
+  }
+
+  shutdown(): Promise<void> {
+    return traceExporter.shutdown();
+  }
+}
+
+const wrappedExporter = new ErrorHandlingExporterWrapper() as any;
 
 // Create a wrapper processor that enriches span names before exporting
 class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
@@ -27,7 +60,7 @@ class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
   }
 }
 
-const spanProcessor = new EnrichedBatchSpanProcessor(traceExporter, {
+const spanProcessor = new EnrichedBatchSpanProcessor(wrappedExporter, {
   maxQueueSize: 2048,
   maxExportBatchSize: 512,
   scheduledDelayMillis: 5000, // Send every 5 seconds
