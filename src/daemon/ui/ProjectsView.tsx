@@ -1,15 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { formatUptime } from "@/utils/time";
-
-export interface ProjectInfo {
-  projectId: string;
-  title: string;
-  isRunning: boolean;
-  startTime: Date | null;
-  eventCount: number;
-  agentCount: number;
-}
+import type { ProjectInfo } from "./types";
 
 interface ProjectsViewProps {
   projects: ProjectInfo[];

@@ -1,13 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-
-export interface AgentInfo {
-  pubkey: string;
-  name: string;
-  role: string;
-  description?: string;
-  lessonsCount: number;
-}
+import type { AgentInfo } from "./types";
 
 interface AgentsViewProps {
   agents: AgentInfo[];

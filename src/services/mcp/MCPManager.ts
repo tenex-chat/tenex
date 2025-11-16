@@ -106,7 +106,9 @@ export class MCPManager {
         // SECURITY CHECK: Enforce allowedPaths
         if (config.allowedPaths && config.allowedPaths.length > 0 && this.projectPath) {
             const resolvedProjectPath = path.resolve(this.projectPath);
-            const isAllowed = config.allowedPaths.some((allowedPath) => {
+            // Filter out undefined/null values from allowedPaths
+            const validAllowedPaths = config.allowedPaths.filter((p): p is string => typeof p === "string" && p.length > 0);
+            const isAllowed = validAllowedPaths.some((allowedPath) => {
                 const resolvedAllowedPath = path.resolve(allowedPath);
                 return (
                     resolvedProjectPath.startsWith(resolvedAllowedPath) ||
@@ -116,7 +118,7 @@ export class MCPManager {
 
             if (!isAllowed) {
                 logger.warn(
-                    `Skipping MCP server '${name}' due to path restrictions. Project path '${this.projectPath}' is not in allowedPaths: ${config.allowedPaths.join(", ")}`
+                    `Skipping MCP server '${name}' due to path restrictions. Project path '${this.projectPath}' is not in allowedPaths: ${validAllowedPaths.join(", ")}`
                 );
                 return;
             }
