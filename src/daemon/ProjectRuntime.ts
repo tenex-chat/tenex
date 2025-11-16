@@ -24,7 +24,7 @@ import chalk from "chalk";
  */
 export class ProjectRuntime {
   public readonly projectId: string;
-  public readonly projectPath: string; // User's git repo path
+  public projectPath: string; // User's git repo path (updated after git initialization)
   private readonly metadataPath: string; // TENEX metadata path
   private readonly dTag: string;
 
