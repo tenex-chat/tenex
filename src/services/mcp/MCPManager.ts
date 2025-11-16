@@ -49,11 +49,8 @@ export class MCPManager {
         }
 
         try {
-            logger.debug(`[MCPManager] initialize() called with projectPath: ${projectPath}`);
             this.projectPath = projectPath;
-            logger.debug(`[MCPManager] About to load config`);
             const config = await configService.loadConfig(projectPath);
-            logger.debug(`[MCPManager] Config loaded successfully`);
 
             if (!config.mcp || !config.mcp.enabled) {
                 logger.info("MCP is disabled");
@@ -63,15 +60,11 @@ export class MCPManager {
             // Enable resources as tools globally
             this.includeResourcesInTools = true;
 
-            logger.debug(`[MCPManager] About to start servers`);
             await this.startServers(config.mcp);
-            logger.debug(`[MCPManager] Servers started, refreshing tool cache`);
             await this.refreshToolCache();
-            logger.debug(`[MCPManager] Tool cache refreshed`);
             this.isInitialized = true;
 
             logger.info("MCP manager initialized with resources as tools enabled");
-            logger.debug(`[MCPManager] initialize() completed successfully`);
         } catch (error) {
             logger.error("Failed to initialize MCP manager:", error);
             // Don't throw - allow the system to continue without MCP
