@@ -56,13 +56,13 @@ export class ConfigService {
 
   /**
    * Get the base directory for all projects
-   * Defaults to ~/.tenex/projects if not configured
+   * Defaults to ~/tenex if not configured
    */
   getProjectsBase(): string {
     const config = this.loadedConfig?.config;
     return config?.projectsBase
       ? path.resolve(config.projectsBase)
-      : path.join(os.homedir(), ".tenex", "projects");
+      : path.join(os.homedir(), "tenex");
   }
 
   private getConfigFilePath(basePath: string, configFile: ConfigFile): string {
