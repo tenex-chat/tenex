@@ -18,8 +18,6 @@ export type ViewAction =
   | { type: "NAVIGATE"; direction: "up" | "down"; maxIndex: number }
   | { type: "VIEW_AGENTS"; projectId: string; agents: AgentInfo[] }
   | { type: "VIEW_AGENT_DETAIL"; agent: AgentInstance; lessons: NDKAgentLesson[] }
-  | { type: "VIEW_CONVERSATIONS" }
-  | { type: "VIEW_PROJECTS" }
   | { type: "NAVIGATE_BACK" };
 
 export const initialViewState: ViewState = {
@@ -64,20 +62,6 @@ export function viewReducer(state: ViewState, action: ViewAction): ViewState {
         selectedIndex: 0,
       };
 
-    case "VIEW_CONVERSATIONS":
-      return {
-        ...state,
-        viewMode: "conversations",
-        selectedIndex: 0,
-      };
-
-    case "VIEW_PROJECTS":
-      return {
-        ...state,
-        viewMode: "projects",
-        selectedIndex: 0,
-      };
-
     case "NAVIGATE_BACK":
       if (state.viewMode === "agent-detail") {
         return {
@@ -94,13 +78,6 @@ export function viewReducer(state: ViewState, action: ViewAction): ViewState {
           viewMode: "projects",
           selectedProjectId: null,
           agents: [],
-          selectedIndex: 0,
-        };
-      }
-      if (state.viewMode === "conversations") {
-        return {
-          ...state,
-          viewMode: "projects",
           selectedIndex: 0,
         };
       }

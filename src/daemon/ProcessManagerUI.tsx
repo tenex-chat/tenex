@@ -1,12 +1,9 @@
 import React, { useState, useEffect, useReducer } from "react";
 import { Box, Text, useInput } from "ink";
 import type { ProjectRuntime } from "./ProjectRuntime";
-import { ConversationFetcher, type ConversationData } from "@/conversations/services/ConversationFetcher";
-import { CONVERSATION_UI } from "@/conversations/constants";
 import { ProjectsView } from "./ui/ProjectsView";
 import { AgentsView } from "./ui/AgentsView";
 import { AgentDetailView } from "./ui/AgentDetailView";
-import { ConversationsView } from "./ui/ConversationsView";
 import type { ProjectInfo, ActionType } from "./ui/types";
 import { areProjectListsEqual, extractProjectInfo } from "./ui/utils";
 import { viewReducer, initialViewState } from "./ui/state";
@@ -22,7 +19,6 @@ interface ProcessManagerUIProps {
 export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: ProcessManagerUIProps): JSX.Element {
   const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [conversations, setConversations] = useState<ConversationData[]>([]);
 
   useEffect((): (() => void) => {
     const updateProjects = (): void => {
@@ -39,21 +35,6 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
     const interval = setInterval(updateProjects, 1000);
     return () => clearInterval(interval);
   }, [runtimes]);
-
-  useEffect((): (() => void) => {
-    const fetchConversations = async (): Promise<void> => {
-      try {
-        const conversations = await ConversationFetcher.fetchRecentConversations();
-        setConversations(conversations);
-      } catch (error) {
-        console.error("Failed to fetch conversations:", error);
-      }
-    };
-
-    fetchConversations();
-    const interval = setInterval(fetchConversations, CONVERSATION_UI.REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, []);
 
   const loadAgents = (projectId: string): void => {
     try {
@@ -140,13 +121,11 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       case "projects":
         maxIndex = projects.length - 1;
         break;
-      case "conversations":
-        maxIndex = conversations.length - 1;
-        break;
       case "agents":
         maxIndex = viewState.agents.length - 1;
         break;
       case "agent-detail":
+      case "conversations":
         return;
       default:
         maxIndex = 0;
@@ -218,14 +197,6 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
     }
 
     if (viewState.viewMode === "projects") {
-      if (input === "c") {
-        dispatch({ type: "VIEW_CONVERSATIONS" });
-      }
-
-      if (input === "p") {
-        dispatch({ type: "VIEW_PROJECTS" });
-      }
-
       if (input === "k") {
         performAction("kill");
       }
@@ -257,7 +228,6 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       </Box>
 
       {viewState.viewMode === "projects" && <ProjectsView projects={projects} selectedIndex={viewState.selectedIndex} />}
-      {viewState.viewMode === "conversations" && <ConversationsView conversations={conversations} selectedIndex={viewState.selectedIndex} />}
       {viewState.viewMode === "agents" && <AgentsView agents={viewState.agents} selectedIndex={viewState.selectedIndex} />}
       {viewState.viewMode === "agent-detail" && viewState.selectedAgent && <AgentDetailView agent={viewState.selectedAgent} lessons={viewState.agentLessons} />}
 

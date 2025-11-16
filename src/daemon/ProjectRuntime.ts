@@ -147,6 +147,7 @@ export class ProjectRuntime {
     } catch (error) {
       logger.error(`Failed to start project runtime: ${this.projectId}`, {
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
       throw error;
     }
