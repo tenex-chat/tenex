@@ -4,8 +4,9 @@ import type { ProjectRuntime } from "./ProjectRuntime";
 import { ProjectsView } from "./ui/ProjectsView";
 import { AgentsView } from "./ui/AgentsView";
 import { AgentDetailView } from "./ui/AgentDetailView";
-import type { ProjectInfo, ActionType } from "./ui/types";
-import { areProjectListsEqual, extractProjectInfo } from "./ui/utils";
+import { ConversationsView } from "./ui/ConversationsView";
+import type { ProjectInfo, ConversationInfo, ActionType } from "./ui/types";
+import { areProjectListsEqual, extractProjectInfo, extractCachedConversations } from "./ui/utils";
 import { viewReducer, initialViewState } from "./ui/state";
 import { VIEW_INSTRUCTIONS, getViewTitle } from "./ui/viewConfig";
 
@@ -19,6 +20,7 @@ interface ProcessManagerUIProps {
 export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: ProcessManagerUIProps): JSX.Element {
   const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
 
   useEffect((): (() => void) => {
     const updateProjects = (): void => {
@@ -33,6 +35,17 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
 
     updateProjects();
     const interval = setInterval(updateProjects, 1000);
+    return () => clearInterval(interval);
+  }, [runtimes]);
+
+  useEffect((): (() => void) => {
+    const updateConversations = (): void => {
+      const cachedConversations = extractCachedConversations(runtimes);
+      setConversations(cachedConversations);
+    };
+
+    updateConversations();
+    const interval = setInterval(updateConversations, 2000);
     return () => clearInterval(interval);
   }, [runtimes]);
 

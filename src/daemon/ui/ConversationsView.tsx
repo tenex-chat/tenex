@@ -1,10 +1,10 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { formatTimeAgo } from "@/utils/time";
-import type { ConversationData } from "@/conversations/services/ConversationFetcher";
+import type { ConversationInfo } from "./types";
 
 interface ConversationsViewProps {
-  conversations: ConversationData[];
+  conversations: ConversationInfo[];
   selectedIndex: number;
 }
 
