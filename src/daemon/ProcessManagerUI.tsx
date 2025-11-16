@@ -4,6 +4,8 @@ import type { ProjectRuntime } from "./ProjectRuntime";
 import { ConversationFetcher, type ConversationData } from "@/conversations/services/ConversationFetcher";
 import { CONVERSATION_UI } from "@/conversations/constants";
 import { formatTimeAgo, formatUptime } from "@/utils/time";
+import type { AgentInstance } from "@/agents/types";
+import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 interface ProcessManagerUIProps {
   runtimes: Map<string, ProjectRuntime>;
@@ -21,9 +23,16 @@ interface ProjectInfo {
   agentCount: number;
 }
 
+interface AgentInfo {
+  pubkey: string;
+  name: string;
+  role: string;
+  description?: string;
+  lessonsCount: number;
+}
 
 type ActionType = "kill" | "restart";
-type ViewMode = "projects" | "conversations";
+type ViewMode = "projects" | "conversations" | "agents" | "agent-detail";
 
 /**
  * Check if two project lists are equivalent (shallow comparison of key fields)
@@ -77,6 +86,12 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
   const [viewMode, setViewMode] = useState<ViewMode>("projects");
   const [statusMessage, setStatusMessage] = useState<string>("");
 
+  // State for agent views
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentInstance | null>(null);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agentLessons, setAgentLessons] = useState<NDKAgentLesson[]>([]);
+
   // Update project list only when data actually changes
   useEffect((): (() => void) => {
     const updateProjects = (): void => {
@@ -114,11 +129,100 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
     return () => clearInterval(interval);
   }, []);
 
+  // Helper: Load agents for a project
+  const loadAgents = (projectId: string): void => {
+    const runtime = runtimes.get(projectId);
+    if (!runtime) {
+      setStatusMessage("Project runtime not found");
+      return;
+    }
+
+    const context = runtime.getContext();
+    if (!context) {
+      setStatusMessage("Project context not available");
+      return;
+    }
+
+    const allAgents = context.agentRegistry.getAllAgents();
+    const agentInfoList: AgentInfo[] = allAgents.map((agent) => {
+      const lessons = context.getLessonsForAgent(agent.pubkey);
+      return {
+        pubkey: agent.pubkey,
+        name: agent.name,
+        role: agent.role,
+        description: agent.description,
+        lessonsCount: lessons.length,
+      };
+    });
+
+    setAgents(agentInfoList);
+    setSelectedProjectId(projectId);
+    setViewMode("agents");
+    setSelectedIndex(0);
+  };
+
+  // Helper: Load agent details
+  const loadAgentDetails = (agentPubkey: string): void => {
+    if (!selectedProjectId) return;
+
+    const runtime = runtimes.get(selectedProjectId);
+    if (!runtime) return;
+
+    const context = runtime.getContext();
+    if (!context) return;
+
+    const agent = context.agentRegistry.getAgentByPubkey(agentPubkey);
+    if (!agent) {
+      setStatusMessage("Agent not found");
+      return;
+    }
+
+    const lessons = context.getLessonsForAgent(agentPubkey);
+    setSelectedAgent(agent);
+    setAgentLessons(lessons);
+    setViewMode("agent-detail");
+    setSelectedIndex(0);
+  };
+
+  // Helper: Navigate back
+  const navigateBack = (): void => {
+    if (viewMode === "agent-detail") {
+      setViewMode("agents");
+      setSelectedAgent(null);
+      setAgentLessons([]);
+      setSelectedIndex(0);
+    } else if (viewMode === "agents") {
+      setViewMode("projects");
+      setSelectedProjectId(null);
+      setAgents([]);
+      setSelectedIndex(0);
+    } else if (viewMode === "conversations") {
+      setViewMode("projects");
+      setSelectedIndex(0);
+    } else {
+      onClose();
+    }
+  };
+
   // Helper: Handle navigation (up/down arrows)
   const handleNavigation = (direction: "up" | "down"): void => {
-    const maxIndex = viewMode === "projects"
-      ? projects.length - 1
-      : conversations.length - 1;
+    let maxIndex: number;
+    switch (viewMode) {
+      case "projects":
+        maxIndex = projects.length - 1;
+        break;
+      case "conversations":
+        maxIndex = conversations.length - 1;
+        break;
+      case "agents":
+        maxIndex = agents.length - 1;
+        break;
+      case "agent-detail":
+        // No navigation in detail view
+        return;
+      default:
+        maxIndex = 0;
+    }
 
     if (direction === "up") {
       setSelectedIndex((prev) => Math.max(0, prev - 1));
@@ -159,7 +263,14 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       setStatusMessage("");
     }
 
-    if (key.escape || input === "q") {
+    // ESC or Backspace to navigate back
+    if (key.escape || key.backspace) {
+      navigateBack();
+      return;
+    }
+
+    // q to quit (only from projects view)
+    if (input === "q" && viewMode === "projects") {
       onClose();
       return;
     }
@@ -172,19 +283,35 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       handleNavigation("down");
     }
 
-    // Switch view modes
-    if (input === "c") {
-      setViewMode("conversations");
-      setSelectedIndex(0);
+    // Enter to drill down
+    if (key.return) {
+      if (viewMode === "projects" && projects.length > 0) {
+        const project = projects[selectedIndex];
+        if (project) {
+          loadAgents(project.projectId);
+        }
+      } else if (viewMode === "agents" && agents.length > 0) {
+        const agent = agents[selectedIndex];
+        if (agent) {
+          loadAgentDetails(agent.pubkey);
+        }
+      }
+      return;
     }
 
-    if (input === "p") {
-      setViewMode("projects");
-      setSelectedIndex(0);
-    }
-
-    // Actions only work in projects view
+    // Switch view modes (only from projects view)
     if (viewMode === "projects") {
+      if (input === "c") {
+        setViewMode("conversations");
+        setSelectedIndex(0);
+      }
+
+      if (input === "p") {
+        setViewMode("projects");
+        setSelectedIndex(0);
+      }
+
+      // Actions only work in projects view
       if (input === "k") {
         performAction("kill");
       }
@@ -207,20 +334,25 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       {/* Instructions */}
       <Box marginBottom={1}>
         <Text dimColor>
-          Use ↑/↓ to navigate | p: projects | c: conversations
-          {viewMode === "projects" ? " | k: kill | r: restart" : ""} | q/ESC: close
+          {viewMode === "projects" && "Use ↑/↓ to navigate | Enter: expand | p: projects | c: conversations | k: kill | r: restart | q: quit"}
+          {viewMode === "conversations" && "Use ↑/↓ to navigate | ESC: back to projects"}
+          {viewMode === "agents" && "Use ↑/↓ to navigate | Enter: view details | ESC: back"}
+          {viewMode === "agent-detail" && "ESC: back to agents"}
         </Text>
       </Box>
 
       {/* View Mode Indicator */}
       <Box marginBottom={1}>
-        <Text bold color={viewMode === "projects" ? "green" : "yellow"}>
-          [{viewMode === "projects" ? "Projects" : "Conversations"}]
+        <Text bold color="green">
+          {viewMode === "projects" && "[Projects]"}
+          {viewMode === "conversations" && "[Conversations]"}
+          {viewMode === "agents" && `[Agents - ${projects.find(p => p.projectId === selectedProjectId)?.title || ""}]`}
+          {viewMode === "agent-detail" && `[Agent Details - ${selectedAgent?.name || ""}]`}
         </Text>
       </Box>
 
       {/* Content based on view mode */}
-      {viewMode === "projects" ? (
+      {viewMode === "projects" && (
         // Projects View
         projects.length === 0 ? (
           <Box>
@@ -251,7 +383,9 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
             })}
           </Box>
         )
-      ) : (
+      )}
+
+      {viewMode === "conversations" && (
         // Conversations View
         conversations.length === 0 ? (
           <Box>
@@ -282,6 +416,96 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
             })}
           </Box>
         )
+      )}
+
+      {viewMode === "agents" && (
+        // Agents View
+        agents.length === 0 ? (
+          <Box>
+            <Text dimColor>No agents found in this project</Text>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            {agents.map((agent, index) => {
+              const isSelected = index === selectedIndex;
+
+              return (
+                <Box key={agent.pubkey} flexDirection="column" marginBottom={1}>
+                  <Text backgroundColor={isSelected ? "blue" : undefined} color={isSelected ? "white" : undefined}>
+                    {isSelected ? "▶ " : "  "}
+                    👤 {agent.name}
+                  </Text>
+                  <Text dimColor marginLeft={4}>
+                    Role: {agent.role}
+                  </Text>
+                  {agent.description && (
+                    <Text dimColor marginLeft={4}>
+                      {agent.description}
+                    </Text>
+                  )}
+                  <Text dimColor marginLeft={4}>
+                    Lessons: {agent.lessonsCount}
+                  </Text>
+                </Box>
+              );
+            })}
+          </Box>
+        )
+      )}
+
+      {viewMode === "agent-detail" && selectedAgent && (
+        // Agent Detail View
+        <Box flexDirection="column">
+          {/* Agent Info */}
+          <Box marginBottom={1} flexDirection="column">
+            <Text bold color="cyan">Agent Information:</Text>
+            <Text>Name: {selectedAgent.name}</Text>
+            <Text>Role: {selectedAgent.role}</Text>
+            {selectedAgent.description && <Text>Description: {selectedAgent.description}</Text>}
+            <Text dimColor>Pubkey: {selectedAgent.pubkey.slice(0, 16)}...</Text>
+          </Box>
+
+          {/* System Prompt */}
+          <Box marginBottom={1} flexDirection="column">
+            <Text bold color="cyan">System Instructions:</Text>
+            {selectedAgent.instructions ? (
+              <Text wrap="wrap">{selectedAgent.instructions}</Text>
+            ) : (
+              <Text dimColor>No instructions defined</Text>
+            )}
+          </Box>
+
+          {/* Agent Lessons */}
+          <Box flexDirection="column">
+            <Text bold color="cyan">Agent Lessons ({agentLessons.length}):</Text>
+            {agentLessons.length === 0 ? (
+              <Text dimColor>No lessons loaded</Text>
+            ) : (
+              <Box flexDirection="column" marginTop={1}>
+                {agentLessons.map((lesson, index) => (
+                  <Box key={index} flexDirection="column" marginBottom={1}>
+                    <Text bold>
+                      {index + 1}. {lesson.title || "Untitled Lesson"}
+                    </Text>
+                    <Text wrap="wrap" marginLeft={2}>
+                      {lesson.lesson}
+                    </Text>
+                    {lesson.detailed && (
+                      <Text dimColor wrap="wrap" marginLeft={2}>
+                        Details: {lesson.detailed}
+                      </Text>
+                    )}
+                    {lesson.category && (
+                      <Text dimColor marginLeft={2}>
+                        Category: {lesson.category}
+                      </Text>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
+        </Box>
       )}
 
       {/* Status Message */}
