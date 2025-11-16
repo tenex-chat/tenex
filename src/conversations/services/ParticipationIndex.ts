@@ -1,5 +1,5 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * Service for tracking agent participations in conversations
@@ -40,7 +40,7 @@ export class ParticipationIndex {
         logger.debug("[ParticipationIndex] Built index", {
             conversationId: conversationId.substring(0, 8),
             participantCount: convIndex.size,
-            totalEvents: history.length
+            totalEvents: history.length,
         });
     }
 
@@ -51,7 +51,7 @@ export class ParticipationIndex {
         const convIndex = this.index.get(conversationId);
         if (!convIndex) {
             logger.debug("[ParticipationIndex] No index for conversation", {
-                conversationId: conversationId.substring(0, 8)
+                conversationId: conversationId.substring(0, 8),
             });
             return [];
         }
@@ -60,7 +60,7 @@ export class ParticipationIndex {
         if (!participations) {
             logger.debug("[ParticipationIndex] Agent has no participations", {
                 conversationId: conversationId.substring(0, 8),
-                agentPubkey: agentPubkey.substring(0, 8)
+                agentPubkey: agentPubkey.substring(0, 8),
             });
             return [];
         }
@@ -106,7 +106,7 @@ export class ParticipationIndex {
     clearConversation(conversationId: string): void {
         this.index.delete(conversationId);
         logger.debug("[ParticipationIndex] Cleared index for conversation", {
-            conversationId: conversationId.substring(0, 8)
+            conversationId: conversationId.substring(0, 8),
         });
     }
 

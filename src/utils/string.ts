@@ -8,8 +8,8 @@
  * toKebabCase("Hello World") // "hello-world"
  */
 export function toKebabCase(str: string): string {
-  return str
-    .replace(/([a-z])([A-Z])/g, "$1-$2")
-    .replace(/[\s_]+/g, "-")
-    .toLowerCase();
+    return str
+        .replace(/([a-z])([A-Z])/g, "$1-$2")
+        .replace(/[\s_]+/g, "-")
+        .toLowerCase();
 }

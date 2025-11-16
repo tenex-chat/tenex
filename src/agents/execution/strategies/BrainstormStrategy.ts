@@ -1,22 +1,21 @@
-import type { MessageGenerationStrategy } from "./types";
-import type { ExecutionContext } from "../types";
-import type { ModelMessage } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { logger } from "@/utils/logger";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { NostrKind, NostrTag, TagValue, isBrainstormEvent } from "@/nostr/constants";
 import { isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { NudgeService } from "@/services/NudgeService";
+import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ModelMessage } from "ai";
+import type { ExecutionContext } from "../types";
+import type { MessageGenerationStrategy } from "./types";
 
 /**
  * Message generation strategy for brainstorming sessions.
  * Only includes agent responses that have been selected via kind:7 events.
  */
 export class BrainstormStrategy implements MessageGenerationStrategy {
-    
     /**
      * Build messages for brainstorm context, including only selected responses
      */
@@ -30,7 +29,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
-        
+
         const messages: ModelMessage[] = [];
 
         // Add system prompt
@@ -44,22 +43,17 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             logger.info("[BrainstormStrategy] Applied event filter to conversation history", {
                 originalLength,
                 filteredLength: history.length,
-                eventsRemoved: originalLength - history.length
+                eventsRemoved: originalLength - history.length,
             });
         }
 
         // Process brainstorm rounds
         const brainstormRoots = this.findBrainstormRoots(history);
-        
+
         for (const root of brainstormRoots) {
-            await this.processBrainstormRound(
-                root,
-                history,
-                messages,
-                context.agent.pubkey
-            );
+            await this.processBrainstormRound(root, history, messages, context.agent.pubkey);
         }
-        
+
         // Process triggering event if not already included
         await this.processTriggeringEventIfNeeded(
             triggeringEvent,
@@ -68,15 +62,15 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             messages,
             context.agent.pubkey
         );
-        
+
         logger.debug("[BrainstormStrategy] Message building complete", {
             totalMessages: messages.length,
-            brainstormRounds: brainstormRoots.length
+            brainstormRounds: brainstormRoots.length,
         });
-        
+
         return messages;
     }
-    
+
     /**
      * Adds system prompt messages to the conversation context
      */
@@ -90,10 +84,12 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
                 throw new Error("[BrainstormStrategy] Project context required for system prompt");
             }
             // In tests, skip gracefully
-            logger.debug("[BrainstormStrategy] Project context not initialized, skipping system prompt");
+            logger.debug(
+                "[BrainstormStrategy] Project context not initialized, skipping system prompt"
+            );
             return;
         }
-        
+
         const projectCtx = getProjectContext();
         const project = projectCtx.project;
 
@@ -109,7 +105,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             conversation,
             agentLessons: new Map(),
             isProjectManager: context.agent.pubkey === projectCtx.getProjectManager().pubkey,
-            projectManagerPubkey: projectCtx.getProjectManager().pubkey
+            projectManagerPubkey: projectCtx.getProjectManager().pubkey,
         });
 
         // Add all system messages
@@ -123,7 +119,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             logger.debug("[BrainstormStrategy] Injecting nudges", {
                 agent: context.agent.slug,
                 nudgeCount: nudgeIds.length,
-                conversationId: context.conversationId.substring(0, 8)
+                conversationId: context.conversationId.substring(0, 8),
             });
 
             const nudgeService = NudgeService.getInstance();
@@ -131,30 +127,30 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
             if (nudgeContent) {
                 messages.push({
                     role: "system",
-                    content: nudgeContent
+                    content: nudgeContent,
                 });
 
                 logger.info("[BrainstormStrategy] Nudges injected successfully", {
                     agent: context.agent.slug,
                     nudgeCount: nudgeIds.length,
-                    contentLength: nudgeContent.length
+                    contentLength: nudgeContent.length,
                 });
             } else {
                 logger.debug("[BrainstormStrategy] Nudge content was empty", {
                     agent: context.agent.slug,
-                    nudgeCount: nudgeIds.length
+                    nudgeCount: nudgeIds.length,
                 });
             }
         }
     }
-    
+
     /**
      * Finds all brainstorm root events (kind:11 with mode:brainstorm) in conversation history
      */
     private findBrainstormRoots(history: NDKEvent[]): NDKEvent[] {
-        return history.filter(e => isBrainstormEvent(e.kind, e.tags));
+        return history.filter((e) => isBrainstormEvent(e.kind, e.tags));
     }
-    
+
     /**
      * Processes a complete brainstorm round including root, responses, and follow-ups
      */
@@ -166,10 +162,10 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     ): Promise<void> {
         // Add root prompt
         await this.addRootPrompt(root, messages, agentPubkey);
-        
+
         // Add selected responses
         await this.addSelectedResponses(root.id, history, messages, agentPubkey);
-        
+
         // Add follow-ups
         await this.addFollowUps(root.id, history, messages, agentPubkey);
     }
@@ -197,13 +193,13 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     ): Promise<void> {
         const responses = this.findResponses(history, rootId);
         const selectedIds = this.getSelectedResponseIds(history, rootId);
-        
+
         logger.debug("[BrainstormStrategy] Processing selected responses", {
             rootId: rootId?.substring(0, 8),
             responseCount: responses.length,
-            selectedCount: selectedIds.size
+            selectedCount: selectedIds.size,
         });
-        
+
         for (const response of responses) {
             if (selectedIds.has(response.id)) {
                 const responseMessages = await this.processEvent(response, agentPubkey);
@@ -223,27 +219,27 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
     ): Promise<void> {
         await this.processFollowUps(rootId, history, messages, agentPubkey);
     }
-    
+
     /**
      * Finds all generic reply events (kind:1111) that reference the given root event
      */
     private findResponses(history: NDKEvent[], rootId: string): NDKEvent[] {
-        return history.filter(e =>
-            e.kind === NostrKind.GENERIC_REPLY && 
-            e.tagValue(NostrTag.ROOT_EVENT) === rootId
+        return history.filter(
+            (e) => e.kind === NostrKind.GENERIC_REPLY && e.tagValue(NostrTag.ROOT_EVENT) === rootId
         );
     }
-    
+
     /**
      * Extracts IDs of responses that have been positively selected via kind:7 reactions
      */
     private getSelectedResponseIds(history: NDKEvent[], rootId: string): Set<string> {
-        const selections = history.filter(e =>
-            e.kind === NostrKind.REACTION &&
-            e.content === TagValue.REACTION_POSITIVE &&
-            e.tagValue(NostrTag.ROOT_EVENT) === rootId
+        const selections = history.filter(
+            (e) =>
+                e.kind === NostrKind.REACTION &&
+                e.content === TagValue.REACTION_POSITIVE &&
+                e.tagValue(NostrTag.ROOT_EVENT) === rootId
         );
-        
+
         const selectedIds = new Set<string>();
         for (const selection of selections) {
             const selectedId = selection.tagValue(NostrTag.EVENT);
@@ -251,10 +247,10 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
                 selectedIds.add(selectedId);
             }
         }
-        
+
         return selectedIds;
     }
-    
+
     /**
      * Processes follow-up events that are neither responses nor reactions to include in context
      */
@@ -264,19 +260,20 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         messages: ModelMessage[],
         agentPubkey: string
     ): Promise<void> {
-        const followUps = history.filter(e =>
-            e.tagValue(NostrTag.EVENT) === rootId &&
-            e.kind !== NostrKind.GENERIC_REPLY &&
-            e.kind !== NostrKind.REACTION &&
-            e.id !== rootId
+        const followUps = history.filter(
+            (e) =>
+                e.tagValue(NostrTag.EVENT) === rootId &&
+                e.kind !== NostrKind.GENERIC_REPLY &&
+                e.kind !== NostrKind.REACTION &&
+                e.id !== rootId
         );
-        
+
         for (const followUp of followUps) {
             const followUpMessages = await this.processEvent(followUp, agentPubkey);
             messages.push(...followUpMessages);
         }
     }
-    
+
     /**
      * Processes the triggering event if it hasn't been already included in the messages
      */
@@ -290,14 +287,14 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         if (!this.isEventAlreadyProcessed(triggeringEvent, brainstormRoots, history)) {
             logger.debug("[BrainstormStrategy] Processing triggering event", {
                 eventId: triggeringEvent.id?.substring(0, 8),
-                kind: triggeringEvent.kind
+                kind: triggeringEvent.kind,
             });
-            
+
             const triggerMessages = await this.processEvent(triggeringEvent, agentPubkey);
             messages.push(...triggerMessages);
         }
     }
-    
+
     /**
      * Checks if an event has already been processed in the current context
      */
@@ -307,25 +304,23 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         history: NDKEvent[]
     ): boolean {
         // Check if it's a brainstorm root
-        if (brainstormRoots.some(r => r.id === event.id)) {
+        if (brainstormRoots.some((r) => r.id === event.id)) {
             return true;
         }
-        
+
         // Check if it's a response or reaction that would have been processed
-        return history.some(e => 
-            e.id === event.id && 
-            (e.kind === NostrKind.GENERIC_REPLY || e.kind === NostrKind.REACTION)
+        return history.some(
+            (e) =>
+                e.id === event.id &&
+                (e.kind === NostrKind.GENERIC_REPLY || e.kind === NostrKind.REACTION)
         );
     }
-    
+
     /**
      * Transforms a Nostr event into LLM-compatible model messages.
      * In brainstorm context, messages include speaker identification without targeting notation.
      */
-    private async processEvent(
-        event: NDKEvent,
-        agentPubkey: string
-    ): Promise<ModelMessage[]> {
+    private async processEvent(event: NDKEvent, agentPubkey: string): Promise<ModelMessage[]> {
         const messages: ModelMessage[] = [];
 
         // Check for phase transitions (if used in brainstorms)
@@ -335,7 +330,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         if (phaseTag) {
             const phaseContent = PromptBuilder.buildFragment("phase-transition", {
                 phase: phaseTag,
-                phaseInstructions: phaseInstructionsTag
+                phaseInstructions: phaseInstructionsTag,
             });
 
             if (phaseContent) {

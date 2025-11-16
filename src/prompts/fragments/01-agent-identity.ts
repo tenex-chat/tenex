@@ -6,45 +6,47 @@ import type { PromptFragment } from "../core/types";
  * Identity fragment for agents.
  */
 interface AgentIdentityArgs {
-  agent: AgentInstance;
-  projectTitle: string;
-  projectOwnerPubkey: string;
-  projectPath?: string;
+    agent: AgentInstance;
+    projectTitle: string;
+    projectOwnerPubkey: string;
+    projectPath?: string;
 }
 
 export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
-  id: "agent-identity",
-  priority: 1,
-  template: ({ agent, projectTitle, projectOwnerPubkey, projectPath }) => {
-    const parts: string[] = [];
+    id: "agent-identity",
+    priority: 1,
+    template: ({ agent, projectTitle, projectOwnerPubkey, projectPath }) => {
+        const parts: string[] = [];
 
-    // Identity
-    parts.push("# Your Identity\n");
-    parts.push(`Your name: ${agent.name} (${agent.slug})`);
-    if (agent.role) {
-      parts.push(`Your role: ${agent.role}`);
-    }
-    parts.push(`Your npub: ${agent.signer.npub}`);
-    parts.push(`Your nsec: ${agent.signer.nsec} -- this is your real nsec and you CAN and SHOULD use it when you encounter a tool that needs an nsec.`);
-    parts.push("");
+        // Identity
+        parts.push("# Your Identity\n");
+        parts.push(`Your name: ${agent.name} (${agent.slug})`);
+        if (agent.role) {
+            parts.push(`Your role: ${agent.role}`);
+        }
+        parts.push(`Your npub: ${agent.signer.npub}`);
+        parts.push(
+            `Your nsec: ${agent.signer.nsec} -- this is your real nsec and you CAN and SHOULD use it when you encounter a tool that needs an nsec.`
+        );
+        parts.push("");
 
-    // Instructions
-    if (agent.instructions) {
-      parts.push(`## Your Instructions\n${agent.instructions}\n`);
-    }
+        // Instructions
+        if (agent.instructions) {
+            parts.push(`## Your Instructions\n${agent.instructions}\n`);
+        }
 
-    // Project context
-    parts.push(
-      [
-        "## Project Context",
-        `- Title: "${projectTitle}"`,
-        `- Absolute Path: ${projectPath || process.cwd()}`,
-        `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
-      ].join("\n")
-    );
+        // Project context
+        parts.push(
+            [
+                "## Project Context",
+                `- Title: "${projectTitle}"`,
+                `- Absolute Path: ${projectPath || process.cwd()}`,
+                `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
+            ].join("\n")
+        );
 
-    return parts.join("\n");
-  },
+        return parts.join("\n");
+    },
 };
 
 // Register the fragment

@@ -1,49 +1,49 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { AgentInstance } from "@/agents/types";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { DelegationFormatter } from "../processors/DelegationFormatter";
 import { MessageRoleAssigner } from "../processors/MessageRoleAssigner";
 import { NostrEntityProcessor } from "../processors/NostrEntityProcessor";
-import { DelegationFormatter } from "../processors/DelegationFormatter";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { AgentInstance } from "@/agents/types";
 
 // Mock the modules before importing them
 mock.module("@/services", () => ({
-  getProjectContext: mock(() => ({})),
-  isProjectContextInitialized: mock(() => true)
+    getProjectContext: mock(() => ({})),
+    isProjectContextInitialized: mock(() => true),
 }));
 
 mock.module("@/services/PubkeyNameRepository", () => ({
-  getPubkeyNameRepository: mock(() => ({
-    getName: mock(async (pubkey: string) => {
-      // Map pubkeys to names
-      if (pubkey === "user-pubkey") return "TestUser";
-      if (pubkey === "agent1-pubkey") return "code-writer";
-      if (pubkey === "agent2-pubkey") return "reviewer";
-      if (pubkey === "agent3-pubkey") return "project-manager";
-      return "User";
-    }),
-    getNameSync: mock((pubkey: string) => {
-      if (pubkey === "user-pubkey") return "TestUser";
-      if (pubkey === "agent1-pubkey") return "code-writer";
-      if (pubkey === "agent2-pubkey") return "reviewer";
-      if (pubkey === "agent3-pubkey") return "project-manager";
-      return "User";
-    })
-  }))
+    getPubkeyNameRepository: mock(() => ({
+        getName: mock(async (pubkey: string) => {
+            // Map pubkeys to names
+            if (pubkey === "user-pubkey") return "TestUser";
+            if (pubkey === "agent1-pubkey") return "code-writer";
+            if (pubkey === "agent2-pubkey") return "reviewer";
+            if (pubkey === "agent3-pubkey") return "project-manager";
+            return "User";
+        }),
+        getNameSync: mock((pubkey: string) => {
+            if (pubkey === "user-pubkey") return "TestUser";
+            if (pubkey === "agent1-pubkey") return "code-writer";
+            if (pubkey === "agent2-pubkey") return "reviewer";
+            if (pubkey === "agent3-pubkey") return "project-manager";
+            return "User";
+        }),
+    })),
 }));
 
 mock.module("@/nostr", () => ({
-  getNDK: mock(() => ({
-    fetchEvent: mock(() => null)
-  }))
+    getNDK: mock(() => ({
+        fetchEvent: mock(() => null),
+    })),
 }));
 
 mock.module("@/utils/logger", () => ({
-  logger: {
-    debug: mock(() => {}),
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {})
-  }
+    logger: {
+        debug: mock(() => {}),
+        info: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+    },
 }));
 
 // Now import after mocking
@@ -51,254 +51,266 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 
 describe("MessageRoleAssigner - Message Targeting", () => {
-  let mockProjectContext: any;
-  
-  beforeEach(() => {
-    
-    // Setup mock project context with agents
-    mockProjectContext = {
-      pubkey: "project-pubkey",
-      agents: new Map<string, AgentInstance>([
-        ["code-writer", {
-          name: "Code Writer",
-          slug: "code-writer",
-          pubkey: "agent1-pubkey",
-          instructions: "",
-          tools: []
-        }],
-        ["reviewer", {
-          name: "Code Reviewer",
-          slug: "reviewer",
-          pubkey: "agent2-pubkey",
-          instructions: "",
-          tools: []
-        }],
-        ["project-manager", {
-          name: "Project Manager",
-          slug: "project-manager",
-          pubkey: "agent3-pubkey",
-          instructions: "",
-          tools: []
-        }]
-      ])
-    };
-    
-    // Override the mocked functions
-    (getProjectContext as any).mockImplementation(() => mockProjectContext);
-    (isProjectContextInitialized as any).mockImplementation(() => true);
-  });
+    let mockProjectContext: any;
 
-  // Helper to create NDKEvent with proper getMatchingTags method
-  const createEvent = (pubkey: string, tags: string[][] = []) => {
-    const event = new NDKEvent();
-    event.pubkey = pubkey;
-    event.tags = tags;
-    event.getMatchingTags = (tag: string) => event.tags.filter(t => t[0] === tag);
-    return event;
-  };
-  
-  describe("User message targeting", () => {
-    it("should format broadcast message as 'user' role for all agents", async () => {
-      const event = createEvent("user-pubkey", []); // No p-tags means broadcast
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Hello everyone",
-        "agent1-pubkey"
-      );
-      
-      expect(message.role).toBe("user");
-      expect(message.content).toBe("Hello everyone");
+    beforeEach(() => {
+        // Setup mock project context with agents
+        mockProjectContext = {
+            pubkey: "project-pubkey",
+            agents: new Map<string, AgentInstance>([
+                [
+                    "code-writer",
+                    {
+                        name: "Code Writer",
+                        slug: "code-writer",
+                        pubkey: "agent1-pubkey",
+                        instructions: "",
+                        tools: [],
+                    },
+                ],
+                [
+                    "reviewer",
+                    {
+                        name: "Code Reviewer",
+                        slug: "reviewer",
+                        pubkey: "agent2-pubkey",
+                        instructions: "",
+                        tools: [],
+                    },
+                ],
+                [
+                    "project-manager",
+                    {
+                        name: "Project Manager",
+                        slug: "project-manager",
+                        pubkey: "agent3-pubkey",
+                        instructions: "",
+                        tools: [],
+                    },
+                ],
+            ]),
+        };
+
+        // Override the mocked functions
+        (getProjectContext as any).mockImplementation(() => mockProjectContext);
+        (isProjectContextInitialized as any).mockImplementation(() => true);
     });
-    
-    it("should format targeted message as 'user' role for the targeted agent", async () => {
-      const event = createEvent("user-pubkey", [
-        ["p", "agent1-pubkey"] // Targeting code-writer
-      ]);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Please write some code",
-        "agent1-pubkey"
-      );
-      
-      expect(message.role).toBe("user");
-      expect(message.content).toBe("Please write some code");
+
+    // Helper to create NDKEvent with proper getMatchingTags method
+    const createEvent = (pubkey: string, tags: string[][] = []) => {
+        const event = new NDKEvent();
+        event.pubkey = pubkey;
+        event.tags = tags;
+        event.getMatchingTags = (tag: string) => event.tags.filter((t) => t[0] === tag);
+        return event;
+    };
+
+    describe("User message targeting", () => {
+        it("should format broadcast message as 'user' role for all agents", async () => {
+            const event = createEvent("user-pubkey", []); // No p-tags means broadcast
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Hello everyone",
+                "agent1-pubkey"
+            );
+
+            expect(message.role).toBe("user");
+            expect(message.content).toBe("Hello everyone");
+        });
+
+        it("should format targeted message as 'user' role for the targeted agent", async () => {
+            const event = createEvent("user-pubkey", [
+                ["p", "agent1-pubkey"], // Targeting code-writer
+            ]);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Please write some code",
+                "agent1-pubkey"
+            );
+
+            expect(message.role).toBe("user");
+            expect(message.content).toBe("Please write some code");
+        });
+
+        it("should format targeted message as 'system' role for non-targeted agents", async () => {
+            const event = createEvent("user-pubkey", [
+                ["p", "agent1-pubkey"], // Targeting code-writer
+            ]);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Please write some code",
+                "agent2-pubkey" // Different agent viewing the message
+            );
+
+            expect(message.role).toBe("system");
+            expect(message.content).toBe("[User (TestUser) → code-writer]: Please write some code");
+        });
+
+        it("should handle multiple targeted agents", async () => {
+            const event = createEvent("user-pubkey", [
+                ["p", "agent1-pubkey"], // code-writer
+                ["p", "agent2-pubkey"], // reviewer
+            ]);
+
+            // For a targeted agent
+            const message1 = await MessageRoleAssigner.assignRole(
+                event,
+                "Please collaborate on this",
+                "agent1-pubkey"
+            );
+
+            expect(message1.role).toBe("user");
+            expect(message1.content).toBe("Please collaborate on this");
+
+            // For a non-targeted agent
+            const message2 = await MessageRoleAssigner.assignRole(
+                event,
+                "Please collaborate on this",
+                "agent3-pubkey"
+            );
+
+            expect(message2.role).toBe("system");
+            expect(message2.content).toBe(
+                "[User (TestUser) → code-writer, reviewer]: Please collaborate on this"
+            );
+        });
+
+        it("should handle p-tags for non-agent entities gracefully", async () => {
+            const event = createEvent("user-pubkey", [
+                ["p", "random-pubkey"], // Not an agent
+                ["p", "agent1-pubkey"], // code-writer
+            ]);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Mixed p-tags message",
+                "agent2-pubkey"
+            );
+
+            // Should only show the agent that was targeted
+            expect(message.role).toBe("system");
+            expect(message.content).toBe("[User (TestUser) → code-writer]: Mixed p-tags message");
+        });
     });
-    
-    it("should format targeted message as 'system' role for non-targeted agents", async () => {
-      const event = createEvent("user-pubkey", [
-        ["p", "agent1-pubkey"] // Targeting code-writer
-      ]);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Please write some code",
-        "agent2-pubkey" // Different agent viewing the message
-      );
-      
-      expect(message.role).toBe("system");
-      expect(message.content).toBe("[User (TestUser) → code-writer]: Please write some code");
+
+    describe("Agent message formatting", () => {
+        it("should format agent's own message as 'assistant' role", async () => {
+            const event = createEvent("agent1-pubkey", []); // code-writer's pubkey
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "I've written the code",
+                "agent1-pubkey"
+            );
+
+            expect(message.role).toBe("assistant");
+            expect(message.content).toBe("I've written the code");
+        });
+
+        it("should format broadcast agent message as 'system' role with attribution", async () => {
+            const event = createEvent("agent1-pubkey", []); // code-writer's pubkey, no p-tags (broadcast)
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "I've written the code",
+                "agent2-pubkey" // Different agent viewing
+            );
+
+            expect(message.role).toBe("system");
+            expect(message.content).toBe("[code-writer]: I've written the code");
+        });
+
+        it("should format targeted agent-to-agent message as 'user' role for recipient", async () => {
+            const event = createEvent("agent1-pubkey", [
+                ["p", "agent2-pubkey"], // code-writer targeting reviewer
+            ]);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Can you review this code?",
+                "agent2-pubkey" // Targeted agent viewing
+            );
+
+            expect(message.role).toBe("user");
+            expect(message.content).toBe("[code-writer → @reviewer]: Can you review this code?");
+        });
+
+        it("should format targeted agent-to-agent message as 'system' role for non-recipient", async () => {
+            const event = createEvent("agent1-pubkey", [
+                ["p", "agent2-pubkey"], // code-writer targeting reviewer
+            ]);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Can you review this code?",
+                "agent3-pubkey" // Non-targeted agent observing
+            );
+
+            expect(message.role).toBe("system");
+            expect(message.content).toBe("[code-writer → reviewer]: Can you review this code?");
+        });
+
+        it("should handle multiple targeted agents in agent-to-agent messages", async () => {
+            const event = createEvent("agent1-pubkey", [
+                ["p", "agent2-pubkey"], // reviewer
+                ["p", "agent3-pubkey"], // project-manager
+            ]);
+
+            // For one of the targeted agents
+            const message1 = await MessageRoleAssigner.assignRole(
+                event,
+                "Need input from both of you",
+                "agent2-pubkey"
+            );
+
+            expect(message1.role).toBe("user");
+            expect(message1.content).toBe("[code-writer → @reviewer]: Need input from both of you");
+
+            // For the other targeted agent
+            const message2 = await MessageRoleAssigner.assignRole(
+                event,
+                "Need input from both of you",
+                "agent3-pubkey"
+            );
+
+            expect(message2.role).toBe("user");
+            expect(message2.content).toBe(
+                "[code-writer → @project-manager]: Need input from both of you"
+            );
+        });
     });
-    
-    it("should handle multiple targeted agents", async () => {
-      const event = createEvent("user-pubkey", [
-        ["p", "agent1-pubkey"], // code-writer
-        ["p", "agent2-pubkey"]  // reviewer
-      ]);
-      
-      // For a targeted agent
-      const message1 = await MessageRoleAssigner.assignRole(
-        event,
-        "Please collaborate on this",
-        "agent1-pubkey"
-      );
-      
-      expect(message1.role).toBe("user");
-      expect(message1.content).toBe("Please collaborate on this");
-      
-      // For a non-targeted agent
-      const message2 = await MessageRoleAssigner.assignRole(
-        event,
-        "Please collaborate on this",
-        "agent3-pubkey"
-      );
-      
-      expect(message2.role).toBe("system");
-      expect(message2.content).toBe("[User (TestUser) → code-writer, reviewer]: Please collaborate on this");
+
+    describe("Edge cases", () => {
+        it("should handle events with no pubkey", async () => {
+            const event = createEvent("", []); // Empty pubkey
+            event.pubkey = undefined as any; // Force undefined
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Anonymous message",
+                "agent1-pubkey"
+            );
+
+            // Should treat as user message (fallback)
+            expect(message.role).toBe("user");
+            expect(message.content).toBe("Anonymous message");
+        });
+
+        it("should handle unknown non-user pubkeys gracefully", async () => {
+            const event = createEvent("unknown-agent-pubkey", []);
+
+            const message = await MessageRoleAssigner.assignRole(
+                event,
+                "Message from unknown",
+                "agent1-pubkey"
+            );
+
+            // Unknown pubkeys are treated as users (since isEventFromUser returns true for non-agent pubkeys)
+            expect(message.role).toBe("user");
+            expect(message.content).toBe("Message from unknown");
+        });
     });
-    
-    it("should handle p-tags for non-agent entities gracefully", async () => {
-      const event = createEvent("user-pubkey", [
-        ["p", "random-pubkey"], // Not an agent
-        ["p", "agent1-pubkey"]  // code-writer
-      ]);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Mixed p-tags message",
-        "agent2-pubkey"
-      );
-      
-      // Should only show the agent that was targeted
-      expect(message.role).toBe("system");
-      expect(message.content).toBe("[User (TestUser) → code-writer]: Mixed p-tags message");
-    });
-  });
-  
-  describe("Agent message formatting", () => {
-    it("should format agent's own message as 'assistant' role", async () => {
-      const event = createEvent("agent1-pubkey", []); // code-writer's pubkey
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "I've written the code",
-        "agent1-pubkey"
-      );
-      
-      expect(message.role).toBe("assistant");
-      expect(message.content).toBe("I've written the code");
-    });
-    
-    it("should format broadcast agent message as 'system' role with attribution", async () => {
-      const event = createEvent("agent1-pubkey", []); // code-writer's pubkey, no p-tags (broadcast)
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "I've written the code",
-        "agent2-pubkey" // Different agent viewing
-      );
-      
-      expect(message.role).toBe("system");
-      expect(message.content).toBe("[code-writer]: I've written the code");
-    });
-    
-    it("should format targeted agent-to-agent message as 'user' role for recipient", async () => {
-      const event = createEvent("agent1-pubkey", [
-        ["p", "agent2-pubkey"] // code-writer targeting reviewer
-      ]);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Can you review this code?",
-        "agent2-pubkey" // Targeted agent viewing
-      );
-      
-      expect(message.role).toBe("user");
-      expect(message.content).toBe("[code-writer → @reviewer]: Can you review this code?");
-    });
-    
-    it("should format targeted agent-to-agent message as 'system' role for non-recipient", async () => {
-      const event = createEvent("agent1-pubkey", [
-        ["p", "agent2-pubkey"] // code-writer targeting reviewer
-      ]);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Can you review this code?",
-        "agent3-pubkey" // Non-targeted agent observing
-      );
-      
-      expect(message.role).toBe("system");
-      expect(message.content).toBe("[code-writer → reviewer]: Can you review this code?");
-    });
-    
-    it("should handle multiple targeted agents in agent-to-agent messages", async () => {
-      const event = createEvent("agent1-pubkey", [
-        ["p", "agent2-pubkey"], // reviewer
-        ["p", "agent3-pubkey"]  // project-manager
-      ]);
-      
-      // For one of the targeted agents
-      const message1 = await MessageRoleAssigner.assignRole(
-        event,
-        "Need input from both of you",
-        "agent2-pubkey"
-      );
-      
-      expect(message1.role).toBe("user");
-      expect(message1.content).toBe("[code-writer → @reviewer]: Need input from both of you");
-      
-      // For the other targeted agent
-      const message2 = await MessageRoleAssigner.assignRole(
-        event,
-        "Need input from both of you",
-        "agent3-pubkey"
-      );
-      
-      expect(message2.role).toBe("user");
-      expect(message2.content).toBe("[code-writer → @project-manager]: Need input from both of you");
-    });
-  });
-  
-  describe("Edge cases", () => {
-    it("should handle events with no pubkey", async () => {
-      const event = createEvent("", []); // Empty pubkey
-      event.pubkey = undefined as any; // Force undefined
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Anonymous message",
-        "agent1-pubkey"
-      );
-      
-      // Should treat as user message (fallback)
-      expect(message.role).toBe("user");
-      expect(message.content).toBe("Anonymous message");
-    });
-    
-    it("should handle unknown non-user pubkeys gracefully", async () => {
-      const event = createEvent("unknown-agent-pubkey", []);
-      
-      const message = await MessageRoleAssigner.assignRole(
-        event,
-        "Message from unknown",
-        "agent1-pubkey"
-      );
-      
-      // Unknown pubkeys are treated as users (since isEventFromUser returns true for non-agent pubkeys)
-      expect(message.role).toBe("user");
-      expect(message.content).toBe("Message from unknown");
-    });
-  });
 });

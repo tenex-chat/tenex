@@ -1,9 +1,9 @@
+import { buildBrainstormModerationPrompt } from "@/prompts/fragments/brainstorm-moderation";
+import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { logger } from "@/utils/logger";
-import { buildBrainstormModerationPrompt } from "@/prompts/fragments/brainstorm-moderation";
-import type { ExecutionContext } from "./types";
 import type { MessageGenerationStrategy } from "./strategies/types";
+import type { ExecutionContext } from "./types";
 
 export interface BrainstormResponse {
     agent: {
@@ -37,18 +37,23 @@ export class BrainstormModerator {
     ): Promise<ModerationResult | null> {
         try {
             // Build messages using the strategy to get the moderator's full identity
-            const messages = await this.messageStrategy.buildMessages(context, context.triggeringEvent);
+            const messages = await this.messageStrategy.buildMessages(
+                context,
+                context.triggeringEvent
+            );
 
             // Keep only system messages (agent identity, instructions, etc)
-            const moderationMessages: ModelMessage[] = messages.filter(msg => msg.role === "system");
+            const moderationMessages: ModelMessage[] = messages.filter(
+                (msg) => msg.role === "system"
+            );
 
             // Add the moderation prompt messages
             const promptMessages = buildBrainstormModerationPrompt(
                 context.triggeringEvent.content,
-                responses.map(r => ({
+                responses.map((r) => ({
                     name: r.agent.name,
                     pubkey: r.agent.pubkey,
-                    content: r.content
+                    content: r.content,
                 }))
             );
             moderationMessages.push(...promptMessages);
@@ -56,8 +61,8 @@ export class BrainstormModerator {
             logger.debug("[BrainstormModerator] Executing moderation", {
                 moderator: context.agent.name,
                 responseCount: responses.length,
-                agents: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey })),
-                messageCount: moderationMessages.length
+                agents: responses.map((r) => ({ name: r.agent.name, pubkey: r.agent.pubkey })),
+                messageCount: moderationMessages.length,
             });
 
             // Use regular text generation instead of generateObject
@@ -82,7 +87,7 @@ export class BrainstormModerator {
             } catch (parseError) {
                 logger.error("[BrainstormModerator] Failed to parse moderation response as JSON", {
                     response: response.substring(0, 200),
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
+                    error: parseError instanceof Error ? parseError.message : String(parseError),
                 });
                 return null;
             }
@@ -93,19 +98,22 @@ export class BrainstormModerator {
                 : [parsed.selectedAgents];
 
             if (selectedPubkeys.length === 0) {
-                logger.info("[BrainstormModerator] No agents selected by moderator - defaulting to all responses");
+                logger.info(
+                    "[BrainstormModerator] No agents selected by moderator - defaulting to all responses"
+                );
                 return {
-                    selectedAgents: responses.map(r => r.agent.pubkey),
-                    reasoning: parsed.reasoning || "Moderator did not select specific responses - including all"
+                    selectedAgents: responses.map((r) => r.agent.pubkey),
+                    reasoning:
+                        parsed.reasoning ||
+                        "Moderator did not select specific responses - including all",
                 };
             }
 
             // Validate all selected agents exist and map to their pubkeys
             const validatedPubkeys: string[] = [];
             for (const selection of selectedPubkeys) {
-                const matchingResponse = responses.find(r =>
-                    r.agent.pubkey === selection ||
-                    r.agent.name === selection
+                const matchingResponse = responses.find(
+                    (r) => r.agent.pubkey === selection || r.agent.name === selection
                 );
 
                 if (matchingResponse) {
@@ -113,7 +121,10 @@ export class BrainstormModerator {
                 } else {
                     logger.warn("[BrainstormModerator] Selected agent not found", {
                         selected: selection,
-                        available: responses.map(r => ({ name: r.agent.name, pubkey: r.agent.pubkey }))
+                        available: responses.map((r) => ({
+                            name: r.agent.name,
+                            pubkey: r.agent.pubkey,
+                        })),
                     });
                 }
             }
@@ -127,18 +138,17 @@ export class BrainstormModerator {
                 moderator: context.agent.name,
                 selectedCount: validatedPubkeys.length,
                 selectedAgents: validatedPubkeys,
-                reasoning: parsed.reasoning?.substring(0, 100)
+                reasoning: parsed.reasoning?.substring(0, 100),
             });
 
             return {
                 selectedAgents: validatedPubkeys,
-                reasoning: parsed.reasoning
+                reasoning: parsed.reasoning,
             };
-
         } catch (error) {
             logger.error("[BrainstormModerator] Moderation failed", {
                 error: error instanceof Error ? error.message : String(error),
-                moderator: context.agent.name
+                moderator: context.agent.name,
             });
             return null;
         }
@@ -157,13 +167,13 @@ export class BrainstormModerator {
             // Use complete() since we don't need streaming
             const result = await llmService.complete(
                 messages,
-                {}  // no tools needed for moderation
+                {} // no tools needed for moderation
             );
 
             return result.text?.trim() || null;
         } catch (error) {
             logger.error("[BrainstormModerator] Failed to generate text response", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
             return null;
         }

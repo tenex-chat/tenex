@@ -1,11 +1,11 @@
-import { isEventFromUser, getTargetedAgentPubkeys } from "@/nostr/utils";
+import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
+import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isProjectContextInitialized } from "@/services";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 
 /**
  * Transforms NDKEvents into model messages for LLM consumption
@@ -13,7 +13,7 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
  */
 
 // biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
-export  class EventToModelMessage {
+export class EventToModelMessage {
     /**
      * Transform an NDKEvent into a prompt message for the LLM
      * Can return multiple messages if phase transition is detected
@@ -39,10 +39,11 @@ export  class EventToModelMessage {
             let phaseContent: string;
             if (isTargetedAgent) {
                 // Show full phase transition with instructions for targeted agent
-                phaseContent = PromptBuilder.buildFragment("phase-transition", {
-                    phase: phaseTag,
-                    phaseInstructions: phaseInstructionsTag
-                }) || "";
+                phaseContent =
+                    PromptBuilder.buildFragment("phase-transition", {
+                        phase: phaseTag,
+                        phaseInstructions: phaseInstructionsTag,
+                    }) || "";
             } else {
                 // Only show phase name for non-targeted agents
                 phaseContent = `=== PHASE TRANSITION: ${phaseTag.toUpperCase()} ===`;
@@ -133,12 +134,14 @@ export  class EventToModelMessage {
                 // Format as a delegation response with clear context
                 return {
                     role: "user",
-                    content: `[DELEGATION RESPONSE from ${responderName}]:\n${processedContent}\n[END DELEGATION RESPONSE]`
+                    content: `[DELEGATION RESPONSE from ${responderName}]:\n${processedContent}\n[END DELEGATION RESPONSE]`,
                 };
             }
         } catch (error) {
             // If registry is not initialized, continue with normal processing
-            logger.debug("[EventToModelMessage] Could not check for external delegation context", { error });
+            logger.debug("[EventToModelMessage] Could not check for external delegation context", {
+                error,
+            });
         }
 
         return null;
@@ -162,24 +165,30 @@ export  class EventToModelMessage {
             const userName = await nameRepo.getName(event.pubkey);
 
             // If the message targets specific agents and this agent is NOT one of them
-            if (targetedAgentPubkeys.length > 0 && !targetedAgentPubkeys.includes(targetAgentPubkey)) {
+            if (
+                targetedAgentPubkeys.length > 0 &&
+                !targetedAgentPubkeys.includes(targetAgentPubkey)
+            ) {
                 // Get names for targeted agents
                 const targetedAgentNames = await Promise.all(
-                    targetedAgentPubkeys.map(pk => nameRepo.getName(pk))
+                    targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
                 );
 
-                logger.debug("[EventToModelMessage] Formatting targeted message for non-recipient agent", {
-                    eventId: event.id,
-                    userName,
-                    targetedAgents: targetedAgentNames,
-                    viewingAgent: await nameRepo.getName(targetAgentPubkey),
-                    messageType: "system"
-                });
+                logger.debug(
+                    "[EventToModelMessage] Formatting targeted message for non-recipient agent",
+                    {
+                        eventId: event.id,
+                        userName,
+                        targetedAgents: targetedAgentNames,
+                        viewingAgent: await nameRepo.getName(targetAgentPubkey),
+                        messageType: "system",
+                    }
+                );
 
                 // Format as a system message showing it was directed to other agents
                 return {
                     role: "system",
-                    content: `[User (${userName}) → ${targetedAgentNames.join(", ")}]: ${processedContent}`
+                    content: `[User (${userName}) → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
                 };
             }
 
@@ -191,7 +200,7 @@ export  class EventToModelMessage {
                 viewingAgent: targetAgentPubkey,
                 isTargeted: targetedAgentPubkeys.includes(targetAgentPubkey),
                 isBroadcast: targetedAgentPubkeys.length === 0,
-                messageType: "user"
+                messageType: "user",
             });
 
             return { role: "user", content: processedContent };
@@ -214,32 +223,35 @@ export  class EventToModelMessage {
                     from: sendingAgentName,
                     to: targetAgentName,
                     viewingAgent: targetAgentName,
-                    messageType: "user"
+                    messageType: "user",
                 });
 
                 // Use 'user' role so the agent knows to respond, with clear sender → recipient format
                 return {
                     role: "user",
-                    content: `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`
+                    content: `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`,
                 };
             } else {
                 // This agent is NOT targeted - they're just observing
                 const targetedAgentNames = await Promise.all(
-                    targetedAgentPubkeys.map(pk => nameRepo.getName(pk))
+                    targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
                 );
 
-                logger.debug("[EventToModelMessage] Formatting agent-to-agent message for non-recipient", {
-                    eventId: event.id,
-                    from: sendingAgentName,
-                    to: targetedAgentNames,
-                    viewingAgent: await nameRepo.getName(targetAgentPubkey),
-                    messageType: "system"
-                });
+                logger.debug(
+                    "[EventToModelMessage] Formatting agent-to-agent message for non-recipient",
+                    {
+                        eventId: event.id,
+                        from: sendingAgentName,
+                        to: targetedAgentNames,
+                        viewingAgent: await nameRepo.getName(targetAgentPubkey),
+                        messageType: "system",
+                    }
+                );
 
                 // Use 'system' role since this agent is just observing
                 return {
                     role: "system",
-                    content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`
+                    content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
                 };
             }
         }
@@ -249,7 +261,7 @@ export  class EventToModelMessage {
             eventId: event.id,
             from: sendingAgentName,
             viewingAgent: await nameRepo.getName(targetAgentPubkey),
-            messageType: "system"
+            messageType: "system",
         });
 
         // Use 'system' role for broadcast messages from other agents

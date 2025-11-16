@@ -38,7 +38,7 @@ export class DelegationXmlFormatter {
         }
 
         // Add pending placeholders for recipients without responses
-        const respondedFrom = new Set(delegation.responses.map(r => r.from));
+        const respondedFrom = new Set(delegation.responses.map((r) => r.from));
         for (const recipient of delegation.recipients) {
             if (!respondedFrom.has(recipient)) {
                 xml += `\n    <response from="${recipient}" status="pending" />`;

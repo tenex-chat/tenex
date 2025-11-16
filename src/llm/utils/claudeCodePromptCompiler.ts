@@ -1,5 +1,5 @@
-import type { ModelMessage } from "ai";
 import { logger } from "@/utils/logger";
+import type { ModelMessage } from "ai";
 
 /**
  * Compiles messages for Claude Code when NOT resuming.
@@ -15,8 +15,9 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
     }
 
     // Find first system message for customSystemPrompt
-    const firstSystemIndex = messages.findIndex(m => m.role === "system");
-    const customSystemPrompt = firstSystemIndex !== -1 ? messages[firstSystemIndex].content : undefined;
+    const firstSystemIndex = messages.findIndex((m) => m.role === "system");
+    const customSystemPrompt =
+        firstSystemIndex !== -1 ? messages[firstSystemIndex].content : undefined;
 
     // Compile ALL remaining messages (after first system) preserving order
     const appendParts: string[] = [];
@@ -27,8 +28,8 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         // Process all messages after the first system message, preserving order
         for (let i = firstSystemIndex + 1; i < messages.length; i++) {
             const msg = messages[i];
-            const roleLabel = msg.role === "system" ? "[System]" :
-                            msg.role === "user" ? "[User]" : "[Assistant]";
+            const roleLabel =
+                msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
             appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
         }
 
@@ -38,8 +39,8 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         appendParts.push("=== Conversation History ===\n\n");
 
         for (const msg of messages) {
-            const roleLabel = msg.role === "system" ? "[System]" :
-                            msg.role === "user" ? "[User]" : "[Assistant]";
+            const roleLabel =
+                msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
             appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
         }
 
@@ -61,7 +62,7 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
     // after the conversation started into user messages
 
     // Find the first non-system message (start of conversation)
-    const conversationStartIndex = messages.findIndex(m => m.role !== "system");
+    const conversationStartIndex = messages.findIndex((m) => m.role !== "system");
 
     if (conversationStartIndex === -1) {
         // All messages are system messages, no conversion needed
@@ -79,7 +80,7 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
         if (msg.role === "system") {
             return {
                 role: "user",
-                content: `[System Context]: ${msg.content}`
+                content: `[System Context]: ${msg.content}`,
             };
         }
 

@@ -1,9 +1,8 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
-import { logger } from "@/utils/logger";
 import { handleError } from "@/utils/error-handler";
+import { logger } from "@/utils/logger";
 import type { z } from "zod";
-
 
 /**
  * Resolves and validates a file path to ensure it stays within the project boundaries.
@@ -14,39 +13,39 @@ import type { z } from "zod";
  * @throws Error if the path would escape the project directory
  */
 export function resolveAndValidatePath(filePath: string, projectPath: string): string {
-  const fullPath = isAbsolute(filePath) ? filePath : resolve(projectPath, filePath);
-  const relativePath = relative(projectPath, fullPath);
+    const fullPath = isAbsolute(filePath) ? filePath : resolve(projectPath, filePath);
+    const relativePath = relative(projectPath, fullPath);
 
-  if (relativePath.startsWith("..")) {
-    throw new Error(`Path outside project directory: ${filePath}`);
-  }
+    if (relativePath.startsWith("..")) {
+        throw new Error(`Path outside project directory: ${filePath}`);
+    }
 
-  return fullPath;
+    return fullPath;
 }
 
 /**
  * Standard response format for tool execution
  */
 export interface ToolResponse {
-  success: boolean;
-  message?: string;
-  error?: string;
-  data?: unknown;
-  [key: string]: unknown;
+    success: boolean;
+    message?: string;
+    error?: string;
+    data?: unknown;
+    [key: string]: unknown;
 }
 
 /**
  * Base class for tool execution errors
  */
 export class ToolExecutionError extends Error {
-  constructor(
-    message: string,
-    public readonly toolName: string,
-    public readonly cause?: Error
-  ) {
-    super(message);
-    this.name = "ToolExecutionError";
-  }
+    constructor(
+        message: string,
+        public readonly toolName: string,
+        public readonly cause?: Error
+    ) {
+        super(message);
+        this.name = "ToolExecutionError";
+    }
 }
 
 /**
@@ -54,92 +53,90 @@ export class ToolExecutionError extends Error {
  * Provides consistent error handling and response formatting
  */
 export async function executeToolWithErrorHandling<T extends z.ZodType>(
-  toolName: string,
-  input: z.infer<T>,
-  context: ExecutionContext,
-  executeFn: (input: z.infer<T>, context: ExecutionContext) => Promise<ToolResponse>
+    toolName: string,
+    input: z.infer<T>,
+    context: ExecutionContext,
+    executeFn: (input: z.infer<T>, context: ExecutionContext) => Promise<ToolResponse>
 ): Promise<string> {
-  logger.debug(`Executing tool: ${toolName}`, { input });
-  
-  try {
-    const result = await executeFn(input, context);
-    
-    if (!result.success) {
-      logger.warn(`Tool execution failed: ${toolName}`, { 
-        error: result.error,
-        input 
-      });
+    logger.debug(`Executing tool: ${toolName}`, { input });
+
+    try {
+        const result = await executeFn(input, context);
+
+        if (!result.success) {
+            logger.warn(`Tool execution failed: ${toolName}`, {
+                error: result.error,
+                input,
+            });
+        }
+
+        return JSON.stringify(result, null, 2);
+    } catch (error) {
+        // Use project's error handling utilities
+        const errorMessage = handleError(error, `Tool execution failed: ${toolName}`, {
+            logLevel: "error",
+        });
+
+        // Return standardized error response
+        const errorResponse: ToolResponse = {
+            success: false,
+            error: errorMessage,
+            toolName,
+        };
+
+        return JSON.stringify(errorResponse, null, 2);
     }
-    
-    return JSON.stringify(result, null, 2);
-  } catch (error) {
-    // Use project's error handling utilities
-    const errorMessage = handleError(
-      error,
-      `Tool execution failed: ${toolName}`,
-      { logLevel: "error" }
-    );
-    
-    // Return standardized error response
-    const errorResponse: ToolResponse = {
-      success: false,
-      error: errorMessage,
-      toolName
-    };
-    
-    return JSON.stringify(errorResponse, null, 2);
-  }
 }
 
 /**
  * Validate required fields in tool input
  */
 export function validateRequiredFields<T extends Record<string, unknown>>(
-  input: T,
-  requiredFields: (keyof T)[],
-  toolName: string
+    input: T,
+    requiredFields: (keyof T)[],
+    toolName: string
 ): void {
-  const missingFields = requiredFields.filter(
-    field => input[field] === undefined || input[field] === null
-  );
-  
-  if (missingFields.length > 0) {
-    throw new ToolExecutionError(
-      `Missing required fields: ${missingFields.join(", ")}`,
-      toolName
+    const missingFields = requiredFields.filter(
+        (field) => input[field] === undefined || input[field] === null
     );
-  }
+
+    if (missingFields.length > 0) {
+        throw new ToolExecutionError(
+            `Missing required fields: ${missingFields.join(", ")}`,
+            toolName
+        );
+    }
 }
 
 /**
  * Parse and validate numeric input with constraints
  */
 export function parseNumericInput(
-  value: number | undefined,
-  defaultValue: number,
-  constraints?: {
-    min?: number;
-    max?: number;
-    integer?: boolean;
-  }
+    value: number | undefined,
+    defaultValue: number,
+    constraints?: {
+        min?: number;
+        max?: number;
+        integer?: boolean;
+    }
 ): number {
-  const result = value ?? defaultValue;
-  
-  if (constraints) {
-    if (constraints.min !== undefined && result < constraints.min) {
-      throw new Error(`Value ${result} is less than minimum ${constraints.min}`);
+    const result = value ?? defaultValue;
+
+    if (constraints) {
+        if (constraints.min !== undefined && result < constraints.min) {
+            throw new Error(`Value ${result} is less than minimum ${constraints.min}`);
+        }
+
+        if (constraints.max !== undefined && result > constraints.max) {
+            throw new Error(`Value ${result} is greater than maximum ${constraints.max}`);
+        }
+
+        if (constraints.integer && !Number.isInteger(result)) {
+            throw new Error(`Value ${result} must be an integer`);
+        }
     }
-    
-    if (constraints.max !== undefined && result > constraints.max) {
-      throw new Error(`Value ${result} is greater than maximum ${constraints.max}`);
-    }
-    
-    if (constraints.integer && !Number.isInteger(result)) {
-      throw new Error(`Value ${result} must be an integer`);
-    }
-  }
-  
-  return result;
+
+    return result;
 }
 
 /**
@@ -156,7 +153,7 @@ export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
  * JSON-serializable object
  */
 export interface JsonObject {
-  [key: string]: JsonValue;
+    [key: string]: JsonValue;
 }
 
 /**
@@ -168,110 +165,110 @@ export type JsonArray = JsonValue[];
  * Document metadata with known common fields and extensibility
  */
 export interface DocumentMetadata {
-  language?: string;
-  type?: string;
-  category?: string;
-  tags?: string[];
-  author?: string;
-  title?: string;
-  uri?: string;
-  [key: string]: JsonValue | undefined;
+    language?: string;
+    type?: string;
+    category?: string;
+    tags?: string[];
+    author?: string;
+    title?: string;
+    uri?: string;
+    [key: string]: JsonValue | undefined;
 }
 
 /**
  * LanceDB stored document structure (what gets stored in the DB)
  */
 export interface LanceDBStoredDocument {
-  id: string;
-  content: string;
-  vector: number[];
-  metadata: string;
-  timestamp: number;
-  source: string;
+    id: string;
+    content: string;
+    vector: number[];
+    metadata: string;
+    timestamp: number;
+    source: string;
 }
 
 /**
  * LanceDB query result structure (what comes back from queries)
  */
 export interface LanceDBResult {
-  id: string | undefined;
-  content: string | undefined;
-  metadata?: string | Record<string, unknown>;
-  timestamp: number | undefined;
-  source: string | undefined;
-  vector?: number[];
-  _distance?: number;
+    id: string | undefined;
+    content: string | undefined;
+    metadata?: string | Record<string, unknown>;
+    timestamp: number | undefined;
+    source: string | undefined;
+    vector?: number[];
+    _distance?: number;
 }
 
 /**
  * RAG-specific document interface for mapping
  */
 export interface MappedRAGDocument {
-  id: string;
-  content: string;
-  metadata: DocumentMetadata;
-  timestamp: number;
-  source: string;
+    id: string;
+    content: string;
+    metadata: DocumentMetadata;
+    timestamp: number;
+    source: string;
 }
 
 /**
  * Type guard to validate JSON object structure
  */
 export function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
  * Type guard to validate DocumentMetadata structure
  */
 export function isDocumentMetadata(value: unknown): value is DocumentMetadata {
-  if (!isJsonObject(value)) return false;
-  
-  // Validate optional known fields if present
-  if (value.language !== undefined && typeof value.language !== "string") return false;
-  if (value.type !== undefined && typeof value.type !== "string") return false;
-  if (value.category !== undefined && typeof value.category !== "string") return false;
-  if (value.author !== undefined && typeof value.author !== "string") return false;
-  if (value.title !== undefined && typeof value.title !== "string") return false;
-  if (value.uri !== undefined && typeof value.uri !== "string") return false;
-  
-  // Deep validation for tags array - ensure all elements are strings
-  if (value.tags !== undefined) {
-    if (!Array.isArray(value.tags)) return false;
-    if (!value.tags.every((tag): tag is string => typeof tag === "string")) return false;
-  }
-  
-  return true;
+    if (!isJsonObject(value)) return false;
+
+    // Validate optional known fields if present
+    if (value.language !== undefined && typeof value.language !== "string") return false;
+    if (value.type !== undefined && typeof value.type !== "string") return false;
+    if (value.category !== undefined && typeof value.category !== "string") return false;
+    if (value.author !== undefined && typeof value.author !== "string") return false;
+    if (value.title !== undefined && typeof value.title !== "string") return false;
+    if (value.uri !== undefined && typeof value.uri !== "string") return false;
+
+    // Deep validation for tags array - ensure all elements are strings
+    if (value.tags !== undefined) {
+        if (!Array.isArray(value.tags)) return false;
+        if (!value.tags.every((tag): tag is string => typeof tag === "string")) return false;
+    }
+
+    return true;
 }
 
 /**
  * Parse document metadata from JSON string or object with type validation
  */
 export function parseDocumentMetadata(
-  metadata: string | DocumentMetadata | undefined
+    metadata: string | DocumentMetadata | undefined
 ): DocumentMetadata {
-  if (!metadata) return {};
-  
-  if (typeof metadata === "string") {
-    try {
-      const parsed = JSON.parse(metadata);
-      if (!isDocumentMetadata(parsed)) {
-        logger.warn("Parsed metadata does not match DocumentMetadata schema", { parsed });
-        return {};
-      }
-      return parsed;
-    } catch (error) {
-      logger.warn("Failed to parse document metadata", { error, metadata });
-      return {};
+    if (!metadata) return {};
+
+    if (typeof metadata === "string") {
+        try {
+            const parsed = JSON.parse(metadata);
+            if (!isDocumentMetadata(parsed)) {
+                logger.warn("Parsed metadata does not match DocumentMetadata schema", { parsed });
+                return {};
+            }
+            return parsed;
+        } catch (error) {
+            logger.warn("Failed to parse document metadata", { error, metadata });
+            return {};
+        }
     }
-  }
-  
-  if (!isDocumentMetadata(metadata)) {
-    logger.warn("Metadata object does not match DocumentMetadata schema", { metadata });
-    return {};
-  }
-  
-  return metadata;
+
+    if (!isDocumentMetadata(metadata)) {
+        logger.warn("Metadata object does not match DocumentMetadata schema", { metadata });
+        return {};
+    }
+
+    return metadata;
 }
 
 /**
@@ -279,13 +276,13 @@ export function parseDocumentMetadata(
  * Handles metadata parsing and field extraction
  */
 export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocument {
-  return {
-    id: result.id ?? "",
-    content: result.content ?? "",
-    metadata: parseDocumentMetadata(result.metadata),
-    timestamp: result.timestamp ?? Date.now(),
-    source: result.source ?? "unknown"
-  };
+    return {
+        id: result.id ?? "",
+        content: result.content ?? "",
+        metadata: parseDocumentMetadata(result.metadata),
+        timestamp: result.timestamp ?? Date.now(),
+        source: result.source ?? "unknown",
+    };
 }
 
 /**
@@ -293,7 +290,7 @@ export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocume
  * Converts distance to similarity score (0-1 range)
  */
 export function calculateRelevanceScore(distance: number | undefined): number {
-  if (distance === undefined || distance === null) return 0;
-  // Closer distance = higher similarity
-  return Math.max(0, Math.min(1, 1 - distance));
+    if (distance === undefined || distance === null) return 0;
+    // Closer distance = higher similarity
+    return Math.max(0, Math.min(1, 1 - distance));
 }

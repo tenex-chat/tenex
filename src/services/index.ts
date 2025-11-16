@@ -7,9 +7,9 @@ export { AgentsRegistryService, agentsRegistryService } from "./AgentsRegistrySe
 export { DelegationRegistry } from "./DelegationRegistry";
 export { DynamicToolService, dynamicToolService } from "./DynamicToolService";
 export {
-  getProjectContext,
-  isProjectContextInitialized,
-  ProjectContext,
+    getProjectContext,
+    isProjectContextInitialized,
+    ProjectContext,
 } from "./ProjectContext";
 export { projectContextStore } from "./ProjectContextStore";
 export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyNameRepository";

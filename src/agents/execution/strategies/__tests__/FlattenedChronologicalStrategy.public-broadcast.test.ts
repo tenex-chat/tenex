@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 
 /**
  * Test public broadcast handling:
@@ -48,7 +48,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         event2.tags = [
             ["e", event1.id],
             ["E", event1.id],
-            ["p", AGENT_A_PUBKEY]
+            ["p", AGENT_A_PUBKEY],
         ];
         event2.sig = "sig2";
         events.push(event2);
@@ -63,7 +63,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         event3.tags = [
             ["e", event2.id],
             ["E", event1.id],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event3.sig = "sig3";
         events.push(event3);
@@ -78,7 +78,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         event4.tags = [
             ["e", event1.id],
             ["E", event1.id],
-            ["p", AGENT_B_PUBKEY]
+            ["p", AGENT_B_PUBKEY],
         ];
         event4.sig = "sig4";
         events.push(event4);
@@ -93,7 +93,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         event5.tags = [
             ["e", event4.id],
             ["E", event1.id],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event5.sig = "sig5";
         events.push(event5);
@@ -105,7 +105,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             participants: new Set([USER_PUBKEY, AGENT_A_PUBKEY, AGENT_B_PUBKEY]),
             agentStates: new Map(),
             metadata: {},
-            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         } as Conversation;
 
         strategy = new FlattenedChronologicalStrategy();
@@ -118,7 +118,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             pubkey: AGENT_A_PUBKEY,
             role: "assistant",
             instructions: "Test Agent A",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -129,17 +129,17 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             projectPath: "/test/path",
             triggeringEvent: events[1], // event2 = User asking Agent A
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[1]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== Messages for Agent A ===");
@@ -148,10 +148,10 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         });
 
         // Should see public broadcast (it's in thread path to root)
-        expect(messageContents.some(c => c.includes("Hello everyone"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("Hello everyone"))).toBe(true);
 
         // Should see message targeted to it
-        expect(messageContents.some(c => c.includes("@agent-a what do you think"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-a what do you think"))).toBe(true);
     });
 
     it("Agent B should see public broadcast in its thread path", async () => {
@@ -161,7 +161,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             pubkey: AGENT_B_PUBKEY,
             role: "assistant",
             instructions: "Test Agent B",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -172,17 +172,17 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             projectPath: "/test/path",
             triggeringEvent: events[3], // event4 = User asking Agent B
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[3]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== Messages for Agent B ===");
@@ -191,17 +191,17 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
         });
 
         // Should see public broadcast (it's in thread path to root)
-        expect(messageContents.some(c => c.includes("Hello everyone"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("Hello everyone"))).toBe(true);
 
         // Should see message targeted to it
-        expect(messageContents.some(c => c.includes("@agent-b your thoughts"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-b your thoughts"))).toBe(true);
 
         // WILL see root-level sibling (event2: user asking Agent A)
         // Root-level conversations are collaborative - all agents see root-level siblings
-        expect(messageContents.some(c => c.includes("@agent-a what do you think"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-a what do you think"))).toBe(true);
 
         // Should NOT see Agent A's deeper reply (event3 is depth 3, parent=event2)
-        expect(messageContents.some(c => c.includes("I think it's great"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("I think it's great"))).toBe(false);
     });
 
     it("Agent A sees Agent B's branch due to root-level sibling inclusion", async () => {
@@ -211,7 +211,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             pubkey: AGENT_A_PUBKEY,
             role: "assistant",
             instructions: "Test Agent A",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -222,23 +222,23 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             projectPath: "/test/path",
             triggeringEvent: events[1], // event2 = User asking Agent A
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[1]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // WILL see Branch B start (event4: root-level sibling)
-        expect(messageContents.some(c => c.includes("@agent-b your thoughts"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-b your thoughts"))).toBe(true);
 
         // Should NOT see Agent B's deeper reply (event5 is depth 3, parent=event4)
-        expect(messageContents.some(c => c.includes("Sounds good to me"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("Sounds good to me"))).toBe(false);
     });
 });

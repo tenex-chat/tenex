@@ -1,121 +1,125 @@
-import { tool } from "ai";
-import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
+import type { ExecutionContext } from "@/agents/execution/types";
+import { type DelegationResponses, DelegationService } from "@/services/DelegationService";
+import type { AISdkTool } from "@/tools/registry";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
+import { tool } from "ai";
 import { z } from "zod";
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/registry";
 
 const delegateSchema = z.object({
-  recipients: z
-    .array(z.string())
-    .describe(
-      "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) of the recipient agent(s)"
-    ),
-  fullRequest: z
-    .string()
-    .describe("The complete request or question to delegate to the recipient agent(s)"),
+    recipients: z
+        .array(z.string())
+        .describe(
+            "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) of the recipient agent(s)"
+        ),
+    fullRequest: z
+        .string()
+        .describe("The complete request or question to delegate to the recipient agent(s)"),
 });
 
 type DelegateInput = z.infer<typeof delegateSchema>;
 type DelegateOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
-async function executeDelegate(input: DelegateInput, context: ExecutionContext): Promise<DelegateOutput> {
-  const { recipients, fullRequest } = input;
+async function executeDelegate(
+    input: DelegateInput,
+    context: ExecutionContext
+): Promise<DelegateOutput> {
+    const { recipients, fullRequest } = input;
 
-  // Recipients is always an array due to schema validation
-  if (!Array.isArray(recipients)) {
-    throw new Error("Recipients must be an array of strings");
-  }
-
-  // Resolve recipients to pubkeys
-  const resolvedPubkeys: string[] = [];
-  const failedRecipients: string[] = [];
-
-  for (const recipient of recipients) {
-    const pubkey = resolveRecipientToPubkey(recipient);
-    if (pubkey) {
-      resolvedPubkeys.push(pubkey);
-    } else {
-      failedRecipients.push(recipient);
+    // Recipients is always an array due to schema validation
+    if (!Array.isArray(recipients)) {
+        throw new Error("Recipients must be an array of strings");
     }
-  }
 
-  if (failedRecipients.length > 0) {
-    logger.warn("Some recipients could not be resolved", {
-      failed: failedRecipients,
-      resolved: resolvedPubkeys.length,
-    });
-  }
+    // Resolve recipients to pubkeys
+    const resolvedPubkeys: string[] = [];
+    const failedRecipients: string[] = [];
 
-  if (resolvedPubkeys.length === 0) {
-    throw new Error("No valid recipients provided.");
-  }
+    for (const recipient of recipients) {
+        const pubkey = resolveRecipientToPubkey(recipient);
+        if (pubkey) {
+            resolvedPubkeys.push(pubkey);
+        } else {
+            failedRecipients.push(recipient);
+        }
+    }
 
-  // Check for self-delegation (not allowed in regular delegate tool)
-  const selfDelegationAttempts = resolvedPubkeys.filter(
-    pubkey => pubkey === context.agent.pubkey
-  );
-  
-  if (selfDelegationAttempts.length > 0) {
-    throw new Error(
-      "Self-delegation is not permitted with the delegate tool. " +
-      `Agent "${context.agent.slug}" cannot delegate to itself. ` +
-      "Use the delegate_phase tool if you need to transition phases within the same agent."
+    if (failedRecipients.length > 0) {
+        logger.warn("Some recipients could not be resolved", {
+            failed: failedRecipients,
+            resolved: resolvedPubkeys.length,
+        });
+    }
+
+    if (resolvedPubkeys.length === 0) {
+        throw new Error("No valid recipients provided.");
+    }
+
+    // Check for self-delegation (not allowed in regular delegate tool)
+    const selfDelegationAttempts = resolvedPubkeys.filter(
+        (pubkey) => pubkey === context.agent.pubkey
     );
-  }
 
-  // Use DelegationService to execute the delegation
-  const delegationService = new DelegationService(
-    context.agent,
-    context.conversationId,
-    context.conversationCoordinator,
-    context.triggeringEvent,
-    context.agentPublisher, // Pass the required AgentPublisher
-    context.phase
-  );
-  
-  return await delegationService.execute({
-    recipients: resolvedPubkeys,
-    request: fullRequest,
-  });
+    if (selfDelegationAttempts.length > 0) {
+        throw new Error(
+            "Self-delegation is not permitted with the delegate tool. " +
+                `Agent "${context.agent.slug}" cannot delegate to itself. ` +
+                "Use the delegate_phase tool if you need to transition phases within the same agent."
+        );
+    }
+
+    // Use DelegationService to execute the delegation
+    const delegationService = new DelegationService(
+        context.agent,
+        context.conversationId,
+        context.conversationCoordinator,
+        context.triggeringEvent,
+        context.agentPublisher, // Pass the required AgentPublisher
+        context.phase
+    );
+
+    return await delegationService.execute({
+        recipients: resolvedPubkeys,
+        request: fullRequest,
+    });
 }
 
 // AI SDK tool factory
 export function createDelegateTool(context: ExecutionContext): AISdkTool {
-  const aiTool = tool({
-    description: "Delegate a task or question to one or more agents and wait for their responses. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys. Responses are returned synchronously - the tool waits for all agents to complete.",
-    inputSchema: delegateSchema,
-    execute: async (input: DelegateInput) => {
-      return await executeDelegate(input, context);
-    },
-  });
+    const aiTool = tool({
+        description:
+            "Delegate a task or question to one or more agents and wait for their responses. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys. Responses are returned synchronously - the tool waits for all agents to complete.",
+        inputSchema: delegateSchema,
+        execute: async (input: DelegateInput) => {
+            return await executeDelegate(input, context);
+        },
+    });
 
-  Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: (args: unknown) => {
-      // Defensive: handle cases where args might not be properly typed
-      if (!args || typeof args !== "object" || !("recipients" in args)) {
-        return "Delegating to agent(s)";
-      }
+    Object.defineProperty(aiTool, "getHumanReadableContent", {
+        value: (args: unknown) => {
+            // Defensive: handle cases where args might not be properly typed
+            if (!args || typeof args !== "object" || !("recipients" in args)) {
+                return "Delegating to agent(s)";
+            }
 
-      const { recipients } = args as DelegateInput;
+            const { recipients } = args as DelegateInput;
 
-      if (!recipients || !Array.isArray(recipients)) {
-        return "Delegating to agent(s)";
-      }
+            if (!recipients || !Array.isArray(recipients)) {
+                return "Delegating to agent(s)";
+            }
 
-      if (recipients.length === 1) {
-        return `Delegating to ${recipients[0]}`;
-      } else {
-        return `Delegating to ${recipients.length} recipients`;
-      }
-    },
-    enumerable: false,
-    configurable: true
-  });
+            if (recipients.length === 1) {
+                return `Delegating to ${recipients[0]}`;
+            } else {
+                return `Delegating to ${recipients.length} recipients`;
+            }
+        },
+        enumerable: false,
+        configurable: true,
+    });
 
-  return aiTool;
+    return aiTool;
 }
 
 /**

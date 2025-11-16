@@ -1,19 +1,19 @@
-import { tool } from "ai";
-import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
+import { tool } from "ai";
+import { z } from "zod";
 
 /**
  * Dynamic Tool Template
- * 
+ *
  * This template provides the structure for dynamically created tools.
- * 
+ *
  * File naming convention: agent_{agentId}_{toolName}.ts
- * 
+ *
  * The default export MUST be a factory function that:
  * 1. Takes an ExecutionContext as parameter
  * 2. Returns an AISdkTool (CoreTool with optional getHumanReadableContent)
- * 
+ *
  * Example usage:
  * ```typescript
  * const createMyTool: DynamicToolFactory = (context) => {
@@ -29,7 +29,7 @@ import type { AISdkTool } from "@/tools/registry";
  *     }
  *   });
  * };
- * 
+ *
  * export default createMyTool;
  * ```
  */
@@ -53,15 +53,15 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
     const aiTool = tool({
         // Tool description - this is shown to the LLM
         description: "TODO: Add a clear description of what this tool does",
-        
+
         // Input schema for validation
         inputSchema: toolSchema,
-        
+
         // Execute function - the main tool logic
         execute: async (input: ToolInput) => {
             // Access context properties if needed
             const { agent, conversationId, agentPublisher } = context;
-            
+
             // TODO: Implement your tool logic here
             // You can:
             // - Access the file system
@@ -69,10 +69,10 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
             // - Execute commands
             // - Interact with other services
             // - Publish status updates via agentPublisher
-            
+
             // Example: Log the execution
             console.log(`[${agent.name}] Executing dynamic tool with params:`, input);
-            
+
             // Example: Publish a status update
             if (agentPublisher && context.triggeringEvent) {
                 try {
@@ -91,7 +91,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
                     console.warn("Failed to publish status:", error);
                 }
             }
-            
+
             // Return your result
             // This can be a string, object, or any serializable data
             return {
@@ -101,7 +101,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
             };
         },
     });
-    
+
     // Optionally add human-readable content generation
     // This is used for displaying tool calls in a user-friendly way
     Object.defineProperty(aiTool, "getHumanReadableContent", {
@@ -109,9 +109,9 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
             return `Processing: ${input.exampleParam}${input.optionalParam ? ` with value ${input.optionalParam}` : ""}`;
         },
         enumerable: false,
-        configurable: true
+        configurable: true,
     });
-    
+
     return aiTool;
 };
 

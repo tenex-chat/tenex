@@ -1,25 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { ThreadService } from "../ThreadService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { describe, expect, it } from "vitest";
+import { ThreadService } from "../ThreadService";
 
 describe("ThreadService", () => {
     const threadService = new ThreadService();
 
     // Helper to create mock events
-    const createMockEvent = (id: string, parentId?: string): NDKEvent => ({
-        id,
-        pubkey: `user-${id}`,
-        created_at: Date.now() / 1000,
-        kind: 1,
-        tags: parentId ? [['e', parentId]] : [],
-        content: `Message ${id}`,
-        sig: 'mock-sig',
-        // Add the tagValue method that ThreadService needs
-        tagValue: function(tagName: string): string | undefined {
-            const tag = this.tags.find((t: string[]) => t[0] === tagName);
-            return tag ? tag[1] : undefined;
-        }
-    } as NDKEvent);
+    const createMockEvent = (id: string, parentId?: string): NDKEvent =>
+        ({
+            id,
+            pubkey: `user-${id}`,
+            created_at: Date.now() / 1000,
+            kind: 1,
+            tags: parentId ? [["e", parentId]] : [],
+            content: `Message ${id}`,
+            sig: "mock-sig",
+            // Add the tagValue method that ThreadService needs
+            tagValue: function (tagName: string): string | undefined {
+                const tag = this.tags.find((t: string[]) => t[0] === tagName);
+                return tag ? tag[1] : undefined;
+            },
+        }) as NDKEvent;
 
     describe("getThreadToEvent", () => {
         it("should build a simple linear thread", () => {
@@ -65,7 +66,7 @@ describe("ThreadService", () => {
             const event3 = createMockEvent("3", "2");
 
             // Modify event2 to point back to event3 (creating a cycle)
-            event2.tags = [['e', '3']];
+            event2.tags = [["e", "3"]];
 
             const history = [event1, event2, event3];
 
@@ -89,9 +90,9 @@ describe("ThreadService", () => {
             const children = threadService.getChildEvents("1", history);
 
             expect(children).toHaveLength(2);
-            expect(children.map(e => e.id)).toContain("2");
-            expect(children.map(e => e.id)).toContain("3");
-            expect(children.map(e => e.id)).not.toContain("4");
+            expect(children.map((e) => e.id)).toContain("2");
+            expect(children.map((e) => e.id)).toContain("3");
+            expect(children.map((e) => e.id)).not.toContain("4");
         });
 
         it("should return empty array for events with no children", () => {

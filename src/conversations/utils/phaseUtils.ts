@@ -6,12 +6,12 @@ import { logger } from "@/utils/logger";
  * @returns true if valid, false otherwise
  */
 export function isValidPhase(phase: string | undefined | null): phase is string {
-  if (!phase || typeof phase !== "string") {
-    return false;
-  }
-  
-  // Phase must be non-empty and not contain special characters that could break parsing
-  return phase.trim().length > 0 && !/[<>"]/.test(phase);
+    if (!phase || typeof phase !== "string") {
+        return false;
+    }
+
+    // Phase must be non-empty and not contain special characters that could break parsing
+    return phase.trim().length > 0 && !/[<>"]/.test(phase);
 }
 
 /**
@@ -20,11 +20,11 @@ export function isValidPhase(phase: string | undefined | null): phase is string 
  * @returns Normalized phase string or undefined if invalid
  */
 export function normalizePhase(phase: string | undefined | null): string | undefined {
-  if (!isValidPhase(phase)) {
-    return undefined;
-  }
-  
-  return phase.trim().toLowerCase();
+    if (!isValidPhase(phase)) {
+        return undefined;
+    }
+
+    return phase.trim().toLowerCase();
 }
 
 /**
@@ -34,23 +34,23 @@ export function normalizePhase(phase: string | undefined | null): string | undef
  * @returns true if phases match, false otherwise
  */
 export function phasesMatch(
-  phase1: string | undefined | null,
-  phase2: string | undefined | null
+    phase1: string | undefined | null,
+    phase2: string | undefined | null
 ): boolean {
-  const normalized1 = normalizePhase(phase1);
-  const normalized2 = normalizePhase(phase2);
-  
-  // Both undefined means no phase restriction - they match
-  if (normalized1 === undefined && normalized2 === undefined) {
-    return true;
-  }
-  
-  // One undefined and one defined means they don't match
-  if (normalized1 === undefined || normalized2 === undefined) {
-    return false;
-  }
-  
-  return normalized1 === normalized2;
+    const normalized1 = normalizePhase(phase1);
+    const normalized2 = normalizePhase(phase2);
+
+    // Both undefined means no phase restriction - they match
+    if (normalized1 === undefined && normalized2 === undefined) {
+        return true;
+    }
+
+    // One undefined and one defined means they don't match
+    if (normalized1 === undefined || normalized2 === undefined) {
+        return false;
+    }
+
+    return normalized1 === normalized2;
 }
 
 /**
@@ -59,8 +59,8 @@ export function phasesMatch(
  * @returns The phase string if found, undefined otherwise
  */
 export function extractPhaseFromTags(tags: string[][]): string | undefined {
-  const phaseTag = tags.find(tag => tag[0] === "phase");
-  return phaseTag?.[1];
+    const phaseTag = tags.find((tag) => tag[0] === "phase");
+    return phaseTag?.[1];
 }
 
 /**
@@ -69,11 +69,11 @@ export function extractPhaseFromTags(tags: string[][]): string | undefined {
  * @returns A tag array or undefined if phase is invalid
  */
 export function createPhaseTag(phase: string | undefined | null): string[] | undefined {
-  if (!isValidPhase(phase)) {
-    return undefined;
-  }
-  
-  return ["phase", phase.trim()];
+    if (!isValidPhase(phase)) {
+        return undefined;
+    }
+
+    return ["phase", phase.trim()];
 }
 
 /**
@@ -83,25 +83,25 @@ export function createPhaseTag(phase: string | undefined | null): string[] | und
  * @returns Filtered array of definitions that match the phase
  */
 export function filterDefinitionsByPhase<T extends { phase?: string }>(
-  definitions: T[],
-  targetPhase: string | undefined
+    definitions: T[],
+    targetPhase: string | undefined
 ): T[] {
-  if (targetPhase === undefined) {
-    // No phase specified - return all definitions without a phase
-    return definitions.filter(def => !def.phase);
-  }
-  
-  const normalizedTarget = normalizePhase(targetPhase);
-  if (!normalizedTarget) {
-    logger.warn("Invalid target phase provided for filtering", { targetPhase });
-    return [];
-  }
-  
-  return definitions.filter(def => {
-    const defPhase = normalizePhase(def.phase);
-    // Match if definition has same phase, or no phase (universal)
-    return defPhase === normalizedTarget || defPhase === undefined;
-  });
+    if (targetPhase === undefined) {
+        // No phase specified - return all definitions without a phase
+        return definitions.filter((def) => !def.phase);
+    }
+
+    const normalizedTarget = normalizePhase(targetPhase);
+    if (!normalizedTarget) {
+        logger.warn("Invalid target phase provided for filtering", { targetPhase });
+        return [];
+    }
+
+    return definitions.filter((def) => {
+        const defPhase = normalizePhase(def.phase);
+        // Match if definition has same phase, or no phase (universal)
+        return defPhase === normalizedTarget || defPhase === undefined;
+    });
 }
 
 /**
@@ -111,21 +111,21 @@ export function filterDefinitionsByPhase<T extends { phase?: string }>(
  * @returns true if the definition should be used
  */
 export function shouldUseDefinitionForPhase(
-  definitionPhase: string | undefined,
-  requestPhase: string | undefined
+    definitionPhase: string | undefined,
+    requestPhase: string | undefined
 ): boolean {
-  // If definition has no phase, it's universal and can be used
-  if (!definitionPhase) {
-    return true;
-  }
-  
-  // If definition has phase but request doesn't, don't use it
-  if (definitionPhase && !requestPhase) {
-    return false;
-  }
-  
-  // Both have phases - they must match
-  return phasesMatch(definitionPhase, requestPhase);
+    // If definition has no phase, it's universal and can be used
+    if (!definitionPhase) {
+        return true;
+    }
+
+    // If definition has phase but request doesn't, don't use it
+    if (definitionPhase && !requestPhase) {
+        return false;
+    }
+
+    // Both have phases - they must match
+    return phasesMatch(definitionPhase, requestPhase);
 }
 
 /**
@@ -135,14 +135,14 @@ export function shouldUseDefinitionForPhase(
  * @returns Combined cache key
  */
 export function getPhaseCacheKey(baseKey: string, phase: string | undefined): string {
-  if (!phase) {
-    return baseKey;
-  }
-  
-  const normalizedPhase = normalizePhase(phase);
-  if (!normalizedPhase) {
-    return baseKey;
-  }
-  
-  return `${baseKey}:phase:${normalizedPhase}`;
+    if (!phase) {
+        return baseKey;
+    }
+
+    const normalizedPhase = normalizePhase(phase);
+    if (!normalizedPhase) {
+        return baseKey;
+    }
+
+    return `${baseKey}:phase:${normalizedPhase}`;
 }

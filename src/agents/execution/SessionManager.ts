@@ -1,6 +1,6 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { logger } from "@/utils/logger";
 import type { AgentInstance } from "@/agents/types";
+import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export type EventFilter = (event: NDKEvent) => boolean;
 
@@ -37,7 +37,7 @@ export class SessionManager {
                 sessionId: this.sessionId,
                 agent: this.agent.name,
                 conversationId: this.conversationId.substring(0, 8),
-                lastSentEventId: this.lastSentEventId || "NONE"
+                lastSentEventId: this.lastSentEventId || "NONE",
             });
         }
     }
@@ -48,7 +48,7 @@ export class SessionManager {
     getSession(): SessionData {
         return {
             sessionId: this.sessionId,
-            lastSentEventId: this.lastSentEventId
+            lastSentEventId: this.lastSentEventId,
         };
     }
 
@@ -68,7 +68,7 @@ export class SessionManager {
             sessionId,
             lastSentEventId: lastSentEventId.substring(0, 8),
             agent: this.agent.name,
-            conversationId: this.conversationId.substring(0, 8)
+            conversationId: this.conversationId.substring(0, 8),
         });
     }
 
@@ -84,7 +84,7 @@ export class SessionManager {
         logger.info("[SessionManager] 📝 Stored lastSentEventId", {
             lastSentEventId: lastSentEventId.substring(0, 8),
             agent: this.agent.name,
-            conversationId: this.conversationId.substring(0, 8)
+            conversationId: this.conversationId.substring(0, 8),
         });
     }
 
@@ -101,7 +101,7 @@ export class SessionManager {
 
         logger.info("[SessionManager] 📋 Created event filter for resumed session", {
             lastSentEventId: lastSentEventId.substring(0, 8),
-            willFilterEvents: true
+            willFilterEvents: true,
         });
 
         let foundLastSent = false;
@@ -112,20 +112,20 @@ export class SessionManager {
                     foundLastSent = true;
                     logger.debug("[SessionManager] 🎯 Found last sent event, excluding it", {
                         eventId: event.id.substring(0, 8),
-                        content: event.content?.substring(0, 50)
+                        content: event.content?.substring(0, 50),
                     });
                     return false;
                 }
                 logger.debug("[SessionManager] ⏭️ Skipping event (before last sent)", {
                     eventId: event.id.substring(0, 8),
                     content: event.content?.substring(0, 50),
-                    lookingFor: lastSentEventId.substring(0, 8)
+                    lookingFor: lastSentEventId.substring(0, 8),
                 });
                 return false;
             }
             logger.debug("[SessionManager] ✅ Including event (after last sent)", {
                 eventId: event.id.substring(0, 8),
-                content: event.content?.substring(0, 50)
+                content: event.content?.substring(0, 50),
             });
             return true;
         };

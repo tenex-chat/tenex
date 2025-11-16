@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 import testData from "./delegation-response-test-data.json";
 
 /**
@@ -30,7 +30,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
 
     beforeAll(async () => {
         // Load test events
-        events = testData.map(eventData => {
+        events = testData.map((eventData) => {
             const event = new NDKEvent();
             event.id = eventData.id;
             event.pubkey = eventData.pubkey;
@@ -49,7 +49,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
         mockConversation = {
             id: CONVERSATION_ID,
             history: events,
-            participants: new Set([USER_PUBKEY, PM_PUBKEY, CLAUDE_CODE_PUBKEY])
+            participants: new Set([USER_PUBKEY, PM_PUBKEY, CLAUDE_CODE_PUBKEY]),
         } as Conversation;
 
         // Register the delegation
@@ -60,7 +60,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             pubkey: PM_PUBKEY,
             role: "PM",
             instructions: "Test PM",
-            tools: []
+            tools: [],
         };
         const claudeCodeAgent: AgentInstance = {
             name: "Claude Code",
@@ -68,18 +68,22 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             pubkey: CLAUDE_CODE_PUBKEY,
             role: "Agent",
             instructions: "Test",
-            tools: []
+            tools: [],
         };
         await delegationRegistry.registerDelegation({
             delegationEventId: "1a4e52fb76791050425f81ec49db55b39093142fd8c1ab46c520bfe51d92373a",
-            recipients: [{
-                pubkey: CLAUDE_CODE_PUBKEY,
-                request: "Tell me how many uncommitted files we have and what their changes are.",
-                phase: "EXECUTE"
-            }],
+            recipients: [
+                {
+                    pubkey: CLAUDE_CODE_PUBKEY,
+                    request:
+                        "Tell me how many uncommitted files we have and what their changes are.",
+                    phase: "EXECUTE",
+                },
+            ],
             delegatingAgent: pmAgent,
             rootConversationId: CONVERSATION_ID,
-            originalRequest: "Tell me how many uncommitted files we have and what their changes are."
+            originalRequest:
+                "Tell me how many uncommitted files we have and what their changes are.",
         });
 
         // Create strategy
@@ -92,7 +96,7 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             pubkey: PM_PUBKEY,
             role: "PM",
             instructions: "Test PM",
-            tools: []
+            tools: [],
         };
 
         // Create mock execution context (will be updated per test)
@@ -102,11 +106,13 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             projectPath: "/test/path",
             triggeringEvent: events[events.length - 1], // Default to last event
             conversationCoordinator: {
-                threadService: new (await import("@/conversations/services/ThreadService")).ThreadService()
+                threadService: new (
+                    await import("@/conversations/services/ThreadService")
+                ).ThreadService(),
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
     });
 
@@ -115,8 +121,8 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== All Messages ===");
@@ -124,28 +130,33 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             console.log(`\nMessage ${i + 1}:`, content.substring(0, 200));
             if (content.includes("📊 Let me check")) {
                 console.log("  → Contains '📊 Let me check'");
-                console.log("  → Has delegation marker:", content.includes("[delegation result from"));
+                console.log(
+                    "  → Has delegation marker:",
+                    content.includes("[delegation result from")
+                );
             }
         });
 
         // Event abf94738: "📊 Let me check the uncommitted files..."
         // This event does NOT p-tag PM, so should NOT appear as a STANDALONE message from claude-code
         // (It's OK for it to appear inside a delegation XML block or tool result)
-        const hasIntermediateMessage1AsStandalone = messageContents.some(content =>
-            content.includes("📊 Let me check the uncommitted files") &&
-            !content.includes("<delegation") &&
-            !content.includes("[delegation result from") &&
-            !content.includes("tool-result")
+        const hasIntermediateMessage1AsStandalone = messageContents.some(
+            (content) =>
+                content.includes("📊 Let me check the uncommitted files") &&
+                !content.includes("<delegation") &&
+                !content.includes("[delegation result from") &&
+                !content.includes("tool-result")
         );
         expect(hasIntermediateMessage1AsStandalone).toBe(false);
 
         // Event f871e4ea: "📈 Now let me get the detailed changes..."
         // This event does NOT p-tag PM, so should NOT appear as a STANDALONE message from claude-code
-        const hasIntermediateMessage2AsStandalone = messageContents.some(content =>
-            content.includes("📈 Now let me get the detailed changes") &&
-            !content.includes("<delegation") &&
-            !content.includes("[delegation result from") &&
-            !content.includes("tool-result")
+        const hasIntermediateMessage2AsStandalone = messageContents.some(
+            (content) =>
+                content.includes("📈 Now let me get the detailed changes") &&
+                !content.includes("<delegation") &&
+                !content.includes("[delegation result from") &&
+                !content.includes("tool-result")
         );
         expect(hasIntermediateMessage2AsStandalone).toBe(false);
     });
@@ -155,25 +166,27 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Event 52c6c5df: The actual delegation completion
         // This event DOES p-tag PM and has status:completed, so SHOULD be in messages
-        const hasCompletionMessage = messageContents.some(content =>
-            content.includes("📋 **Summary: You have 13 uncommitted files**") ||
-            content.includes("13 uncommitted files")
+        const hasCompletionMessage = messageContents.some(
+            (content) =>
+                content.includes("📋 **Summary: You have 13 uncommitted files**") ||
+                content.includes("13 uncommitted files")
         );
         expect(hasCompletionMessage).toBe(true);
 
         // It should appear within delegation context (either XML block or result marker)
         // Note: Shows "from User" because PubkeyNameRepository fallback when project context not initialized
-        const hasDelegationContextForCompletion = messageContents.some(content =>
-            (content.includes("<delegation") || content.includes("[delegation result from")) &&
-            (content.includes("📋 **Summary: You have 13 uncommitted files**") || content.includes("13 uncommitted files"))
+        const hasDelegationContextForCompletion = messageContents.some(
+            (content) =>
+                (content.includes("<delegation") || content.includes("[delegation result from")) &&
+                (content.includes("📋 **Summary: You have 13 uncommitted files**") ||
+                    content.includes("13 uncommitted files"))
         );
         expect(hasDelegationContextForCompletion).toBe(true);
     });
-
 });

@@ -20,30 +20,30 @@ const THINKING_BLOCK_REGEX = /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi;
  */
 export function stripThinkingBlocks(content: string): string {
     if (!content) return "";
-    
+
     // Remove all thinking blocks
     let stripped = content.replace(THINKING_BLOCK_REGEX, "");
-    
+
     // Normalize whitespace more carefully:
     // 1. Only collapse multiple spaces that aren't at the beginning of a line (preserve indentation)
     // 2. Collapse multiple blank lines to a single newline
     stripped = stripped
         .split("\n")
-        .map(line => {
+        .map((line) => {
             // Only collapse spaces in the middle of lines, not at the start (preserve indentation)
             if (line.trimStart() !== line) {
                 // Line has leading whitespace - preserve it
                 const leadingWhitespace = line.match(/^\s*/)?.[0] || "";
                 const rest = line.slice(leadingWhitespace.length);
-                return leadingWhitespace + rest.replace(/  +/g, " ");
+                return leadingWhitespace + rest.replace(/ {2,}/g, " ");
             }
             // No leading whitespace - collapse all multiple spaces
-            return line.replace(/  +/g, " ");
+            return line.replace(/ {2,}/g, " ");
         })
         .join("\n")
-        .replace(/\n\s*\n+/g, "\n")  // Collapse 2+ newlines to single newline
-        .trim();                      // Trim leading/trailing whitespace
-    
+        .replace(/\n\s*\n+/g, "\n") // Collapse 2+ newlines to single newline
+        .trim(); // Trim leading/trailing whitespace
+
     return stripped;
 }
 
@@ -54,7 +54,7 @@ export function stripThinkingBlocks(content: string): string {
  */
 export function isOnlyThinkingBlocks(content: string): boolean {
     if (!content || content.trim().length === 0) return false; // Empty/whitespace content is not "only thinking blocks"
-    
+
     const stripped = stripThinkingBlocks(content);
     return stripped.length === 0;
 }
@@ -89,7 +89,7 @@ export function countThinkingBlocks(content: string): number {
  */
 export function hasReasoningTag(event: NDKEvent): boolean {
     if (!event.tags) return false;
-    return event.tags.some(tag => tag[0] === "reasoning" && tag.length === 1);
+    return event.tags.some((tag) => tag[0] === "reasoning" && tag.length === 1);
 }
 
 /**
@@ -99,8 +99,8 @@ export function hasReasoningTag(event: NDKEvent): boolean {
  * @param strippedLength - Length after stripping
  */
 export function logThinkingBlockRemoval(
-    eventId: string, 
-    originalLength: number, 
+    eventId: string,
+    originalLength: number,
     strippedLength: number
 ): void {
     if (originalLength !== strippedLength) {
@@ -108,7 +108,7 @@ export function logThinkingBlockRemoval(
             eventId: eventId.substring(0, 8),
             originalLength,
             strippedLength,
-            removed: originalLength - strippedLength
+            removed: originalLength - strippedLength,
         });
     }
 }

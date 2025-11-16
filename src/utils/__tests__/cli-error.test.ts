@@ -3,90 +3,90 @@ import { handleCliError, handleCliWarning } from "../cli-error";
 import { logger } from "../logger";
 
 describe("CLI Error Handler", () => {
-  describe("handleCliError", () => {
-    it("should log error message and exit with code 1", () => {
-      const mockExit = spyOn(process, "exit").mockImplementation(() => {
-        throw new Error("process.exit called");
-      });
-      const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+    describe("handleCliError", () => {
+        it("should log error message and exit with code 1", () => {
+            const mockExit = spyOn(process, "exit").mockImplementation(() => {
+                throw new Error("process.exit called");
+            });
+            const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
 
-      const error = new Error("Test error");
+            const error = new Error("Test error");
 
-      expect(() => handleCliError(error)).toThrow("process.exit called");
+            expect(() => handleCliError(error)).toThrow("process.exit called");
 
-      expect(mockLogError).toHaveBeenCalledWith("Test error");
-      expect(mockExit).toHaveBeenCalledWith(1);
+            expect(mockLogError).toHaveBeenCalledWith("Test error");
+            expect(mockExit).toHaveBeenCalledWith(1);
 
-      mockExit.mockRestore();
-      mockLogError.mockRestore();
+            mockExit.mockRestore();
+            mockLogError.mockRestore();
+        });
+
+        it("should log error with context when provided", () => {
+            const mockExit = spyOn(process, "exit").mockImplementation(() => {
+                throw new Error("process.exit called");
+            });
+            const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+
+            const error = new Error("Test error");
+
+            expect(() => handleCliError(error, "Command failed")).toThrow("process.exit called");
+
+            expect(mockLogError).toHaveBeenCalledWith("Command failed: Test error");
+            expect(mockExit).toHaveBeenCalledWith(1);
+
+            mockExit.mockRestore();
+            mockLogError.mockRestore();
+        });
+
+        it("should handle string errors", () => {
+            const mockExit = spyOn(process, "exit").mockImplementation(() => {
+                throw new Error("process.exit called");
+            });
+            const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+
+            expect(() => handleCliError("String error")).toThrow("process.exit called");
+
+            expect(mockLogError).toHaveBeenCalledWith("String error");
+            expect(mockExit).toHaveBeenCalledWith(1);
+
+            mockExit.mockRestore();
+            mockLogError.mockRestore();
+        });
+
+        it("should use custom exit code when provided", () => {
+            const mockExit = spyOn(process, "exit").mockImplementation(() => {
+                throw new Error("process.exit called");
+            });
+            const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+
+            expect(() => handleCliError("Error", undefined, 2)).toThrow("process.exit called");
+
+            expect(mockExit).toHaveBeenCalledWith(2);
+
+            mockExit.mockRestore();
+            mockLogError.mockRestore();
+        });
     });
 
-    it("should log error with context when provided", () => {
-      const mockExit = spyOn(process, "exit").mockImplementation(() => {
-        throw new Error("process.exit called");
-      });
-      const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
+    describe("handleCliWarning", () => {
+        it("should log warning message without exiting", () => {
+            const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
 
-      const error = new Error("Test error");
+            handleCliWarning("Test warning");
 
-      expect(() => handleCliError(error, "Command failed")).toThrow("process.exit called");
+            expect(mockLogWarn).toHaveBeenCalledWith("Test warning");
 
-      expect(mockLogError).toHaveBeenCalledWith("Command failed: Test error");
-      expect(mockExit).toHaveBeenCalledWith(1);
+            mockLogWarn.mockRestore();
+        });
 
-      mockExit.mockRestore();
-      mockLogError.mockRestore();
+        it("should log warning with context when provided", () => {
+            const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
+
+            handleCliWarning("Test warning", "Command");
+
+            expect(mockLogWarn).toHaveBeenCalledWith("Command: Test warning");
+
+            mockLogWarn.mockRestore();
+        });
     });
-
-    it("should handle string errors", () => {
-      const mockExit = spyOn(process, "exit").mockImplementation(() => {
-        throw new Error("process.exit called");
-      });
-      const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
-
-      expect(() => handleCliError("String error")).toThrow("process.exit called");
-
-      expect(mockLogError).toHaveBeenCalledWith("String error");
-      expect(mockExit).toHaveBeenCalledWith(1);
-
-      mockExit.mockRestore();
-      mockLogError.mockRestore();
-    });
-
-    it("should use custom exit code when provided", () => {
-      const mockExit = spyOn(process, "exit").mockImplementation(() => {
-        throw new Error("process.exit called");
-      });
-      const mockLogError = spyOn(logger, "error").mockImplementation(() => {});
-
-      expect(() => handleCliError("Error", undefined, 2)).toThrow("process.exit called");
-
-      expect(mockExit).toHaveBeenCalledWith(2);
-
-      mockExit.mockRestore();
-      mockLogError.mockRestore();
-    });
-  });
-
-  describe("handleCliWarning", () => {
-    it("should log warning message without exiting", () => {
-      const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
-
-      handleCliWarning("Test warning");
-
-      expect(mockLogWarn).toHaveBeenCalledWith("Test warning");
-
-      mockLogWarn.mockRestore();
-    });
-
-    it("should log warning with context when provided", () => {
-      const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
-
-      handleCliWarning("Test warning", "Command");
-
-      expect(mockLogWarn).toHaveBeenCalledWith("Command: Test warning");
-
-      mockLogWarn.mockRestore();
-    });
-  });
 });

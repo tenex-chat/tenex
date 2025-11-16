@@ -25,30 +25,41 @@ program.addCommand(setupCommand);
 // Add debug command
 const debug = program.command("debug").description("Debug commands");
 debug
-  .command("system-prompt")
-  .description("Show the system prompt for an agent")
-  .requiredOption("--project <naddr>", "Project naddr (e.g., naddr1...)")
-  .option("--agent <name>", "Agent name", "default")
-  .action((options) => runDebugSystemPrompt(options));
+    .command("system-prompt")
+    .description("Show the system prompt for an agent")
+    .requiredOption("--project <naddr>", "Project naddr (e.g., naddr1...)")
+    .option("--agent <name>", "Agent name", "default")
+    .action((options) => runDebugSystemPrompt(options));
 
 debug
-  .command("threaded-formatter <conversationId>")
-  .description("Show the threaded conversation formatter output for a conversation")
-  .requiredOption("--project <naddr>", "Project naddr (e.g., naddr1...)")
-  .option("--strategy <strategy>", "Strategy to use (threaded-with-memory, flattened-chronological)")
-  .option("--agent <agent>", "Agent slug to view from perspective")
-  .option("--dont-trim", "Don't trim message content (default: trim to 500 chars)")
-  .action((conversationId, options) => runDebugThreadedFormatter({ project: options.project, conversationId, strategy: options.strategy, agent: options.agent, dontTrim: options.dontTrim }));
+    .command("threaded-formatter <conversationId>")
+    .description("Show the threaded conversation formatter output for a conversation")
+    .requiredOption("--project <naddr>", "Project naddr (e.g., naddr1...)")
+    .option(
+        "--strategy <strategy>",
+        "Strategy to use (threaded-with-memory, flattened-chronological)"
+    )
+    .option("--agent <agent>", "Agent slug to view from perspective")
+    .option("--dont-trim", "Don't trim message content (default: trim to 500 chars)")
+    .action((conversationId, options) =>
+        runDebugThreadedFormatter({
+            project: options.project,
+            conversationId,
+            strategy: options.strategy,
+            agent: options.agent,
+            dontTrim: options.dontTrim,
+        })
+    );
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {
-  await initNDK();
-  program.parse(process.argv);
+    await initNDK();
+    program.parse(process.argv);
 }
 
 // Only run if called directly (not imported)
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
-    handleCliError(error, "Fatal error in TENEX CLI");
-  });
+    main().catch((error) => {
+        handleCliError(error, "Fatal error in TENEX CLI");
+    });
 }

@@ -22,32 +22,32 @@ export const MOCK_AGENTS: Record<string, MockAgent> = {
         name: "User",
         slug: "user",
         pubkey: "user-pubkey-123",
-        color: "#4CAF50"
+        color: "#4CAF50",
     },
     alice: {
         name: "Alice (PM)",
         slug: "alice-pm",
         pubkey: "alice-pubkey-456",
-        color: "#2196F3"
+        color: "#2196F3",
     },
     bob: {
         name: "Bob (Developer)",
         slug: "bob-dev",
         pubkey: "bob-pubkey-789",
-        color: "#FF9800"
+        color: "#FF9800",
     },
     charlie: {
         name: "Charlie (Reviewer)",
         slug: "charlie-review",
         pubkey: "charlie-pubkey-abc",
-        color: "#9C27B0"
+        color: "#9C27B0",
     },
     diana: {
         name: "Diana (Tester)",
         slug: "diana-test",
         pubkey: "diana-pubkey-def",
-        color: "#F44336"
-    }
+        color: "#F44336",
+    },
 };
 
 export class MockEventGenerator {
@@ -95,7 +95,7 @@ export class MockEventGenerator {
             id: "root-announce",
             pubkey: MOCK_AGENTS.user.pubkey,
             content: "🚀 Starting new feature: Dark Mode implementation",
-            kind: 11
+            kind: 11,
         });
         events.push(root);
 
@@ -108,8 +108,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", root.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.bob.pubkey]
-            ]
+                ["p", MOCK_AGENTS.bob.pubkey],
+            ],
         });
         events.push(aliceTask);
 
@@ -122,8 +122,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", aliceTask.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.alice.pubkey]
-            ]
+                ["p", MOCK_AGENTS.alice.pubkey],
+            ],
         });
         events.push(bobImpl);
 
@@ -136,8 +136,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", bobImpl.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.bob.pubkey]
-            ]
+                ["p", MOCK_AGENTS.bob.pubkey],
+            ],
         });
         events.push(charlieReview);
 
@@ -150,8 +150,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", charlieReview.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.charlie.pubkey]
-            ]
+                ["p", MOCK_AGENTS.charlie.pubkey],
+            ],
         });
         events.push(bobFix);
 
@@ -163,8 +163,8 @@ export class MockEventGenerator {
             kind: 1111,
             tags: [
                 ["e", root.id],
-                ["E", root.id]
-            ]
+                ["E", root.id],
+            ],
         });
         events.push(dianaTest);
 
@@ -177,8 +177,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", dianaTest.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.bob.pubkey]
-            ]
+                ["p", MOCK_AGENTS.bob.pubkey],
+            ],
         });
         events.push(dianaBugs);
 
@@ -190,9 +190,9 @@ export class MockEventGenerator {
             kind: 1111,
             tags: [
                 ["e", root.id],
-                ["E", root.id]
+                ["E", root.id],
                 // No p-tags = public broadcast
-            ]
+            ],
         });
         events.push(broadcast);
 
@@ -212,7 +212,7 @@ export class MockEventGenerator {
             id: "root-help",
             pubkey: MOCK_AGENTS.user.pubkey,
             content: "Need help optimizing our database queries",
-            kind: 11
+            kind: 11,
         });
         events.push(root);
 
@@ -225,8 +225,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", root.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.user.pubkey]
-            ]
+                ["p", MOCK_AGENTS.user.pubkey],
+            ],
         });
         events.push(aliceResponse);
 
@@ -239,8 +239,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", root.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.user.pubkey]
-            ]
+                ["p", MOCK_AGENTS.user.pubkey],
+            ],
         });
         events.push(bobResponse);
 
@@ -253,8 +253,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", root.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.user.pubkey]
-            ]
+                ["p", MOCK_AGENTS.user.pubkey],
+            ],
         });
         events.push(charlieResponse);
 
@@ -267,8 +267,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", root.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.user.pubkey]
-            ]
+                ["p", MOCK_AGENTS.user.pubkey],
+            ],
         });
         events.push(dianaResponse);
 
@@ -288,7 +288,7 @@ export class MockEventGenerator {
             id: "root-feature-request",
             pubkey: MOCK_AGENTS.user.pubkey,
             content: "We need user authentication with OAuth",
-            kind: 11
+            kind: 11,
         });
         events.push(root);
 
@@ -302,8 +302,8 @@ export class MockEventGenerator {
                 ["e", root.id],
                 ["E", root.id],
                 ["p", MOCK_AGENTS.bob.pubkey],
-                ["delegation-request", ""]
-            ]
+                ["delegation-request", ""],
+            ],
         });
         events.push(aliceResponse);
 
@@ -316,8 +316,8 @@ export class MockEventGenerator {
             tags: [
                 ["e", aliceResponse.id],
                 ["E", root.id],
-                ["p", MOCK_AGENTS.alice.pubkey]
-            ]
+                ["p", MOCK_AGENTS.alice.pubkey],
+            ],
         });
         events.push(bobAccepts);
 
@@ -331,8 +331,8 @@ export class MockEventGenerator {
                 ["e", bobAccepts.id],
                 ["E", root.id],
                 ["p", MOCK_AGENTS.diana.pubkey],
-                ["delegation-request", ""]
-            ]
+                ["delegation-request", ""],
+            ],
         });
         events.push(bobDelegates);
 
@@ -346,8 +346,8 @@ export class MockEventGenerator {
                 ["e", bobDelegates.id],
                 ["E", root.id],
                 ["p", MOCK_AGENTS.bob.pubkey],
-                ["status", "completed"]
-            ]
+                ["status", "completed"],
+            ],
         });
         events.push(dianaComplete);
 
@@ -361,8 +361,8 @@ export class MockEventGenerator {
                 ["e", aliceResponse.id],
                 ["E", root.id],
                 ["p", MOCK_AGENTS.alice.pubkey],
-                ["status", "completed"]
-            ]
+                ["status", "completed"],
+            ],
         });
         events.push(bobReports);
 
@@ -376,7 +376,7 @@ export class MockEventGenerator {
         return {
             complexThreading: this.generateComplexThreadingScenario(),
             rootCollaboration: this.generateRootCollaborationScenario(),
-            delegation: this.generateDelegationScenario()
+            delegation: this.generateDelegationScenario(),
         };
     }
 }

@@ -1,7 +1,7 @@
 import { getNDK } from "@/nostr";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
-import { trace, context as otelContext, SpanStatusCode } from "@opentelemetry/api";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.nudge-service");
 
@@ -33,49 +33,44 @@ export class NudgeService {
 
         const span = tracer.startSpan("tenex.nudge.fetch_nudges", {
             attributes: {
-                "nudge.requested_count": eventIds.length
-            }
+                "nudge.requested_count": eventIds.length,
+            },
         });
 
-        return otelContext.with(
-            trace.setSpan(otelContext.active(), span),
-            async () => {
-                try {
-                    const ndk = getNDK();
-                    const nudgeEvents = await ndk.fetchEvents({
-                        ids: eventIds
-                    });
+        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
+            try {
+                const ndk = getNDK();
+                const nudgeEvents = await ndk.fetchEvents({
+                    ids: eventIds,
+                });
 
-                    const nudges = Array.from(nudgeEvents);
-                    const concatenated = nudges
-                        .map(nudge => nudge.content.trim())
-                        .filter(content => content.length > 0)
-                        .join("\n\n");
+                const nudges = Array.from(nudgeEvents);
+                const concatenated = nudges
+                    .map((nudge) => nudge.content.trim())
+                    .filter((content) => content.length > 0)
+                    .join("\n\n");
 
-                    const nudgeTitles = nudges
-                        .map(n => n.tagValue("title") || "untitled")
-                        .join(", ");
+                const nudgeTitles = nudges.map((n) => n.tagValue("title") || "untitled").join(", ");
 
-                    span.setAttributes({
-                        "nudge.fetched_count": nudges.length,
-                        "nudge.content_length": concatenated.length,
-                        "nudge.titles": nudgeTitles
-                    });
+                span.setAttributes({
+                    "nudge.fetched_count": nudges.length,
+                    "nudge.content_length": concatenated.length,
+                    "nudge.titles": nudgeTitles,
+                });
 
-                    span.setStatus({ code: SpanStatusCode.OK });
-                    span.end();
-                    return concatenated;
-                } catch (error) {
-                    span.recordException(error as Error);
-                    span.setStatus({
-                        code: SpanStatusCode.ERROR,
-                        message: (error as Error).message
-                    });
-                    span.end();
-                    return "";
-                }
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+                return concatenated;
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: (error as Error).message,
+                });
+                span.end();
+                return "";
             }
-        );
+        });
     }
 
     /**
@@ -87,10 +82,10 @@ export class NudgeService {
         try {
             const ndk = getNDK();
             const events = await ndk.fetchEvents({
-                ids: [eventId]
+                ids: [eventId],
             });
 
-            const nudge = Array.from(events).find(event => event.kind === 4201);
+            const nudge = Array.from(events).find((event) => event.kind === 4201);
             return nudge || null;
         } catch (error) {
             logger.error("[NudgeService] Failed to fetch nudge", { error, eventId });

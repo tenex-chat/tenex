@@ -2,8 +2,8 @@ import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
 import { getProjectContext } from "@/services";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
+import { hasReasoningTag, isOnlyThinkingBlocks, stripThinkingBlocks } from "../utils/content-utils";
 import { NostrEntityProcessor } from "./NostrEntityProcessor";
-import { stripThinkingBlocks, isOnlyThinkingBlocks, hasReasoningTag } from "../utils/content-utils";
 
 /**
  * Handles formatting of delegation-related messages
@@ -15,7 +15,7 @@ export class DelegationFormatter {
      * Build "Messages While You Were Away" block for catching up on conversation history
      */
     static async buildMissedMessagesBlock(
-        events: NDKEvent[], 
+        events: NDKEvent[],
         agentSlug: string,
         delegationSummary?: string
     ): Promise<ModelMessage> {
@@ -36,17 +36,18 @@ export class DelegationFormatter {
                 if (isOnlyThinkingBlocks(event.content)) {
                     continue;
                 }
-                
+
                 // Strip thinking blocks from content
                 const strippedContent = stripThinkingBlocks(event.content);
-                
+
                 const processed = await NostrEntityProcessor.processEntities(strippedContent);
                 contextBlock += `${sender}:\n${processed}\n\n`;
             }
         }
 
         contextBlock += "=== END OF HISTORY ===\n";
-        contextBlock += "Respond to the most recent user message above, considering the context.\n\n";
+        contextBlock +=
+            "Respond to the most recent user message above, considering the context.\n\n";
 
         return { role: "system", content: contextBlock };
     }
@@ -55,7 +56,7 @@ export class DelegationFormatter {
      * Build delegation responses block
      */
     static buildDelegationResponsesBlock(
-        responses: Map<string, NDKEvent>, 
+        responses: Map<string, NDKEvent>,
         originalRequest: string
     ): ModelMessage {
         let message = "=== DELEGATE RESPONSES RECEIVED ===\n\n";
@@ -67,7 +68,7 @@ export class DelegationFormatter {
         for (const [pubkey, event] of responses) {
             const agent = projectCtx.getAgentByPubkey(pubkey);
             const agentName = agent?.name || pubkey.substring(0, 8);
-            
+
             // Skip if response has reasoning tag
             if (hasReasoningTag(event)) {
                 continue;
@@ -76,10 +77,10 @@ export class DelegationFormatter {
             if (!event.content || isOnlyThinkingBlocks(event.content)) {
                 continue;
             }
-            
+
             // Strip thinking blocks from response content
             const strippedContent = stripThinkingBlocks(event.content);
-            
+
             message += `### Response from ${agentName}:\n`;
             message += `${strippedContent}\n\n`;
         }

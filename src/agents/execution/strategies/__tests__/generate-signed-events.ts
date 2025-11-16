@@ -1,5 +1,5 @@
+import type { AgentInstance } from "@/agents/types";
 import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { AgentInstance } from "@/agents/types";
 
 export interface SignedAgent {
     agent: AgentInstance;
@@ -37,7 +37,7 @@ export class SignedEventGenerator {
             pubkey: user.pubkey,
             role,
             instructions: `I am ${name}, a ${role}`,
-            tools: []
+            tools: [],
         };
 
         return { agent, signer };
@@ -65,7 +65,7 @@ export class SignedEventGenerator {
         event.content = content;
         event.tags = [
             ["title", content],
-            ["a", `31933:${(await userSigner.user()).pubkey}:${projectId}`]
+            ["a", `31933:${(await userSigner.user()).pubkey}:${projectId}`],
         ];
 
         await event.sign(userSigner);
@@ -90,7 +90,7 @@ export class SignedEventGenerator {
             ["E", rootEvent.id!, "", ""],
             ["p", targetAgent.agent.pubkey],
             ["K", String(rootEvent.kind)],
-            ["P", (await userSigner.user()).pubkey]
+            ["P", (await userSigner.user()).pubkey],
         ];
 
         await event.sign(userSigner);
@@ -119,7 +119,7 @@ export class SignedEventGenerator {
             ["K", String(rootEvent.kind)],
             ["P", fromAgent.agent.pubkey],
             ["phase", "EXECUTE"],
-            ["delegation-request", ""]
+            ["delegation-request", ""],
         ];
 
         await event.sign(fromAgent.signer);
@@ -135,7 +135,7 @@ export class SignedEventGenerator {
         parentEvent: NDKEvent,
         rootEvent: NDKEvent,
         targetPubkey?: string,
-        isCompletion: boolean = false
+        isCompletion = false
     ): Promise<NDKEvent> {
         const event = new NDKEvent(this.ndk);
         event.kind = 1111;
@@ -145,7 +145,7 @@ export class SignedEventGenerator {
             ["e", parentEvent.id!, "", ""],
             ["E", rootEvent.id!, "", ""],
             ["K", String(rootEvent.kind)],
-            ["P", agent.agent.pubkey]
+            ["P", agent.agent.pubkey],
         ];
 
         if (targetPubkey) {
@@ -245,7 +245,7 @@ export class SignedEventGenerator {
         // Bob fixes issues
         const bobFixes = await this.createAgentResponse(
             bob,
-            "✅ Fixed accessibility issues:\n- Added aria-label=\"Toggle dark mode\"\n- Implemented keyboard navigation\n- Tested with screen reader",
+            '✅ Fixed accessibility issues:\n- Added aria-label="Toggle dark mode"\n- Implemented keyboard navigation\n- Tested with screen reader',
             charlieReview,
             root,
             charlie.agent.pubkey
@@ -288,7 +288,7 @@ export class SignedEventGenerator {
             description: "Multi-level delegation with code review and parallel testing branch",
             events,
             agents: [alice, bob, charlie, diana],
-            user
+            user,
         };
     }
 
@@ -357,10 +357,11 @@ export class SignedEventGenerator {
 
         return {
             name: "Root Collaboration",
-            description: "All agents respond at root level - should see each other (collaborative discussion)",
+            description:
+                "All agents respond at root level - should see each other (collaborative discussion)",
             events,
             agents: [alice, bob, charlie, diana],
-            user
+            user,
         };
     }
 
@@ -486,7 +487,7 @@ export class SignedEventGenerator {
             description: "Deep delegation chain: PM → Dev → Reviewer → Tester",
             events,
             agents: [pm, dev, reviewer, tester],
-            user
+            user,
         };
     }
 
@@ -497,7 +498,7 @@ export class SignedEventGenerator {
         return Promise.all([
             this.generateComplexThreading(),
             this.generateRootCollaboration(),
-            this.generateDelegationChain()
+            this.generateDelegationChain(),
         ]);
     }
 }

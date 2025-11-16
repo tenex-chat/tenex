@@ -5,9 +5,9 @@ import type { PromptFragment } from "../core/types";
  * RAG (Retrieval-Augmented Generation) system instructions fragment
  */
 export const ragInstructionsFragment: PromptFragment = {
-  id: "rag-instructions",
-  priority: 25,
-  template: () => `# RAG (Retrieval-Augmented Generation) System
+    id: "rag-instructions",
+    priority: 25,
+    template: () => `# RAG (Retrieval-Augmented Generation) System
 
 The RAG system provides semantic search and vector-based retrieval capabilities for enhanced agent memory and context management.
 

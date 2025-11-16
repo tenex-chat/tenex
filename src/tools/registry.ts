@@ -1,108 +1,105 @@
 /**
  * Tool Registry - AI SDK Tools
- * 
+ *
  * Central registry for all AI SDK tools in the TENEX system.
  */
 
-import type { Tool as CoreTool } from "ai";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import { mcpService } from "@/services/mcp/MCPManager";
-import { createReadPathTool } from "./implementations/read_path";
-import { createLessonLearnTool } from "./implementations/learn";
-import { createLessonGetTool } from "./implementations/lesson_get";
-import { createShellTool } from "./implementations/shell";
+import type { Tool as CoreTool } from "ai";
+import { createAddPhaseTool } from "./implementations/add_phase";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
 import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
-import { createMcpDiscoverTool } from "./implementations/mcp_discover";
-import { createDelegateTool } from "./implementations/delegate";
-import { createDelegatePhaseTool } from "./implementations/delegate_phase";
-import { createDelegateFollowupTool } from "./implementations/delegate_followup";
-import { createNostrProjectsTool } from "./implementations/nostr_projects";
-import { createGeminiCliTool } from "./implementations/gemini_cli";
-import { createClaudeCodeTool } from "./implementations/claude_code";
-import { createCreateProjectTool } from "./implementations/create_project";
-import { createDelegateExternalTool } from "./implementations/delegate_external";
-import { createReportWriteTool } from "./implementations/report_write";
-import { createReportReadTool } from "./implementations/report_read";
-import { createReportsListTool } from "./implementations/reports_list";
-import { createReportDeleteTool } from "./implementations/report_delete";
-import { createAddPhaseTool } from "./implementations/add_phase";
-import { createRemovePhaseTool } from "./implementations/phase_remove";
-import { createScheduleTaskTool } from "./implementations/schedule_task";
-import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
-import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
-import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createAskTool } from "./implementations/ask";
-import { createUploadBlobTool } from "./implementations/upload_blob";
+import { createClaudeCodeTool } from "./implementations/claude_code";
 import { createCodebaseSearchTool } from "./implementations/codebase_search";
-import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
+import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
+import { createCreateProjectTool } from "./implementations/create_project";
+import { createDelegateTool } from "./implementations/delegate";
+import { createDelegateExternalTool } from "./implementations/delegate_external";
+import { createDelegateFollowupTool } from "./implementations/delegate_followup";
+import { createDelegatePhaseTool } from "./implementations/delegate_phase";
+import { createGeminiCliTool } from "./implementations/gemini_cli";
+import { createLessonLearnTool } from "./implementations/learn";
+import { createLessonGetTool } from "./implementations/lesson_get";
+import { createMcpDiscoverTool } from "./implementations/mcp_discover";
+import { createNostrProjectsTool } from "./implementations/nostr_projects";
+import { createRemovePhaseTool } from "./implementations/phase_remove";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
-import { createRAGQueryTool } from "./implementations/rag_query";
+import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
 import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
 import { createRAGListCollectionsTool } from "./implementations/rag_list_collections";
+import { createRAGQueryTool } from "./implementations/rag_query";
 import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscription_create";
-import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
-import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
+import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
+import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
+import { createReadPathTool } from "./implementations/read_path";
+import { createReportDeleteTool } from "./implementations/report_delete";
+import { createReportReadTool } from "./implementations/report_read";
+import { createReportWriteTool } from "./implementations/report_write";
+import { createReportsListTool } from "./implementations/reports_list";
+import { createScheduleTaskTool } from "./implementations/schedule_task";
+import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
+import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
+import { createShellTool } from "./implementations/shell";
+import { createUploadBlobTool } from "./implementations/upload_blob";
 
 /**
  * Tool names available in the system
  */
 export type ToolName =
-  | "read_path"
-  | "codebase_search"
-  | "lesson_learn"
-  | "lesson_get"
-  | "shell"
-  | "agents_discover"
-  | "agents_hire"
-  | "agents_list"
-  | "agents_read"
-  | "agents_write"
-  | "discover_capabilities"
-  | "delegate"
-  | "delegate_phase"
-  | "delegate_followup"
-  | "ask"
-  | "nostr_projects"
-  | "claude_code"
-  | "gemini_cli"
-  | "create_project"
-  | "delegate_external"
-  | "report_write"
-  | "report_read"
-  | "reports_list"
-  | "report_delete"
-  | "phase_add"
-  | "phase_remove"
-  | "schedule_task"
-  | "schedule_tasks_list"
-  | "schedule_task_cancel"
-  | "create_dynamic_tool"
-  | "upload_blob"
-  | "rag_create_collection"
-  | "rag_add_documents"
-  | "rag_query"
-  | "rag_delete_collection"
-  | "rag_list_collections"
-  | "rag_subscription_create"
-  | "rag_subscription_list"
-  | "rag_subscription_get"
-  | "rag_subscription_delete";
+    | "read_path"
+    | "codebase_search"
+    | "lesson_learn"
+    | "lesson_get"
+    | "shell"
+    | "agents_discover"
+    | "agents_hire"
+    | "agents_list"
+    | "agents_read"
+    | "agents_write"
+    | "discover_capabilities"
+    | "delegate"
+    | "delegate_phase"
+    | "delegate_followup"
+    | "ask"
+    | "nostr_projects"
+    | "claude_code"
+    | "gemini_cli"
+    | "create_project"
+    | "delegate_external"
+    | "report_write"
+    | "report_read"
+    | "reports_list"
+    | "report_delete"
+    | "phase_add"
+    | "phase_remove"
+    | "schedule_task"
+    | "schedule_tasks_list"
+    | "schedule_task_cancel"
+    | "create_dynamic_tool"
+    | "upload_blob"
+    | "rag_create_collection"
+    | "rag_add_documents"
+    | "rag_query"
+    | "rag_delete_collection"
+    | "rag_list_collections"
+    | "rag_subscription_create"
+    | "rag_subscription_list"
+    | "rag_subscription_get"
+    | "rag_subscription_delete";
 
 /**
  * AI SDK Tool type - tools with optional human-readable content generation
  * The getHumanReadableContent function is attached as a non-enumerable property
  */
-export type AISdkTool<
-  TInput = unknown,
-  TOutput = unknown
-> = CoreTool<TInput, TOutput> & {
-  getHumanReadableContent?: (args: TInput) => string;
+export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
+    getHumanReadableContent?: (args: TInput) => string;
 };
 
 /**
@@ -114,76 +111,76 @@ export type ToolFactory = (context: ExecutionContext) => AISdkTool<unknown, unkn
  * Registry of tool factories
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
-  // Agent tools
-  agents_discover: createAgentsDiscoverTool,
-  agents_hire: createAgentsHireTool,
-  agents_list: createAgentsListTool,
-  agents_read: createAgentsReadTool,
-  agents_write: createAgentsWriteTool,
-  
-  // Ask tool
-  ask: createAskTool,
+    // Agent tools
+    agents_discover: createAgentsDiscoverTool,
+    agents_hire: createAgentsHireTool,
+    agents_list: createAgentsListTool,
+    agents_read: createAgentsReadTool,
+    agents_write: createAgentsWriteTool,
 
-  // Claude code
-  claude_code: createClaudeCodeTool,
-  gemini_cli: createGeminiCliTool,
-  
-  // Codebase search
-  codebase_search: createCodebaseSearchTool,
+    // Ask tool
+    ask: createAskTool,
 
-  // Project tools
-  create_project: createCreateProjectTool,
-  nostr_projects: createNostrProjectsTool,
+    // Claude code
+    claude_code: createClaudeCodeTool,
+    gemini_cli: createGeminiCliTool,
 
-  // Delegation tools
-  delegate_external: createDelegateExternalTool,
-  delegate_followup: createDelegateFollowupTool,
-  delegate_phase: createDelegatePhaseTool,
-  delegate: createDelegateTool,
+    // Codebase search
+    codebase_search: createCodebaseSearchTool,
 
-  discover_capabilities: createMcpDiscoverTool,
+    // Project tools
+    create_project: createCreateProjectTool,
+    nostr_projects: createNostrProjectsTool,
 
-  // Lesson tools
-  lesson_get: createLessonGetTool,
-  lesson_learn: createLessonLearnTool,
+    // Delegation tools
+    delegate_external: createDelegateExternalTool,
+    delegate_followup: createDelegateFollowupTool,
+    delegate_phase: createDelegatePhaseTool,
+    delegate: createDelegateTool,
 
-  // Phase management tools
-  phase_add: createAddPhaseTool,
-  phase_remove: createRemovePhaseTool,
+    discover_capabilities: createMcpDiscoverTool,
 
-  read_path: createReadPathTool,
+    // Lesson tools
+    lesson_get: createLessonGetTool,
+    lesson_learn: createLessonLearnTool,
 
-  // Report tools
-  report_delete: createReportDeleteTool,
-  report_read: createReportReadTool,
-  report_write: createReportWriteTool,
-  reports_list: createReportsListTool,
+    // Phase management tools
+    phase_add: createAddPhaseTool,
+    phase_remove: createRemovePhaseTool,
 
-  // Schedule tools
-  schedule_task_cancel: createCancelScheduledTaskTool,
-  schedule_task: createScheduleTaskTool,
-  schedule_tasks_list: createListScheduledTasksTool,
-  
-  shell: createShellTool,
-  
-  // Dynamic tool creation
-  create_dynamic_tool: createCreateDynamicToolTool,
-  
-  // Upload tools
-  upload_blob: createUploadBlobTool,
-  
-  // RAG tools
-  rag_create_collection: createRAGCreateCollectionTool,
-  rag_add_documents: createRAGAddDocumentsTool,
-  rag_query: createRAGQueryTool,
-  rag_delete_collection: createRAGDeleteCollectionTool,
-  rag_list_collections: createRAGListCollectionsTool,
-  
-  // RAG subscription tools
-  rag_subscription_create: createRAGSubscriptionCreateTool,
-  rag_subscription_list: createRAGSubscriptionListTool,
-  rag_subscription_get: createRAGSubscriptionGetTool,
-  rag_subscription_delete: createRAGSubscriptionDeleteTool,
+    read_path: createReadPathTool,
+
+    // Report tools
+    report_delete: createReportDeleteTool,
+    report_read: createReportReadTool,
+    report_write: createReportWriteTool,
+    reports_list: createReportsListTool,
+
+    // Schedule tools
+    schedule_task_cancel: createCancelScheduledTaskTool,
+    schedule_task: createScheduleTaskTool,
+    schedule_tasks_list: createListScheduledTasksTool,
+
+    shell: createShellTool,
+
+    // Dynamic tool creation
+    create_dynamic_tool: createCreateDynamicToolTool,
+
+    // Upload tools
+    upload_blob: createUploadBlobTool,
+
+    // RAG tools
+    rag_create_collection: createRAGCreateCollectionTool,
+    rag_add_documents: createRAGAddDocumentsTool,
+    rag_query: createRAGQueryTool,
+    rag_delete_collection: createRAGDeleteCollectionTool,
+    rag_list_collections: createRAGListCollectionsTool,
+
+    // RAG subscription tools
+    rag_subscription_create: createRAGSubscriptionCreateTool,
+    rag_subscription_list: createRAGSubscriptionListTool,
+    rag_subscription_get: createRAGSubscriptionGetTool,
+    rag_subscription_delete: createRAGSubscriptionDeleteTool,
 };
 
 /**
@@ -192,10 +189,13 @@ const toolFactories: Record<ToolName, ToolFactory> = {
  * @param context - Execution context for the tool
  * @returns The instantiated AI SDK tool or undefined if not found
  */
-export function getTool(name: ToolName, context: ExecutionContext): AISdkTool<unknown, unknown> | undefined {
-  const factory = toolFactories[name];
-  const ret = factory ? factory(context) : undefined;
-  return ret;
+export function getTool(
+    name: ToolName,
+    context: ExecutionContext
+): AISdkTool<unknown, unknown> | undefined {
+    const factory = toolFactories[name];
+    const ret = factory ? factory(context) : undefined;
+    return ret;
 }
 
 /**
@@ -204,10 +204,13 @@ export function getTool(name: ToolName, context: ExecutionContext): AISdkTool<un
  * @param context - Execution context for the tools
  * @returns Array of instantiated AI SDK tools
  */
-export function getTools(names: ToolName[], context: ExecutionContext): AISdkTool<unknown, unknown>[] {
-  return names
-    .map(name => getTool(name, context))
-    .filter((tool): tool is AISdkTool<unknown, unknown> => tool !== undefined);
+export function getTools(
+    names: ToolName[],
+    context: ExecutionContext
+): AISdkTool<unknown, unknown>[] {
+    return names
+        .map((name) => getTool(name, context))
+        .filter((tool): tool is AISdkTool<unknown, unknown> => tool !== undefined);
 }
 
 /**
@@ -216,10 +219,10 @@ export function getTools(names: ToolName[], context: ExecutionContext): AISdkToo
  * @returns Array of all instantiated AI SDK tools
  */
 export function getAllTools(context: ExecutionContext): AISdkTool<unknown, unknown>[] {
-  const toolNames = Object.keys(toolFactories) as ToolName[];
-  return toolNames.map(name =>
-    getTool(name, context)
-  ).filter((tool): tool is AISdkTool<unknown, unknown> => !!tool);
+    const toolNames = Object.keys(toolFactories) as ToolName[];
+    return toolNames
+        .map((name) => getTool(name, context))
+        .filter((tool): tool is AISdkTool<unknown, unknown> => !!tool);
 }
 
 /**
@@ -227,7 +230,7 @@ export function getAllTools(context: ExecutionContext): AISdkTool<unknown, unkno
  * @returns Array of all tool names in the registry
  */
 export function getAllToolNames(): ToolName[] {
-  return Object.keys(toolFactories);
+    return Object.keys(toolFactories);
 }
 
 /**
@@ -236,69 +239,72 @@ export function getAllToolNames(): ToolName[] {
  * @param context - Execution context for the tools
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
-export function getToolsObject(names: string[], context: ExecutionContext): Record<string, CoreTool<unknown, unknown>> {
-  const tools: Record<string, CoreTool<unknown, unknown>> = {};
+export function getToolsObject(
+    names: string[],
+    context: ExecutionContext
+): Record<string, CoreTool<unknown, unknown>> {
+    const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
-  // Separate MCP tools, dynamic tools, and regular tools
-  const regularTools: ToolName[] = [];
-  const mcpToolNames: string[] = [];
-  const dynamicToolNames: string[] = [];
+    // Separate MCP tools, dynamic tools, and regular tools
+    const regularTools: ToolName[] = [];
+    const mcpToolNames: string[] = [];
+    const dynamicToolNames: string[] = [];
 
-  for (const name of names) {
-    if (name.startsWith("mcp__")) {
-      mcpToolNames.push(name);
-    } else if (name in toolFactories) {
-      regularTools.push(name as ToolName);
-    } else if (dynamicToolService.isDynamicTool(name)) {
-      dynamicToolNames.push(name);
-    }
-  }
-
-  // Add regular tools
-  for (const name of regularTools) {
-    const tool = getTool(name, context);
-    if (tool) {
-      // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
-      tools[name] = tool;
-    }
-  }
-
-  // Add dynamic tools
-  if (dynamicToolNames.length > 0) {
-    const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
-    for (const name of dynamicToolNames) {
-      if (dynamicTools[name]) {
-        tools[name] = dynamicTools[name];
-      } else {
-        console.debug(`Dynamic tool '${name}' not found`);
-      }
-    }
-  }
-
-  // Add MCP tools if any requested
-  if (mcpToolNames.length > 0) {
-    try {
-      // Get MCP tools from service
-      const allMcpTools = mcpService.getCachedTools();
-
-      for (const mcpToolName of mcpToolNames) {
-        // getCachedTools returns an object keyed by tool name
-        const mcpTool = allMcpTools[mcpToolName];
-        if (mcpTool) {
-          // MCP tools from AI SDK already have the correct structure
-          // They are CoreTool instances with description, parameters, and execute
-          tools[mcpToolName] = mcpTool;
-        } else {
-          console.debug(`MCP tool '${mcpToolName}' not found in cached tools`);
+    for (const name of names) {
+        if (name.startsWith("mcp__")) {
+            mcpToolNames.push(name);
+        } else if (name in toolFactories) {
+            regularTools.push(name as ToolName);
+        } else if (dynamicToolService.isDynamicTool(name)) {
+            dynamicToolNames.push(name);
         }
-      }
-    } catch (error) {
-      // MCP not available, continue without MCP tools
-      console.debug("Could not load MCP tools:", error);
     }
-  }
 
-  return tools;
+    // Add regular tools
+    for (const name of regularTools) {
+        const tool = getTool(name, context);
+        if (tool) {
+            // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
+            tools[name] = tool;
+        }
+    }
+
+    // Add dynamic tools
+    if (dynamicToolNames.length > 0) {
+        const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+        for (const name of dynamicToolNames) {
+            if (dynamicTools[name]) {
+                tools[name] = dynamicTools[name];
+            } else {
+                console.debug(`Dynamic tool '${name}' not found`);
+            }
+        }
+    }
+
+    // Add MCP tools if any requested
+    if (mcpToolNames.length > 0) {
+        try {
+            // Get MCP tools from service
+            const allMcpTools = mcpService.getCachedTools();
+
+            for (const mcpToolName of mcpToolNames) {
+                // getCachedTools returns an object keyed by tool name
+                const mcpTool = allMcpTools[mcpToolName];
+                if (mcpTool) {
+                    // MCP tools from AI SDK already have the correct structure
+                    // They are CoreTool instances with description, parameters, and execute
+                    tools[mcpToolName] = mcpTool;
+                } else {
+                    console.debug(`MCP tool '${mcpToolName}' not found in cached tools`);
+                }
+            }
+        } catch (error) {
+            // MCP not available, continue without MCP tools
+            console.debug("Could not load MCP tools:", error);
+        }
+    }
+
+    return tools;
 }
 
 /**
@@ -306,24 +312,26 @@ export function getToolsObject(names: string[], context: ExecutionContext): Reco
  * @param context - Execution context for the tools
  * @returns Object with all tools keyed by name (returns the underlying CoreTool)
  */
-export function getAllToolsObject(context: ExecutionContext): Record<string, CoreTool<unknown, unknown>> {
-  const tools: Record<string, CoreTool<unknown, unknown>> = {};
+export function getAllToolsObject(
+    context: ExecutionContext
+): Record<string, CoreTool<unknown, unknown>> {
+    const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
-  // Add static tools
-  const toolNames = Object.keys(toolFactories) as ToolName[];
-  for (const name of toolNames) {
-    const tool = getTool(name, context);
-    if (tool) {
-      // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
-      tools[name] = tool;
+    // Add static tools
+    const toolNames = Object.keys(toolFactories) as ToolName[];
+    for (const name of toolNames) {
+        const tool = getTool(name, context);
+        if (tool) {
+            // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
+            tools[name] = tool;
+        }
     }
-  }
 
-  // Add dynamic tools
-  const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
-  Object.assign(tools, dynamicTools);
+    // Add dynamic tools
+    const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+    Object.assign(tools, dynamicTools);
 
-  return tools;
+    return tools;
 }
 
 /**
@@ -332,7 +340,7 @@ export function getAllToolsObject(context: ExecutionContext): Record<string, Cor
  * @returns True if the tool name is valid
  */
 export function isValidToolName(name: string): boolean {
-  return name in toolFactories || dynamicToolService.isDynamicTool(name);
+    return name in toolFactories || dynamicToolService.isDynamicTool(name);
 }
 
 /**
@@ -340,9 +348,7 @@ export function isValidToolName(name: string): boolean {
  * @returns Array of all tool names (static and dynamic)
  */
 export function getAllAvailableToolNames(): string[] {
-  const staticTools = getAllToolNames();
-  const dynamicTools = Array.from(dynamicToolService.getDynamicTools().keys());
-  return [...staticTools, ...dynamicTools];
+    const staticTools = getAllToolNames();
+    const dynamicTools = Array.from(dynamicToolService.getDynamicTools().keys());
+    return [...staticTools, ...dynamicTools];
 }
-
-

@@ -1,14 +1,17 @@
-import { connect, type Connection, type Table } from "@lancedb/lancedb";
-import * as path from "path";
 import * as os from "os";
-import { logger } from "@/utils/logger";
+import * as path from "path";
 import { handleError } from "@/utils/error-handler";
+import { logger } from "@/utils/logger";
+import { type Connection, type Table, connect } from "@lancedb/lancedb";
 
 /**
  * Custom error for database-related issues
  */
 export class RAGDatabaseError extends Error {
-    constructor(message: string, public readonly cause?: Error) {
+    constructor(
+        message: string,
+        public readonly cause?: Error
+    ) {
         super(message);
         this.name = "RAGDatabaseError";
     }
@@ -25,9 +28,10 @@ export class RAGDatabaseManager {
 
     constructor(dataDir?: string) {
         // Use provided directory or environment variable, fallback to global location
-        this.dataDir = dataDir ||
-                      process.env.LANCEDB_DATA_DIR ||
-                      path.join(os.homedir(), ".tenex", "data", "lancedb");
+        this.dataDir =
+            dataDir ||
+            process.env.LANCEDB_DATA_DIR ||
+            path.join(os.homedir(), ".tenex", "data", "lancedb");
 
         logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
     }
@@ -60,7 +64,7 @@ export class RAGDatabaseManager {
         }
 
         const connection = await this.ensureConnection();
-        
+
         try {
             // Check if table exists
             const tables = await connection.tableNames();
@@ -72,7 +76,7 @@ export class RAGDatabaseManager {
             table = await connection.openTable(name);
             this.tableCache.set(name, table);
             logger.debug(`Opened table: ${name}`);
-            
+
             return table;
         } catch (error) {
             if (error instanceof RAGDatabaseError) {
@@ -93,18 +97,14 @@ export class RAGDatabaseManager {
         options?: { mode?: "create" | "overwrite" }
     ): Promise<Table> {
         const connection = await this.ensureConnection();
-        
+
         try {
-            const table = await connection.createTable(
-                name,
-                initialData,
-                options
-            );
-            
+            const table = await connection.createTable(name, initialData, options);
+
             // Cache the new table
             this.tableCache.set(name, table);
             logger.info(`Created table: ${name}`);
-            
+
             return table;
         } catch (error) {
             const message = `Failed to create table: ${name}`;
@@ -118,10 +118,10 @@ export class RAGDatabaseManager {
      */
     async dropTable(name: string): Promise<void> {
         const connection = await this.ensureConnection();
-        
+
         try {
             await connection.dropTable(name);
-            
+
             // Remove from cache
             this.tableCache.delete(name);
             logger.info(`Dropped table: ${name}`);
@@ -137,7 +137,7 @@ export class RAGDatabaseManager {
      */
     async listTables(): Promise<string[]> {
         const connection = await this.ensureConnection();
-        
+
         try {
             return await connection.tableNames();
         } catch (error) {

@@ -20,14 +20,14 @@ export function buildBrainstormModerationPrompt(
         role: "user",
         content: `A brainstorming session was initiated with this request: "${originalRequest}"
 
-The following agents have responded:`
+The following agents have responded:`,
     });
 
     // Add each response as context
     for (const response of responses) {
         messages.push({
             role: "assistant",
-            content: `${response.name} (${response.pubkey}): ${response.content}`
+            content: `${response.name} (${response.pubkey}): ${response.content}`,
         });
     }
 
@@ -38,7 +38,7 @@ The following agents have responded:`
 Return a JSON object with your selection(s):
 {"selectedAgents": ["pubkey1", "pubkey2", ...], "reasoning": "your explanation"}
 
-If you believe none of the responses are suitable, you may return an empty array, and all responses will be included by default.`
+If you believe none of the responses are suitable, you may return an empty array, and all responses will be included by default.`,
     });
 
     return messages;

@@ -9,7 +9,7 @@ export function isAISdkProvider(provider: string): provider is AISdkProvider {
         "anthropic",
         "openai",
         "ollama",
-        "claudeCode"
+        "claudeCode",
     ] as const;
     return (validProviders as readonly string[]).includes(provider);
 }

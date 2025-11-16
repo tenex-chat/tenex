@@ -5,14 +5,17 @@ import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
 import type { AgentState, Conversation, ConversationMetadata } from "../types";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
-import { ConversationPersistenceService, type IConversationPersistenceService } from "./ConversationPersistenceService";
+import {
+    ConversationPersistenceService,
+    type IConversationPersistenceService,
+} from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
-import { ThreadService } from "./ThreadService";
 import { ParticipationIndex } from "./ParticipationIndex";
 import { ConversationSummarizer } from "./ConversationSummarizer";
 import { SummarizationTimerManager } from "./SummarizationTimerManager";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { NDKKind } from "@/nostr/kinds";
+import { ThreadService } from "./ThreadService";
 
 /**
  * Coordinates between all conversation services.
@@ -24,9 +27,9 @@ export class ConversationCoordinator {
   private eventProcessor: ConversationEventProcessor;
   private timerManager?: SummarizationTimerManager;
 
-  // NEW: Expose decomposed services for strategies to use
-  public readonly threadService = new ThreadService();
-  public readonly participationIndex = new ParticipationIndex();
+    // NEW: Expose decomposed services for strategies to use
+    public readonly threadService = new ThreadService();
+    public readonly participationIndex = new ParticipationIndex();
 
   constructor(
     projectPath: string,
@@ -271,9 +274,4 @@ export class ConversationCoordinator {
       logger.error("[ConversationCoordinator] Failed to load conversations", { error });
     }
   }
-
-
-
-
-
 }

@@ -54,12 +54,12 @@
  * ```
  */
 
-import type { Tool as CoreTool } from "ai";
-import { logger } from "@/utils/logger";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import type { Tool as CoreTool } from "ai";
 
 /**
  * Represents a tracked tool execution
@@ -163,15 +163,16 @@ export class ToolExecutionTracker {
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
             toolCallId,
-            currentTrackedCount: this.executions.size
+            currentTrackedCount: this.executions.size,
         });
 
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
             // Truncate args for telemetry to prevent huge span attributes
-            const argsPreview = typeof args === "object" && args !== null
-                ? JSON.stringify(args).substring(0, 200)
-                : String(args).substring(0, 200);
+            const argsPreview =
+                typeof args === "object" && args !== null
+                    ? JSON.stringify(args).substring(0, 200)
+                    : String(args).substring(0, 200);
 
             activeSpan.addEvent("tool.execution_start", {
                 "tool.name": toolName,
@@ -190,7 +191,7 @@ export class ToolExecutionTracker {
             toolName,
             toolEventId: "", // Will be updated after publish
             input: args,
-            completed: false
+            completed: false,
         };
 
         this.executions.set(toolCallId, execution);
@@ -200,7 +201,7 @@ export class ToolExecutionTracker {
             {
                 toolName,
                 content: humanContent,
-                args
+                args,
             },
             eventContext
         );
@@ -212,7 +213,7 @@ export class ToolExecutionTracker {
             toolCallId,
             toolName,
             toolEventId: toolEvent.id,
-            totalTracked: this.executions.size
+            totalTracked: this.executions.size,
         });
     }
 
@@ -237,7 +238,7 @@ export class ToolExecutionTracker {
         logger.debug("[ToolExecutionTracker] Completing tool execution", {
             toolCallId,
             error,
-            hasResult: result !== undefined
+            hasResult: result !== undefined,
         });
 
         // Retrieve the tracked execution
@@ -246,7 +247,7 @@ export class ToolExecutionTracker {
         if (!execution) {
             logger.warn("[ToolExecutionTracker] Attempted to complete unknown tool execution", {
                 toolCallId,
-                availableExecutions: Array.from(this.executions.keys())
+                availableExecutions: Array.from(this.executions.keys()),
             });
 
             const activeSpan = trace.getActiveSpan();
@@ -265,7 +266,7 @@ export class ToolExecutionTracker {
                 toolName: execution.toolName,
                 toolCallId,
                 toolEventId: execution.toolEventId,
-                result
+                result,
             });
         }
 
@@ -278,9 +279,10 @@ export class ToolExecutionTracker {
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
             // Truncate result for telemetry
-            const resultPreview = typeof result === "object" && result !== null
-                ? JSON.stringify(result).substring(0, 200)
-                : String(result).substring(0, 200);
+            const resultPreview =
+                typeof result === "object" && result !== null
+                    ? JSON.stringify(result).substring(0, 200)
+                    : String(result).substring(0, 200);
 
             activeSpan.addEvent("tool.execution_complete", {
                 "tool.name": execution.toolName,
@@ -297,13 +299,13 @@ export class ToolExecutionTracker {
             {
                 toolCallId,
                 toolName: execution.toolName,
-                input: execution.input
+                input: execution.input,
             },
             {
                 toolCallId,
                 toolName: execution.toolName,
                 output: result,
-                error
+                error,
             },
             agentPubkey
         );
@@ -312,7 +314,7 @@ export class ToolExecutionTracker {
             toolCallId,
             toolName: execution.toolName,
             toolEventId: execution.toolEventId,
-            error
+            error,
         });
     }
 
@@ -374,7 +376,7 @@ export class ToolExecutionTracker {
             total: this.executions.size,
             pending,
             completed,
-            failed
+            failed,
         };
     }
 
@@ -390,7 +392,7 @@ export class ToolExecutionTracker {
         this.executions.clear();
 
         logger.debug("[ToolExecutionTracker] Cleared all tracked executions", {
-            previousSize
+            previousSize,
         });
     }
 
@@ -451,7 +453,7 @@ export class ToolExecutionTracker {
                 pending.push({
                     toolCallId,
                     toolName: execution.toolName,
-                    startedAt: execution.toolEventId.substring(0, 8) // First 8 chars of event ID
+                    startedAt: execution.toolEventId.substring(0, 8), // First 8 chars of event ID
                 });
             }
         }

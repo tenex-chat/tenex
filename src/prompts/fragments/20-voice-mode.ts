@@ -3,16 +3,16 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 export interface VoiceModeOptions {
-  isVoiceMode: boolean;
+    isVoiceMode: boolean;
 }
 
 const voiceModeFragment: PromptFragment<VoiceModeOptions> = {
-  id: "voice-mode",
-  priority: 20, // High priority to ensure voice instructions are prominent
-  template: (options: VoiceModeOptions) => {
-    if (!options.isVoiceMode) return "";
+    id: "voice-mode",
+    priority: 20, // High priority to ensure voice instructions are prominent
+    template: (options: VoiceModeOptions) => {
+        if (!options.isVoiceMode) return "";
 
-    return `## Voice Mode Guidelines
+        return `## Voice Mode Guidelines
 
 CRITICAL: You are currently in "voice mode" -- heed this guidelines consistently.
 
@@ -47,7 +47,7 @@ You are generating text that will be converted to speech and read aloud. Please 
 - Provide context before diving into details
 
 Remember: The user is listening, not reading. Make your response engaging and easy to follow by ear.`;
-  },
+    },
 };
 
 // Register the fragment
@@ -57,6 +57,6 @@ fragmentRegistry.register(voiceModeFragment);
  * Helper function to check if an event has voice mode enabled
  */
 export function isVoiceMode(event: NDKEvent | undefined): boolean {
-  if (!event) return false;
-  return event.tagValue("mode") === "voice";
+    if (!event) return false;
+    return event.tagValue("mode") === "voice";
 }

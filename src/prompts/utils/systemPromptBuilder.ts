@@ -9,35 +9,35 @@ import type { ModelMessage } from "ai";
 import "@/prompts/fragments"; // This auto-registers all fragments
 
 export interface BuildSystemPromptOptions {
-  // Required data
-  agent: AgentInstance;
-  project: NDKProject;
-  projectPath?: string; // Absolute path to the project working directory
+    // Required data
+    agent: AgentInstance;
+    project: NDKProject;
+    projectPath?: string; // Absolute path to the project working directory
 
-  // Optional runtime data
-  availableAgents?: AgentInstance[];
-  conversation?: Conversation;
-  agentLessons?: Map<string, NDKAgentLesson[]>;
-  isProjectManager?: boolean; // Indicates if this agent is the PM
-  projectManagerPubkey?: string; // Pubkey of the project manager
+    // Optional runtime data
+    availableAgents?: AgentInstance[];
+    conversation?: Conversation;
+    agentLessons?: Map<string, NDKAgentLesson[]>;
+    isProjectManager?: boolean; // Indicates if this agent is the PM
+    projectManagerPubkey?: string; // Pubkey of the project manager
 }
 
 export interface BuildStandalonePromptOptions {
-  // Required data
-  agent: AgentInstance;
+    // Required data
+    agent: AgentInstance;
 
-  // Optional runtime data
-  availableAgents?: AgentInstance[];
-  conversation?: Conversation;
-  agentLessons?: Map<string, NDKAgentLesson[]>;
-  projectManagerPubkey?: string; // Pubkey of the project manager
+    // Optional runtime data
+    availableAgents?: AgentInstance[];
+    conversation?: Conversation;
+    agentLessons?: Map<string, NDKAgentLesson[]>;
+    projectManagerPubkey?: string; // Pubkey of the project manager
 }
 
 export interface SystemMessage {
-  message: ModelMessage;
-  metadata?: {
-    description?: string;
-  };
+    message: ModelMessage;
+    metadata?: {
+        description?: string;
+    };
 }
 
 /**
@@ -47,7 +47,7 @@ async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     conversation?: Conversation,
-    agentLessons?: Map<string, NDKAgentLesson[]>,
+    agentLessons?: Map<string, NDKAgentLesson[]>
 ): Promise<void> {
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
@@ -77,9 +77,11 @@ async function addCoreAgentFragments(
                 try {
                     const [resources, templates] = await Promise.all([
                         mcpManager.listResources(serverName),
-                        mcpManager.listResourceTemplates(serverName)
+                        mcpManager.listResourceTemplates(serverName),
                     ]);
-                    logger.debug(`Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`);
+                    logger.debug(
+                        `Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`
+                    );
                     return { serverName, resources, templates };
                 } catch (error) {
                     logger.warn(`Failed to fetch MCP resources from '${serverName}':`, error);
@@ -119,64 +121,56 @@ function addAgentFragments(
  * with optional caching metadata.
  * This is the single source of truth for system prompt generation.
  */
-export async function buildSystemPromptMessages(options: BuildSystemPromptOptions): Promise<SystemMessage[]> {
-  const messages: SystemMessage[] = [];
+export async function buildSystemPromptMessages(
+    options: BuildSystemPromptOptions
+): Promise<SystemMessage[]> {
+    const messages: SystemMessage[] = [];
 
-  // Build the main system prompt
-  const mainPrompt = await buildMainSystemPrompt(options);
-  messages.push({
-    message: { role: "system", content: mainPrompt },
-    metadata: {
-      description: "Main system prompt",
-    },
-  });
+    // Build the main system prompt
+    const mainPrompt = await buildMainSystemPrompt(options);
+    messages.push({
+        message: { role: "system", content: mainPrompt },
+        metadata: {
+            description: "Main system prompt",
+        },
+    });
 
-  return messages;
+    return messages;
 }
 
 /**
  * Builds the main system prompt content
  */
 async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise<string> {
-  const {
-    agent,
-    project,
-    projectPath,
-    availableAgents = [],
-    conversation,
-    agentLessons,
-  } = options;
+    const {
+        agent,
+        project,
+        projectPath,
+        availableAgents = [],
+        conversation,
+        agentLessons,
+    } = options;
 
-  const systemPromptBuilder = new PromptBuilder();
+    const systemPromptBuilder = new PromptBuilder();
 
-  // Add agent identity
-  systemPromptBuilder.add("agent-identity", {
-    agent,
-    projectTitle: project.tagValue("title") || "Unknown Project",
-    projectOwnerPubkey: project.pubkey,
-    projectPath,
-  });
+    // Add agent identity
+    systemPromptBuilder.add("agent-identity", {
+        agent,
+        projectTitle: project.tagValue("title") || "Unknown Project",
+        projectOwnerPubkey: project.pubkey,
+        projectPath,
+    });
 
-  // Add agent phases awareness if agent has phases defined
-  systemPromptBuilder.add("agent-phases", { agent });
+    // Add agent phases awareness if agent has phases defined
+    systemPromptBuilder.add("agent-phases", { agent });
 
-  // Add core agent fragments using shared composition
-  await addCoreAgentFragments(
-    systemPromptBuilder,
-    agent,
-    conversation,
-    agentLessons,
-  );
+    // Add core agent fragments using shared composition
+    await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons);
 
-  // Add agent-specific fragments
-  addAgentFragments(
-    systemPromptBuilder,
-    agent,
-    availableAgents,
-    options.projectManagerPubkey
-  );
+    // Add agent-specific fragments
+    addAgentFragments(systemPromptBuilder, agent, availableAgents, options.projectManagerPubkey);
 
-  return systemPromptBuilder.build();
+    return systemPromptBuilder.build();
 }
 
 /**
@@ -184,59 +178,49 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
  * Includes most fragments except project-specific ones.
  */
 export async function buildStandaloneSystemPromptMessages(
-  options: BuildStandalonePromptOptions
+    options: BuildStandalonePromptOptions
 ): Promise<SystemMessage[]> {
-  const messages: SystemMessage[] = [];
+    const messages: SystemMessage[] = [];
 
-  // Build the main system prompt
-  const mainPrompt = await buildStandaloneMainPrompt(options);
-  messages.push({
-    message: { role: "system", content: mainPrompt },
-    metadata: {
-      description: "Main standalone system prompt",
-    },
-  });
+    // Build the main system prompt
+    const mainPrompt = await buildStandaloneMainPrompt(options);
+    messages.push({
+        message: { role: "system", content: mainPrompt },
+        metadata: {
+            description: "Main standalone system prompt",
+        },
+    });
 
-  return messages;
+    return messages;
 }
 
 /**
  * Builds the main system prompt for standalone agents
  */
 async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): Promise<string> {
-  const {
-    agent,
-    availableAgents = [],
-    conversation,
-    agentLessons,
-  } = options;
+    const { agent, availableAgents = [], conversation, agentLessons } = options;
 
-  const systemPromptBuilder = new PromptBuilder();
+    const systemPromptBuilder = new PromptBuilder();
 
-  // For standalone agents, use a simplified identity without project references
-  systemPromptBuilder.add("agent-identity", {
-    agent,
-    projectTitle: "Standalone Mode",
-    projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
-  });
+    // For standalone agents, use a simplified identity without project references
+    systemPromptBuilder.add("agent-identity", {
+        agent,
+        projectTitle: "Standalone Mode",
+        projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
+    });
 
-  // Add core agent fragments using shared composition
-  await addCoreAgentFragments(
-    systemPromptBuilder,
-    agent,
-    conversation,
-    agentLessons,
-  );
+    // Add core agent fragments using shared composition
+    await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons);
 
-  // Add agent-specific fragments only if multiple agents available
-  if (availableAgents.length > 1) {
-    addAgentFragments(
-      systemPromptBuilder,
-      agent,
-      availableAgents,
-      options.projectManagerPubkey
-    );
-  }
+    // Add agent-specific fragments only if multiple agents available
+    if (availableAgents.length > 1) {
+        addAgentFragments(
+            systemPromptBuilder,
+            agent,
+            availableAgents,
+            options.projectManagerPubkey
+        );
+    }
 
-  return systemPromptBuilder.build();
+    return systemPromptBuilder.build();
 }

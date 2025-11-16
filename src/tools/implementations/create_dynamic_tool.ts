@@ -1,18 +1,34 @@
-import { tool } from "ai";
-import { z } from "zod";
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/registry";
-import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
-import { logger } from "@/utils/logger";
+import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/ProjectContext";
+import type { AISdkTool } from "@/tools/registry";
+import { logger } from "@/utils/logger";
+import { tool } from "ai";
+import { mkdir, writeFile } from "fs/promises";
+import { z } from "zod";
 
 const createDynamicToolSchema = z.object({
-    name: z.string().regex(/^[a-z0-9_]+$/).describe("Tool name (lowercase, alphanumeric and underscores only)"),
+    name: z
+        .string()
+        .regex(/^[a-z0-9_]+$/)
+        .describe("Tool name (lowercase, alphanumeric and underscores only)"),
     description: z.string().describe("Clear description of what the tool does"),
-    inputSchema: z.string().describe('Zod schema definition as TypeScript code (e.g., "z.object({ param: z.string() })")'),
-    implementation: z.string().describe("The async function body that implements the tool logic (without the function declaration)"),
-    humanReadableFormat: z.string().nullable().describe("Optional template string for human-readable output (use ${input.paramName} for parameters)")
+    inputSchema: z
+        .string()
+        .describe(
+            'Zod schema definition as TypeScript code (e.g., "z.object({ param: z.string() })")'
+        ),
+    implementation: z
+        .string()
+        .describe(
+            "The async function body that implements the tool logic (without the function declaration)"
+        ),
+    humanReadableFormat: z
+        .string()
+        .nullable()
+        .describe(
+            "Optional template string for human-readable output (use ${input.paramName} for parameters)"
+        ),
 });
 
 type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;
@@ -22,13 +38,14 @@ type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;
  */
 export function createCreateDynamicToolTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: "Create a new dynamic tool that can be used immediately by agents. The tool will be saved as a TypeScript file and automatically loaded.",
-        
+        description:
+            "Create a new dynamic tool that can be used immediately by agents. The tool will be saved as a TypeScript file and automatically loaded.",
+
         inputSchema: createDynamicToolSchema,
-        
+
         execute: async (input: CreateDynamicToolInput) => {
             const { name, description, inputSchema, implementation, humanReadableFormat } = input;
-            
+
             // Generate the tool code
             const toolCode = `import { tool, type CoreTool } from 'ai';
 import { z } from 'zod';
@@ -59,18 +76,26 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
         inputSchema: ${name}Schema,
         
         execute: async (input: ${name.charAt(0).toUpperCase() + name.slice(1)}Input) => {
-            ${implementation.split("\n").map(line => "            " + line).join("\n").trim()}
+            ${implementation
+                .split("\n")
+                .map((line) => "            " + line)
+                .join("\n")
+                .trim()}
         },
     });
     
-    ${humanReadableFormat ? `// Add human-readable content generation
+    ${
+        humanReadableFormat
+            ? `// Add human-readable content generation
     Object.defineProperty(aiTool, 'getHumanReadableContent', {
         value: (input: ${name.charAt(0).toUpperCase() + name.slice(1)}Input) => {
             return \`${humanReadableFormat}\`;
         },
         enumerable: false,
         configurable: true
-    });` : ""}
+    });`
+            : ""
+    }
     
     return aiTool;
 };
@@ -82,41 +107,46 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
             const dynamicToolsDir = join(context.projectPath, ".tenex/tools");
             const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
-            
+
             // Ensure the directory exists
             await mkdir(dynamicToolsDir, { recursive: true });
-            
+
             // Write the tool file
             await writeFile(filePath, toolCode, "utf-8");
-            
+
             logger.info("[CreateDynamicTool] Created new dynamic tool", {
                 name,
                 agent: context.agent.name,
                 file: fileName,
-                path: filePath
+                path: filePath,
             });
-            
+
             // Update the agent's tool list to include the new tool
             // Get the agent's current tool list from the execution context
             const currentTools = context.agent.tools || [];
-            
+
             // Add the new tool's name to the list
             const updatedTools = [...currentTools, name];
-            
+
             // Save the updated tool list to the agent's persistent configuration
             try {
                 const projectContext = getProjectContext();
                 const agentRegistry = projectContext.agentRegistry;
                 await agentRegistry.updateAgentTools(context.agent.pubkey, updatedTools);
-                logger.info(`[CreateDynamicTool] Added tool '${name}' to agent '${context.agent.name}'`);
+                logger.info(
+                    `[CreateDynamicTool] Added tool '${name}' to agent '${context.agent.name}'`
+                );
             } catch (error) {
-                logger.error(`Failed to persist updated tool list for agent ${context.agent.name}:`, {
-                    agentPubkey: context.agent.pubkey,
-                    toolName: name,
-                    error: error instanceof Error ? error.message : String(error)
-                });
+                logger.error(
+                    `Failed to persist updated tool list for agent ${context.agent.name}:`,
+                    {
+                        agentPubkey: context.agent.pubkey,
+                        toolName: name,
+                        error: error instanceof Error ? error.message : String(error),
+                    }
+                );
             }
-            
+
             // Publish status
             if (context.agentPublisher && context.triggeringEvent) {
                 try {
@@ -135,24 +165,24 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                     console.warn("Failed to publish status:", error);
                 }
             }
-            
+
             return {
                 success: true,
                 toolName: name,
                 fileName,
                 path: filePath,
-                message: `Successfully created dynamic tool '${name}'. It will be available for use in a few moments.`
+                message: `Successfully created dynamic tool '${name}'. It will be available for use in a few moments.`,
             };
         },
     });
-    
+
     Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: ({ name }: CreateDynamicToolInput) => {
             return `Creating dynamic tool: ${name}`;
         },
         enumerable: false,
-        configurable: true
+        configurable: true,
     });
-    
+
     return aiTool;
 }

@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { ParticipationIndex } from "../ParticipationIndex";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { beforeEach, describe, expect, it } from "vitest";
+import { ParticipationIndex } from "../ParticipationIndex";
 
 describe("ParticipationIndex", () => {
     let participationIndex: ParticipationIndex;
@@ -10,15 +10,16 @@ describe("ParticipationIndex", () => {
     });
 
     // Helper to create mock events
-    const createMockEvent = (id: string, pubkey: string): NDKEvent => ({
-        id,
-        pubkey,
-        created_at: Date.now() / 1000,
-        kind: 1,
-        tags: [],
-        content: `Message ${id}`,
-        sig: 'mock-sig',
-    } as NDKEvent);
+    const createMockEvent = (id: string, pubkey: string): NDKEvent =>
+        ({
+            id,
+            pubkey,
+            created_at: Date.now() / 1000,
+            kind: 1,
+            tags: [],
+            content: `Message ${id}`,
+            sig: "mock-sig",
+        }) as NDKEvent;
 
     describe("buildIndex", () => {
         it("should build index of agent participations", () => {
@@ -50,14 +51,9 @@ describe("ParticipationIndex", () => {
         it("should rebuild index when called multiple times", () => {
             const agent1 = "agent1-pubkey";
 
-            const history1 = [
-                createMockEvent("1", agent1),
-                createMockEvent("2", agent1),
-            ];
+            const history1 = [createMockEvent("1", agent1), createMockEvent("2", agent1)];
 
-            const history2 = [
-                createMockEvent("3", agent1),
-            ];
+            const history2 = [createMockEvent("3", agent1)];
 
             // Build with first history
             participationIndex.buildIndex("conv1", history1);
@@ -77,9 +73,7 @@ describe("ParticipationIndex", () => {
             const agent1 = "agent1-pubkey";
             const agent2 = "agent2-pubkey";
 
-            const history = [
-                createMockEvent("1", agent1),
-            ];
+            const history = [createMockEvent("1", agent1)];
 
             participationIndex.buildIndex("conv1", history);
 
@@ -133,9 +127,7 @@ describe("ParticipationIndex", () => {
         it("should clear index for a conversation", () => {
             const agent1 = "agent1-pubkey";
 
-            const history = [
-                createMockEvent("1", agent1),
-            ];
+            const history = [createMockEvent("1", agent1)];
 
             participationIndex.buildIndex("conv1", history);
             expect(participationIndex.hasAgentParticipated("conv1", agent1)).toBe(true);

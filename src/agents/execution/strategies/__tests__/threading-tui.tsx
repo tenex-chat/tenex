@@ -1,13 +1,18 @@
 #!/usr/bin/env bun
-import React, { useState, useEffect } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
-import { SignedEventGenerator, SignedConversation, SignedAgent } from './generate-signed-events';
-import { FlattenedChronologicalStrategy } from '../FlattenedChronologicalStrategy';
-import { DelegationRegistry } from '@/services/DelegationRegistry';
-import { ThreadService } from '@/conversations/services/ThreadService';
-import type { ExecutionContext } from '../../types';
-import type { Conversation } from '@/conversations';
-import { NDKEvent } from '@nostr-dev-kit/ndk';
+import type { Conversation } from "@/conversations";
+import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { Box, Text, render, useApp, useInput } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import {
+    SignedAgent,
+    type SignedConversation,
+    SignedEventGenerator,
+} from "./generate-signed-events";
 
 interface AppState {
     scenarios: SignedConversation[];
@@ -36,7 +41,7 @@ function buildTree(events: NDKEvent[]): EventNode[] {
     const roots: EventNode[] = [];
     for (const event of events) {
         const node = eventMap.get(event.id!)!;
-        const parentTag = event.tags.find(tag => tag[0] === 'e');
+        const parentTag = event.tags.find((tag) => tag[0] === "e");
 
         if (!parentTag || !parentTag[1]) {
             roots.push(node);
@@ -66,7 +71,13 @@ function buildTree(events: NDKEvent[]): EventNode[] {
 }
 
 // Render a single event in the tree
-function EventDisplay({ node, isVisible, indent = 0, isLast = false, prefix = '' }: {
+function EventDisplay({
+    node,
+    isVisible,
+    indent = 0,
+    isLast = false,
+    prefix = "",
+}: {
     node: EventNode;
     isVisible: boolean;
     indent?: number;
@@ -75,23 +86,23 @@ function EventDisplay({ node, isVisible, indent = 0, isLast = false, prefix = ''
 }) {
     const author = node.event.pubkey.substring(0, 8);
     const content = node.event.content.substring(0, 60);
-    const color = isVisible ? 'green' : 'gray';
-    const symbol = isVisible ? '✓' : '✗';
+    const color = isVisible ? "green" : "gray";
+    const symbol = isVisible ? "✓" : "✗";
 
-    const connector = isLast ? '└─' : '├─';
-    const line = indent > 0 ? prefix + connector : '';
+    const connector = isLast ? "└─" : "├─";
+    const line = indent > 0 ? prefix + connector : "";
 
     return (
         <>
             <Box>
                 <Text color={color}>
                     {line} {symbol} {author}: {content}
-                    {node.event.content.length > 60 ? '...' : ''}
+                    {node.event.content.length > 60 ? "..." : ""}
                 </Text>
             </Box>
             {node.children.map((child, index) => {
                 const isChildLast = index === node.children.length - 1;
-                const childPrefix = indent > 0 ? prefix + (isLast ? '   ' : '│  ') : '   ';
+                const childPrefix = indent > 0 ? prefix + (isLast ? "   " : "│  ") : "   ";
                 return (
                     <EventDisplay
                         key={child.event.id}
@@ -115,7 +126,7 @@ function ThreadingVisualizerApp() {
         currentScenarioIndex: 0,
         selectedAgentIndex: 0,
         loading: true,
-        agentMessages: new Map()
+        agentMessages: new Map(),
     });
 
     // Generate scenarios on mount
@@ -126,13 +137,13 @@ function ThreadingVisualizerApp() {
                 const generator = new SignedEventGenerator();
                 const scenarios = await generator.generateAllScenarios();
 
-                setState(prev => ({
+                setState((prev) => ({
                     ...prev,
                     scenarios,
-                    loading: false
+                    loading: false,
                 }));
             } catch (error) {
-                console.error('Failed to generate scenarios:', error);
+                console.error("Failed to generate scenarios:", error);
                 exit();
             }
         })();
@@ -152,8 +163,12 @@ function ThreadingVisualizerApp() {
                 let triggeringEvent: NDKEvent | null = null;
                 for (let i = scenario.events.length - 1; i >= 0; i--) {
                     const event = scenario.events[i];
-                    if (event.pubkey === signedAgent.agent.pubkey ||
-                        event.tags.some(tag => tag[0] === 'p' && tag[1] === signedAgent.agent.pubkey)) {
+                    if (
+                        event.pubkey === signedAgent.agent.pubkey ||
+                        event.tags.some(
+                            (tag) => tag[0] === "p" && tag[1] === signedAgent.agent.pubkey
+                        )
+                    ) {
                         triggeringEvent = event;
                         break;
                     }
@@ -166,24 +181,24 @@ function ThreadingVisualizerApp() {
                     history: scenario.events,
                     participants: new Set([
                         scenario.user.pubkey,
-                        ...scenario.agents.map(a => a.agent.pubkey)
+                        ...scenario.agents.map((a) => a.agent.pubkey),
                     ]),
                     agentStates: new Map(),
                     metadata: {},
-                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 } as Conversation;
 
                 const context: ExecutionContext = {
                     agent: signedAgent.agent,
                     conversationId: conversation.id,
-                    projectPath: '/test/path',
+                    projectPath: "/test/path",
                     triggeringEvent,
                     conversationCoordinator: {
-                        threadService: new ThreadService()
+                        threadService: new ThreadService(),
                     } as any,
                     agentPublisher: {} as any,
                     getConversation: () => conversation,
-                    isDelegationCompletion: false
+                    isDelegationCompletion: false,
                 } as ExecutionContext;
 
                 try {
@@ -195,40 +210,40 @@ function ThreadingVisualizerApp() {
                 }
             }
 
-            setState(prev => ({
+            setState((prev) => ({
                 ...prev,
-                agentMessages
+                agentMessages,
             }));
         })();
     }, [state.currentScenarioIndex, state.selectedAgentIndex, state.scenarios]);
 
     // Handle keyboard input
     useInput((input, key) => {
-        if (input === 'q' || key.escape) {
+        if (input === "q" || key.escape) {
             exit();
         } else if (key.leftArrow && state.currentScenarioIndex > 0) {
-            setState(prev => ({
+            setState((prev) => ({
                 ...prev,
                 currentScenarioIndex: prev.currentScenarioIndex - 1,
-                selectedAgentIndex: 0
+                selectedAgentIndex: 0,
             }));
         } else if (key.rightArrow && state.currentScenarioIndex < state.scenarios.length - 1) {
-            setState(prev => ({
+            setState((prev) => ({
                 ...prev,
                 currentScenarioIndex: prev.currentScenarioIndex + 1,
-                selectedAgentIndex: 0
+                selectedAgentIndex: 0,
             }));
         } else if (key.upArrow && state.selectedAgentIndex > 0) {
-            setState(prev => ({
+            setState((prev) => ({
                 ...prev,
-                selectedAgentIndex: prev.selectedAgentIndex - 1
+                selectedAgentIndex: prev.selectedAgentIndex - 1,
             }));
         } else if (key.downArrow && state.scenarios.length > 0) {
             const maxIndex = state.scenarios[state.currentScenarioIndex].agents.length - 1;
             if (state.selectedAgentIndex < maxIndex) {
-                setState(prev => ({
+                setState((prev) => ({
                     ...prev,
-                    selectedAgentIndex: prev.selectedAgentIndex + 1
+                    selectedAgentIndex: prev.selectedAgentIndex + 1,
                 }));
             }
         }
@@ -260,7 +275,10 @@ function ThreadingVisualizerApp() {
         // Extract event IDs from message content or structure
         // This is simplified - in real code, you'd track which events are included
         for (const event of scenario.events) {
-            if (typeof message.content === 'string' && message.content.includes(event.content.substring(0, 30))) {
+            if (
+                typeof message.content === "string" &&
+                message.content.includes(event.content.substring(0, 30))
+            ) {
                 visibleEventIds.add(event.id!);
             }
         }
@@ -279,7 +297,8 @@ function ThreadingVisualizerApp() {
 
             <Box marginTop={1}>
                 <Text>
-                    Scenario [{state.currentScenarioIndex + 1}/{state.scenarios.length}]: <Text bold>{scenario.name}</Text>
+                    Scenario [{state.currentScenarioIndex + 1}/{state.scenarios.length}]:{" "}
+                    <Text bold>{scenario.name}</Text>
                 </Text>
             </Box>
 
@@ -290,9 +309,17 @@ function ThreadingVisualizerApp() {
             {/* Main content - side by side */}
             <Box>
                 {/* Left: Full conversation tree */}
-                <Box flexDirection="column" width="50%" borderStyle="single" borderColor="white" paddingX={1}>
+                <Box
+                    flexDirection="column"
+                    width="50%"
+                    borderStyle="single"
+                    borderColor="white"
+                    paddingX={1}
+                >
                     <Box marginBottom={1}>
-                        <Text bold underline>Full Conversation ({scenario.events.length} events)</Text>
+                        <Text bold underline>
+                            Full Conversation ({scenario.events.length} events)
+                        </Text>
                     </Box>
                     {tree.map((root, index) => (
                         <EventDisplay
@@ -305,7 +332,13 @@ function ThreadingVisualizerApp() {
                 </Box>
 
                 {/* Right: Agent perspective */}
-                <Box flexDirection="column" width="50%" borderStyle="single" borderColor="green" paddingX={1}>
+                <Box
+                    flexDirection="column"
+                    width="50%"
+                    borderStyle="single"
+                    borderColor="green"
+                    paddingX={1}
+                >
                     <Box marginBottom={1}>
                         <Text bold underline color="green">
                             {selectedAgent.agent.name}'s View ({agentMessages.length} messages)
@@ -313,12 +346,17 @@ function ThreadingVisualizerApp() {
                     </Box>
 
                     {tree.map((root, index) => {
-                        function renderNode(node: EventNode, depth: number = 0, isLast: boolean = false, prefix: string = ''): React.ReactElement | null {
+                        function renderNode(
+                            node: EventNode,
+                            depth = 0,
+                            isLast = false,
+                            prefix = ""
+                        ): React.ReactElement | null {
                             const isVisible = visibleEventIds.has(node.event.id!);
-                            const connector = isLast ? '└─' : '├─';
-                            const line = depth > 0 ? prefix + connector : '';
-                            const color = isVisible ? 'green' : 'gray';
-                            const symbol = isVisible ? '✓' : '✗';
+                            const connector = isLast ? "└─" : "├─";
+                            const line = depth > 0 ? prefix + connector : "";
+                            const color = isVisible ? "green" : "gray";
+                            const symbol = isVisible ? "✓" : "✗";
                             const author = node.event.pubkey.substring(0, 8);
                             const content = node.event.content.substring(0, 40);
 
@@ -326,12 +364,18 @@ function ThreadingVisualizerApp() {
                                 <Box key={node.event.id} flexDirection="column">
                                     <Text color={color}>
                                         {line} {symbol} {author}: {content}
-                                        {node.event.content.length > 40 ? '...' : ''}
+                                        {node.event.content.length > 40 ? "..." : ""}
                                     </Text>
                                     {node.children.map((child, childIndex) => {
                                         const isChildLast = childIndex === node.children.length - 1;
-                                        const childPrefix = depth > 0 ? prefix + (isLast ? '   ' : '│  ') : '   ';
-                                        return renderNode(child, depth + 1, isChildLast, childPrefix);
+                                        const childPrefix =
+                                            depth > 0 ? prefix + (isLast ? "   " : "│  ") : "   ";
+                                        return renderNode(
+                                            child,
+                                            depth + 1,
+                                            isChildLast,
+                                            childPrefix
+                                        );
                                     })}
                                 </Box>
                             );
@@ -345,17 +389,21 @@ function ThreadingVisualizerApp() {
             {/* Footer with controls */}
             <Box marginTop={1} borderStyle="single" borderColor="yellow" paddingX={1}>
                 <Text>
-                    <Text color="cyan">←→</Text> Change scenario | <Text color="cyan">↑↓</Text> Change agent |{' '}
-                    Agent: <Text bold color="yellow">{selectedAgent.agent.name}</Text> |{' '}
-                    <Text color="red">Q</Text> Quit
+                    <Text color="cyan">←→</Text> Change scenario | <Text color="cyan">↑↓</Text>{" "}
+                    Change agent | Agent:{" "}
+                    <Text bold color="yellow">
+                        {selectedAgent.agent.name}
+                    </Text>{" "}
+                    | <Text color="red">Q</Text> Quit
                 </Text>
             </Box>
 
             {/* Stats */}
             <Box marginTop={1}>
                 <Text>
-                    Events: {scenario.events.length} | Visible to {selectedAgent.agent.name}: {visibleEventIds.size} |{' '}
-                    Filtered: {scenario.events.length - visibleEventIds.size}
+                    Events: {scenario.events.length} | Visible to {selectedAgent.agent.name}:{" "}
+                    {visibleEventIds.size} | Filtered:{" "}
+                    {scenario.events.length - visibleEventIds.size}
                 </Text>
             </Box>
         </Box>

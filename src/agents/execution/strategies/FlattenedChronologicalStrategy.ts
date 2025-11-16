@@ -1,26 +1,27 @@
-import type { MessageGenerationStrategy } from "./types";
-import type { ExecutionContext } from "../types";
-import type { ModelMessage } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { logger } from "@/utils/logger";
+import { DelegationXmlFormatter } from "@/conversations/formatters/DelegationXmlFormatter";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import { EventToModelMessage } from "@/conversations/processors/EventToModelMessage";
-import {
-    buildSystemPromptMessages
-} from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
-import { getNDK } from "@/nostr";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 // Utility imports
 import { hasReasoningTag } from "@/conversations/utils/content-utils";
-import { extractNostrEntities, resolveNostrEntitiesToSystemMessages } from "@/utils/nostr-entity-parser";
 import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
-import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
-import { DelegationXmlFormatter } from "@/conversations/formatters/DelegationXmlFormatter";
-import { trace, context as otelContext, SpanStatusCode } from "@opentelemetry/api";
+import { getNDK } from "@/nostr";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { NudgeService } from "@/services/NudgeService";
+import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { logger } from "@/utils/logger";
+import {
+    extractNostrEntities,
+    resolveNostrEntitiesToSystemMessages,
+} from "@/utils/nostr-entity-parser";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import type { ModelMessage } from "ai";
+import type { ExecutionContext } from "../types";
+import type { MessageGenerationStrategy } from "./types";
 
 const tracer = trace.getTracer("tenex.message-strategy");
 
@@ -40,7 +41,6 @@ interface EventWithContext {
  * of all threads the agent has participated in, with delegation markers
  */
 export class FlattenedChronologicalStrategy implements MessageGenerationStrategy {
-
     /**
      * Build messages with flattened chronological context (telemetry wrapper)
      */
@@ -57,22 +57,24 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             },
         });
 
-        return otelContext.with(
-            trace.setSpan(otelContext.active(), span),
-            async () => {
-                try {
-                    const messages = await this.buildMessagesCore(context, triggeringEvent, eventFilter, span);
-                    span.setStatus({ code: SpanStatusCode.OK });
-                    return messages;
-                } catch (error) {
-                    span.recordException(error as Error);
-                    span.setStatus({ code: SpanStatusCode.ERROR });
-                    throw error;
-                } finally {
-                    span.end();
-                }
+        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
+            try {
+                const messages = await this.buildMessagesCore(
+                    context,
+                    triggeringEvent,
+                    eventFilter,
+                    span
+                );
+                span.setStatus({ code: SpanStatusCode.OK });
+                return messages;
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({ code: SpanStatusCode.ERROR });
+                throw error;
+            } finally {
+                span.end();
             }
-        );
+        });
     }
 
     /**
@@ -87,7 +89,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const conversation = context.getConversation();
 
         if (!conversation) {
-            span.addEvent("error", { "reason": "conversation_not_found" });
+            span.addEvent("error", { reason: "conversation_not_found" });
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
@@ -99,11 +101,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         await this.addSystemPrompt(messages, context, span);
 
         // Capture system prompt for debugging
-        const systemMessage = messages.find(m => m.role === "system");
+        const systemMessage = messages.find((m) => m.role === "system");
         if (systemMessage) {
-            const systemContent = typeof systemMessage.content === "string"
-                ? systemMessage.content
-                : JSON.stringify(systemMessage.content);
+            const systemContent =
+                typeof systemMessage.content === "string"
+                    ? systemMessage.content
+                    : JSON.stringify(systemMessage.content);
 
             span.addEvent("system_prompt_compiled", {
                 "prompt.length": systemContent.length,
@@ -119,8 +122,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         );
 
         span.addEvent("events_gathered", {
-            "relevant_event_count": relevantEvents.length,
-            "total_event_count": conversation.history.length,
+            relevant_event_count: relevantEvents.length,
+            total_event_count: conversation.history.length,
         });
 
         // Sort events chronologically
@@ -146,11 +149,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         span.setAttributes({
             "messages.total": messages.length,
-            "messages.has_system": messages.some(m => m.role === "system"),
+            "messages.has_system": messages.some((m) => m.role === "system"),
         });
 
         span.addEvent("messages_built", {
-            "final_message_count": messages.length,
+            final_message_count: messages.length,
         });
 
         return messages;
@@ -169,12 +172,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const delegationRegistry = DelegationRegistry.getInstance();
 
         // Track delegations this agent has made
-        const outgoingDelegations = new Map<string, { content: string, targets: string[] }>();
+        const outgoingDelegations = new Map<string, { content: string; targets: string[] }>();
 
         // STEP 1: Build thread path set for inclusion
         // Build the parent chain from triggering event to root
         const triggeringEvent = context.triggeringEvent;
-        const eventMap = new Map(allEvents.map(e => [e.id, e]));
+        const eventMap = new Map(allEvents.map((e) => [e.id, e]));
 
         // Build parent chain
         const parentChain: NDKEvent[] = [];
@@ -207,7 +210,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             // Add ALL direct replies to root (sorted chronologically)
             const rootReplies = allEvents
-                .filter(e => {
+                .filter((e) => {
                     if (e.id === rootId) return false; // Skip root itself
                     const parentId = e.tagValue("e");
                     return parentId === rootId;
@@ -220,7 +223,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             threadPath = parentChain;
         }
 
-        const threadPathIds = new Set(threadPath.map(e => e.id));
+        const threadPathIds = new Set(threadPath.map((e) => e.id));
 
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
@@ -230,7 +233,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 "thread_path.is_root_level_reply": parentChain.length === 2,
                 "thread_path.includes_root_siblings": parentChain.length === 2,
                 "thread_path.root_id": threadPath[0]?.id?.substring(0, 8),
-                "thread_path.triggering_id": triggeringEvent.id?.substring(0, 8)
+                "thread_path.triggering_id": triggeringEvent.id?.substring(0, 8),
             });
         }
 
@@ -241,7 +244,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     activeSpan.addEvent("event.filtered_by_external", {
                         "event.id": event.id?.substring(0, 8),
                         "event.content": event.content?.substring(0, 50),
-                        "filter.reason": "external_filter"
+                        "filter.reason": "external_filter",
                     });
                 }
                 continue;
@@ -253,7 +256,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     activeSpan.addEvent("event.filtered_by_reasoning", {
                         "event.id": event.id?.substring(0, 8),
                         "event.content": event.content?.substring(0, 50),
-                        "filter.reason": "reasoning_event"
+                        "filter.reason": "reasoning_event",
                     });
                 }
                 continue;
@@ -261,7 +264,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             const eventWithContext: EventWithContext = {
                 event,
-                timestamp: event.created_at || Date.now() / 1000
+                timestamp: event.created_at || Date.now() / 1000,
             };
 
             // Check if this agent is involved
@@ -270,8 +273,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             const isFromUser = isEventFromUser(event);
             // Only consider it a public broadcast if it's from a user with no specific agent targets
             // AND we have project context initialized (otherwise we can't reliably determine user vs agent)
-            const isPublicBroadcast = isProjectContextInitialized() && isFromUser && getTargetedAgentPubkeys(event).length === 0;
-
+            const isPublicBroadcast =
+                isProjectContextInitialized() &&
+                isFromUser &&
+                getTargetedAgentPubkeys(event).length === 0;
 
             // Check if this is a delegation response (do this FIRST, before other filtering)
             // Delegation responses are special because they should be formatted differently
@@ -291,7 +296,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         event.pubkey
                     );
                     if (delegationRecord) {
-                        eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
+                        eventWithContext.delegationId =
+                            delegationRecord.delegationEventId.substring(0, 8);
                     }
                 }
             }
@@ -302,7 +308,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             // B. It's directly relevant to this agent (for awareness of parallel branches)
 
             const isInThreadPath = threadPathIds.has(event.id);
-            const isDirectlyRelevant = isFromAgent || isTargetedToAgent || isPublicBroadcast || eventWithContext.isDelegationResponse;
+            const isDirectlyRelevant =
+                isFromAgent ||
+                isTargetedToAgent ||
+                isPublicBroadcast ||
+                eventWithContext.isDelegationResponse;
 
             if (!isInThreadPath && !isDirectlyRelevant) {
                 if (activeSpan) {
@@ -314,8 +324,9 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         "filter.is_from_agent": isFromAgent,
                         "filter.is_targeted_to_agent": isTargetedToAgent,
                         "filter.is_public_broadcast": isPublicBroadcast,
-                        "filter.is_delegation_response": eventWithContext.isDelegationResponse || false,
-                        "filter.reason": "not_in_thread_and_not_relevant"
+                        "filter.is_delegation_response":
+                            eventWithContext.isDelegationResponse || false,
+                        "filter.reason": "not_in_thread_and_not_relevant",
                     });
                 }
                 continue;
@@ -342,14 +353,15 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
                         if (delegationRecord && delegationRecord.delegationEventId === event.id) {
                             eventWithContext.isDelegationRequest = true;
-                            eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
+                            eventWithContext.delegationId =
+                                delegationRecord.delegationEventId.substring(0, 8);
                             eventWithContext.delegationContent = event.content;
                             eventWithContext.delegatedToPubkey = recipientPubkey;
 
                             // Track this delegation for later response matching
                             outgoingDelegations.set(delegationRecord.delegationEventId, {
                                 content: event.content,
-                                targets: [recipientPubkey]
+                                targets: [recipientPubkey],
                             });
 
                             break;
@@ -369,11 +381,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 if (delegationRecord) {
                     // Only consider it a delegation response if it p-tags the delegating agent
                     const pTags = event.getMatchingTags("p");
-                    const mentionsAgent = pTags.some(tag => tag[1] === agentPubkey);
+                    const mentionsAgent = pTags.some((tag) => tag[1] === agentPubkey);
 
                     if (mentionsAgent) {
                         eventWithContext.isDelegationResponse = true;
-                        eventWithContext.delegationId = delegationRecord.delegationEventId.substring(0, 8);
+                        eventWithContext.delegationId =
+                            delegationRecord.delegationEventId.substring(0, 8);
                     }
                 }
             }
@@ -388,9 +401,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     "inclusion.is_from_agent": isFromAgent,
                     "inclusion.is_targeted_to_agent": isTargetedToAgent,
                     "inclusion.is_public_broadcast": isPublicBroadcast,
-                    "inclusion.is_delegation_response": eventWithContext.isDelegationResponse || false,
-                    "inclusion.is_delegation_request": eventWithContext.isDelegationRequest || false,
-                    "inclusion.reason": isInThreadPath ? "in_thread_path" : "directly_relevant"
+                    "inclusion.is_delegation_response":
+                        eventWithContext.isDelegationResponse || false,
+                    "inclusion.is_delegation_request":
+                        eventWithContext.isDelegationRequest || false,
+                    "inclusion.reason": isInThreadPath ? "in_thread_path" : "directly_relevant",
                 });
             }
 
@@ -430,14 +445,16 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 // Events that reply to the delegation but don't p-tag the delegating agent are
                 // just the delegated agent working on the task, not responding back
                 const pTags = event.getMatchingTags("p");
-                const mentionsAgent = pTags.some(tag => tag[1] === agentPubkey);
+                const mentionsAgent = pTags.some((tag) => tag[1] === agentPubkey);
 
                 if (mentionsAgent) {
                     return true;
                 }
             }
         } catch (error) {
-            logger.debug("[FlattenedChronologicalStrategy] Error checking delegation response", { error });
+            logger.debug("[FlattenedChronologicalStrategy] Error checking delegation response", {
+                error,
+            });
         }
 
         return false;
@@ -456,7 +473,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const nameRepo = getPubkeyNameRepository();
         const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
         const delegationRegistry = DelegationRegistry.getInstance();
-
 
         // First pass: Collect all delegations and their responses
         interface DelegationData {
@@ -495,11 +511,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     let toSlug = record.assignedTo.slug;
                     if (!toSlug) {
                         const toAgent = projectCtx?.getAgentByPubkey(record.assignedTo.pubkey);
-                        toSlug = toAgent?.slug || await nameRepo.getName(record.assignedTo.pubkey);
+                        toSlug =
+                            toAgent?.slug || (await nameRepo.getName(record.assignedTo.pubkey));
                     }
 
                     // Get phase from event tags if available
-                    const phaseTag = event.tags.find(t => t[0] === "phase");
+                    const phaseTag = event.tags.find((t) => t[0] === "phase");
                     const phase = phaseTag?.[1];
 
                     if (!delegationMap.has(eventContext.delegationId)) {
@@ -511,13 +528,15 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                             message: eventContext.delegationContent || "",
                             requestEventId: event.id,
                             requestEvent: event,
-                            responses: []
+                            responses: [],
                         });
                     } else {
                         // Add recipient to existing delegation (multi-recipient case)
                         const delegation = delegationMap.get(eventContext.delegationId);
                         if (!delegation) {
-                            throw new Error(`Delegation ${eventContext.delegationId} not found in delegationMap after has() check`);
+                            throw new Error(
+                                `Delegation ${eventContext.delegationId} not found in delegationMap after has() check`
+                            );
                         }
                         if (toSlug && !delegation.recipients.includes(toSlug)) {
                             delegation.recipients.push(toSlug);
@@ -535,13 +554,14 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         agentPubkey,
                         event.pubkey
                     );
-                    const responderSlug = record?.assignedTo.slug || await nameRepo.getName(event.pubkey);
+                    const responderSlug =
+                        record?.assignedTo.slug || (await nameRepo.getName(event.pubkey));
 
                     delegation.responses.push({
                         from: responderSlug,
                         content: event.content || "",
                         eventId: event.id,
-                        status: "completed"
+                        status: "completed",
                     });
 
                     delegationResponseEventIds.add(event.id);
@@ -561,7 +581,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         // Also identify tool-call events for delegate_phase (they should be skipped)
         for (const eventWithContext of events) {
-            const toolTag = eventWithContext.event.tags.find(t => t[0] === "tool");
+            const toolTag = eventWithContext.event.tags.find((t) => t[0] === "tool");
             if (toolTag && (toolTag[1] === "delegate_phase" || toolTag[1] === "delegate")) {
                 toolCallEventIds.add(eventWithContext.event.id);
             }
@@ -584,7 +604,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
                     messages.push({
                         role: "system",
-                        content: xml
+                        content: xml,
                     });
 
                     processedDelegations.add(eventContext.delegationId);
@@ -614,7 +634,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
     /**
      * Process a single event into messages (reused from ThreadWithMemoryStrategy)
      */
-    private async processEvent(event: NDKEvent, agentPubkey: string, conversationId: string, debug = false): Promise<ModelMessage[]> {
+    private async processEvent(
+        event: NDKEvent,
+        agentPubkey: string,
+        conversationId: string,
+        debug = false
+    ): Promise<ModelMessage[]> {
         const messages: ModelMessage[] = [];
 
         // Skip reasoning events
@@ -623,7 +648,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         }
 
         // Check if this is a tool event from this agent
-        const isToolEvent = event.tags.some(t => t[0] === "tool");
+        const isToolEvent = event.tags.some((t) => t[0] === "tool");
         const isThisAgent = event.pubkey === agentPubkey;
 
         if (isToolEvent) {
@@ -634,7 +659,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     // Add event ID prefix in debug mode
                     if (debug) {
                         const eventIdPrefix = `[Event ${event.id.substring(0, 8)}] `;
-                        toolMessages.forEach(msg => {
+                        toolMessages.forEach((msg) => {
                             if (typeof msg.content === "string") {
                                 msg.content = eventIdPrefix + msg.content;
                             }
@@ -666,7 +691,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         // Add event ID prefix in debug mode
         if (debug) {
             const eventIdPrefix = `[Event ${event.id.substring(0, 8)}] `;
-            messagesToAdd.forEach(msg => {
+            messagesToAdd.forEach((msg) => {
                 if (typeof msg.content === "string") {
                     msg.content = eventIdPrefix + msg.content;
                 }
@@ -691,14 +716,17 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     for (const systemContent of entitySystemMessages) {
                         messages.push({
                             role: "system",
-                            content: systemContent
+                            content: systemContent,
                         });
                     }
                 } catch (error) {
-                    logger.warn("[FlattenedChronologicalStrategy] Failed to resolve nostr entities", {
-                        error,
-                        eventId: event.id.substring(0, 8)
-                    });
+                    logger.warn(
+                        "[FlattenedChronologicalStrategy] Failed to resolve nostr entities",
+                        {
+                            error,
+                            eventId: event.id.substring(0, 8),
+                        }
+                    );
                 }
             }
         }
@@ -751,7 +779,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             if (nudgeIds.length > 0) {
                 span.addEvent("nudge.injection_start", {
                     "nudge.count": nudgeIds.length,
-                    "agent.slug": context.agent.slug
+                    "agent.slug": context.agent.slug,
                 });
 
                 const nudgeService = NudgeService.getInstance();
@@ -759,17 +787,17 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 if (nudgeContent) {
                     messages.push({
                         role: "system",
-                        content: nudgeContent
+                        content: nudgeContent,
                     });
 
                     span.addEvent("nudge.injection_success", {
-                        "nudge.content_length": nudgeContent.length
+                        "nudge.content_length": nudgeContent.length,
                     });
 
                     span.setAttributes({
                         "nudge.injected": true,
                         "nudge.count": nudgeIds.length,
-                        "nudge.content_length": nudgeContent.length
+                        "nudge.content_length": nudgeContent.length,
                     });
                 } else {
                     span.addEvent("nudge.injection_empty");

@@ -1,7 +1,7 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { LanguageModelUsageWithCostUsd } from "@/llm/types";
-import { getNDK } from "@/nostr/ndkClient";
+import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
+import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
@@ -20,80 +20,80 @@ export interface CompletionIntent {
 }
 
 export interface DelegationIntent {
-  recipients: string[];
-  request: string;
-  phase?: string;
-  phaseInstructions?: string; // Instructions to be passed with phase delegation
-  type?: "delegation" | "delegation_followup" | "ask";
+    recipients: string[];
+    request: string;
+    phase?: string;
+    phaseInstructions?: string; // Instructions to be passed with phase delegation
+    type?: "delegation" | "delegation_followup" | "ask";
 }
 
 export interface AskIntent {
-  content: string;
-  suggestions?: string[];
+    content: string;
+    suggestions?: string[];
 }
 
 export interface ConversationIntent {
-  content: string;
-  isReasoning?: boolean;
+    content: string;
+    isReasoning?: boolean;
 }
 
 export interface ErrorIntent {
-  message: string;
-  errorType?: string;
+    message: string;
+    errorType?: string;
 }
 
 export interface TypingIntent {
-  state: "start" | "stop";
+    state: "start" | "stop";
 }
 
 export interface StreamingIntent {
-  content: string;
-  sequence: number;
-  isReasoning?: boolean;
+    content: string;
+    sequence: number;
+    isReasoning?: boolean;
 }
 
 export interface LessonIntent {
-  title: string;
-  lesson: string;
-  detailed?: string;
-  category?: string;
-  hashtags?: string[];
+    title: string;
+    lesson: string;
+    detailed?: string;
+    category?: string;
+    hashtags?: string[];
 }
 
 export interface StatusIntent {
-  type: "status";
-  agents: Array<{ pubkey: string; slug: string }>;
-  models: Array<{ slug: string; agents: string[] }>;
-  tools: Array<{ name: string; agents: string[] }>;
+    type: "status";
+    agents: Array<{ pubkey: string; slug: string }>;
+    models: Array<{ slug: string; agents: string[] }>;
+    tools: Array<{ name: string; agents: string[] }>;
 }
 
 export interface ToolUseIntent {
-  toolName: string;
-  content: string; // e.g., "Reading $path"
-  args?: unknown; // Tool arguments to be serialized
+    toolName: string;
+    content: string; // e.g., "Reading $path"
+    args?: unknown; // Tool arguments to be serialized
 }
 
 export type AgentIntent =
-  | CompletionIntent
-  | DelegationIntent
-  | AskIntent
-  | ConversationIntent
-  | ErrorIntent
-  | TypingIntent
-  | StreamingIntent
-  | LessonIntent
-  | StatusIntent
-  | ToolUseIntent;
+    | CompletionIntent
+    | DelegationIntent
+    | AskIntent
+    | ConversationIntent
+    | ErrorIntent
+    | TypingIntent
+    | StreamingIntent
+    | LessonIntent
+    | StatusIntent
+    | ToolUseIntent;
 
 // Execution context provided by RAL
 export interface EventContext {
-  triggeringEvent: NDKEvent;
-  rootEvent: NDKEvent; // Now mandatory for better type safety
-  conversationId: string; // Required for conversation lookup
-  executionTime?: number;
-  model?: string;
-  cost?: number; // LLM cost in USD
-  phase?: string; // Current phase for phase-aware events
+    triggeringEvent: NDKEvent;
+    rootEvent: NDKEvent; // Now mandatory for better type safety
+    conversationId: string; // Required for conversation lookup
+    executionTime?: number;
+    model?: string;
+    cost?: number; // LLM cost in USD
+    phase?: string; // Current phase for phase-aware events
 }
 
 /**
@@ -139,7 +139,7 @@ export class AgentEventEncoder {
             // if the triggering pubkey is the owner of the project
             // (or of the thread if there is no projet)
 
-            replyToEventId = eTagValue // reply inside the same parent
+            replyToEventId = eTagValue; // reply inside the same parent
         }
 
         // Only add the e-tag if we have a valid event ID
@@ -172,7 +172,6 @@ export class AgentEventEncoder {
         // event. This is so that this completion event also shows up in the main thread.
         // const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
         // const authorIsProductOwner = context.triggeringEvent.pubkey === projectCtx?.project?.pubkey;
-        
 
         // console.log('encode completion', {
         //     pTagsMatch, authorIsProductOwner, eTagValue,
@@ -187,7 +186,7 @@ export class AgentEventEncoder {
         // } else {
         //     event.tag(["e", context.triggeringEvent.id, "", "reply"]);
         // }
-        
+
         // const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
 
         // if (pTagsMatch && triggerTagsRoot) {
@@ -237,7 +236,7 @@ export class AgentEventEncoder {
         const agentRegistry = projectCtx.agentRegistry;
 
         // Build recipient identifiers
-        const recipientIdentifiers = recipients.map(pubkey => {
+        const recipientIdentifiers = recipients.map((pubkey) => {
             // Check if this pubkey belongs to an agent in the system
             const agent = agentRegistry.getAgentByPubkey(pubkey);
             if (agent) {
@@ -314,7 +313,7 @@ export class AgentEventEncoder {
         // Get project owner to ask the question to
         const projectCtx = getProjectContext();
         const ownerPubkey = projectCtx?.project?.pubkey;
-        
+
         if (ownerPubkey) {
             event.tag(["p", ownerPubkey]);
         }
@@ -363,7 +362,6 @@ export class AgentEventEncoder {
 
         return event;
     }
-
 
     /**
      * Add standard metadata tags that all agent events should have.
@@ -468,7 +466,6 @@ export class AgentEventEncoder {
         return event;
     }
 
-
     /**
      * Add LLM usage metadata tags to an event.
      * Centralizes the encoding of usage information from AI SDK's LanguageModelUsageWithCostUsd.
@@ -521,7 +518,7 @@ export class AgentEventEncoder {
         title: string,
         content: string,
         context: EventContext,
-        claudeSessionId?: string,
+        claudeSessionId?: string
     ): NDKTask {
         const task = new NDKTask(getNDK());
         task.title = title;

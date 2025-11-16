@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { BrainstormStrategy } from "../BrainstormStrategy";
-import type { ExecutionContext } from "../../types";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Conversation } from "@/conversations/types";
 import { NostrKind, NostrTag, TagValue } from "@/nostr/constants";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { BrainstormStrategy } from "../BrainstormStrategy";
 
 describe("BrainstormStrategy", () => {
     let strategy: BrainstormStrategy;
@@ -19,19 +19,20 @@ describe("BrainstormStrategy", () => {
         kind: number;
         content?: string;
         tags?: string[][];
-    }): NDKEvent => ({
-        id: params.id,
-        pubkey: params.pubkey,
-        created_at: Date.now() / 1000,
-        kind: params.kind,
-        tags: params.tags || [],
-        content: params.content || `Content for ${params.id}`,
-        sig: 'mock-sig',
-        tagValue: (tagName: string) => {
-            const tag = (params.tags || []).find(t => t[0] === tagName);
-            return tag?.[1];
-        }
-    } as any);
+    }): NDKEvent =>
+        ({
+            id: params.id,
+            pubkey: params.pubkey,
+            created_at: Date.now() / 1000,
+            kind: params.kind,
+            tags: params.tags || [],
+            content: params.content || `Content for ${params.id}`,
+            sig: "mock-sig",
+            tagValue: (tagName: string) => {
+                const tag = (params.tags || []).find((t) => t[0] === tagName);
+                return tag?.[1];
+            },
+        }) as any;
 
     // Mock conversation factory
     const createMockConversation = (history: NDKEvent[]): Conversation => ({
@@ -44,12 +45,15 @@ describe("BrainstormStrategy", () => {
         executionTime: {
             totalSeconds: 0,
             isActive: false,
-            lastUpdated: Date.now()
-        }
+            lastUpdated: Date.now(),
+        },
     });
 
     // Mock execution context factory
-    const createMockContext = (conversation: Conversation, triggeringEvent: NDKEvent): ExecutionContext => ({
+    const createMockContext = (
+        conversation: Conversation,
+        triggeringEvent: NDKEvent
+    ): ExecutionContext => ({
         conversationId: conversation.id,
         agent: {
             name: "Test Agent",
@@ -77,8 +81,8 @@ describe("BrainstormStrategy", () => {
                     [NostrTag.MODE, TagValue.BRAINSTORM_MODE],
                     [NostrTag.PUBKEY, "moderator"],
                     [NostrTag.PARTICIPANT, "agent1"],
-                    [NostrTag.PARTICIPANT, "agent2"]
-                ]
+                    [NostrTag.PARTICIPANT, "agent2"],
+                ],
             });
 
             const response1 = createMockEvent({
@@ -86,7 +90,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent1",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Agent 1 response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             const response2 = createMockEvent({
@@ -94,7 +98,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent2",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Agent 2 response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             const selection = createMockEvent({
@@ -105,15 +109,15 @@ describe("BrainstormStrategy", () => {
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm1"],
                     [NostrTag.EVENT, "response2"],
-                    [NostrTag.PUBKEY, "agent2"]
-                ]
+                    [NostrTag.PUBKEY, "agent2"],
+                ],
             });
 
             const conversation = createMockConversation([
                 brainstormRoot,
                 response1,
                 response2,
-                selection
+                selection,
             ]);
 
             const context = createMockContext(conversation, brainstormRoot);
@@ -122,7 +126,7 @@ describe("BrainstormStrategy", () => {
             const messages = await strategy.buildMessages(context, brainstormRoot);
 
             // Assert
-            const messageContent = messages.map(m => m.content).join(" ");
+            const messageContent = messages.map((m) => m.content).join(" ");
             expect(messageContent).toContain("Agent 2 response");
             expect(messageContent).not.toContain("Agent 1 response");
         });
@@ -134,7 +138,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "user",
                 kind: NostrKind.BRAINSTORM_REQUEST,
                 content: "Brainstorm topic",
-                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]]
+                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]],
             });
 
             const response1 = createMockEvent({
@@ -142,7 +146,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent1",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "First response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             const response2 = createMockEvent({
@@ -150,7 +154,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent2",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Second response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             // Both responses selected
@@ -161,8 +165,8 @@ describe("BrainstormStrategy", () => {
                 content: TagValue.REACTION_POSITIVE,
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm1"],
-                    [NostrTag.EVENT, "response1"]
-                ]
+                    [NostrTag.EVENT, "response1"],
+                ],
             });
 
             const selection2 = createMockEvent({
@@ -172,8 +176,8 @@ describe("BrainstormStrategy", () => {
                 content: TagValue.REACTION_POSITIVE,
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm1"],
-                    [NostrTag.EVENT, "response2"]
-                ]
+                    [NostrTag.EVENT, "response2"],
+                ],
             });
 
             const conversation = createMockConversation([
@@ -181,7 +185,7 @@ describe("BrainstormStrategy", () => {
                 response1,
                 response2,
                 selection1,
-                selection2
+                selection2,
             ]);
 
             const context = createMockContext(conversation, brainstormRoot);
@@ -190,7 +194,7 @@ describe("BrainstormStrategy", () => {
             const messages = await strategy.buildMessages(context, brainstormRoot);
 
             // Assert
-            const messageContent = messages.map(m => m.content).join(" ");
+            const messageContent = messages.map((m) => m.content).join(" ");
             expect(messageContent).toContain("First response");
             expect(messageContent).toContain("Second response");
         });
@@ -202,7 +206,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "user",
                 kind: NostrKind.BRAINSTORM_REQUEST,
                 content: "No selections",
-                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]]
+                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]],
             });
 
             const response = createMockEvent({
@@ -210,7 +214,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent1",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Unselected response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             const conversation = createMockConversation([brainstormRoot, response]);
@@ -220,7 +224,7 @@ describe("BrainstormStrategy", () => {
             const messages = await strategy.buildMessages(context, brainstormRoot);
 
             // Assert
-            const messageContent = messages.map(m => m.content).join(" ");
+            const messageContent = messages.map((m) => m.content).join(" ");
             expect(messageContent).not.toContain("Unselected response");
             expect(messageContent).toContain("No selections"); // Root prompt should be included
         });
@@ -232,7 +236,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "user",
                 kind: NostrKind.BRAINSTORM_REQUEST,
                 content: "First brainstorm",
-                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]]
+                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]],
             });
 
             const response1 = createMockEvent({
@@ -240,7 +244,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent1",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "First round response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             const selection1 = createMockEvent({
@@ -250,8 +254,8 @@ describe("BrainstormStrategy", () => {
                 content: TagValue.REACTION_POSITIVE,
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm1"],
-                    [NostrTag.EVENT, "response1"]
-                ]
+                    [NostrTag.EVENT, "response1"],
+                ],
             });
 
             const brainstorm2 = createMockEvent({
@@ -259,7 +263,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "user",
                 kind: NostrKind.BRAINSTORM_REQUEST,
                 content: "Second brainstorm",
-                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]]
+                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]],
             });
 
             const response2 = createMockEvent({
@@ -267,7 +271,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent2",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Second round response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm2"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm2"]],
             });
 
             const selection2 = createMockEvent({
@@ -277,8 +281,8 @@ describe("BrainstormStrategy", () => {
                 content: TagValue.REACTION_POSITIVE,
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm2"],
-                    [NostrTag.EVENT, "response2"]
-                ]
+                    [NostrTag.EVENT, "response2"],
+                ],
             });
 
             const conversation = createMockConversation([
@@ -287,7 +291,7 @@ describe("BrainstormStrategy", () => {
                 selection1,
                 brainstorm2,
                 response2,
-                selection2
+                selection2,
             ]);
 
             const context = createMockContext(conversation, brainstorm2);
@@ -296,7 +300,7 @@ describe("BrainstormStrategy", () => {
             const messages = await strategy.buildMessages(context, brainstorm2);
 
             // Assert
-            const messageContent = messages.map(m => m.content).join(" ");
+            const messageContent = messages.map((m) => m.content).join(" ");
             expect(messageContent).toContain("First round response");
             expect(messageContent).toContain("Second round response");
         });
@@ -308,7 +312,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "user",
                 kind: NostrKind.BRAINSTORM_REQUEST,
                 content: "Test brainstorm",
-                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]]
+                tags: [[NostrTag.MODE, TagValue.BRAINSTORM_MODE]],
             });
 
             const response = createMockEvent({
@@ -316,7 +320,7 @@ describe("BrainstormStrategy", () => {
                 pubkey: "agent1",
                 kind: NostrKind.GENERIC_REPLY,
                 content: "Rejected response",
-                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]]
+                tags: [[NostrTag.ROOT_EVENT, "brainstorm1"]],
             });
 
             // Negative reaction
@@ -327,15 +331,11 @@ describe("BrainstormStrategy", () => {
                 content: "-", // Negative reaction
                 tags: [
                     [NostrTag.ROOT_EVENT, "brainstorm1"],
-                    [NostrTag.EVENT, "response1"]
-                ]
+                    [NostrTag.EVENT, "response1"],
+                ],
             });
 
-            const conversation = createMockConversation([
-                brainstormRoot,
-                response,
-                rejection
-            ]);
+            const conversation = createMockConversation([brainstormRoot, response, rejection]);
 
             const context = createMockContext(conversation, brainstormRoot);
 
@@ -343,7 +343,7 @@ describe("BrainstormStrategy", () => {
             const messages = await strategy.buildMessages(context, brainstormRoot);
 
             // Assert
-            const messageContent = messages.map(m => m.content).join(" ");
+            const messageContent = messages.map((m) => m.content).join(" ");
             expect(messageContent).not.toContain("Rejected response");
         });
     });

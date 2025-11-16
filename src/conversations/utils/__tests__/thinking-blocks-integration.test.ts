@@ -2,8 +2,8 @@
  * Integration test for thinking block filtering in real-world scenarios
  */
 
-import { describe, it, expect } from "vitest";
-import { stripThinkingBlocks, isOnlyThinkingBlocks } from "../content-utils";
+import { describe, expect, it } from "vitest";
+import { isOnlyThinkingBlocks, stripThinkingBlocks } from "../content-utils";
 
 describe("Thinking Blocks - Real World Integration", () => {
     describe("Agent response scenarios", () => {
@@ -101,12 +101,16 @@ Final response text.`;
 
         it("should handle multiple agents in conversation with thinking blocks", () => {
             // Simulate a conversation history where multiple agents have thinking blocks
-            const agent1Message = "Let me analyze this. <thinking>internal thought</thinking> Here's my analysis.";
-            const agent2Message = "<THINKING>Responding to agent1</THINKING>I agree with your analysis.";
+            const agent1Message =
+                "Let me analyze this. <thinking>internal thought</thinking> Here's my analysis.";
+            const agent2Message =
+                "<THINKING>Responding to agent1</THINKING>I agree with your analysis.";
             const userMessage = "What about edge cases?";
             const agent3Message = "<thinking>Both agents missed edge cases</thinking>";
 
-            expect(stripThinkingBlocks(agent1Message)).toBe("Let me analyze this. Here's my analysis.");
+            expect(stripThinkingBlocks(agent1Message)).toBe(
+                "Let me analyze this. Here's my analysis."
+            );
             expect(stripThinkingBlocks(agent2Message)).toBe("I agree with your analysis.");
             expect(stripThinkingBlocks(userMessage)).toBe("What about edge cases?");
             expect(stripThinkingBlocks(agent3Message)).toBe("");
@@ -187,26 +191,27 @@ Summary: Task completed successfully.`;
             const chunk1 = "Starting response <think";
             const chunk2 = "ing>This is internal</thi";
             const chunk3 = "nking> visible content";
-            
+
             const fullMessage = chunk1 + chunk2 + chunk3;
             const expected = "Starting response visible content";
-            
+
             expect(stripThinkingBlocks(fullMessage)).toBe(expected);
         });
     });
 
     describe("Performance scenarios", () => {
         it("should handle very long messages with multiple thinking blocks efficiently", () => {
-            const longMessage = Array(100).fill(null).map((_, i) => 
-                `Section ${i}: <thinking>thought ${i}</thinking> Content ${i}`
-            ).join("\n");
+            const longMessage = Array(100)
+                .fill(null)
+                .map((_, i) => `Section ${i}: <thinking>thought ${i}</thinking> Content ${i}`)
+                .join("\n");
 
             const result = stripThinkingBlocks(longMessage);
-            
+
             // Should not contain any thinking blocks
             expect(result).not.toContain("<thinking>");
             expect(result).not.toContain("</thinking>");
-            
+
             // Should contain all the content sections
             for (let i = 0; i < 100; i++) {
                 expect(result).toContain(`Section ${i}: Content ${i}`);

@@ -3,5 +3,5 @@ import { main } from "./tenex.js";
 import { handleCliError } from "./utils/cli-error.js";
 
 main().catch((error) => {
-  handleCliError(error, "Fatal error in TENEX CLI");
+    handleCliError(error, "Fatal error in TENEX CLI");
 });

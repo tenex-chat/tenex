@@ -1,9 +1,9 @@
-import type { Table, VectorQuery } from "@lancedb/lancedb";
-import type { RAGDatabaseManager } from "./RAGDatabaseManager";
-import type { EmbeddingProvider } from "../EmbeddingProvider";
-import { logger } from "@/utils/logger";
+import type { DocumentMetadata, LanceDBResult, LanceDBStoredDocument } from "@/tools/utils";
 import { handleError } from "@/utils/error-handler";
-import type { LanceDBResult, LanceDBStoredDocument, DocumentMetadata } from "@/tools/utils";
+import { logger } from "@/utils/logger";
+import type { Table, VectorQuery } from "@lancedb/lancedb";
+import type { EmbeddingProvider } from "../EmbeddingProvider";
+import type { RAGDatabaseManager } from "./RAGDatabaseManager";
 
 /**
  * Document structure for RAG operations
@@ -59,7 +59,10 @@ export class RAGValidationError extends Error {
 }
 
 export class RAGOperationError extends Error {
-    constructor(message: string, public readonly cause?: Error) {
+    constructor(
+        message: string,
+        public readonly cause?: Error
+    ) {
         super(message);
         this.name = "RAGOperationError";
     }
@@ -71,7 +74,7 @@ export class RAGOperationError extends Error {
  */
 export class RAGOperations {
     private static readonly BATCH_SIZE = 100;
-    
+
     constructor(
         private readonly dbManager: RAGDatabaseManager,
         private readonly embeddingProvider: EmbeddingProvider
@@ -80,7 +83,10 @@ export class RAGOperations {
     /**
      * Create a new collection with vector schema
      */
-    async createCollection(name: string, customSchema?: Partial<LanceDBSchema>): Promise<RAGCollection> {
+    async createCollection(
+        name: string,
+        customSchema?: Partial<LanceDBSchema>
+    ): Promise<RAGCollection> {
         // Validate collection name
         this.validateCollectionName(name);
 
@@ -92,7 +98,7 @@ export class RAGOperations {
 
         try {
             const dimensions = await this.embeddingProvider.getDimensions();
-            
+
             // Build schema with vector column
             const defaultSchema = {
                 id: "string",
@@ -100,7 +106,7 @@ export class RAGOperations {
                 vector: `vector(${dimensions})`,
                 metadata: "string", // JSON string
                 timestamp: "int64",
-                source: "string"
+                source: "string",
             };
 
             const finalSchema = { ...defaultSchema, ...customSchema };
@@ -113,14 +119,12 @@ export class RAGOperations {
                 vector: Array(dimensions).fill(0),
                 metadata: "{}",
                 timestamp: Date.now(),
-                source: "system"
+                source: "system",
             };
 
-            const table = await this.dbManager.createTable(
-                name,
-                [initialRow],
-                { mode: "overwrite" }
-            );
+            const table = await this.dbManager.createTable(name, [initialRow], {
+                mode: "overwrite",
+            });
 
             // Delete the initial row
             await table.delete("id = 'initial'");
@@ -131,13 +135,10 @@ export class RAGOperations {
                 name,
                 schema: finalSchema,
                 created_at: Date.now(),
-                updated_at: Date.now()
+                updated_at: Date.now(),
             };
         } catch (error) {
-            return this.handleRAGError(
-                error,
-                `Failed to create collection '${name}'`
-            );
+            return this.handleRAGError(error, `Failed to create collection '${name}'`);
         }
     }
 
@@ -155,10 +156,10 @@ export class RAGOperations {
             // Process in batches for efficiency
             for (let i = 0; i < documents.length; i += RAGOperations.BATCH_SIZE) {
                 const batch = documents.slice(i, i + RAGOperations.BATCH_SIZE);
-                
+
                 const processedDocs = await this.processBatch(batch);
                 await table.add(processedDocs);
-                
+
                 logger.debug(
                     `Added batch of ${processedDocs.length} documents to '${collectionName}'`
                 );
@@ -184,17 +185,17 @@ export class RAGOperations {
                 // Validate document structure
                 this.validateDocument(doc);
 
-                const vector = doc.vector || await this.embeddingProvider.embed(doc.content);
-                
+                const vector = doc.vector || (await this.embeddingProvider.embed(doc.content));
+
                 const storedDoc: LanceDBStoredDocument = {
                     id: doc.id || this.generateDocumentId(),
                     content: doc.content,
                     vector: Array.from(vector),
                     metadata: JSON.stringify(doc.metadata || {}),
                     timestamp: doc.timestamp || Date.now(),
-                    source: doc.source || "user"
+                    source: doc.source || "user",
                 };
-                
+
                 return storedDoc;
             })
         );
@@ -206,7 +207,7 @@ export class RAGOperations {
     async performSemanticSearch(
         collectionName: string,
         queryText: string,
-        topK: number = 5
+        topK = 5
     ): Promise<RAGQueryResult[]> {
         // Validate inputs early
         this.validateSearchInputs(collectionName, queryText, topK);
@@ -218,11 +219,7 @@ export class RAGOperations {
             const queryVector = await this.embeddingProvider.embed(queryText);
 
             // Perform vector search
-            const results = await this.executeVectorSearch(
-                table,
-                queryVector,
-                topK
-            );
+            const results = await this.executeVectorSearch(table, queryVector, topK);
 
             logger.info(
                 `Semantic search completed on '${collectionName}': found ${results.length} results`
@@ -254,8 +251,8 @@ export class RAGOperations {
      * Create a vector search query
      */
     private createVectorSearchQuery(
-        table: Table, 
-        queryVector: Float32Array, 
+        table: Table,
+        queryVector: Float32Array,
         topK: number
     ): VectorQuery {
         logger.debug(`Creating vector search with topK=${topK}, vector_dims=${queryVector.length}`);
@@ -266,17 +263,15 @@ export class RAGOperations {
      * Execute LanceDB query with fallback approaches
      */
     private async executeLanceDBQuery(searchQuery: VectorQuery): Promise<LanceDBResult[]> {
-        return this.withQueryErrorHandling(
-            async () => {
-                const results = await this.tryToArrayQuery(searchQuery)
-                    ?? await this.tryExecuteQuery(searchQuery)
-                    ?? await this.tryIterateQuery(searchQuery);
-                
-                this.logQueryResults(results);
-                return results;
-            },
-            "Vector search execution failed"
-        );
+        return this.withQueryErrorHandling(async () => {
+            const results =
+                (await this.tryToArrayQuery(searchQuery)) ??
+                (await this.tryExecuteQuery(searchQuery)) ??
+                (await this.tryIterateQuery(searchQuery));
+
+            this.logQueryResults(results);
+            return results;
+        }, "Vector search execution failed");
     }
 
     /**
@@ -284,7 +279,7 @@ export class RAGOperations {
      */
     private async tryToArrayQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
         if (typeof searchQuery.toArray !== "function") return null;
-        
+
         const queryResults = await searchQuery.toArray();
         logger.debug(`Query executed with toArray(), got ${queryResults.length} results`);
         return queryResults;
@@ -295,14 +290,14 @@ export class RAGOperations {
      */
     private async tryExecuteQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
         if (typeof searchQuery.execute !== "function") return null;
-        
+
         const queryResults = await searchQuery.execute();
         logger.debug("Query executed with execute()");
-        
+
         if (Array.isArray(queryResults)) {
             return queryResults;
         }
-        
+
         if (queryResults) {
             const results: LanceDBResult[] = [];
             for await (const item of queryResults) {
@@ -310,7 +305,7 @@ export class RAGOperations {
             }
             return results;
         }
-        
+
         return null;
     }
 
@@ -320,11 +315,11 @@ export class RAGOperations {
     private async tryIterateQuery(searchQuery: VectorQuery): Promise<LanceDBResult[]> {
         logger.debug("Trying direct iteration");
         const results: LanceDBResult[] = [];
-        
+
         for await (const item of searchQuery) {
             results.push(item);
         }
-        
+
         return results;
     }
 
@@ -360,14 +355,14 @@ export class RAGOperations {
      */
     private logQueryResults(results: LanceDBResult[]): void {
         logger.debug(`Vector search collected ${results.length} results`);
-        
+
         if (results.length > 0) {
             logger.debug(`First result structure: ${JSON.stringify(Object.keys(results[0]))}`);
             logger.debug("First result sample:", {
                 id: results[0].id,
                 content_preview: results[0].content?.substring(0, 50),
                 has_vector: !!results[0].vector,
-                distance: results[0]._distance
+                distance: results[0]._distance,
             });
         }
     }
@@ -376,7 +371,7 @@ export class RAGOperations {
      * Transform LanceDB results to RAGQueryResult format
      */
     private transformSearchResults(results: LanceDBResult[]): RAGQueryResult[] {
-        return results.map(result => this.transformSingleResult(result));
+        return results.map((result) => this.transformSingleResult(result));
     }
 
     /**
@@ -385,7 +380,7 @@ export class RAGOperations {
     private transformSingleResult(result: LanceDBResult): RAGQueryResult {
         return {
             document: mapLanceResultToDocument(result),
-            score: calculateRelevanceScore(result._distance)
+            score: calculateRelevanceScore(result._distance),
         };
     }
 
@@ -423,13 +418,13 @@ export class RAGOperations {
         if (!name || typeof name !== "string") {
             throw new RAGValidationError("Collection name must be a non-empty string");
         }
-        
+
         if (!/^[a-zA-Z0-9_]+$/.test(name)) {
             throw new RAGValidationError(
                 "Collection name must be alphanumeric with underscores only"
             );
         }
-        
+
         if (name.length > 64) {
             throw new RAGValidationError("Collection name must be 64 characters or less");
         }
@@ -438,17 +433,13 @@ export class RAGOperations {
     /**
      * Validate search input parameters
      */
-    private validateSearchInputs(
-        collectionName: string, 
-        queryText: string, 
-        topK: number
-    ): void {
+    private validateSearchInputs(collectionName: string, queryText: string, topK: number): void {
         this.validateCollectionName(collectionName);
-        
+
         if (!queryText || queryText.trim().length === 0) {
             throw new RAGValidationError("Query text cannot be empty");
         }
-        
+
         if (!Number.isInteger(topK) || topK < 1 || topK > 100) {
             throw new RAGValidationError("topK must be an integer between 1 and 100");
         }
@@ -461,11 +452,11 @@ export class RAGOperations {
         if (!doc.content || doc.content.trim().length === 0) {
             throw new RAGValidationError("Document content cannot be empty");
         }
-        
+
         if (doc.id && typeof doc.id !== "string") {
             throw new RAGValidationError("Document ID must be a string");
         }
-        
+
         if (doc.metadata && typeof doc.metadata !== "object") {
             throw new RAGValidationError("Document metadata must be an object");
         }

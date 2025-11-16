@@ -1,129 +1,133 @@
-import { tool } from "ai";
-import { DelegationService, type DelegationResponses } from "@/services/DelegationService";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
-import { logger } from "@/utils/logger";
-import { z } from "zod";
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/registry";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
+import { type DelegationResponses, DelegationService } from "@/services/DelegationService";
+import type { AISdkTool } from "@/tools/registry";
+import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
+import { logger } from "@/utils/logger";
+import { tool } from "ai";
+import { z } from "zod";
 
 const delegatePhaseSchema = z.object({
-  phase: z
-    .string()
-    .describe("The phase to switch to (must be defined in agent's phases configuration)"),
-  recipients: z
-    .array(z.string())
-    .describe(
-      "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) to delegate to in this phase."
-    ),
-  prompt: z
-    .string()
-    .describe(
-      "The request or question to delegate - this will be what the recipient processes."
-    ),
-  title: z
-    .string()
-    .nullable()
-    .describe("Title for this conversation (if not already set)."),
+    phase: z
+        .string()
+        .describe("The phase to switch to (must be defined in agent's phases configuration)"),
+    recipients: z
+        .array(z.string())
+        .describe(
+            "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) to delegate to in this phase."
+        ),
+    prompt: z
+        .string()
+        .describe(
+            "The request or question to delegate - this will be what the recipient processes."
+        ),
+    title: z.string().nullable().describe("Title for this conversation (if not already set)."),
 });
 
 type DelegatePhaseInput = z.infer<typeof delegatePhaseSchema>;
 type DelegatePhaseOutput = DelegationResponses;
 
 // Core implementation - extracted from existing execute function
-async function executeDelegatePhase(input: DelegatePhaseInput, context: ExecutionContext): Promise<DelegatePhaseOutput> {
-  const { phase, recipients, prompt, title } = input;
+async function executeDelegatePhase(
+    input: DelegatePhaseInput,
+    context: ExecutionContext
+): Promise<DelegatePhaseOutput> {
+    const { phase, recipients, prompt, title } = input;
 
-  // Validate that the phase exists in the agent's phases configuration
-  if (!context.agent.phases) {
-    throw new Error(`Agent ${context.agent.name} does not have any phases defined. Cannot use delegate_phase tool.`);
-  }
-
-  // Case-insensitive phase matching
-  const normalizedPhase = phase.toLowerCase();
-  const phaseEntry = Object.entries(context.agent.phases).find(
-    ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
-  );
-
-  if (!phaseEntry) {
-    const availablePhases = Object.keys(context.agent.phases).join(", ");
-    throw new Error(`Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`);
-  }
-
-  // Use the actual phase name and instructions from configuration
-  const [actualPhaseName, phase_instructions] = phaseEntry;
-
-  // Recipients is always an array due to schema validation
-  if (!Array.isArray(recipients)) {
-    throw new Error("Recipients must be an array of strings");
-  }
-
-  // Resolve recipients to pubkeys
-  const resolvedPubkeys: string[] = [];
-  const failedRecipients: string[] = [];
-
-  for (const recipient of recipients) {
-    const pubkey = resolveRecipientToPubkey(recipient);
-    if (pubkey) {
-      resolvedPubkeys.push(pubkey);
-    } else {
-      failedRecipients.push(recipient);
+    // Validate that the phase exists in the agent's phases configuration
+    if (!context.agent.phases) {
+        throw new Error(
+            `Agent ${context.agent.name} does not have any phases defined. Cannot use delegate_phase tool.`
+        );
     }
-  }
 
-  if (failedRecipients.length > 0) {
-    logger.warn("Some recipients could not be resolved", {
-      failed: failedRecipients,
-      resolved: resolvedPubkeys.length,
+    // Case-insensitive phase matching
+    const normalizedPhase = phase.toLowerCase();
+    const phaseEntry = Object.entries(context.agent.phases).find(
+        ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
+    );
+
+    if (!phaseEntry) {
+        const availablePhases = Object.keys(context.agent.phases).join(", ");
+        throw new Error(
+            `Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`
+        );
+    }
+
+    // Use the actual phase name and instructions from configuration
+    const [actualPhaseName, phase_instructions] = phaseEntry;
+
+    // Recipients is always an array due to schema validation
+    if (!Array.isArray(recipients)) {
+        throw new Error("Recipients must be an array of strings");
+    }
+
+    // Resolve recipients to pubkeys
+    const resolvedPubkeys: string[] = [];
+    const failedRecipients: string[] = [];
+
+    for (const recipient of recipients) {
+        const pubkey = resolveRecipientToPubkey(recipient);
+        if (pubkey) {
+            resolvedPubkeys.push(pubkey);
+        } else {
+            failedRecipients.push(recipient);
+        }
+    }
+
+    if (failedRecipients.length > 0) {
+        logger.warn("Some recipients could not be resolved", {
+            failed: failedRecipients,
+            resolved: resolvedPubkeys.length,
+        });
+    }
+
+    if (resolvedPubkeys.length === 0) {
+        throw new Error("No valid recipients provided.");
+    }
+
+    if (title) {
+        const ndk = getNDK();
+
+        const metadataEvent = new NDKEventMetadata(ndk);
+        metadataEvent.kind = 513;
+        metadataEvent.setConversationId(context.conversationId);
+        metadataEvent.title = title;
+        // metadataEvent.created_at = Math.floor(Date.now())-1;
+
+        await context.agent.sign(metadataEvent);
+        await metadataEvent.publish();
+
+        context.conversationCoordinator.setTitle(context.conversationId, title);
+        logger.info(`Set conversation title: ${title}`);
+    }
+
+    // Use DelegationService to execute the delegation
+    // Phase instructions are now passed through the delegation intent via event tags
+    const delegationService = new DelegationService(
+        context.agent,
+        context.conversationId,
+        context.conversationCoordinator,
+        context.triggeringEvent,
+        context.agentPublisher
+    );
+
+    const responses = await delegationService.execute({
+        recipients: resolvedPubkeys,
+        request: prompt,
+        phase: actualPhaseName, // Include phase in the delegation intent
+        phaseInstructions: phase_instructions, // Pass phase instructions to be included in event tags
     });
-  }
 
-  if (resolvedPubkeys.length === 0) {
-    throw new Error("No valid recipients provided.");
-  }
+    logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
+        phase: actualPhaseName,
+        recipientCount: resolvedPubkeys.length,
+        responseCount: responses.responses.length,
+        mode: "synchronous",
+    });
 
-  if (title) {
-    const ndk = getNDK();
-
-    const metadataEvent = new NDKEventMetadata(ndk);
-    metadataEvent.kind = 513;
-    metadataEvent.setConversationId(context.conversationId);
-    metadataEvent.title = title;
-    // metadataEvent.created_at = Math.floor(Date.now())-1;
-
-    await context.agent.sign(metadataEvent);
-    await metadataEvent.publish();
-
-    context.conversationCoordinator.setTitle(context.conversationId, title);
-    logger.info(`Set conversation title: ${title}`);
-  }
-
-  // Use DelegationService to execute the delegation
-  // Phase instructions are now passed through the delegation intent via event tags
-  const delegationService = new DelegationService(
-    context.agent,
-    context.conversationId,
-    context.conversationCoordinator,
-    context.triggeringEvent,
-    context.agentPublisher
-  );
-
-  const responses = await delegationService.execute({
-    recipients: resolvedPubkeys,
-    request: prompt,
-    phase: actualPhaseName, // Include phase in the delegation intent
-    phaseInstructions: phase_instructions, // Pass phase instructions to be included in event tags
-  });
-
-  logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
-    phase: actualPhaseName,
-    recipientCount: resolvedPubkeys.length,
-    responseCount: responses.responses.length,
-    mode: "synchronous",
-  });
-  
-  return responses;
+    return responses;
 }
 
 // AI SDK tool factory
@@ -155,7 +159,7 @@ export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
             return `Switching to ${phase.toUpperCase()} phase and delegating to ${recipients.join(", ")}`;
         },
         enumerable: false,
-        configurable: true
+        configurable: true,
     });
 
     return aiTool;

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "bun:test";
-import { ThreadService } from "@/conversations/services/ThreadService";
+import { describe, expect, it } from "bun:test";
 import { ParticipationIndex } from "@/conversations/services/ParticipationIndex";
+import { ThreadService } from "@/conversations/services/ThreadService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 describe("ThreadWithMemoryStrategy Integration", () => {
@@ -10,15 +10,16 @@ describe("ThreadWithMemoryStrategy Integration", () => {
         pubkey: string,
         parentId?: string,
         content?: string
-    ): NDKEvent => ({
-        id,
-        pubkey,
-        created_at: Date.now() / 1000,
-        kind: 1,
-        tags: parentId ? [['e', parentId]] : [],
-        content: content || `Message ${id}`,
-        sig: 'mock-sig',
-    } as NDKEvent);
+    ): NDKEvent =>
+        ({
+            id,
+            pubkey,
+            created_at: Date.now() / 1000,
+            kind: 1,
+            tags: parentId ? [["e", parentId]] : [],
+            content: content || `Message ${id}`,
+            sig: "mock-sig",
+        }) as NDKEvent;
 
     describe("Example scenario verification", () => {
         it("should correctly identify threads for Agent 2 at message 4.2", () => {
@@ -59,10 +60,13 @@ describe("ThreadWithMemoryStrategy Integration", () => {
             const currentThread = threadService.getThreadToEvent("4.2", events);
 
             // Verify current thread: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 (direct parent chain)
-            expect(currentThread.map(e => e.id)).toEqual(["1", "2", "3", "4", "4.1", "4.2"]);
+            expect(currentThread.map((e) => e.id)).toEqual(["1", "2", "3", "4", "4.1", "4.2"]);
 
             // Get Agent 2's participations
-            const agent2Participations = participationIndex.getAgentParticipations("conv1", agent2Pubkey);
+            const agent2Participations = participationIndex.getAgentParticipations(
+                "conv1",
+                agent2Pubkey
+            );
             expect(agent2Participations).toContain("2.2");
             expect(agent2Participations).toContain("4.2");
 
@@ -70,7 +74,7 @@ describe("ThreadWithMemoryStrategy Integration", () => {
             const previousThread = threadService.getThreadToEvent("2.2", events);
 
             // Verify previous thread: 1 -> 2 -> 2.1 -> 2.2
-            expect(previousThread.map(e => e.id)).toEqual(["1", "2", "2.1", "2.2"]);
+            expect(previousThread.map((e) => e.id)).toEqual(["1", "2", "2.1", "2.2"]);
 
             // Verify Agent 2 sees both threads
             const agent2ThreadRoots = participationIndex.getAgentThreadRoots(
@@ -109,10 +113,21 @@ describe("ThreadWithMemoryStrategy Integration", () => {
             const currentThread = threadService.getThreadToEvent("3.2.2", events);
 
             // Verify thread: 1 -> 2 -> 3 -> 3.1 -> 3.2 -> 3.2.1 -> 3.2.2
-            expect(currentThread.map(e => e.id)).toEqual(["1", "2", "3", "3.1", "3.2", "3.2.1", "3.2.2"]);
+            expect(currentThread.map((e) => e.id)).toEqual([
+                "1",
+                "2",
+                "3",
+                "3.1",
+                "3.2",
+                "3.2.1",
+                "3.2.2",
+            ]);
 
             // Get Agent 4's participations
-            const agent4Participations = participationIndex.getAgentParticipations("conv1", agent4Pubkey);
+            const agent4Participations = participationIndex.getAgentParticipations(
+                "conv1",
+                agent4Pubkey
+            );
             expect(agent4Participations).toContain("3.2");
             expect(agent4Participations).toContain("3.2.2");
 
@@ -154,7 +169,7 @@ describe("ThreadWithMemoryStrategy Integration", () => {
             const currentThread = threadService.getThreadToEvent("2.3", events);
 
             // Should be: 1 -> 2 -> 2.1 -> 2.2 -> 2.3
-            expect(currentThread.map(e => e.id)).toEqual(["1", "2", "2.1", "2.2", "2.3"]);
+            expect(currentThread.map((e) => e.id)).toEqual(["1", "2", "2.1", "2.2", "2.3"]);
 
             // Agent 2's participations
             const agent2Events = participationIndex.getAgentParticipations("conv1", agent2Pubkey);
@@ -165,7 +180,7 @@ describe("ThreadWithMemoryStrategy Integration", () => {
             // - Current thread already includes 2.2 (Agent 2's earlier response)
             // - Should also show thread 4.x participation (4.2) as memory
             const thread4 = threadService.getThreadToEvent("4.2", events);
-            expect(thread4.map(e => e.id)).toEqual(["1", "2", "3", "4.1", "4.2"]);
+            expect(thread4.map((e) => e.id)).toEqual(["1", "2", "3", "4.1", "4.2"]);
 
             // So Agent 2 would see:
             // 1. Memory: Thread with 4.2 (1 -> 3 -> 4.1 -> 4.2)

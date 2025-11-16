@@ -5,15 +5,15 @@
  * to generate accurate filtering results for visualization
  */
 
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { MockEventGenerator, MOCK_AGENTS } from "./mock-event-generator";
-import type { ExecutionContext } from "../../types";
-import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
-import { ThreadService } from "@/conversations/services/ThreadService";
 import * as fs from "fs";
 import * as path from "path";
+import type { AgentInstance } from "@/agents/types";
+import type { Conversation } from "@/conversations";
+import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import { MOCK_AGENTS, MockEventGenerator } from "./mock-event-generator";
 
 interface VisualizationData {
     scenario: string;
@@ -46,14 +46,16 @@ async function generateVisualizationData(): Promise<Record<string, Visualization
 
             // Test visibility for each agent
             for (const [agentKey, agentData] of Object.entries(MOCK_AGENTS)) {
-                if (agentKey === 'user') continue; // Skip user
+                if (agentKey === "user") continue; // Skip user
 
                 // Find triggering event for this agent
                 let triggeringEvent = null;
                 for (let i = events.length - 1; i >= 0; i--) {
                     const e = events[i];
-                    if (e.pubkey === agentData.pubkey ||
-                        e.tags.some(tag => tag[0] === 'p' && tag[1] === agentData.pubkey)) {
+                    if (
+                        e.pubkey === agentData.pubkey ||
+                        e.tags.some((tag) => tag[0] === "p" && tag[1] === agentData.pubkey)
+                    ) {
                         triggeringEvent = e;
                         break;
                     }
@@ -70,16 +72,16 @@ async function generateVisualizationData(): Promise<Record<string, Visualization
                     pubkey: agentData.pubkey,
                     role: "assistant",
                     instructions: "Test",
-                    tools: []
+                    tools: [],
                 };
 
                 const conversation: Conversation = {
                     id: `test-${scenarioName}`,
                     history: events,
-                    participants: new Set(Object.values(MOCK_AGENTS).map(a => a.pubkey)),
+                    participants: new Set(Object.values(MOCK_AGENTS).map((a) => a.pubkey)),
                     agentStates: new Map(),
                     metadata: {},
-                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 } as Conversation;
 
                 const context: ExecutionContext = {
@@ -88,33 +90,33 @@ async function generateVisualizationData(): Promise<Record<string, Visualization
                     projectPath: "/test/path",
                     triggeringEvent,
                     conversationCoordinator: {
-                        threadService: new ThreadService()
+                        threadService: new ThreadService(),
                     } as any,
                     agentPublisher: {} as any,
                     getConversation: () => conversation,
-                    isDelegationCompletion: false
+                    isDelegationCompletion: false,
                 } as ExecutionContext;
 
                 try {
                     const messages = await strategy.buildMessages(context, triggeringEvent);
-                    const messageContents = messages.map(m =>
-                        typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+                    const messageContents = messages.map((m) =>
+                        typeof m.content === "string" ? m.content : JSON.stringify(m.content)
                     );
 
                     // Check if this event's content appears in messages
-                    const isVisible = messageContents.some(c =>
+                    const isVisible = messageContents.some((c) =>
                         c.includes(event.content.substring(0, 30))
                     );
 
                     visibleTo[agentData.pubkey] = {
                         visible: isVisible,
-                        reason: isVisible ? "In agent's view" : "Filtered out"
+                        reason: isVisible ? "In agent's view" : "Filtered out",
                     };
                 } catch (error) {
                     console.error(`Error processing agent ${agentData.name}:`, error);
                     visibleTo[agentData.pubkey] = {
                         visible: false,
-                        reason: "Error processing"
+                        reason: "Error processing",
                     };
                 }
             }
@@ -125,13 +127,13 @@ async function generateVisualizationData(): Promise<Record<string, Visualization
                 content: event.content || "",
                 created_at: event.created_at || 0,
                 tags: event.tags,
-                visibleTo
+                visibleTo,
             });
         }
 
         results[scenarioName] = {
             scenario: scenarioName,
-            events: visualizationEvents
+            events: visualizationEvents,
         };
     }
 
@@ -155,7 +157,7 @@ async function main() {
 
     // Generate updated HTML that uses this data
     const htmlTemplatePath = path.join(__dirname, "agent-perspective-visualization.html");
-    const htmlContent = fs.readFileSync(htmlTemplatePath, 'utf-8');
+    const htmlContent = fs.readFileSync(htmlTemplatePath, "utf-8");
 
     // Replace the hardcoded scenarios with actual data
     const updatedHtml = htmlContent.replace(

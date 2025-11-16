@@ -1,8 +1,11 @@
-import { LLMService } from "../service";
-import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "../utils/claudeCodePromptCompiler";
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { ModelMessage } from "ai";
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LLMService } from "../service";
+import {
+    compileMessagesForClaudeCode,
+    convertSystemMessagesForResume,
+} from "../utils/claudeCodePromptCompiler";
 
 describe("LLMService Claude Code Integration", () => {
     let llmLogger: LLMLogger;
@@ -30,7 +33,9 @@ describe("LLMService Claude Code Integration", () => {
             expect(result.appendSystemPrompt).toContain("[System]: Additional context here");
             expect(result.appendSystemPrompt).toContain("[User]: Hello");
             // Verify order is preserved
-            const systemIndex = result.appendSystemPrompt!.indexOf("[System]: Additional context here");
+            const systemIndex = result.appendSystemPrompt!.indexOf(
+                "[System]: Additional context here"
+            );
             const userIndex = result.appendSystemPrompt!.indexOf("[User]: Hello");
             expect(systemIndex).toBeLessThan(userIndex);
         });
@@ -71,15 +76,15 @@ describe("LLMService Claude Code Integration", () => {
             // Verify order
             const userIndex = result.appendSystemPrompt!.indexOf("[User]: User says hello");
             const systemIndex = result.appendSystemPrompt!.indexOf("[System]: Phase transition");
-            const assistantIndex = result.appendSystemPrompt!.indexOf("[Assistant]: Assistant response");
+            const assistantIndex = result.appendSystemPrompt!.indexOf(
+                "[Assistant]: Assistant response"
+            );
             expect(userIndex).toBeLessThan(systemIndex);
             expect(systemIndex).toBeLessThan(assistantIndex);
         });
 
         it("should return undefined appendSystemPrompt when only one system message", () => {
-            const messages: ModelMessage[] = [
-                { role: "system", content: "Only system prompt" },
-            ];
+            const messages: ModelMessage[] = [{ role: "system", content: "Only system prompt" }];
 
             const result = compileMessagesForClaudeCode(messages);
 
@@ -133,7 +138,10 @@ describe("LLMService Claude Code Integration", () => {
             expect(result[0]).toEqual({ role: "system", content: "Initial prompt" });
             expect(result[1]).toEqual({ role: "user", content: "Hello" });
             expect(result[2]).toEqual({ role: "assistant", content: "Hi there" });
-            expect(result[3]).toEqual({ role: "user", content: "[System Context]: New system context added" });
+            expect(result[3]).toEqual({
+                role: "user",
+                content: "[System Context]: New system context added",
+            });
             expect(result[4]).toEqual({ role: "user", content: "Continue" });
         });
 
@@ -206,7 +214,7 @@ describe("LLMService Claude Code Integration", () => {
 
             // Verify provider was called with resume option
             expect(mockProviderFunction).toHaveBeenCalledWith("opus", {
-                resume: "existing-session-123"
+                resume: "existing-session-123",
             });
         });
 
@@ -240,7 +248,7 @@ describe("LLMService Claude Code Integration", () => {
             // Verify provider was called with compiled prompts
             expect(mockProviderFunction).toHaveBeenCalledWith("opus", {
                 customSystemPrompt: "Main prompt",
-                appendSystemPrompt: expect.stringContaining("Additional context")
+                appendSystemPrompt: expect.stringContaining("Additional context"),
             });
 
             const call = mockProviderFunction.mock.calls[0];

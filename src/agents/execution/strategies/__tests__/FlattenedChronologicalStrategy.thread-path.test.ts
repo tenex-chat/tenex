@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 
 /**
  * Test that agents see the full thread path (root → triggering event)
@@ -55,7 +55,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
         event2.tags = [
             ["e", event1.id],
             ["E", event1.id],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event2.sig = "sig2";
         events.push(event2);
@@ -70,7 +70,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
         event3.tags = [
             ["e", event2.id],
             ["E", event1.id],
-            ["p", AGENT_B_PUBKEY]
+            ["p", AGENT_B_PUBKEY],
         ];
         event3.sig = "sig3";
         events.push(event3);
@@ -85,7 +85,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
         event4.tags = [
             ["e", event3.id],
             ["E", event1.id],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event4.sig = "sig4";
         events.push(event4);
@@ -97,7 +97,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
             participants: new Set([USER_PUBKEY, AGENT_A_PUBKEY, AGENT_B_PUBKEY]),
             agentStates: new Map(),
             metadata: {},
-            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         } as Conversation;
 
         // Create strategy
@@ -110,7 +110,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
             pubkey: AGENT_B_PUBKEY,
             role: "assistant",
             instructions: "Test Agent B",
-            tools: []
+            tools: [],
         };
 
         // Create ThreadService
@@ -123,19 +123,19 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
             projectPath: "/test/path",
             triggeringEvent: event3, // Agent B is responding to event 3
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
     });
 
     it("should include ALL events in thread path, even those not targeted to the agent", async () => {
         const messages = await strategy.buildMessages(mockContextAgentB, events[2]); // event3 = triggering
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== Messages for Agent B ===");
@@ -144,19 +144,17 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
         });
 
         // Agent B should see event 1 (root) even though it was targeted to Agent A
-        const hasEvent1 = messageContents.some(content =>
-            content.includes("test @agent-a")
-        );
+        const hasEvent1 = messageContents.some((content) => content.includes("test @agent-a"));
         expect(hasEvent1).toBe(true);
 
         // Agent B should see event 2 (Agent A's reply) even though it's from another agent
-        const hasEvent2 = messageContents.some(content =>
-            content.includes("ok") && !content.includes("Agent B") // "ok" from Agent A, not Agent B
+        const hasEvent2 = messageContents.some(
+            (content) => content.includes("ok") && !content.includes("Agent B") // "ok" from Agent A, not Agent B
         );
         expect(hasEvent2).toBe(true);
 
         // Agent B should see event 3 (targeted to it)
-        const hasEvent3 = messageContents.some(content =>
+        const hasEvent3 = messageContents.some((content) =>
             content.includes("what messages did we discuss")
         );
         expect(hasEvent3).toBe(true);
@@ -168,11 +166,11 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
         const messages = await strategy.buildMessages(mockContextAgentB, events[2]);
 
         // If messages include events not targeted to Agent B, they were included via thread path
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
-        const hasNonTargetedMessage = messageContents.some(content =>
+        const hasNonTargetedMessage = messageContents.some((content) =>
             content.includes("test @agent-a")
         );
 
@@ -182,14 +180,18 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
     it("should maintain chronological order of thread path events", async () => {
         const messages = await strategy.buildMessages(mockContextAgentB, events[2]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Find indices of our events
-        const event1Index = messageContents.findIndex(c => c.includes("test @agent-a"));
-        const event2Index = messageContents.findIndex(c => c.includes("ok") && !c.includes("Agent B"));
-        const event3Index = messageContents.findIndex(c => c.includes("what messages did we discuss"));
+        const event1Index = messageContents.findIndex((c) => c.includes("test @agent-a"));
+        const event2Index = messageContents.findIndex(
+            (c) => c.includes("ok") && !c.includes("Agent B")
+        );
+        const event3Index = messageContents.findIndex((c) =>
+            c.includes("what messages did we discuss")
+        );
 
         // All should be present
         expect(event1Index).toBeGreaterThanOrEqual(0);

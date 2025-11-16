@@ -1,16 +1,18 @@
 #!/usr/bin/env node
-import React from 'react';
-import { render } from 'ink';
-import { App } from './components/App.js';
+import { render } from "ink";
+import React from "react";
+import { App } from "./components/App.js";
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
-const jaegerUrl = args.find(arg => arg.startsWith('--jaeger='))?.split('=')[1] || 'http://localhost:16686';
-const serviceName = args.find(arg => arg.startsWith('--service='))?.split('=')[1] || 'tenex-daemon';
+const jaegerUrl =
+    args.find((arg) => arg.startsWith("--jaeger="))?.split("=")[1] || "http://localhost:16686";
+const serviceName =
+    args.find((arg) => arg.startsWith("--service="))?.split("=")[1] || "tenex-daemon";
 
 // Show usage if help flag is present
-if (args.includes('--help') || args.includes('-h')) {
-  console.log(`
+if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
 TENEX Trace Viewer
 
 Usage: trace-viewer [options]
@@ -25,7 +27,7 @@ Examples:
   trace-viewer --jaeger=http://localhost:16686
   trace-viewer --service=my-service
   `);
-  process.exit(0);
+    process.exit(0);
 }
 
 // Render the TUI

@@ -4,13 +4,13 @@
  * These are pure functions that take minimal parameters and return enhanced content
  */
 
-import type { ModelMessage } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
-import { logger } from "@/utils/logger";
+import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ModelMessage } from "ai";
 
 /**
  * Add voice mode context if applicable
@@ -27,7 +27,7 @@ export function addVoiceModeContext(
     if (isVoiceMode(triggeringEvent)) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("voice-mode", { isVoiceMode: true });
-        
+
         const voiceInstructions = contextBuilder.build();
         if (voiceInstructions) {
             messages.push({ role: "system", content: voiceInstructions });
@@ -36,7 +36,7 @@ export function addVoiceModeContext(
         if (agentName) {
             logger.debug("[CONTEXT_ENHANCER] Voice mode activated", { agent: agentName });
         }
-        
+
         return true;
     }
     return false;
@@ -57,7 +57,7 @@ export function addDebugModeContext(
     if (isDebugMode(triggeringEvent)) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("debug-mode", { enabled: true });
-        
+
         const debugInstructions = contextBuilder.build();
         if (debugInstructions) {
             messages.push({ role: "system", content: debugInstructions });
@@ -66,7 +66,7 @@ export function addDebugModeContext(
         if (agentName) {
             logger.debug("[CONTEXT_ENHANCER] Debug mode activated", { agent: agentName });
         }
-        
+
         return true;
     }
     return false;
@@ -87,7 +87,7 @@ export function addDelegationCompletionContext(
     if (isDelegationCompletion) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("delegation-completion", {
-            isDelegationCompletion: true
+            isDelegationCompletion: true,
         });
 
         const delegationInstructions = contextBuilder.build();
@@ -96,7 +96,9 @@ export function addDelegationCompletionContext(
         }
 
         if (agentName) {
-            logger.debug("[CONTEXT_ENHANCER] Added delegation completion context", { agent: agentName });
+            logger.debug("[CONTEXT_ENHANCER] Added delegation completion context", {
+                agent: agentName,
+            });
         }
 
         return true;
@@ -120,13 +122,13 @@ export async function addRespondingToContext(
 
     messages.push({
         role: "system",
-        content: `You are responding to @${triggeringUserName}. If you need to consult with a different agent before you're ready to satisfy the request from @${triggeringUserName}, use the delegate or ask tools.`
+        content: `You are responding to @${triggeringUserName}. If you need to consult with a different agent before you're ready to satisfy the request from @${triggeringUserName}, use the delegate or ask tools.`,
     });
 
     if (agentName) {
         logger.debug("[CONTEXT_ENHANCER] Added responding-to context", {
             agent: agentName,
-            respondingTo: triggeringUserName
+            respondingTo: triggeringUserName,
         });
     }
 }
@@ -148,7 +150,7 @@ export async function addAllSpecialContexts(
     const result = {
         voiceMode: addVoiceModeContext(messages, triggeringEvent, agentName),
         debugMode: addDebugModeContext(messages, triggeringEvent, agentName),
-        delegationMode: addDelegationCompletionContext(messages, isDelegationCompletion, agentName)
+        delegationMode: addDelegationCompletionContext(messages, isDelegationCompletion, agentName),
     };
 
     // Add context about who the agent is responding to

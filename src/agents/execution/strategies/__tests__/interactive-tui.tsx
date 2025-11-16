@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
-import React, { useState, useEffect } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
-import { SignedEventGenerator, SignedConversation } from './generate-signed-events';
-import { FlattenedChronologicalStrategy } from '../FlattenedChronologicalStrategy';
-import { DelegationRegistry } from '@/services/DelegationRegistry';
-import { ThreadService } from '@/conversations/services/ThreadService';
-import type { ExecutionContext } from '../../types';
-import type { Conversation } from '@/conversations';
-import { NDKEvent } from '@nostr-dev-kit/ndk';
+import type { Conversation } from "@/conversations";
+import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { Box, Text, render, useApp, useInput } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import { type SignedConversation, SignedEventGenerator } from "./generate-signed-events";
 
 interface AppState {
     loading: boolean;
@@ -24,7 +25,7 @@ function InteractiveTUI() {
         scenarios: [],
         currentScenarioIndex: 0,
         selectedAgentIndex: 0,
-        visibilityMap: new Map()
+        visibilityMap: new Map(),
     });
 
     // Initialize and generate scenarios
@@ -34,7 +35,7 @@ function InteractiveTUI() {
             const generator = new SignedEventGenerator();
             const scenarios = await generator.generateAllScenarios();
 
-            setState(prev => ({ ...prev, scenarios, loading: false }));
+            setState((prev) => ({ ...prev, scenarios, loading: false }));
         })();
     }, []);
 
@@ -52,8 +53,12 @@ function InteractiveTUI() {
                 let triggeringEvent: NDKEvent | null = null;
                 for (let i = scenario.events.length - 1; i >= 0; i--) {
                     const event = scenario.events[i];
-                    if (event.pubkey === signedAgent.agent.pubkey ||
-                        event.tags.some(tag => tag[0] === 'p' && tag[1] === signedAgent.agent.pubkey)) {
+                    if (
+                        event.pubkey === signedAgent.agent.pubkey ||
+                        event.tags.some(
+                            (tag) => tag[0] === "p" && tag[1] === signedAgent.agent.pubkey
+                        )
+                    ) {
                         triggeringEvent = event;
                         break;
                     }
@@ -64,21 +69,24 @@ function InteractiveTUI() {
                 const conversation: Conversation = {
                     id: scenario.events[0].id!,
                     history: scenario.events,
-                    participants: new Set([scenario.user.pubkey, ...scenario.agents.map(a => a.agent.pubkey)]),
+                    participants: new Set([
+                        scenario.user.pubkey,
+                        ...scenario.agents.map((a) => a.agent.pubkey),
+                    ]),
                     agentStates: new Map(),
                     metadata: {},
-                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 } as Conversation;
 
                 const context: ExecutionContext = {
                     agent: signedAgent.agent,
                     conversationId: conversation.id,
-                    projectPath: '/test/path',
+                    projectPath: "/test/path",
                     triggeringEvent,
                     conversationCoordinator: { threadService: new ThreadService() } as any,
                     agentPublisher: {} as any,
                     getConversation: () => conversation,
-                    isDelegationCompletion: false
+                    isDelegationCompletion: false,
                 } as ExecutionContext;
 
                 try {
@@ -88,8 +96,11 @@ function InteractiveTUI() {
                     // Check which events appear in the messages
                     for (const event of scenario.events) {
                         const eventPreview = event.content.substring(0, 40);
-                        const isVisible = messages.some(msg => {
-                            const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                        const isVisible = messages.some((msg) => {
+                            const content =
+                                typeof msg.content === "string"
+                                    ? msg.content
+                                    : JSON.stringify(msg.content);
                             return content.includes(eventPreview);
                         });
                         if (isVisible) {
@@ -103,24 +114,32 @@ function InteractiveTUI() {
                 }
             }
 
-            setState(prev => ({ ...prev, visibilityMap }));
+            setState((prev) => ({ ...prev, visibilityMap }));
         })();
     }, [state.currentScenarioIndex, state.scenarios]);
 
     // Handle keyboard input
     useInput((input, key) => {
-        if (input === 'q' || key.escape) {
+        if (input === "q" || key.escape) {
             exit();
         } else if (key.leftArrow && state.currentScenarioIndex > 0) {
-            setState(prev => ({ ...prev, currentScenarioIndex: prev.currentScenarioIndex - 1, selectedAgentIndex: 0 }));
+            setState((prev) => ({
+                ...prev,
+                currentScenarioIndex: prev.currentScenarioIndex - 1,
+                selectedAgentIndex: 0,
+            }));
         } else if (key.rightArrow && state.currentScenarioIndex < state.scenarios.length - 1) {
-            setState(prev => ({ ...prev, currentScenarioIndex: prev.currentScenarioIndex + 1, selectedAgentIndex: 0 }));
+            setState((prev) => ({
+                ...prev,
+                currentScenarioIndex: prev.currentScenarioIndex + 1,
+                selectedAgentIndex: 0,
+            }));
         } else if (key.upArrow && state.selectedAgentIndex > 0) {
-            setState(prev => ({ ...prev, selectedAgentIndex: prev.selectedAgentIndex - 1 }));
+            setState((prev) => ({ ...prev, selectedAgentIndex: prev.selectedAgentIndex - 1 }));
         } else if (key.downArrow && state.scenarios.length > 0) {
             const maxIndex = state.scenarios[state.currentScenarioIndex].agents.length - 1;
             if (state.selectedAgentIndex < maxIndex) {
-                setState(prev => ({ ...prev, selectedAgentIndex: prev.selectedAgentIndex + 1 }));
+                setState((prev) => ({ ...prev, selectedAgentIndex: prev.selectedAgentIndex + 1 }));
             }
         }
     });
@@ -139,11 +158,11 @@ function InteractiveTUI() {
 
     // Build tree
     const buildTree = (events: NDKEvent[]) => {
-        const map = new Map(events.map(e => [e.id!, e]));
+        const map = new Map(events.map((e) => [e.id!, e]));
         const roots: NDKEvent[] = [];
 
         for (const event of events) {
-            const parentTag = event.tags.find(tag => tag[0] === 'e');
+            const parentTag = event.tags.find((tag) => tag[0] === "e");
             if (!parentTag || !map.has(parentTag[1])) {
                 roots.push(event);
             }
@@ -152,31 +171,41 @@ function InteractiveTUI() {
         return roots;
     };
 
-    const renderTree = (event: NDKEvent, depth: number = 0, isLast: boolean = true, prefix: string = ''): React.ReactElement[] => {
+    const renderTree = (
+        event: NDKEvent,
+        depth = 0,
+        isLast = true,
+        prefix = ""
+    ): React.ReactElement[] => {
         const isVisible = visibleIds.has(event.id!);
-        const color = isVisible ? 'green' : 'dim';
-        const symbol = isVisible ? '✓' : '✗';
-        const connector = isLast ? '└─' : '├─';
-        const line = depth > 0 ? prefix + connector + ' ' : '';
+        const color = isVisible ? "green" : "dim";
+        const symbol = isVisible ? "✓" : "✗";
+        const connector = isLast ? "└─" : "├─";
+        const line = depth > 0 ? prefix + connector + " " : "";
 
-        const author = scenario.agents.find(a => a.agent.pubkey === event.pubkey)?.agent.name ||
-                      (event.pubkey === scenario.user.pubkey ? 'User' : event.pubkey.substring(0, 8));
+        const author =
+            scenario.agents.find((a) => a.agent.pubkey === event.pubkey)?.agent.name ||
+            (event.pubkey === scenario.user.pubkey ? "User" : event.pubkey.substring(0, 8));
         const content = event.content.substring(0, 70);
 
-        const children = scenario.events.filter(e => {
-            const parentTag = e.tags.find(tag => tag[0] === 'e');
-            return parentTag && parentTag[1] === event.id;
-        }).sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        const children = scenario.events
+            .filter((e) => {
+                const parentTag = e.tags.find((tag) => tag[0] === "e");
+                return parentTag && parentTag[1] === event.id;
+            })
+            .sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 
         const elements: React.ReactElement[] = [
             <Text key={event.id} color={color}>
-                {line}{symbol} <Text bold>{author}</Text>: {content}{content.length < event.content.length ? '...' : ''}
-            </Text>
+                {line}
+                {symbol} <Text bold>{author}</Text>: {content}
+                {content.length < event.content.length ? "..." : ""}
+            </Text>,
         ];
 
         children.forEach((child, index) => {
             const childIsLast = index === children.length - 1;
-            const childPrefix = depth > 0 ? prefix + (isLast ? '   ' : '│  ') : '';
+            const childPrefix = depth > 0 ? prefix + (isLast ? "   " : "│  ") : "";
             elements.push(...renderTree(child, depth + 1, childIsLast, childPrefix));
         });
 
@@ -205,8 +234,14 @@ function InteractiveTUI() {
             {/* Scenario info */}
             <Box marginBottom={1}>
                 <Text>
-                    Scenario <Text color="yellow">[{state.currentScenarioIndex + 1}/{state.scenarios.length}]</Text>:{' '}
-                    <Text bold color="white">{scenario.name}</Text>
+                    Scenario{" "}
+                    <Text color="yellow">
+                        [{state.currentScenarioIndex + 1}/{state.scenarios.length}]
+                    </Text>
+                    :{" "}
+                    <Text bold color="white">
+                        {scenario.name}
+                    </Text>
                 </Text>
             </Box>
 
@@ -215,26 +250,41 @@ function InteractiveTUI() {
             </Box>
 
             {/* Agent selector */}
-            <Box flexDirection="column" borderStyle="single" borderColor="yellow" paddingX={1} marginBottom={1}>
+            <Box
+                flexDirection="column"
+                borderStyle="single"
+                borderColor="yellow"
+                paddingX={1}
+                marginBottom={1}
+            >
                 <Text bold>Select Agent (↑↓):</Text>
                 {scenario.agents.map((agent, index) => {
                     const selected = index === state.selectedAgentIndex;
-                    const agentVisibleIds = state.visibilityMap.get(agent.agent.pubkey) || new Set();
+                    const agentVisibleIds =
+                        state.visibilityMap.get(agent.agent.pubkey) || new Set();
                     const agentPercentage = Math.round((agentVisibleIds.size / totalCount) * 100);
 
                     return (
-                        <Text key={agent.agent.pubkey} color={selected ? 'green' : 'white'}>
-                            {selected ? '→ ' : '  '}
-                            {agent.agent.name} ({agent.agent.role}) - sees {agentVisibleIds.size}/{totalCount} ({agentPercentage}%)
+                        <Text key={agent.agent.pubkey} color={selected ? "green" : "white"}>
+                            {selected ? "→ " : "  "}
+                            {agent.agent.name} ({agent.agent.role}) - sees {agentVisibleIds.size}/
+                            {totalCount} ({agentPercentage}%)
                         </Text>
                     );
                 })}
             </Box>
 
             {/* Thread view */}
-            <Box flexDirection="column" borderStyle="single" borderColor="green" paddingX={1} marginBottom={1}>
+            <Box
+                flexDirection="column"
+                borderStyle="single"
+                borderColor="green"
+                paddingX={1}
+                marginBottom={1}
+            >
                 <Text bold color="green">
-                    {selectedAgent.agent.name}'s View - {visibleCount}/{totalCount} events ({percentage}%)
+                    {selectedAgent.agent.name}'s View - {visibleCount}/{totalCount} events (
+                    {percentage}%)
                 </Text>
                 <Text dimColor>Green = Visible | Gray = Filtered Out</Text>
                 <Box flexDirection="column" marginTop={1}>
@@ -245,9 +295,8 @@ function InteractiveTUI() {
             {/* Controls */}
             <Box borderStyle="single" borderColor="yellow" paddingX={1}>
                 <Text>
-                    <Text color="cyan">←→</Text> Change scenario |{' '}
-                    <Text color="cyan">↑↓</Text> Select agent |{' '}
-                    <Text color="red">Q/ESC</Text> Quit
+                    <Text color="cyan">←→</Text> Change scenario | <Text color="cyan">↑↓</Text>{" "}
+                    Select agent | <Text color="red">Q/ESC</Text> Quit
                 </Text>
             </Box>
         </Box>

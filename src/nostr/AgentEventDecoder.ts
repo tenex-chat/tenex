@@ -12,243 +12,242 @@ import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 
 // biome-ignore lint/complexity/noStaticOnlyClass: Static utility class for decoding event semantics
 export class AgentEventDecoder {
-  /**
-   * Check if an event is directed to the system (project or agents)
-   */
-  static isDirectedToSystem(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
-    const pTags = event.tags.filter((tag) => tag[0] === "p");
-    if (pTags.length === 0) return false;
+    /**
+     * Check if an event is directed to the system (project or agents)
+     */
+    static isDirectedToSystem(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
+        const pTags = event.tags.filter((tag) => tag[0] === "p");
+        if (pTags.length === 0) return false;
 
-    const mentionedPubkeys = pTags
-      .map((tag) => tag[1])
-      .filter((pubkey): pubkey is string => !!pubkey);
+        const mentionedPubkeys = pTags
+            .map((tag) => tag[1])
+            .filter((pubkey): pubkey is string => !!pubkey);
 
-    const systemPubkeys = new Set([...Array.from(systemAgents.values()).map((a) => a.pubkey)]);
+        const systemPubkeys = new Set([...Array.from(systemAgents.values()).map((a) => a.pubkey)]);
 
-    // Add project pubkey if available
-    const projectCtx = getProjectContext();
-    if (projectCtx.pubkey) {
-      systemPubkeys.add(projectCtx.pubkey);
+        // Add project pubkey if available
+        const projectCtx = getProjectContext();
+        if (projectCtx.pubkey) {
+            systemPubkeys.add(projectCtx.pubkey);
+        }
+
+        return mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
     }
 
-    return mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
-  }
-
-  /**
-   * Check if event is from an agent in the system
-   */
-  static isEventFromAgent(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
-    const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
-    return agentPubkeys.has(event.pubkey);
-  }
-
-  /**
-   * Check if this is a task completion event (for NDKTask kind:1934)
-   * Note: This is different from delegation completions (kind:1111)
-   */
-  static isTaskCompletionEvent(event: NDKEvent): boolean {
-    // Only for actual NDKTask completions, not delegations
-    if (
-      event.tagValue("K") === NDKTask.kind.toString() &&
-      event.tagValue("P") === event.tagValue("p")
-    ) {
-      return true;
+    /**
+     * Check if event is from an agent in the system
+     */
+    static isEventFromAgent(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
+        const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
+        return agentPubkeys.has(event.pubkey);
     }
 
-    return false;
-  }
+    /**
+     * Check if this is a task completion event (for NDKTask kind:1934)
+     * Note: This is different from delegation completions (kind:1111)
+     */
+    static isTaskCompletionEvent(event: NDKEvent): boolean {
+        // Only for actual NDKTask completions, not delegations
+        if (
+            event.tagValue("K") === NDKTask.kind.toString() &&
+            event.tagValue("P") === event.tagValue("p")
+        ) {
+            return true;
+        }
 
-  /**
-   * Get conversation root from event
-   */
-  static getConversationRoot(event: NDKEvent): string | undefined {
-    return event.tagValue("E") || event.tagValue("A");
-  }
-
-
-  /**
-   * Check if event is an orphaned reply (reply without findable root)
-   */
-  static isOrphanedReply(event: NDKEvent): boolean {
-    // Must be a kind 11 (text note reply)
-    if (event.tagValue("K") !== "11") {
-      return false;
+        return false;
     }
 
-    // Must have a conversation root reference
-    const hasRoot = !!(event.tagValue("E") || event.tagValue("A"));
-
-    // Must have p-tags (directed to someone)
-    const hasPTags = event.tags.some((tag) => tag[0] === "p");
-
-    return hasRoot && hasPTags;
-  }
-
-  /**
-   * Get mentioned pubkeys from event
-   */
-  static getMentionedPubkeys(event: NDKEvent): string[] {
-    return event.tags
-      .filter((tag) => tag[0] === "p")
-      .map((tag) => tag[1])
-      .filter((pubkey): pubkey is string => !!pubkey);
-  }
-
-  /**
-   * Check if this is an agent's internal message (completion, delegation, etc)
-   */
-  static isAgentInternalMessage(event: NDKEvent): boolean {
-    // Events with tool tags are internal agent operations
-    if (event.tagValue("tool")) {
-      return true;
+    /**
+     * Get conversation root from event
+     */
+    static getConversationRoot(event: NDKEvent): string | undefined {
+        return event.tagValue("E") || event.tagValue("A");
     }
 
-    // Status events are internal
-    if (event.tagValue("status")) {
-      return true;
+    /**
+     * Check if event is an orphaned reply (reply without findable root)
+     */
+    static isOrphanedReply(event: NDKEvent): boolean {
+        // Must be a kind 11 (text note reply)
+        if (event.tagValue("K") !== "11") {
+            return false;
+        }
+
+        // Must have a conversation root reference
+        const hasRoot = !!(event.tagValue("E") || event.tagValue("A"));
+
+        // Must have p-tags (directed to someone)
+        const hasPTags = event.tags.some((tag) => tag[0] === "p");
+
+        return hasRoot && hasPTags;
     }
 
-    return false;
-  }
-
-  /**
-   * Extract phase from event if present
-   */
-  static getPhase(event: NDKEvent): string | undefined {
-    return event.tagValue("phase");
-  }
-
-  /**
-   * Check if event is a delegation request (kind:1111 from agent to agent)
-   */
-  static isDelegationRequest(event: NDKEvent, systemAgents?: Map<string, AgentInstance>): boolean {
-    // Must be kind:1111
-    if (event.kind !== 1111) return false;
-    
-    // If we have system agents, verify it's from an agent
-    if (systemAgents) {
-      const isFromAgent = this.isEventFromAgent(event, systemAgents);
-      if (!isFromAgent) return false;
-      
-      // Check if p-tag points to another agent
-      const pTag = event.tagValue("p");
-      if (pTag && Array.from(systemAgents.values()).some(a => a.pubkey === pTag)) {
-        return true;
-      }
-    } else {
-      // Fallback: just check if it has a p-tag (less accurate)
-      return !!event.tagValue("p");
+    /**
+     * Get mentioned pubkeys from event
+     */
+    static getMentionedPubkeys(event: NDKEvent): string[] {
+        return event.tags
+            .filter((tag) => tag[0] === "p")
+            .map((tag) => tag[1])
+            .filter((pubkey): pubkey is string => !!pubkey);
     }
-    
-    return false;
-  }
-  
-  /**
-   * Check if event is a delegation completion (kind:1111 with tool:complete)
-   */
-  static isDelegationCompletion(event: NDKEvent): boolean {
-    return event.kind === 1111 && 
-           event.tagValue("status") === "completed";
-  }
-  
-  /**
-   * Get the delegation request ID from a completion event
-   * Checks all e-tags to find the first valid delegation request ID
-   */
-  static getDelegationRequestId(event: NDKEvent): string | undefined {
-    if (this.isDelegationCompletion(event)) {
-      // Check all e-tags to find a delegation request ID
-      // For explicit completions, we return the first e-tag as the most likely candidate
-      // The DelegationCompletionHandler will validate if it's actually a tracked delegation
-      const eTags = event.getMatchingTags("e");
-      if (eTags.length > 0 && eTags[0][1]) {
-        return eTags[0][1]; // Return the first e-tag value
-      }
+
+    /**
+     * Check if this is an agent's internal message (completion, delegation, etc)
+     */
+    static isAgentInternalMessage(event: NDKEvent): boolean {
+        // Events with tool tags are internal agent operations
+        if (event.tagValue("tool")) {
+            return true;
+        }
+
+        // Status events are internal
+        if (event.tagValue("status")) {
+            return true;
+        }
+
+        return false;
     }
-    return undefined;
-  }
-  
 
-  /**
-   * Check if event is a status event
-   */
-  static isStatusEvent(event: NDKEvent): boolean {
-    return event.kind === NDKKind.TenexProjectStatus;
-  }
+    /**
+     * Extract phase from event if present
+     */
+    static getPhase(event: NDKEvent): string | undefined {
+        return event.tagValue("phase");
+    }
 
-  /**
-   * Extract error type from error event
-   */
-  static getErrorType(event: NDKEvent): string | undefined {
-    return event.tagValue("error");
-  }
+    /**
+     * Check if event is a delegation request (kind:1111 from agent to agent)
+     */
+    static isDelegationRequest(
+        event: NDKEvent,
+        systemAgents?: Map<string, AgentInstance>
+    ): boolean {
+        // Must be kind:1111
+        if (event.kind !== 1111) return false;
 
-  /**
-   * Get the K tag value (referenced event kind)
-   */
-  static getReferencedKind(event: NDKEvent): string | undefined {
-    return event.tagValue("K");
-  }
+        // If we have system agents, verify it's from an agent
+        if (systemAgents) {
+            const isFromAgent = this.isEventFromAgent(event, systemAgents);
+            if (!isFromAgent) return false;
 
-  /**
-   * Check if event has a specific tool tag
-   */
-  static hasTool(event: NDKEvent, toolName: string): boolean {
-    return event.tagValue("tool") === toolName;
-  }
+            // Check if p-tag points to another agent
+            const pTag = event.tagValue("p");
+            if (pTag && Array.from(systemAgents.values()).some((a) => a.pubkey === pTag)) {
+                return true;
+            }
+        } else {
+            // Fallback: just check if it has a p-tag (less accurate)
+            return !!event.tagValue("p");
+        }
 
-  /**
-   * Get all tool tags from event
-   */
-  static getToolTags(event: NDKEvent): Array<{ name: string; args?: unknown }> {
-    return event.tags
-      .filter((tag) => tag[0] === "tool")
-      .map((tag) => ({
-        name: tag[1],
-        args: tag[2] ? JSON.parse(tag[2]) : undefined,
-      }));
-  }
+        return false;
+    }
 
-  /**
-   * Check if this is a streaming event
-   */
-  static isStreamingEvent(event: NDKEvent): boolean {
-    return event.kind === NDKKind.TenexStreamingResponse;
-  }
+    /**
+     * Check if event is a delegation completion (kind:1111 with tool:complete)
+     */
+    static isDelegationCompletion(event: NDKEvent): boolean {
+        return event.kind === 1111 && event.tagValue("status") === "completed";
+    }
 
-  /**
-   * Get moderator pubkey from a kind:11 brainstorm event
-   * The moderator is specified in the first p-tag
-   */
-  static getModerator(event: NDKEvent): string | null {
-    if (event.kind !== 11) return null;
-    
-    // The moderator is the first p-tag
-    const pTag = event.tagValue("p");
-    return pTag || null;
-  }
+    /**
+     * Get the delegation request ID from a completion event
+     * Checks all e-tags to find the first valid delegation request ID
+     */
+    static getDelegationRequestId(event: NDKEvent): string | undefined {
+        if (this.isDelegationCompletion(event)) {
+            // Check all e-tags to find a delegation request ID
+            // For explicit completions, we return the first e-tag as the most likely candidate
+            // The DelegationCompletionHandler will validate if it's actually a tracked delegation
+            const eTags = event.getMatchingTags("e");
+            if (eTags.length > 0 && eTags[0][1]) {
+                return eTags[0][1]; // Return the first e-tag value
+            }
+        }
+        return undefined;
+    }
 
-  /**
-   * Get participant pubkeys from a brainstorm event
-   * Participants are specified in "participant" tags
-   * Works for both kind:11 (initial) and kind:1111 (follow-up) events
-   */
-  static getParticipants(event: NDKEvent): string[] {
-    // Get all participant tags regardless of event kind
-    // This supports both initial brainstorm (kind 11) and follow-ups (kind 1111)
-    const participantTags = event.tags.filter(tag => tag[0] === "participant");
-    return participantTags.map(tag => tag[1]).filter(pubkey => !!pubkey);
-  }
+    /**
+     * Check if event is a status event
+     */
+    static isStatusEvent(event: NDKEvent): boolean {
+        return event.kind === NDKKind.TenexProjectStatus;
+    }
 
-  /**
-   * Extract nudge event IDs from event tags
-   * Returns an array of event IDs from all ['nudge', '<id>'] tags
-   */
-  static extractNudgeEventIds(event: NDKEvent): string[] {
-    return event.tags
-      .filter((tag) => tag[0] === "nudge")
-      .map((tag) => tag[1])
-      .filter((id): id is string => !!id);
-  }
+    /**
+     * Extract error type from error event
+     */
+    static getErrorType(event: NDKEvent): string | undefined {
+        return event.tagValue("error");
+    }
 
+    /**
+     * Get the K tag value (referenced event kind)
+     */
+    static getReferencedKind(event: NDKEvent): string | undefined {
+        return event.tagValue("K");
+    }
+
+    /**
+     * Check if event has a specific tool tag
+     */
+    static hasTool(event: NDKEvent, toolName: string): boolean {
+        return event.tagValue("tool") === toolName;
+    }
+
+    /**
+     * Get all tool tags from event
+     */
+    static getToolTags(event: NDKEvent): Array<{ name: string; args?: unknown }> {
+        return event.tags
+            .filter((tag) => tag[0] === "tool")
+            .map((tag) => ({
+                name: tag[1],
+                args: tag[2] ? JSON.parse(tag[2]) : undefined,
+            }));
+    }
+
+    /**
+     * Check if this is a streaming event
+     */
+    static isStreamingEvent(event: NDKEvent): boolean {
+        return event.kind === NDKKind.TenexStreamingResponse;
+    }
+
+    /**
+     * Get moderator pubkey from a kind:11 brainstorm event
+     * The moderator is specified in the first p-tag
+     */
+    static getModerator(event: NDKEvent): string | null {
+        if (event.kind !== 11) return null;
+
+        // The moderator is the first p-tag
+        const pTag = event.tagValue("p");
+        return pTag || null;
+    }
+
+    /**
+     * Get participant pubkeys from a brainstorm event
+     * Participants are specified in "participant" tags
+     * Works for both kind:11 (initial) and kind:1111 (follow-up) events
+     */
+    static getParticipants(event: NDKEvent): string[] {
+        // Get all participant tags regardless of event kind
+        // This supports both initial brainstorm (kind 11) and follow-ups (kind 1111)
+        const participantTags = event.tags.filter((tag) => tag[0] === "participant");
+        return participantTags.map((tag) => tag[1]).filter((pubkey) => !!pubkey);
+    }
+
+    /**
+     * Extract nudge event IDs from event tags
+     * Returns an array of event IDs from all ['nudge', '<id>'] tags
+     */
+    static extractNudgeEventIds(event: NDKEvent): string[] {
+        return event.tags
+            .filter((tag) => tag[0] === "nudge")
+            .map((tag) => tag[1])
+            .filter((id): id is string => !!id);
+    }
 }

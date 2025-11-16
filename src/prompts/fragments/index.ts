@@ -17,8 +17,8 @@ import "./20-voice-mode";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
-import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { debugModeFragment } from "./debug-mode";
+import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { delegationCompletionFragment } from "./delegation-completion";
 import { phaseTransitionFragment } from "./phase-transition";
 
@@ -27,25 +27,24 @@ import { phaseTransitionFragment } from "./phase-transition";
  * This provides a clear view of all available fragments
  */
 export function registerAllFragments(): void {
-  // Core identity and context
-  fragmentRegistry.register(agentIdentityFragment);
-  fragmentRegistry.register(agentPhasesFragment);
-  fragmentRegistry.register(delegatedTaskContextFragment);
-  fragmentRegistry.register(debugModeFragment);
-  fragmentRegistry.register(delegationCompletionFragment);
-  fragmentRegistry.register(phaseTransitionFragment);
+    // Core identity and context
+    fragmentRegistry.register(agentIdentityFragment);
+    fragmentRegistry.register(agentPhasesFragment);
+    fragmentRegistry.register(delegatedTaskContextFragment);
+    fragmentRegistry.register(debugModeFragment);
+    fragmentRegistry.register(delegationCompletionFragment);
+    fragmentRegistry.register(phaseTransitionFragment);
 
-  // Agent collaboration
-  fragmentRegistry.register(availableAgentsFragment);
-  
-  // Behavioral guidance
-  // voice-mode and referenced-article are registered via side effects
-  
-  // Context and learning
-  fragmentRegistry.register(retrievedLessonsFragment);
-  fragmentRegistry.register(ragInstructionsFragment);
-  fragmentRegistry.register(mcpResourcesFragment);
+    // Agent collaboration
+    fragmentRegistry.register(availableAgentsFragment);
 
+    // Behavioral guidance
+    // voice-mode and referenced-article are registered via side effects
+
+    // Context and learning
+    fragmentRegistry.register(retrievedLessonsFragment);
+    fragmentRegistry.register(ragInstructionsFragment);
+    fragmentRegistry.register(mcpResourcesFragment);
 }
 
 // Auto-register all fragments on import

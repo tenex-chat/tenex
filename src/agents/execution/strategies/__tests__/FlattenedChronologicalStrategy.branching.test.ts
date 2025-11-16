@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { ThreadService } from "@/conversations/services/ThreadService";
+import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 
 /**
  * Test filtering in branching conversations:
@@ -57,7 +57,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
         event2.tags = [
             ["e", event1.id],
             ["E", event1.id],
-            ["p", AGENT_A_PUBKEY]
+            ["p", AGENT_A_PUBKEY],
         ];
         event2.sig = "sig2";
         events.push(event2);
@@ -73,7 +73,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             ["e", event2.id],
             ["E", event1.id],
             ["p", USER_PUBKEY],
-            ["p", AGENT_B_PUBKEY]
+            ["p", AGENT_B_PUBKEY],
         ];
         event3.sig = "sig3";
         events.push(event3);
@@ -89,7 +89,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             ["e", event3.id],
             ["E", event1.id],
             ["p", AGENT_A_PUBKEY],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event4.sig = "sig4";
         events.push(event4);
@@ -104,7 +104,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
         event5.tags = [
             ["e", event1.id],
             ["E", event1.id],
-            ["p", AGENT_C_PUBKEY]
+            ["p", AGENT_C_PUBKEY],
         ];
         event5.sig = "sig5";
         events.push(event5);
@@ -119,7 +119,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
         event6.tags = [
             ["e", event5.id],
             ["E", event1.id],
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         event6.sig = "sig6";
         events.push(event6);
@@ -131,7 +131,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             participants: new Set([USER_PUBKEY, AGENT_A_PUBKEY, AGENT_B_PUBKEY, AGENT_C_PUBKEY]),
             agentStates: new Map(),
             metadata: {},
-            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() }
+            executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         } as Conversation;
 
         strategy = new FlattenedChronologicalStrategy();
@@ -144,7 +144,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             pubkey: AGENT_B_PUBKEY,
             role: "assistant",
             instructions: "Test Agent B",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -155,17 +155,17 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             projectPath: "/test/path",
             triggeringEvent: events[3], // event4 = Agent B's reply
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[3]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== Messages for Agent B ===");
@@ -174,16 +174,16 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
         });
 
         // Should see root
-        expect(messageContents.some(c => c.includes("I need help with something"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("I need help with something"))).toBe(true);
 
         // Should see branch A start
-        expect(messageContents.some(c => c.includes("@agent-a can you help"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-a can you help"))).toBe(true);
 
         // Should see Agent A's reply (mentions Agent B)
-        expect(messageContents.some(c => c.includes("let me check with @agent-b"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("let me check with @agent-b"))).toBe(true);
 
         // Should see its own reply
-        expect(messageContents.some(c => c.includes("I can help with that"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("I can help with that"))).toBe(true);
     });
 
     it("Agent B should NOT see unrelated Branch C", async () => {
@@ -193,7 +193,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             pubkey: AGENT_B_PUBKEY,
             role: "assistant",
             instructions: "Test Agent B",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -204,22 +204,22 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             projectPath: "/test/path",
             triggeringEvent: events[3], // event4 = Agent B's reply
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[3]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Should NOT see Branch C messages
-        expect(messageContents.some(c => c.includes("@agent-c different question"))).toBe(false);
-        expect(messageContents.some(c => c.includes("Here's the answer"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("@agent-c different question"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("Here's the answer"))).toBe(false);
     });
 
     it("Agent C should see its own branch but NOT Branch A details", async () => {
@@ -229,7 +229,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             pubkey: AGENT_C_PUBKEY,
             role: "assistant",
             instructions: "Test Agent C",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -240,17 +240,17 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             projectPath: "/test/path",
             triggeringEvent: events[4], // event5 = User asking Agent C
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[4]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== Messages for Agent C ===");
@@ -259,20 +259,20 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
         });
 
         // Should see root (in thread path)
-        expect(messageContents.some(c => c.includes("I need help with something"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("I need help with something"))).toBe(true);
 
         // Should see message targeted to it
-        expect(messageContents.some(c => c.includes("@agent-c different question"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-c different question"))).toBe(true);
 
         // WILL see Branch A start (root-level sibling) because of root-level sibling inclusion
         // This is correct behavior - root-level conversations are collaborative
-        expect(messageContents.some(c => c.includes("@agent-a can you help"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-a can you help"))).toBe(true);
 
         // Should NOT see deeper Branch A messages (Agent A -> Agent B exchange)
         // because Agent C's triggering event is at root level, it only sees root-level siblings
         // Event3 ("let me check...") is depth 3 (parent=event2), Event4 is depth 4
-        expect(messageContents.some(c => c.includes("let me check with @agent-b"))).toBe(false);
-        expect(messageContents.some(c => c.includes("I can help with that"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("let me check with @agent-b"))).toBe(false);
+        expect(messageContents.some((c) => c.includes("I can help with that"))).toBe(false);
     });
 
     it("Agent A should see messages where it participated across branches", async () => {
@@ -282,7 +282,7 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             pubkey: AGENT_A_PUBKEY,
             role: "assistant",
             instructions: "Test Agent A",
-            tools: []
+            tools: [],
         };
 
         const threadService = new ThreadService();
@@ -294,24 +294,24 @@ describe("FlattenedChronologicalStrategy - Branching Conversations", () => {
             projectPath: "/test/path",
             triggeringEvent: events[1], // event2 = User asking Agent A
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
-            isDelegationCompletion: false
+            isDelegationCompletion: false,
         } as ExecutionContext;
 
         const messages = await strategy.buildMessages(mockContext, events[1]);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Should see its own branch
-        expect(messageContents.some(c => c.includes("@agent-a can you help"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-a can you help"))).toBe(true);
 
         // WILL see Branch C because of root-level sibling inclusion
         // All root-level replies are visible to agents responding at root level
-        expect(messageContents.some(c => c.includes("@agent-c different question"))).toBe(true);
+        expect(messageContents.some((c) => c.includes("@agent-c different question"))).toBe(true);
     });
 });

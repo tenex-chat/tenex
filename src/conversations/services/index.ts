@@ -1,16 +1,16 @@
 export {
-  type IAgentResolver,
-  MockAgentResolver,
-  ProjectAgentResolver,
-  StandaloneAgentResolver,
+    type IAgentResolver,
+    MockAgentResolver,
+    ProjectAgentResolver,
+    StandaloneAgentResolver,
 } from "./AgentResolver";
 export { AgentMetadataStore } from "./AgentMetadataStore";
 export { ConversationCoordinator } from "./ConversationCoordinator";
 export { ConversationEventProcessor } from "./ConversationEventProcessor";
 export {
-  ConversationPersistenceService,
-  createFileSystemPersistenceService,
-  type IConversationPersistenceService,
-  InMemoryPersistenceAdapter,
+    ConversationPersistenceService,
+    createFileSystemPersistenceService,
+    type IConversationPersistenceService,
+    InMemoryPersistenceAdapter,
 } from "./ConversationPersistenceService";
 export { ConversationStore } from "./ConversationStore";

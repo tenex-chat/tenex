@@ -17,11 +17,11 @@ import { threadingWorkflow } from "./threading-workflow";
  * All available mock scenarios for testing
  */
 export const allScenarios: MockLLMScenario[] = [
-  errorHandlingScenario,
-  statePersistenceScenario,
-  performanceTestingScenario,
-  networkResilienceScenario,
-  threadingWorkflow,
+    errorHandlingScenario,
+    statePersistenceScenario,
+    performanceTestingScenario,
+    networkResilienceScenario,
+    threadingWorkflow,
 ];
 
 /**
@@ -36,16 +36,16 @@ allScenarios.push(...concurrencyWorkflowScenarios);
  * Get a specific scenario by name
  */
 export function getScenario(name: string): MockLLMScenario | undefined {
-  return allScenarios.find((s) => s.name === name);
+    return allScenarios.find((s) => s.name === name);
 }
 
 /**
  * Create a custom scenario for specific test cases
  */
 export function createScenario(
-  name: string,
-  description: string,
-  responses: MockLLMScenario["responses"]
+    name: string,
+    description: string,
+    responses: MockLLMScenario["responses"]
 ): MockLLMScenario {
-  return { name, description, responses };
+    return { name, description, responses };
 }

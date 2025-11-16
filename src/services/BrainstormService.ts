@@ -1,16 +1,22 @@
-import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { BrainstormStrategy } from "@/agents/execution/strategies/BrainstormStrategy";
+import type { ExecutionContext } from "@/agents/execution/types";
+import type { AgentInstance } from "@/agents/types";
 import { ConversationCoordinator } from "@/conversations";
-import type { Conversation } from "@/conversations/types";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
-import type { ProjectContext } from "@/services/ProjectContext";
+import type { Conversation } from "@/conversations/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import {
+    MAX_REASON_LENGTH,
+    NostrKind,
+    NostrTag,
+    TagValue,
+    isBrainstormEvent,
+} from "@/nostr/constants";
 import { getNDK } from "@/nostr/ndkClient";
-import { NostrKind, NostrTag, TagValue, MAX_REASON_LENGTH, isBrainstormEvent } from "@/nostr/constants";
-import { logger } from "@/utils/logger";
+import type { ProjectContext } from "@/services/ProjectContext";
 import { safeParseJSON } from "@/utils/json-parser";
+import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 interface BrainstormResponse {
@@ -18,7 +24,6 @@ interface BrainstormResponse {
     content: string;
     event: NDKEvent;
 }
-
 
 interface ParsedBrainstormEvent {
     moderator: AgentInstance;
@@ -31,11 +36,9 @@ interface ParsedBrainstormEvent {
  */
 export class BrainstormService {
     private conversationCoordinator: ConversationCoordinator | null = null;
-    
-    constructor(
-        private projectContext: ProjectContext
-    ) {}
-    
+
+    constructor(private projectContext: ProjectContext) {}
+
     /**
      * Get or create a conversation coordinator instance
      */
@@ -54,15 +57,15 @@ export class BrainstormService {
      */
     async start(event: NDKEvent): Promise<void> {
         logger.info("[BrainstormService] Starting brainstorming session", {
-            eventId: event.id?.substring(0, 8)
+            eventId: event.id?.substring(0, 8),
         });
-        
+
         try {
             await this.runBrainstorm(event);
             logger.info("[BrainstormService] Brainstorming session completed");
         } catch (error) {
             logger.error("[BrainstormService] Failed to complete brainstorm", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
         }
     }
@@ -82,11 +85,7 @@ export class BrainstormService {
         if (!conversation) return;
 
         // Execute participants
-        const responses = await this.executeParticipants(
-            participants,
-            event,
-            conversation
-        );
+        const responses = await this.executeParticipants(participants, event, conversation);
 
         if (responses.length === 0) {
             logger.error("[BrainstormService] No responses collected");
@@ -145,7 +144,7 @@ export class BrainstormService {
 
         logger.info("[BrainstormService] Brainstorm participants resolved", {
             moderator: moderator.name,
-            participants: participants.map(p => p.name)
+            participants: participants.map((p) => p.name),
         });
 
         return { moderator, participants };
@@ -156,18 +155,18 @@ export class BrainstormService {
      */
     private resolveParticipants(pubkeys: string[]): AgentInstance[] {
         const participants: AgentInstance[] = [];
-        
+
         for (const pubkey of pubkeys) {
             const agent = this.projectContext.getAgentByPubkey(pubkey);
             if (agent) {
                 participants.push(agent);
             } else {
-                logger.debug("[BrainstormService] Participant agent not found", { 
-                    pubkey: pubkey.substring(0, 8) 
+                logger.debug("[BrainstormService] Participant agent not found", {
+                    pubkey: pubkey.substring(0, 8),
                 });
             }
         }
-        
+
         return participants;
     }
 
@@ -180,7 +179,7 @@ export class BrainstormService {
             return await coordinator.createConversation(event);
         } catch (error) {
             logger.error("[BrainstormService] Failed to create conversation", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
             return null;
         }
@@ -195,14 +194,14 @@ export class BrainstormService {
         conversation: Conversation
     ): Promise<BrainstormResponse[]> {
         logger.debug("[BrainstormService] Executing participants", {
-            count: participants.length
+            count: participants.length,
         });
 
         const coordinator = await this.getConversationCoordinator();
 
         // Execute all participants in parallel and get their responses directly
         const results = await Promise.allSettled(
-            participants.map(participant =>
+            participants.map((participant) =>
                 this.executeParticipant(participant, event, conversation, coordinator)
             )
         );
@@ -215,11 +214,11 @@ export class BrainstormService {
             } else if (result.status === "rejected") {
                 logger.error("[BrainstormService] Participant execution failed", {
                     participant: participants[index].name,
-                    error: result.reason
+                    error: result.reason,
                 });
             } else {
                 logger.debug("[BrainstormService] Participant produced no response", {
-                    participant: participants[index].name
+                    participant: participants[index].name,
                 });
             }
         }
@@ -237,7 +236,7 @@ export class BrainstormService {
         coordinator: ConversationCoordinator
     ): Promise<BrainstormResponse | null> {
         logger.debug("[BrainstormService] Executing participant", {
-            name: participant.name
+            name: participant.name,
         });
 
         const context: ExecutionContext = {
@@ -257,7 +256,7 @@ export class BrainstormService {
             return {
                 agent: participant,
                 content: responseEvent.content,
-                event: responseEvent
+                event: responseEvent,
             };
         }
 
@@ -277,7 +276,7 @@ export class BrainstormService {
         try {
             logger.debug("[BrainstormService] Running moderation", {
                 moderator: moderator.name,
-                responseCount: responses.length
+                responseCount: responses.length,
             });
 
             // Execute moderator with full context using the real brainstorm root
@@ -292,7 +291,9 @@ export class BrainstormService {
             };
 
             // Use BrainstormStrategy for proper context building
-            const { BrainstormStrategy } = await import("@/agents/execution/strategies/BrainstormStrategy");
+            const { BrainstormStrategy } = await import(
+                "@/agents/execution/strategies/BrainstormStrategy"
+            );
             const strategy = new BrainstormStrategy();
             const executor = new AgentExecutor(undefined, strategy);
 
@@ -309,11 +310,13 @@ export class BrainstormService {
 
             // Find indices for all selected agents
             for (const pubkey of selectedAgentPubkeys) {
-                const index = responses.findIndex(r => r.agent.pubkey === pubkey);
+                const index = responses.findIndex((r) => r.agent.pubkey === pubkey);
                 if (index !== -1) {
                     chosenIndices.push(index);
                 } else {
-                    logger.warn("[BrainstormService] Selected agent not found in responses", { pubkey });
+                    logger.warn("[BrainstormService] Selected agent not found in responses", {
+                        pubkey,
+                    });
                 }
             }
 
@@ -324,19 +327,19 @@ export class BrainstormService {
 
             const choice = {
                 chosenIndices,
-                reason: moderationResult.reasoning || "No specific reason provided"
+                reason: moderationResult.reasoning || "No specific reason provided",
             };
 
             logger.info("[BrainstormService] Moderation complete", {
                 selectedCount: chosenIndices.length,
-                chosenAgents: chosenIndices.map(i => responses[i].agent.name),
-                reason: choice.reason
+                chosenAgents: chosenIndices.map((i) => responses[i].agent.name),
+                reason: choice.reason,
             });
 
             return choice;
         } catch (error) {
             logger.error("[BrainstormService] Moderation failed", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
             return null;
         }
@@ -364,7 +367,7 @@ export class BrainstormService {
             );
         } catch (error) {
             logger.error("[BrainstormService] Failed to publish selection", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
         }
     }
@@ -382,36 +385,36 @@ export class BrainstormService {
     ): Promise<void> {
         const ndk = getNDK();
         const selectionEvent = new NDKEvent(ndk);
-        
+
         // Build selection event
         selectionEvent.kind = NostrKind.REACTION;
         selectionEvent.content = TagValue.REACTION_POSITIVE;
         selectionEvent.pubkey = moderator.pubkey;
-        
+
         selectionEvent.tags = [
             [NostrTag.ROOT_EVENT, brainstormRoot.id],
             [NostrTag.EVENT, selectedResponse.id],
             [NostrTag.PUBKEY, selectedAgent.pubkey],
         ];
-        
+
         // Add optional tags
         const aTag = brainstormRoot.tagValue(NostrTag.REPLACEABLE);
         if (aTag) {
             selectionEvent.tags.push([NostrTag.REPLACEABLE, aTag]);
         }
-        
+
         selectionEvent.tags.push([NostrTag.BRAINSTORM_SELECTION]);
-        
+
         if (reason) {
             selectionEvent.tags.push([NostrTag.REASON, reason.substring(0, MAX_REASON_LENGTH)]);
         }
-        
+
         // Sign and publish
         await moderator.sign(selectionEvent);
         await selectionEvent.publish();
-        
+
         logger.debug("[BrainstormService] Published selection event", {
-            selectionId: selectionEvent.id?.substring(0, 8)
+            selectionId: selectionEvent.id?.substring(0, 8),
         });
     }
 
@@ -421,10 +424,11 @@ export class BrainstormService {
     async handleFollowUp(event: NDKEvent): Promise<void> {
         try {
             logger.info("[BrainstormService] Handling brainstorm follow-up", {
-                eventId: event.id?.substring(0, 8)
+                eventId: event.id?.substring(0, 8),
             });
 
-            const isFromParticipant = this.projectContext.getAgentByPubkey(event.pubkey) !== undefined;
+            const isFromParticipant =
+                this.projectContext.getAgentByPubkey(event.pubkey) !== undefined;
 
             if (!isFromParticipant) {
                 // User follow-up - start new brainstorm round
@@ -435,7 +439,7 @@ export class BrainstormService {
             }
         } catch (error) {
             logger.error("[BrainstormService] Failed to handle follow-up", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
         }
     }
@@ -447,7 +451,7 @@ export class BrainstormService {
         const coordinator = await this.getConversationCoordinator();
         const resolver = new ConversationResolver(coordinator);
         const { conversation } = await resolver.resolveConversationForEvent(event);
-        
+
         if (!conversation) {
             logger.error("[BrainstormService] Could not resolve conversation for follow-up");
             return;
@@ -460,10 +464,11 @@ export class BrainstormService {
         }
 
         // Find winning response
-        const winningResponse = conversation.history.find(e =>
-            e.tagValue(NostrTag.EVENT) === rootEvent.id && 
-            !e.tagValue(NostrTag.NOT_CHOSEN) &&
-            e.kind === NostrKind.GENERIC_REPLY
+        const winningResponse = conversation.history.find(
+            (e) =>
+                e.tagValue(NostrTag.EVENT) === rootEvent.id &&
+                !e.tagValue(NostrTag.NOT_CHOSEN) &&
+                e.kind === NostrKind.GENERIC_REPLY
         );
 
         if (!winningResponse) {
@@ -511,16 +516,20 @@ export class BrainstormService {
 
             const llmService = moderator.createLLMService();
 
-            const result = await llmService.complete([
-                {
-                    role: "system",
-                    content: "You are evaluating if a follow-up comment adds value to a brainstorm discussion. Respond ONLY with valid JSON: {\"is_valuable\": true/false, \"reason\": \"<explanation>\"}"
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ], {});
+            const result = await llmService.complete(
+                [
+                    {
+                        role: "system",
+                        content:
+                            'You are evaluating if a follow-up comment adds value to a brainstorm discussion. Respond ONLY with valid JSON: {"is_valuable": true/false, "reason": "<explanation>"}',
+                    },
+                    {
+                        role: "user",
+                        content: prompt,
+                    },
+                ],
+                {}
+            );
 
             const parsed = safeParseJSON<{ is_valuable: boolean; reason: string }>(
                 result.text,
@@ -530,7 +539,7 @@ export class BrainstormService {
             return parsed?.is_valuable === true;
         } catch (error) {
             logger.error("[BrainstormService] Failed to evaluate follow-up", {
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             });
             return false;
         }
@@ -562,11 +571,7 @@ export class BrainstormService {
         }
 
         // Execute participants
-        const responses = await this.executeParticipants(
-            participants,
-            event,
-            conversation
-        );
+        const responses = await this.executeParticipants(participants, event, conversation);
 
         if (responses.length === 0) {
             logger.error("[BrainstormService] No follow-up responses collected");
@@ -586,7 +591,7 @@ export class BrainstormService {
             moderator,
             event.content || "",
             responses,
-            rootEvent,  // Use the original brainstorm root event
+            rootEvent, // Use the original brainstorm root event
             conversation
         );
 
@@ -620,15 +625,16 @@ export class BrainstormService {
     private buildModerationPrompt(originalPrompt: string, responses: BrainstormResponse[]): string {
         let prompt = `Original question/prompt:\n${originalPrompt}\n\n`;
         prompt += `You have ${responses.length} responses to choose from:\n\n`;
-        
+
         for (const [i, response] of responses.entries()) {
             prompt += `Option ${i + 1} (from ${response.agent.name}):\n`;
             prompt += `${response.content}\n\n`;
         }
-        
-        prompt += "Choose the BEST response based on accuracy, completeness, clarity, and relevance. ";
+
+        prompt +=
+            "Choose the BEST response based on accuracy, completeness, clarity, and relevance. ";
         prompt += "Respond with JSON only.";
-        
+
         return prompt;
     }
 
@@ -640,12 +646,13 @@ export class BrainstormService {
         winningResponse: string,
         followUp: string
     ): string {
-        return `Original brainstorm prompt:\n${originalPrompt}\n\n` +
-               `Winning response:\n${winningResponse}\n\n` +
-               `Follow-up comment:\n${followUp}\n\n` +
-               "Evaluate if this follow-up adds significant value, provides important corrections, " +
-               "or contributes meaningful insights to the discussion. " +
-               "Be selective - only approve truly valuable additions.";
+        return (
+            `Original brainstorm prompt:\n${originalPrompt}\n\n` +
+            `Winning response:\n${winningResponse}\n\n` +
+            `Follow-up comment:\n${followUp}\n\n` +
+            "Evaluate if this follow-up adds significant value, provides important corrections, " +
+            "or contributes meaningful insights to the discussion. " +
+            "Be selective - only approve truly valuable additions."
+        );
     }
-
 }

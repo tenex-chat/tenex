@@ -31,4 +31,4 @@ export const NDKKind = {
     TenexStopCommand: 24134 as BaseNDKKind,
 } as const;
 
-export type NDKKind = typeof NDKKind[keyof typeof NDKKind];
+export type NDKKind = (typeof NDKKind)[keyof typeof NDKKind];

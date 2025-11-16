@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { ExecutionContext } from "../../types";
+import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 
 /**
  * Test for condensed delegation XML format
@@ -55,10 +55,13 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             ["e", userEvent.id, "", "root"],
             ["p", USER_PUBKEY],
             ["tool", "delegate_phase"],
-            ["tool-args", JSON.stringify({
-                recipients: ["nostr-expert"],
-                request: "Tell me one fact about Nostr, just 2 sentences max"
-            })]
+            [
+                "tool-args",
+                JSON.stringify({
+                    recipients: ["nostr-expert"],
+                    request: "Tell me one fact about Nostr, just 2 sentences max",
+                }),
+            ],
         ];
         toolCallEvent.sig = "sig2";
         events.push(toolCallEvent);
@@ -67,7 +70,8 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         const delegationEvent = new NDKEvent();
         delegationEvent.id = "delegation-event-789";
         delegationEvent.pubkey = PM_PUBKEY;
-        delegationEvent.content = "@nostr-expert: Tell me one fact about Nostr, just 2 sentences max";
+        delegationEvent.content =
+            "@nostr-expert: Tell me one fact about Nostr, just 2 sentences max";
         delegationEvent.kind = 1111;
         delegationEvent.created_at = 1002;
         delegationEvent.tags = [
@@ -75,7 +79,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             ["p", NOSTR_EXPERT_PUBKEY],
             ["p", USER_PUBKEY],
             ["phase", "chat"],
-            ["phase-instructions", "Please provide a brief fact"]
+            ["phase-instructions", "Please provide a brief fact"],
         ];
         delegationEvent.sig = "sig3";
         events.push(delegationEvent);
@@ -84,14 +88,15 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         const responseEvent = new NDKEvent();
         responseEvent.id = "response-event-abc";
         responseEvent.pubkey = NOSTR_EXPERT_PUBKEY;
-        responseEvent.content = "Nostr is a decentralized protocol where users are identified by cryptographic keys rather than usernames, and all events are cryptographically signed by the author. The protocol uses relays as simple message-passing servers that store and forward events without validating their content.";
+        responseEvent.content =
+            "Nostr is a decentralized protocol where users are identified by cryptographic keys rather than usernames, and all events are cryptographically signed by the author. The protocol uses relays as simple message-passing servers that store and forward events without validating their content.";
         responseEvent.kind = 1111;
         responseEvent.created_at = 1003;
         responseEvent.tags = [
             ["e", delegationEvent.id, "", "reply"],
             ["e", userEvent.id, "", "root"],
             ["p", PM_PUBKEY], // This p-tags PM, making it a delegation response
-            ["p", USER_PUBKEY]
+            ["p", USER_PUBKEY],
         ];
         responseEvent.sig = "sig4";
         events.push(responseEvent);
@@ -100,7 +105,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         mockConversation = {
             id: CONVERSATION_ID,
             history: events,
-            participants: new Set([USER_PUBKEY, PM_PUBKEY, NOSTR_EXPERT_PUBKEY])
+            participants: new Set([USER_PUBKEY, PM_PUBKEY, NOSTR_EXPERT_PUBKEY]),
         } as Conversation;
 
         // Register the delegation
@@ -111,7 +116,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             pubkey: PM_PUBKEY,
             role: "PM",
             instructions: "Test PM",
-            tools: []
+            tools: [],
         };
         const nostrExpertAgent: AgentInstance = {
             name: "Nostr Expert",
@@ -119,19 +124,21 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             pubkey: NOSTR_EXPERT_PUBKEY,
             role: "Expert",
             instructions: "Test Expert",
-            tools: []
+            tools: [],
         };
 
         await delegationRegistry.registerDelegation({
             delegationEventId: delegationEvent.id,
-            recipients: [{
-                pubkey: NOSTR_EXPERT_PUBKEY,
-                request: "Tell me one fact about Nostr, just 2 sentences max",
-                phase: "chat"
-            }],
+            recipients: [
+                {
+                    pubkey: NOSTR_EXPERT_PUBKEY,
+                    request: "Tell me one fact about Nostr, just 2 sentences max",
+                    phase: "chat",
+                },
+            ],
             delegatingAgent: pmAgent,
             rootConversationId: CONVERSATION_ID,
-            originalRequest: "Tell me one fact about Nostr, just 2 sentences max"
+            originalRequest: "Tell me one fact about Nostr, just 2 sentences max",
         });
 
         // Update the delegation record to include the slug (normally done by DelegationService)
@@ -159,12 +166,12 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             projectPath: "/test/path",
             triggeringEvent: events[events.length - 1], // Default to last event
             conversationCoordinator: {
-                threadService
+                threadService,
             } as any,
             agentPublisher: {} as any,
             getConversation: () => mockConversation,
             isDelegationCompletion: false,
-            debug: true // Enable debug mode to see event IDs
+            debug: true, // Enable debug mode to see event IDs
         } as ExecutionContext;
     });
 
@@ -173,8 +180,8 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         console.log("\n=== All Messages ===");
@@ -183,8 +190,8 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         });
 
         // Should have a single delegation XML block
-        const delegationXmlMessages = messageContents.filter(content =>
-            content.includes('<delegation') && content.includes('</delegation>')
+        const delegationXmlMessages = messageContents.filter(
+            (content) => content.includes("<delegation") && content.includes("</delegation>")
         );
         expect(delegationXmlMessages.length).toBe(1);
 
@@ -194,12 +201,12 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         expect(delegationXml).toContain('phase="chat"');
 
         // Should include delegation-request tag
-        expect(delegationXml).toContain('<delegation-request>');
-        expect(delegationXml).toContain('Tell me one fact about Nostr');
+        expect(delegationXml).toContain("<delegation-request>");
+        expect(delegationXml).toContain("Tell me one fact about Nostr");
 
         // Should include response
         expect(delegationXml).toContain('<response from="nostr-expert"');
-        expect(delegationXml).toContain('decentralized protocol');
+        expect(delegationXml).toContain("decentralized protocol");
     });
 
     it("should NOT include separate phase transition message", async () => {
@@ -207,14 +214,14 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Should NOT have a separate phase transition message
-        const phaseTransitionMessages = messageContents.filter(content =>
-            content.includes('=== PHASE TRANSITION:') &&
-            !content.includes('<delegation')
+        const phaseTransitionMessages = messageContents.filter(
+            (content) =>
+                content.includes("=== PHASE TRANSITION:") && !content.includes("<delegation")
         );
         expect(phaseTransitionMessages.length).toBe(0);
     });
@@ -224,15 +231,16 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Should NOT have the delegation request as a separate assistant message
         // (outside the XML block)
-        const standaloneRequestMessages = messageContents.filter(content =>
-            content.includes('@nostr-expert: Tell me one fact') &&
-            !content.includes('<delegation')
+        const standaloneRequestMessages = messageContents.filter(
+            (content) =>
+                content.includes("@nostr-expert: Tell me one fact") &&
+                !content.includes("<delegation")
         );
         expect(standaloneRequestMessages.length).toBe(0);
     });
@@ -242,15 +250,16 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         mockContext.triggeringEvent = triggeringEvent;
         const messages = await strategy.buildMessages(mockContext, triggeringEvent);
 
-        const messageContents = messages.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        const messageContents = messages.map((m) =>
+            typeof m.content === "string" ? m.content : JSON.stringify(m.content)
         );
 
         // Should NOT have the response as a separate message outside the XML
-        const standaloneResponseMessages = messageContents.filter(content =>
-            content.includes('decentralized protocol') &&
-            !content.includes('<delegation') &&
-            !content.includes('[delegation result from')
+        const standaloneResponseMessages = messageContents.filter(
+            (content) =>
+                content.includes("decentralized protocol") &&
+                !content.includes("<delegation") &&
+                !content.includes("[delegation result from")
         );
         expect(standaloneResponseMessages.length).toBe(0);
     });

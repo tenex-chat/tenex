@@ -1,6 +1,5 @@
 import type { AgentInstance } from "./types";
 
-
 /**
  * Core tools that ALL agents must have access to regardless of configuration.
  * These are fundamental capabilities that every agent needs.
@@ -26,29 +25,35 @@ export const CORE_AGENT_TOOLS = [
  * PM-specific tools here. Tool assignment should be done via agent definition events.
  */
 export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
-  // Default tools for all agents
-  // Specific tools should be configured via agent definition events
-  // NOTE: delegate, delegate_phase, delegate_external, and delegate_followup are NOT included here
-  // They are added via getDelegateToolsForAgent based on PM status
-  const tools = [
-    "read_path",
-    "lesson_learn", 
-    "codebase_search",
-    "claude_code",
-    "shell",
-    "discover_capabilities",
-    "agents_hire",
-    "agents_discover",
-    "nostr_projects",
-  ];
+    // Default tools for all agents
+    // Specific tools should be configured via agent definition events
+    // NOTE: delegate, delegate_phase, delegate_external, and delegate_followup are NOT included here
+    // They are added via getDelegateToolsForAgent based on PM status
+    const tools = [
+        "read_path",
+        "lesson_learn",
+        "codebase_search",
+        "claude_code",
+        "shell",
+        "discover_capabilities",
+        "agents_hire",
+        "agents_discover",
+        "nostr_projects",
+    ];
 
-  return tools;
+    return tools;
 }
 
 /**
  * Delegate tools that should be excluded from configuration and TenexProjectStatus events
  */
-export const DELEGATE_TOOLS = ["ask", "delegate", "delegate_phase", "delegate_external", "delegate_followup"] as const;
+export const DELEGATE_TOOLS = [
+    "ask",
+    "delegate",
+    "delegate_phase",
+    "delegate_external",
+    "delegate_followup",
+] as const;
 
 /**
  * Phase management tools
@@ -60,27 +65,27 @@ export const PHASE_MANAGEMENT_TOOLS = ["phase_add", "phase_remove"] as const;
  * This is the SINGLE source of truth for delegate tool assignment
  */
 export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): string[] {
-  const tools: string[] = [];
+    const tools: string[] = [];
 
-  // All agents get ask tool
-  tools.push("ask");
+    // All agents get ask tool
+    tools.push("ask");
 
-  // Check if agent has phases defined
-  const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
+    // Check if agent has phases defined
+    const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
 
-  if (hasPhases) {
-    // Agents with phases get delegate_phase
-    tools.push("delegate_phase");
-    // Also add phase management tools by default for agents with phases
-    tools.push("phase_add", "phase_remove");
-  } else {
-    // Agents without phases get delegate
-    tools.push("delegate");
-  }
+    if (hasPhases) {
+        // Agents with phases get delegate_phase
+        tools.push("delegate_phase");
+        // Also add phase management tools by default for agents with phases
+        tools.push("phase_add", "phase_remove");
+    } else {
+        // Agents without phases get delegate
+        tools.push("delegate");
+    }
 
-  // All agents get delegate_external and delegate_followup
-  tools.push("delegate_external");
-  tools.push("delegate_followup");
+    // All agents get delegate_external and delegate_followup
+    tools.push("delegate_external");
+    tools.push("delegate_followup");
 
-  return tools;
+    return tools;
 }

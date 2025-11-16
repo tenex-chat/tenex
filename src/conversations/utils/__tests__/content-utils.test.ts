@@ -2,15 +2,15 @@
  * Unit tests for content utilities - thinking block handling
  */
 
-import { describe, it, expect } from "vitest";
-import {
-    stripThinkingBlocks,
-    isOnlyThinkingBlocks,
-    hasThinkingBlocks,
-    countThinkingBlocks,
-    hasReasoningTag
-} from "../content-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { describe, expect, it } from "vitest";
+import {
+    countThinkingBlocks,
+    hasReasoningTag,
+    hasThinkingBlocks,
+    isOnlyThinkingBlocks,
+    stripThinkingBlocks,
+} from "../content-utils";
 
 describe("Content Utils - Thinking Block Handling", () => {
     describe("stripThinkingBlocks", () => {
@@ -21,15 +21,16 @@ describe("Content Utils - Thinking Block Handling", () => {
         });
 
         it("should remove multiple thinking blocks", () => {
-            const input = "Start <thinking>thought 1</thinking> middle <thinking>thought 2</thinking> end";
+            const input =
+                "Start <thinking>thought 1</thinking> middle <thinking>thought 2</thinking> end";
             const expected = "Start  middle  end";
-            expect(stripThinkingBlocks(input)).toBe(expected.replace(/\s+/g, ' ').trim());
+            expect(stripThinkingBlocks(input)).toBe(expected.replace(/\s+/g, " ").trim());
         });
 
         it("should handle thinking blocks with attributes", () => {
             const input = 'Text <thinking class="deep">internal</thinking> more text';
             const expected = "Text  more text";
-            expect(stripThinkingBlocks(input)).toBe(expected.replace(/\s+/g, ' ').trim());
+            expect(stripThinkingBlocks(input)).toBe(expected.replace(/\s+/g, " ").trim());
         });
 
         it("should handle case-insensitive thinking tags", () => {
@@ -37,10 +38,10 @@ describe("Content Utils - Thinking Block Handling", () => {
             const input2 = "Before <THINKING>thoughts</THINKING> after";
             const input3 = "Before <ThInKiNg>thoughts</ThInKiNg> after";
             const expected = "Before  after";
-            
-            expect(stripThinkingBlocks(input1)).toBe(expected.replace(/\s+/g, ' ').trim());
-            expect(stripThinkingBlocks(input2)).toBe(expected.replace(/\s+/g, ' ').trim());
-            expect(stripThinkingBlocks(input3)).toBe(expected.replace(/\s+/g, ' ').trim());
+
+            expect(stripThinkingBlocks(input1)).toBe(expected.replace(/\s+/g, " ").trim());
+            expect(stripThinkingBlocks(input2)).toBe(expected.replace(/\s+/g, " ").trim());
+            expect(stripThinkingBlocks(input3)).toBe(expected.replace(/\s+/g, " ").trim());
         });
 
         it("should handle multi-line thinking blocks", () => {
@@ -115,7 +116,9 @@ Line 3`;
     describe("isOnlyThinkingBlocks", () => {
         it("should return true for content with only thinking blocks", () => {
             expect(isOnlyThinkingBlocks("<thinking>only thoughts</thinking>")).toBe(true);
-            expect(isOnlyThinkingBlocks("<thinking>thought1</thinking><thinking>thought2</thinking>")).toBe(true);
+            expect(
+                isOnlyThinkingBlocks("<thinking>thought1</thinking><thinking>thought2</thinking>")
+            ).toBe(true);
             expect(isOnlyThinkingBlocks("  <thinking>thoughts</thinking>  ")).toBe(true);
         });
 
@@ -168,8 +171,14 @@ Line 3`;
         it("should count thinking blocks correctly", () => {
             expect(countThinkingBlocks("No blocks here")).toBe(0);
             expect(countThinkingBlocks("<thinking>one</thinking>")).toBe(1);
-            expect(countThinkingBlocks("<thinking>one</thinking> text <thinking>two</thinking>")).toBe(2);
-            expect(countThinkingBlocks("<thinking>1</thinking><thinking>2</thinking><thinking>3</thinking>")).toBe(3);
+            expect(
+                countThinkingBlocks("<thinking>one</thinking> text <thinking>two</thinking>")
+            ).toBe(2);
+            expect(
+                countThinkingBlocks(
+                    "<thinking>1</thinking><thinking>2</thinking><thinking>3</thinking>"
+                )
+            ).toBe(3);
         });
 
         it("should count case-insensitive blocks", () => {
@@ -185,13 +194,9 @@ Line 3`;
     describe("hasReasoningTag", () => {
         it("should detect reasoning tag", () => {
             const event = {
-                tags: [
-                    ["reasoning"],
-                    ["E", "root-id"],
-                    ["e", "parent-id"]
-                ]
+                tags: [["reasoning"], ["E", "root-id"], ["e", "parent-id"]],
             } as unknown as NDKEvent;
-            
+
             expect(hasReasoningTag(event)).toBe(true);
         });
 
@@ -200,10 +205,10 @@ Line 3`;
                 tags: [
                     ["E", "root-id"],
                     ["e", "parent-id"],
-                    ["p", "pubkey"]
-                ]
+                    ["p", "pubkey"],
+                ],
             } as unknown as NDKEvent;
-            
+
             expect(hasReasoningTag(event)).toBe(false);
         });
 
@@ -212,24 +217,24 @@ Line 3`;
             const event = {
                 tags: [
                     ["reasoning", "extra-value"],
-                    ["E", "root-id"]
-                ]
+                    ["E", "root-id"],
+                ],
             } as unknown as NDKEvent;
-            
+
             expect(hasReasoningTag(event)).toBe(false);
         });
 
         it("should handle events with no tags", () => {
             const event = {
-                tags: []
+                tags: [],
             } as unknown as NDKEvent;
-            
+
             expect(hasReasoningTag(event)).toBe(false);
         });
 
         it("should handle events with undefined tags", () => {
             const event = {} as unknown as NDKEvent;
-            
+
             expect(hasReasoningTag(event)).toBe(false);
         });
     });

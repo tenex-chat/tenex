@@ -1,17 +1,17 @@
-import type { PromptFragment } from "../core/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { PromptFragment } from "../core/types";
 
 /**
  * Fragment for debug mode meta-cognitive analysis
  * Applied when the user includes #debug in their message
  */
 export const debugModeFragment: PromptFragment = {
-  id: "debug-mode",
-  priority: 100, // High priority to ensure it appears after system prompt
-  template: (data: { enabled: boolean }) => {
-    if (!data.enabled) return "";
+    id: "debug-mode",
+    priority: 100, // High priority to ensure it appears after system prompt
+    template: (data: { enabled: boolean }) => {
+        if (!data.enabled) return "";
 
-    return `
+        return `
 === DEBUG MODE: META-COGNITIVE ANALYSIS REQUESTED ===
 
 The user has included "#debug" in their message. They are asking you to explain your decision-making process.
@@ -32,7 +32,7 @@ Be completely transparent about your internal process. If you made a mistake or 
 
 ONLY reply to the question being asked; do NOT perform any other action, do NOT call any tool. Do not apologize. Just transparently respond.
 === END DEBUG MODE ===`;
-  },
+    },
 };
 
 // Note: Fragment is registered in the fragments/index.ts file
@@ -41,5 +41,5 @@ ONLY reply to the question being asked; do NOT perform any other action, do NOT 
  * Helper function to check if debug mode is enabled
  */
 export function isDebugMode(triggeringEvent: NDKEvent): boolean {
-  return triggeringEvent.content.includes("#debug") || false;
+    return triggeringEvent.content.includes("#debug") || false;
 }

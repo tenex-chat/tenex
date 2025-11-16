@@ -1,9 +1,9 @@
+import { logger } from "@/utils/logger";
+import type { EmbeddingProvider } from "../EmbeddingProvider";
+import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
 import { RAGDatabaseManager } from "./RAGDatabaseManager";
 import { RAGOperations } from "./RAGOperations";
-import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
-import type { EmbeddingProvider } from "../EmbeddingProvider";
-import type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
-import { logger } from "@/utils/logger";
+import type { RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
 /**
  * Facade for RAG functionality
@@ -45,14 +45,11 @@ export class RAGService {
     private async initialize(): Promise<void> {
         try {
             logger.debug("Initializing RAGService components");
-            
+
             this.dbManager = new RAGDatabaseManager();
             this.embeddingProvider = await EmbeddingProviderFactory.create();
-            this.operations = new RAGOperations(
-                this.dbManager,
-                this.embeddingProvider
-            );
-            
+            this.operations = new RAGOperations(this.dbManager, this.embeddingProvider);
+
             logger.info("RAGService initialized successfully");
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -75,10 +72,7 @@ export class RAGService {
     /**
      * Add documents to a collection
      */
-    public async addDocuments(
-        collectionName: string,
-        documents: RAGDocument[]
-    ): Promise<void> {
+    public async addDocuments(collectionName: string, documents: RAGDocument[]): Promise<void> {
         await this.ensureInitialized();
         return this.operations.addDocuments(collectionName, documents);
     }
@@ -89,7 +83,7 @@ export class RAGService {
     public async query(
         collectionName: string,
         queryText: string,
-        topK: number = 5
+        topK = 5
     ): Promise<RAGQueryResult[]> {
         await this.ensureInitialized();
         return this.operations.performSemanticSearch(collectionName, queryText, topK);
@@ -117,13 +111,10 @@ export class RAGService {
      */
     public async setEmbeddingProvider(provider: EmbeddingProvider): Promise<void> {
         await this.ensureInitialized();
-        
+
         this.embeddingProvider = provider;
-        this.operations = new RAGOperations(
-            this.dbManager,
-            provider
-        );
-        
+        this.operations = new RAGOperations(this.dbManager, provider);
+
         logger.info("Embedding provider updated");
     }
 

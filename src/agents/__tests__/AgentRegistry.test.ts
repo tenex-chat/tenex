@@ -8,508 +8,510 @@ import { AgentRegistry } from "../AgentRegistry";
 
 // Mock file system
 mock.module("@/lib/fs", () => ({
-  fileExists: mock(),
-  readFile: mock(),
-  writeJsonFile: mock(),
-  ensureDirectory: mock(),
+    fileExists: mock(),
+    readFile: mock(),
+    writeJsonFile: mock(),
+    ensureDirectory: mock(),
 }));
 
 // Mock config service
 mock.module("@/services", () => ({
-  configService: {
-    loadTenexAgents: mock(),
-    saveProjectAgents: mock(),
-  },
-  getProjectContext: mock(),
+    configService: {
+        loadTenexAgents: mock(),
+        saveProjectAgents: mock(),
+    },
+    getProjectContext: mock(),
 }));
 
 // No more built-in agents to mock
 
 describe("AgentRegistry", () => {
-  let registry: AgentRegistry;
-  const testProjectPath = "/test/project";
+    let registry: AgentRegistry;
+    const testProjectPath = "/test/project";
 
-  beforeEach(() => {
-    // Reset mocks
-    (fs.fileExists as any).mockReset();
-    (fs.readFile as any).mockReset();
-    (fs.writeJsonFile as any).mockReset();
-    (fs.ensureDirectory as any).mockReset();
-    (configService.loadTenexAgents as any).mockReset();
-    (configService.saveProjectAgents as any).mockReset();
+    beforeEach(() => {
+        // Reset mocks
+        (fs.fileExists as any).mockReset();
+        (fs.readFile as any).mockReset();
+        (fs.writeJsonFile as any).mockReset();
+        (fs.ensureDirectory as any).mockReset();
+        (configService.loadTenexAgents as any).mockReset();
+        (configService.saveProjectAgents as any).mockReset();
 
-    registry = new AgentRegistry(testProjectPath);
-  });
-
-  describe("loadFromProject", () => {
-    it("should load agents from .tenex/agents.json", async () => {
-      const mockRegistry = {
-        developer: {
-          nsec: "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
-          file: "developer.json",
-        },
-        reviewer: {
-          nsec: "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
-          file: "reviewer.json",
-        },
-      };
-
-      const developerDefinition = {
-        name: "Developer",
-        role: "Software Developer",
-        expertise: "Full-stack development",
-        instructions: "Write clean code",
-        tools: ["read_path", "shell"],
-        llmConfig: "default",
-      };
-
-      const reviewerDefinition = {
-        name: "Reviewer",
-        role: "Code Reviewer",
-        expertise: "Code quality",
-        instructions: "Review code thoroughly",
-        tools: ["read_path"],
-        llmConfig: "fast",
-      };
-
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue(mockRegistry);
-      (fs.fileExists as any).mockImplementation(async (path: string) => {
-        return path.includes("developer.json") || path.includes("reviewer.json");
-      });
-      (fs.readFile as any).mockImplementation(async (path: string) => {
-        if (path.includes("developer.json")) {
-          return JSON.stringify(developerDefinition);
-        }
-        if (path.includes("reviewer.json")) {
-          return JSON.stringify(reviewerDefinition);
-        }
-        return "{}";
-      });
-
-      await registry.loadFromProject();
-
-      // Ensure agent developer
-      const developer = await registry.ensureAgent("developer", {
-        name: "Developer",
-        role: "Software Developer",
-        expertise: "Full-stack development",
-        instructions: "Write clean code",
-        nsec: "",
-        tools: ["read_path", "shell"],
-        llmConfig: "default",
-      });
-
-      expect(developer).toBeDefined();
-      expect(developer?.name).toBe("Developer");
-      expect(developer?.role).toBe("Software Developer");
-      // Tools should include requested tools plus core tools and delegate tools
-      expect(developer?.tools).toContain("read_path");
-      expect(developer?.tools).toContain("shell");
-      expect(developer?.tools).toContain("delegate");
-      expect(developer?.tools).toContain("lesson_get");
-      expect(developer?.tools).toContain("lesson_learn");
-      // Note: delegate_phase is only for PM agents, regular agents get delegate_external and delegate_followup
-      expect(developer?.tools).toContain("delegate_external");
-      expect(developer?.tools).toContain("delegate_followup");
-
-      // Ensure agent reviewer
-      const reviewer = await registry.ensureAgent("reviewer", {
-        name: "Reviewer",
-        role: "Code Reviewer",
-        expertise: "Code quality",
-        instructions: "Review code thoroughly",
-        nsec: "",
-        tools: ["read_path"],
-        llmConfig: "fast",
-      });
-
-      expect(reviewer).toBeDefined();
-      expect(reviewer?.name).toBe("Reviewer");
-      expect(reviewer?.role).toBe("Code Reviewer");
+        registry = new AgentRegistry(testProjectPath);
     });
 
-    it("should handle empty registry", async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
+    describe("loadFromProject", () => {
+        it("should load agents from .tenex/agents.json", async () => {
+            const mockRegistry = {
+                developer: {
+                    nsec: "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
+                    file: "developer.json",
+                },
+                reviewer: {
+                    nsec: "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
+                    file: "reviewer.json",
+                },
+            };
 
-      await registry.loadFromProject();
+            const developerDefinition = {
+                name: "Developer",
+                role: "Software Developer",
+                expertise: "Full-stack development",
+                instructions: "Write clean code",
+                tools: ["read_path", "shell"],
+                llmConfig: "default",
+            };
 
-      expect(configService.loadTenexAgents).toHaveBeenCalledWith(
-        path.join(testProjectPath, ".tenex")
-      );
+            const reviewerDefinition = {
+                name: "Reviewer",
+                role: "Code Reviewer",
+                expertise: "Code quality",
+                instructions: "Review code thoroughly",
+                tools: ["read_path"],
+                llmConfig: "fast",
+            };
+
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue(mockRegistry);
+            (fs.fileExists as any).mockImplementation(async (path: string) => {
+                return path.includes("developer.json") || path.includes("reviewer.json");
+            });
+            (fs.readFile as any).mockImplementation(async (path: string) => {
+                if (path.includes("developer.json")) {
+                    return JSON.stringify(developerDefinition);
+                }
+                if (path.includes("reviewer.json")) {
+                    return JSON.stringify(reviewerDefinition);
+                }
+                return "{}";
+            });
+
+            await registry.loadFromProject();
+
+            // Ensure agent developer
+            const developer = await registry.ensureAgent("developer", {
+                name: "Developer",
+                role: "Software Developer",
+                expertise: "Full-stack development",
+                instructions: "Write clean code",
+                nsec: "",
+                tools: ["read_path", "shell"],
+                llmConfig: "default",
+            });
+
+            expect(developer).toBeDefined();
+            expect(developer?.name).toBe("Developer");
+            expect(developer?.role).toBe("Software Developer");
+            // Tools should include requested tools plus core tools and delegate tools
+            expect(developer?.tools).toContain("read_path");
+            expect(developer?.tools).toContain("shell");
+            expect(developer?.tools).toContain("delegate");
+            expect(developer?.tools).toContain("lesson_get");
+            expect(developer?.tools).toContain("lesson_learn");
+            // Note: delegate_phase is only for PM agents, regular agents get delegate_external and delegate_followup
+            expect(developer?.tools).toContain("delegate_external");
+            expect(developer?.tools).toContain("delegate_followup");
+
+            // Ensure agent reviewer
+            const reviewer = await registry.ensureAgent("reviewer", {
+                name: "Reviewer",
+                role: "Code Reviewer",
+                expertise: "Code quality",
+                instructions: "Review code thoroughly",
+                nsec: "",
+                tools: ["read_path"],
+                llmConfig: "fast",
+            });
+
+            expect(reviewer).toBeDefined();
+            expect(reviewer?.name).toBe("Reviewer");
+            expect(reviewer?.role).toBe("Code Reviewer");
+        });
+
+        it("should handle empty registry", async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+
+            await registry.loadFromProject();
+
+            expect(configService.loadTenexAgents).toHaveBeenCalledWith(
+                path.join(testProjectPath, ".tenex")
+            );
+        });
+
+        it("should handle errors when loading registry", async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockRejectedValue(new Error("Failed to load"));
+
+            // Should not throw, but set empty registry
+            await registry.loadFromProject();
+
+            const agents = registry.getAllAgents();
+            expect(agents).toHaveLength(0);
+        });
     });
 
-    it("should handle errors when loading registry", async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockRejectedValue(new Error("Failed to load"));
+    describe("ensureAgent", () => {
+        beforeEach(async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (fs.fileExists as any).mockResolvedValue(false);
+            (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
-      // Should not throw, but set empty registry
-      await registry.loadFromProject();
+            await registry.loadFromProject();
+        });
 
-      const agents = registry.getAllAgents();
-      expect(agents).toHaveLength(0);
-    });
-  });
+        it("should create a new agent if it doesn't exist", async () => {
+            const config: AgentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                expertise: "Testing",
+                instructions: "Test everything",
+                nsec: "",
+                tools: ["shell"],
+                llmConfig: "default",
+            };
 
-  describe("ensureAgent", () => {
-    beforeEach(async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
-      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
-      (fs.fileExists as any).mockResolvedValue(false);
-      (fs.writeJsonFile as any).mockResolvedValue(undefined);
+            const agent = await registry.ensureAgent("tester", config);
 
-      await registry.loadFromProject();
-    });
+            expect(agent).toBeDefined();
+            expect(agent.name).toBe("TestAgent");
+            expect(agent.role).toBe("Tester");
+            expect(agent.signer).toBeDefined();
+            expect(agent.pubkey).toBeDefined();
+            expect(fs.writeJsonFile).toHaveBeenCalled();
+            expect(configService.saveProjectAgents).toHaveBeenCalled();
+        });
 
-    it("should create a new agent if it doesn't exist", async () => {
-      const config: AgentConfig = {
-        name: "TestAgent",
-        role: "Tester",
-        expertise: "Testing",
-        instructions: "Test everything",
-        nsec: "",
-        tools: ["shell"],
-        llmConfig: "default",
-      };
+        it("should generate nsec if not provided", async () => {
+            const config: AgentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                expertise: "Testing",
+                instructions: "Test everything",
+                nsec: "", // Empty nsec
+                tools: [],
+            };
 
-      const agent = await registry.ensureAgent("tester", config);
+            const agent = await registry.ensureAgent("tester", config);
 
-      expect(agent).toBeDefined();
-      expect(agent.name).toBe("TestAgent");
-      expect(agent.role).toBe("Tester");
-      expect(agent.signer).toBeDefined();
-      expect(agent.pubkey).toBeDefined();
-      expect(fs.writeJsonFile).toHaveBeenCalled();
-      expect(configService.saveProjectAgents).toHaveBeenCalled();
-    });
+            expect(agent.signer).toBeDefined();
+            expect(agent.signer).toBeDefined();
+            const user = await agent.signer.user();
+            expect(agent.pubkey).toBe(user.pubkey);
+        });
 
-    it("should generate nsec if not provided", async () => {
-      const config: AgentConfig = {
-        name: "TestAgent",
-        role: "Tester",
-        expertise: "Testing",
-        instructions: "Test everything",
-        nsec: "", // Empty nsec
-        tools: [],
-      };
+        it("should use provided nsec", async () => {
+            const testPrivateKey = Uint8Array.from([
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+                0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                0x1d, 0x1e, 0x1f, 0x20,
+            ]);
+            const nsec = nip19.nsecEncode(testPrivateKey);
 
-      const agent = await registry.ensureAgent("tester", config);
+            const config: AgentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                expertise: "Testing",
+                instructions: "Test everything",
+                nsec: nsec,
+                tools: [],
+            };
 
-      expect(agent.signer).toBeDefined();
-      expect(agent.signer).toBeDefined();
-      const user = await agent.signer.user();
-      expect(agent.pubkey).toBe(user.pubkey);
-    });
+            const agent = await registry.ensureAgent("tester", config);
 
-    it("should use provided nsec", async () => {
-      const testPrivateKey = Uint8Array.from([
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
-        0x1f, 0x20,
-      ]);
-      const nsec = nip19.nsecEncode(testPrivateKey);
+            expect(agent.signer).toBeDefined();
+            expect(agent.pubkey).toBeDefined();
+        });
 
-      const config: AgentConfig = {
-        name: "TestAgent",
-        role: "Tester",
-        expertise: "Testing",
-        instructions: "Test everything",
-        nsec: nsec,
-        tools: [],
-      };
+        it("should return existing agent if already registered", async () => {
+            const config: AgentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                expertise: "Testing",
+                instructions: "Test everything",
+                nsec: "",
+                tools: [],
+            };
 
-      const agent = await registry.ensureAgent("tester", config);
+            const agent1 = await registry.ensureAgent("tester", config);
 
-      expect(agent.signer).toBeDefined();
-      expect(agent.pubkey).toBeDefined();
-    });
+            // Clear write mock to check it's not called again
+            (fs.writeJsonFile as any).mockClear();
+            (configService.saveProjectAgents as any).mockClear();
 
-    it("should return existing agent if already registered", async () => {
-      const config: AgentConfig = {
-        name: "TestAgent",
-        role: "Tester",
-        expertise: "Testing",
-        instructions: "Test everything",
-        nsec: "",
-        tools: [],
-      };
+            const agent2 = await registry.ensureAgent("tester", config);
 
-      const agent1 = await registry.ensureAgent("tester", config);
+            expect(agent1).toBe(agent2);
+            expect(fs.writeJsonFile).not.toHaveBeenCalled();
+            expect(configService.saveProjectAgents).not.toHaveBeenCalled();
+        });
 
-      // Clear write mock to check it's not called again
-      (fs.writeJsonFile as any).mockClear();
-      (configService.saveProjectAgents as any).mockClear();
+        it("should save agent configuration to disk", async () => {
+            const config: AgentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                expertise: "Testing",
+                instructions: "Test everything",
+                nsec: "",
+                tools: ["read_path", "shell"],
+                llmConfig: "fast",
+            };
 
-      const agent2 = await registry.ensureAgent("tester", config);
+            await registry.ensureAgent("tester", config);
 
-      expect(agent1).toBe(agent2);
-      expect(fs.writeJsonFile).not.toHaveBeenCalled();
-      expect(configService.saveProjectAgents).not.toHaveBeenCalled();
-    });
+            // Check that writeJsonFile was called for the tester agent
+            const calls = (fs.writeJsonFile as any).mock.calls;
+            expect(calls.length).toBe(1);
 
-    it("should save agent configuration to disk", async () => {
-      const config: AgentConfig = {
-        name: "TestAgent",
-        role: "Tester",
-        expertise: "Testing",
-        instructions: "Test everything",
-        nsec: "",
-        tools: ["read_path", "shell"],
-        llmConfig: "fast",
-      };
+            const [filePath, content] = calls[0];
+            expect(filePath).toContain("tester.json");
+            expect(content.name).toBe("TestAgent");
+            expect(content.role).toBe("Tester");
+            expect(content.instructions).toBe("Test everything");
+            expect(content.llmConfig).toBe("fast");
+            // Tools should include all normalized tools
+            expect(content.tools).toContain("read_path");
+            expect(content.tools).toContain("shell");
+            expect(content.tools).toContain("delegate");
+            expect(content.tools).toContain("lesson_get");
 
-      await registry.ensureAgent("tester", config);
-
-      // Check that writeJsonFile was called for the tester agent
-      const calls = (fs.writeJsonFile as any).mock.calls;
-      expect(calls.length).toBe(1);
-
-      const [filePath, content] = calls[0];
-      expect(filePath).toContain("tester.json");
-      expect(content.name).toBe("TestAgent");
-      expect(content.role).toBe("Tester");
-      expect(content.instructions).toBe("Test everything");
-      expect(content.llmConfig).toBe("fast");
-      // Tools should include all normalized tools
-      expect(content.tools).toContain("read_path");
-      expect(content.tools).toContain("shell");
-      expect(content.tools).toContain("delegate");
-      expect(content.tools).toContain("lesson_get");
-
-      expect(configService.saveProjectAgents).toHaveBeenCalled();
-      // Check that it was called with the correct path as first argument
-      const saveCall = (configService.saveProjectAgents as any).mock.calls[0];
-      expect(saveCall[0]).toBe(testProjectPath);
-      // Check that the registry contains the tester agent
-      const savedRegistry = saveCall[1];
-      expect(savedRegistry.tester).toBeDefined();
-      expect(savedRegistry.tester.nsec).toMatch(/^nsec1/);
-      expect(savedRegistry.tester.file).toBe("tester.json");
-    });
-  });
-
-  describe("getAgent", () => {
-    beforeEach(async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
-      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
-      (fs.fileExists as any).mockResolvedValue(false);
-      (fs.writeJsonFile as any).mockResolvedValue(undefined);
-
-      await registry.loadFromProject();
-
-      // Ensure a developer agent
-      await registry.ensureAgent("developer", {
-        name: "Developer",
-        role: "Software Developer",
-        expertise: "Full-stack development",
-        instructions: "Write clean code",
-        nsec: "",
-        tools: ["shell"],
-      });
+            expect(configService.saveProjectAgents).toHaveBeenCalled();
+            // Check that it was called with the correct path as first argument
+            const saveCall = (configService.saveProjectAgents as any).mock.calls[0];
+            expect(saveCall[0]).toBe(testProjectPath);
+            // Check that the registry contains the tester agent
+            const savedRegistry = saveCall[1];
+            expect(savedRegistry.tester).toBeDefined();
+            expect(savedRegistry.tester.nsec).toMatch(/^nsec1/);
+            expect(savedRegistry.tester.file).toBe("tester.json");
+        });
     });
 
-    it("should return agent by name", () => {
-      const agent = registry.getAgent("developer");
+    describe("getAgent", () => {
+        beforeEach(async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (fs.fileExists as any).mockResolvedValue(false);
+            (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
-      expect(agent).toBeDefined();
-      expect(agent?.name).toBe("Developer");
-      expect(agent?.role).toBe("Software Developer");
+            await registry.loadFromProject();
+
+            // Ensure a developer agent
+            await registry.ensureAgent("developer", {
+                name: "Developer",
+                role: "Software Developer",
+                expertise: "Full-stack development",
+                instructions: "Write clean code",
+                nsec: "",
+                tools: ["shell"],
+            });
+        });
+
+        it("should return agent by name", () => {
+            const agent = registry.getAgent("developer");
+
+            expect(agent).toBeDefined();
+            expect(agent?.name).toBe("Developer");
+            expect(agent?.role).toBe("Software Developer");
+        });
+
+        it("should return undefined for non-existent agent", () => {
+            const agent = registry.getAgent("nonexistent");
+
+            expect(agent).toBeUndefined();
+        });
     });
 
-    it("should return undefined for non-existent agent", () => {
-      const agent = registry.getAgent("nonexistent");
+    describe("getAllAgents", () => {
+        it("should return all registered agents", async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (fs.fileExists as any).mockResolvedValue(false);
+            (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
-      expect(agent).toBeUndefined();
-    });
-  });
+            await registry.loadFromProject();
 
-  describe("getAllAgents", () => {
-    it("should return all registered agents", async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
-      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
-      (fs.fileExists as any).mockResolvedValue(false);
-      (fs.writeJsonFile as any).mockResolvedValue(undefined);
+            // Ensure agents
+            await registry.ensureAgent("developer", {
+                name: "Developer",
+                role: "Software Developer",
+                expertise: "Full-stack development",
+                instructions: "Write clean code",
+                nsec: "",
+                tools: [],
+            });
 
-      await registry.loadFromProject();
+            await registry.ensureAgent("reviewer", {
+                name: "Reviewer",
+                role: "Code Reviewer",
+                expertise: "Code quality",
+                instructions: "Review code",
+                nsec: "",
+                tools: [],
+            });
 
-      // Ensure agents
-      await registry.ensureAgent("developer", {
-        name: "Developer",
-        role: "Software Developer",
-        expertise: "Full-stack development",
-        instructions: "Write clean code",
-        nsec: "",
-        tools: [],
-      });
+            const agents = registry.getAllAgents();
 
-      await registry.ensureAgent("reviewer", {
-        name: "Reviewer",
-        role: "Code Reviewer",
-        expertise: "Code quality",
-        instructions: "Review code",
-        nsec: "",
-        tools: [],
-      });
+            expect(agents).toHaveLength(2);
+            expect(agents.map((a) => a.name)).toContain("Developer");
+            expect(agents.map((a) => a.name)).toContain("Reviewer");
+        });
 
-      const agents = registry.getAllAgents();
+        it("should return empty array when no agents exist", async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
 
-      expect(agents).toHaveLength(2);
-      expect(agents.map((a) => a.name)).toContain("Developer");
-      expect(agents.map((a) => a.name)).toContain("Reviewer");
-    });
+            await registry.loadFromProject();
 
-    it("should return empty array when no agents exist", async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
+            const agents = registry.getAllAgents();
 
-      await registry.loadFromProject();
-
-      const agents = registry.getAllAgents();
-
-      expect(agents).toHaveLength(0);
-    });
-  });
-
-  describe("getAgentByPubkey", () => {
-    it("should return agent by pubkey", async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
-      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
-      (fs.fileExists as any).mockResolvedValue(false);
-      (fs.writeJsonFile as any).mockResolvedValue(undefined);
-
-      await registry.loadFromProject();
-
-      const agent = await registry.ensureAgent("developer", {
-        name: "Developer",
-        role: "Software Developer",
-        expertise: "Full-stack development",
-        instructions: "Write clean code",
-        nsec: "",
-        tools: [],
-      });
-
-      const foundAgent = registry.getAgentByPubkey(agent.pubkey);
-      expect(foundAgent).toBe(agent);
+            expect(agents).toHaveLength(0);
+        });
     });
 
-    it("should return undefined for unknown pubkey", async () => {
-      const agent = registry.getAgentByPubkey("unknown-pubkey");
-      expect(agent).toBeUndefined();
-    });
-  });
+    describe("getAgentByPubkey", () => {
+        it("should return agent by pubkey", async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (fs.fileExists as any).mockResolvedValue(false);
+            (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
-  // loadAgentBySlug tests removed - this is now a private internal method
+            await registry.loadFromProject();
 
-  describe("updateAgentLLMConfig", () => {
-    let testAgent: any;
+            const agent = await registry.ensureAgent("developer", {
+                name: "Developer",
+                role: "Software Developer",
+                expertise: "Full-stack development",
+                instructions: "Write clean code",
+                nsec: "",
+                tools: [],
+            });
 
-    beforeEach(async () => {
-      (fs.ensureDirectory as any).mockResolvedValue(undefined);
-      (configService.loadTenexAgents as any).mockResolvedValue({});
-      (configService.saveProjectAgents as any).mockResolvedValue(undefined);
-      (fs.fileExists as any).mockResolvedValue(false);
-      (fs.writeJsonFile as any).mockResolvedValue(undefined);
-      (fs.readFile as any).mockResolvedValue(JSON.stringify({
-        name: "TestAgent",
-        role: "Tester",
-        instructions: "Test everything",
-        llmConfig: "old-model"
-      }));
+            const foundAgent = registry.getAgentByPubkey(agent.pubkey);
+            expect(foundAgent).toBe(agent);
+        });
 
-      await registry.loadFromProject();
-
-      testAgent = await registry.ensureAgent("tester", {
-        name: "TestAgent",
-        role: "Tester",
-        instructions: "Test everything",
-        nsec: "",
-        tools: [],
-        llmConfig: "old-model",
-      });
+        it("should return undefined for unknown pubkey", async () => {
+            const agent = registry.getAgentByPubkey("unknown-pubkey");
+            expect(agent).toBeUndefined();
+        });
     });
 
-    it("should update llmConfig in memory and persist to file", async () => {
-      const newModel = "new-model";
-      const result = await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+    // loadAgentBySlug tests removed - this is now a private internal method
 
-      expect(result).toBe(true);
-      expect(testAgent.llmConfig).toBe(newModel);
-      expect(fs.writeJsonFile).toHaveBeenCalled();
+    describe("updateAgentLLMConfig", () => {
+        let testAgent: any;
 
-      // Check that the file was written with the new config
-      const writeCalls = (fs.writeJsonFile as any).mock.calls;
-      const lastCall = writeCalls[writeCalls.length - 1];
-      const [, content] = lastCall;
-      expect(content.llmConfig).toBe(newModel);
+        beforeEach(async () => {
+            (fs.ensureDirectory as any).mockResolvedValue(undefined);
+            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (fs.fileExists as any).mockResolvedValue(false);
+            (fs.writeJsonFile as any).mockResolvedValue(undefined);
+            (fs.readFile as any).mockResolvedValue(
+                JSON.stringify({
+                    name: "TestAgent",
+                    role: "Tester",
+                    instructions: "Test everything",
+                    llmConfig: "old-model",
+                })
+            );
+
+            await registry.loadFromProject();
+
+            testAgent = await registry.ensureAgent("tester", {
+                name: "TestAgent",
+                role: "Tester",
+                instructions: "Test everything",
+                nsec: "",
+                tools: [],
+                llmConfig: "old-model",
+            });
+        });
+
+        it("should update llmConfig in memory and persist to file", async () => {
+            const newModel = "new-model";
+            const result = await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+
+            expect(result).toBe(true);
+            expect(testAgent.llmConfig).toBe(newModel);
+            expect(fs.writeJsonFile).toHaveBeenCalled();
+
+            // Check that the file was written with the new config
+            const writeCalls = (fs.writeJsonFile as any).mock.calls;
+            const lastCall = writeCalls[writeCalls.length - 1];
+            const [, content] = lastCall;
+            expect(content.llmConfig).toBe(newModel);
+        });
+
+        it("should reflect updated config in agent instance immediately", async () => {
+            const initialModel = testAgent.llmConfig;
+            expect(initialModel).toBe("old-model");
+
+            const newModel = "updated-model";
+
+            // Update the config
+            await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+
+            // Verify that the agent's llmConfig field was updated in memory
+            expect(testAgent.llmConfig).toBe(newModel);
+
+            // This ensures createLLMService will use the new config since it references agent.llmConfig
+            // The fix ensures the closure reads from agent.llmConfig instead of agentDefinition.llmConfig
+        });
+
+        it("should return false for non-existent agent", async () => {
+            const result = await registry.updateAgentLLMConfig("non-existent-pubkey", "new-model");
+            expect(result).toBe(false);
+        });
     });
 
-    it("should reflect updated config in agent instance immediately", async () => {
-      const initialModel = testAgent.llmConfig;
-      expect(initialModel).toBe("old-model");
+    describe("getBasePath", () => {
+        it("should return the project path directly, not its parent", () => {
+            const projectPath = "/Users/test/.tenex/projects/my-project-abc123";
+            const registry = new AgentRegistry(projectPath);
 
-      const newModel = "updated-model";
+            const basePath = registry.getBasePath();
 
-      // Update the config
-      await registry.updateAgentLLMConfig(testAgent.pubkey, newModel);
+            // Should return the project path itself, not the parent directory
+            expect(basePath).toBe(projectPath);
+            expect(basePath).toBe("/Users/test/.tenex/projects/my-project-abc123");
+            expect(basePath).not.toBe("/Users/test/.tenex/projects");
+        });
 
-      // Verify that the agent's llmConfig field was updated in memory
-      expect(testAgent.llmConfig).toBe(newModel);
+        it("should work with various project path formats", () => {
+            const testCases = [
+                "/home/user/.tenex/projects/project-id",
+                "/Users/pablo/tenex/Wikifreedia-56xgs8",
+                "/var/projects/test-project",
+            ];
 
-      // This ensures createLLMService will use the new config since it references agent.llmConfig
-      // The fix ensures the closure reads from agent.llmConfig instead of agentDefinition.llmConfig
+            for (const projectPath of testCases) {
+                const registry = new AgentRegistry(projectPath);
+                expect(registry.getBasePath()).toBe(projectPath);
+            }
+        });
+
+        it("should provide correct base path for execution context", () => {
+            // This is the actual directory structure used in ProjectRuntime
+            const projectsBase = "/Users/test/.tenex/projects";
+            const dTag = "Wikifreedia-56xgs8";
+            const projectPath = path.join(projectsBase, dTag);
+
+            const registry = new AgentRegistry(projectPath);
+            const basePath = registry.getBasePath();
+
+            // The base path should be the working directory where Claude Code operates
+            expect(basePath).toBe("/Users/test/.tenex/projects/Wikifreedia-56xgs8");
+
+            // It should NOT be the parent directory
+            expect(basePath).not.toBe("/Users/test/.tenex/projects");
+        });
     });
-
-    it("should return false for non-existent agent", async () => {
-      const result = await registry.updateAgentLLMConfig("non-existent-pubkey", "new-model");
-      expect(result).toBe(false);
-    });
-  });
-
-  describe("getBasePath", () => {
-    it("should return the project path directly, not its parent", () => {
-      const projectPath = "/Users/test/.tenex/projects/my-project-abc123";
-      const registry = new AgentRegistry(projectPath);
-
-      const basePath = registry.getBasePath();
-
-      // Should return the project path itself, not the parent directory
-      expect(basePath).toBe(projectPath);
-      expect(basePath).toBe("/Users/test/.tenex/projects/my-project-abc123");
-      expect(basePath).not.toBe("/Users/test/.tenex/projects");
-    });
-
-    it("should work with various project path formats", () => {
-      const testCases = [
-        "/home/user/.tenex/projects/project-id",
-        "/Users/pablo/tenex/Wikifreedia-56xgs8",
-        "/var/projects/test-project",
-      ];
-
-      for (const projectPath of testCases) {
-        const registry = new AgentRegistry(projectPath);
-        expect(registry.getBasePath()).toBe(projectPath);
-      }
-    });
-
-    it("should provide correct base path for execution context", () => {
-      // This is the actual directory structure used in ProjectRuntime
-      const projectsBase = "/Users/test/.tenex/projects";
-      const dTag = "Wikifreedia-56xgs8";
-      const projectPath = path.join(projectsBase, dTag);
-
-      const registry = new AgentRegistry(projectPath);
-      const basePath = registry.getBasePath();
-
-      // The base path should be the working directory where Claude Code operates
-      expect(basePath).toBe("/Users/test/.tenex/projects/Wikifreedia-56xgs8");
-
-      // It should NOT be the parent directory
-      expect(basePath).not.toBe("/Users/test/.tenex/projects");
-    });
-  });
 });

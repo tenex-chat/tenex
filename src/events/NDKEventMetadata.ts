@@ -2,7 +2,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * NDKEventMetadata - Kind 513
- * 
+ *
  * Allows setting metadata about conversations:
  * - ["e", "<event-id>"] - References the conversation
  * - ["title", "title-of-the-conversation"] - Sets the conversation title
