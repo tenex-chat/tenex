@@ -13,19 +13,19 @@ export const NDKKind = {
     ...BaseNDKKind,
 
     // Standard NIP kinds not in NDK
-    AgentLesson: 4129, // Agent Lesson - learned knowledge
-    AgentRequest: 4133, // NIP-90 Agent Request
-    AgentDefinition: 4199, // Agent Definition
-    AgentNudge: 4201, // Agent Nudge - system prompt injection
+    AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
+    AgentRequest: 4133 as BaseNDKKind, // NIP-90 Agent Request
+    AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
+    AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
 
     // Tenex custom kinds (2xxxx range)
-    TenexStreamingResponse: 21111,
-    TenexProjectStatus: 24010,
-    TenexAgentConfigUpdate: 24020,
-    TenexAgentTypingStart: 24111,
-    TenexAgentTypingStop: 24112,
-    TenexOperationsStatus: 24133,
-    TenexStopCommand: 24134,
+    TenexStreamingResponse: 21111 as BaseNDKKind,
+    TenexProjectStatus: 24010 as BaseNDKKind,
+    TenexAgentConfigUpdate: 24020 as BaseNDKKind,
+    TenexAgentTypingStart: 24111 as BaseNDKKind,
+    TenexAgentTypingStop: 24112 as BaseNDKKind,
+    TenexOperationsStatus: 24133 as BaseNDKKind,
+    TenexStopCommand: 24134 as BaseNDKKind,
 } as const;
 
 export type NDKKind = typeof NDKKind[keyof typeof NDKKind];

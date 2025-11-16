@@ -157,7 +157,6 @@ export class SubscriptionManager {
         filters.push({
           kinds: [NDKKind.AgentLesson],
           authors: Array.from(this.agentPubkeys),
-          limit: 0,
         });
       }
 
@@ -166,7 +165,6 @@ export class SubscriptionManager {
         filters.push({
           kinds: [NDKKind.AgentLesson],
           "#e": Array.from(this.agentDefinitionIds),
-          limit: 0,
         });
       }
     }
