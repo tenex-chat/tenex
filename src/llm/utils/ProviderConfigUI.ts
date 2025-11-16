@@ -33,11 +33,12 @@ export class ProviderConfigUI {
             // Claude Code and Gemini CLI don't require an API key
             console.log(
                 chalk.green(
-                    `✓ ${this.getProviderDisplayName(provider)} provider configured (no API key required)`
+                    `✓ ${ProviderConfigUI.getProviderDisplayName(provider)} provider configured (no API key required)`
                 )
             );
             return { apiKey: "none" }; // Doesn't use API keys
-        } else if (provider === "ollama") {
+        }
+        if (provider === "ollama") {
             // For Ollama, ask for base URL instead of API key
             const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";
             const { ollamaConfig } = await inquirer.prompt([
@@ -76,26 +77,25 @@ export class ProviderConfigUI {
             }
 
             return { apiKey: baseUrl };
-        } else {
-            // For other providers, ask for API key
-            const currentKey = currentConfig?.providers[provider]?.apiKey;
-            const { apiKey } = await inquirer.prompt([
-                {
-                    type: "password",
-                    name: "apiKey",
-                    message: `Enter API key for ${this.getProviderDisplayName(provider)} (press Enter to keep existing):`,
-                    default: currentKey,
-                    mask: "*",
-                    validate: (input: string) => {
-                        // Allow empty input if there's an existing key
-                        if (!input.trim() && !currentKey) return "API key is required";
-                        return true;
-                    },
-                },
-            ]);
-
-            return { apiKey: apiKey || currentKey || "" };
         }
+        // For other providers, ask for API key
+        const currentKey = currentConfig?.providers[provider]?.apiKey;
+        const { apiKey } = await inquirer.prompt([
+            {
+                type: "password",
+                name: "apiKey",
+                message: `Enter API key for ${ProviderConfigUI.getProviderDisplayName(provider)} (press Enter to keep existing):`,
+                default: currentKey,
+                mask: "*",
+                validate: (input: string) => {
+                    // Allow empty input if there's an existing key
+                    if (!input.trim() && !currentKey) return "API key is required";
+                    return true;
+                },
+            },
+        ]);
+
+        return { apiKey: apiKey || currentKey || "" };
     }
 
     /**
@@ -110,7 +110,7 @@ export class ProviderConfigUI {
             console.log(chalk.gray("  None configured"));
         } else {
             for (const p of providers) {
-                console.log(chalk.green(`  ✓ ${this.getProviderDisplayName(p)}`));
+                console.log(chalk.green(`  ✓ ${ProviderConfigUI.getProviderDisplayName(p)}`));
             }
         }
 

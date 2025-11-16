@@ -55,7 +55,7 @@ export class EventToModelMessage {
         }
 
         // Process the event content normally
-        const mainMessage = await this.transformEventContent(
+        const mainMessage = await EventToModelMessage.transformEventContent(
             event,
             processedContent,
             targetAgentPubkey,
@@ -83,7 +83,7 @@ export class EventToModelMessage {
         }
 
         // Check for delegation response
-        const delegationMessage = await this.checkDelegationResponse(
+        const delegationMessage = await EventToModelMessage.checkDelegationResponse(
             event,
             processedContent,
             targetAgentPubkey,
@@ -92,7 +92,11 @@ export class EventToModelMessage {
         if (delegationMessage) return delegationMessage;
 
         // Determine role and format based on sender and targeting
-        return await this.formatByTargeting(event, processedContent, targetAgentPubkey);
+        return await EventToModelMessage.formatByTargeting(
+            event,
+            processedContent,
+            targetAgentPubkey
+        );
     }
 
     /**
@@ -231,29 +235,28 @@ export class EventToModelMessage {
                     role: "user",
                     content: `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`,
                 };
-            } else {
-                // This agent is NOT targeted - they're just observing
-                const targetedAgentNames = await Promise.all(
-                    targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
-                );
-
-                logger.debug(
-                    "[EventToModelMessage] Formatting agent-to-agent message for non-recipient",
-                    {
-                        eventId: event.id,
-                        from: sendingAgentName,
-                        to: targetedAgentNames,
-                        viewingAgent: await nameRepo.getName(targetAgentPubkey),
-                        messageType: "system",
-                    }
-                );
-
-                // Use 'system' role since this agent is just observing
-                return {
-                    role: "system",
-                    content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
-                };
             }
+            // This agent is NOT targeted - they're just observing
+            const targetedAgentNames = await Promise.all(
+                targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
+            );
+
+            logger.debug(
+                "[EventToModelMessage] Formatting agent-to-agent message for non-recipient",
+                {
+                    eventId: event.id,
+                    from: sendingAgentName,
+                    to: targetedAgentNames,
+                    viewingAgent: await nameRepo.getName(targetAgentPubkey),
+                    messageType: "system",
+                }
+            );
+
+            // Use 'system' role since this agent is just observing
+            return {
+                role: "system",
+                content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
+            };
         }
 
         // No specific target - broadcast to all agents (including this one)

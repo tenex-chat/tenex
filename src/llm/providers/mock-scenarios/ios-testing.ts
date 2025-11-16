@@ -468,8 +468,6 @@ export function getIOSScenarios(testType?: string): MockScenario[] {
 
         case "long-tasks":
             return [iosTestingScenarios[5]]; // Long-running tasks
-
-        case "all":
         default:
             return iosTestingScenarios;
     }

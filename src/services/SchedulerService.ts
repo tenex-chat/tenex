@@ -1,8 +1,8 @@
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import * as fs from "fs/promises";
 import * as cron from "node-cron";
 import { logger } from "../utils/logger";
 import { ConfigService } from "./ConfigService";

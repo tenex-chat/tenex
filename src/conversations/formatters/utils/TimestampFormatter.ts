@@ -25,13 +25,14 @@ export class TimestampFormatter {
 
         if (diffSec < 60) {
             return ` [${diffSec}s ago]`;
-        } else if (diffMin < 60) {
-            return ` [${diffMin}m ago]`;
-        } else if (diffHour < 24) {
-            return ` [${diffHour}h ago]`;
-        } else {
-            return ` [${diffDay}d ago]`;
         }
+        if (diffMin < 60) {
+            return ` [${diffMin}m ago]`;
+        }
+        if (diffHour < 24) {
+            return ` [${diffHour}h ago]`;
+        }
+        return ` [${diffDay}d ago]`;
     }
 
     private formatAbsolute(timestamp: Date): string {

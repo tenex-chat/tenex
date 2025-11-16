@@ -37,17 +37,14 @@ async function fetchConversationThread(eventId: string, relayUrls: string[]): Pr
 
     if (eventsArray.length === 0) {
         throw new Error(
-            `No events found for ${eventId} on relays: ${relayUrls.join(", ")}\n` +
-                `Filters used: [{ ids: ["${eventId}"] }, { "#E": ["${eventId}"] }]\n` +
-                `Try specifying the correct relay: bun run ... <event-id> wss://tenex.chat`
+            `No events found for ${eventId} on relays: ${relayUrls.join(", ")}\nFilters used: [{ ids: ["${eventId}"] }, { "#E": ["${eventId}"] }]\nTry specifying the correct relay: bun run ... <event-id> wss://tenex.chat`
         );
     }
 
     const rootEvent = eventsArray.find((e) => e.id === eventId);
     if (!rootEvent) {
         throw new Error(
-            `Root event ${eventId} not found, but found ${eventsArray.length} related events\n` +
-                `This shouldn't happen - the event might be in the thread but not fetchable by ID`
+            `Root event ${eventId} not found, but found ${eventsArray.length} related events\nThis shouldn't happen - the event might be in the thread but not fetchable by ID`
         );
     }
 
@@ -308,7 +305,7 @@ function NostrConversationViewer({ eventId, relayUrls }: { eventId: string; rela
         const color = isVisible ? "green" : "dim";
         const symbol = selectedParticipant.agent ? (isVisible ? "✓" : "✗") : "•";
         const connector = isLast ? "└─" : "├─";
-        const line = depth > 0 ? prefix + connector + " " : "";
+        const line = depth > 0 ? `${prefix + connector} ` : "";
 
         const authorParticipant = state.participants.find((p) => p.pubkey === event.pubkey);
         const author = authorParticipant?.name || event.pubkey.substring(0, 8);

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import NDK from "@nostr-dev-kit/ndk";
-import * as fs from "fs/promises";
 import { ConfigService } from "../ConfigService";
 import { SchedulerService } from "../SchedulerService";
 

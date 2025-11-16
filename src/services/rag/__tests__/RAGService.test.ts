@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { LocalTransformerEmbeddingProvider } from "../../EmbeddingProvider";
 import { RAGDatabaseError, RAGDatabaseManager } from "../RAGDatabaseManager";
 import { RAGOperations } from "../RAGOperations";
@@ -44,7 +44,7 @@ class RAGTestFixture {
         }
 
         // Reset environment
-        delete process.env.LANCEDB_DATA_DIR;
+        process.env.LANCEDB_DATA_DIR = undefined;
         RAGService.resetInstance();
     }
 }

@@ -161,7 +161,7 @@ export async function resolveNostrEntitiesToSystemMessages(
                 // Get author name if getName function provided, otherwise use pubkey
                 const authorName = getName
                     ? await getName(event.pubkey)
-                    : event.pubkey.substring(0, 8) + "...";
+                    : `${event.pubkey.substring(0, 8)}...`;
 
                 // Format timestamp
                 const timestamp = new Date((event.created_at || 0) * 1000).toISOString();

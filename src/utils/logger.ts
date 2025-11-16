@@ -1,6 +1,6 @@
-import fs from "fs";
-import os from "os";
-import path from "path";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { TenexConfig } from "@/services/config/types";
 import chalk from "chalk";
 
@@ -56,10 +56,9 @@ function writeToFile(level: string, message: string, args: unknown[]): void {
     const timestamp = formatTimestamp();
     const argsStr =
         args.length > 0
-            ? " " +
-              args
+            ? ` ${args
                   .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
-                  .join(" ")
+                  .join(" ")}`
             : "";
 
     const logLine = `[${timestamp}] ${level.toUpperCase()}: ${message}${argsStr}\n`;

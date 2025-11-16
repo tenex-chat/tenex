@@ -420,7 +420,7 @@ export class AgentExecutor {
                 },
             ];
             // Clear it after use
-            delete context.additionalSystemMessage;
+            context.additionalSystemMessage = undefined;
         }
 
         logger.debug("[AgentExecutor] 📝 Built messages for execution", {

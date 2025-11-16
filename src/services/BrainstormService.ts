@@ -646,13 +646,6 @@ export class BrainstormService {
         winningResponse: string,
         followUp: string
     ): string {
-        return (
-            `Original brainstorm prompt:\n${originalPrompt}\n\n` +
-            `Winning response:\n${winningResponse}\n\n` +
-            `Follow-up comment:\n${followUp}\n\n` +
-            "Evaluate if this follow-up adds significant value, provides important corrections, " +
-            "or contributes meaningful insights to the discussion. " +
-            "Be selective - only approve truly valuable additions."
-        );
+        return `Original brainstorm prompt:\n${originalPrompt}\n\nWinning response:\n${winningResponse}\n\nFollow-up comment:\n${followUp}\n\nEvaluate if this follow-up adds significant value, provides important corrections, or contributes meaningful insights to the discussion. Be selective - only approve truly valuable additions.`;
     }
 }

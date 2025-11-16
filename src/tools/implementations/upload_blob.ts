@@ -1,11 +1,11 @@
-import * as crypto from "crypto";
-import * as path from "path";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
-import * as fs from "fs/promises";
 import { z } from "zod";
 
 const uploadBlobSchema = z.object({
@@ -168,7 +168,7 @@ async function downloadFromURL(
         const urlPath = new URL(url).pathname;
         const pathSegments = urlPath.split("/");
         const lastSegment = pathSegments[pathSegments.length - 1];
-        if (lastSegment && lastSegment.includes(".")) {
+        if (lastSegment?.includes(".")) {
             filename = lastSegment;
         }
     }
@@ -415,11 +415,11 @@ export function createUploadBlobTool(context: ExecutionContext): AISdkTool {
             if (isURL(input)) {
                 const url = new URL(input);
                 return `Downloading and uploading from ${url.hostname}${description ? ` - ${description}` : ""}`;
-            } else if (!input.startsWith("data:") && !input.includes(",")) {
-                return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ""}`;
-            } else {
-                return `Uploading blob data${description ? ` - ${description}` : ""}`;
             }
+            if (!input.startsWith("data:") && !input.includes(",")) {
+                return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ""}`;
+            }
+            return `Uploading blob data${description ? ` - ${description}` : ""}`;
         },
         enumerable: false,
         configurable: true,

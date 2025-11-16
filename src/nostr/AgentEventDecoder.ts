@@ -129,7 +129,7 @@ export class AgentEventDecoder {
 
         // If we have system agents, verify it's from an agent
         if (systemAgents) {
-            const isFromAgent = this.isEventFromAgent(event, systemAgents);
+            const isFromAgent = AgentEventDecoder.isEventFromAgent(event, systemAgents);
             if (!isFromAgent) return false;
 
             // Check if p-tag points to another agent
@@ -157,7 +157,7 @@ export class AgentEventDecoder {
      * Checks all e-tags to find the first valid delegation request ID
      */
     static getDelegationRequestId(event: NDKEvent): string | undefined {
-        if (this.isDelegationCompletion(event)) {
+        if (AgentEventDecoder.isDelegationCompletion(event)) {
             // Check all e-tags to find a delegation request ID
             // For explicit completions, we return the first e-tag as the most likely candidate
             // The DelegationCompletionHandler will validate if it's actually a tracked delegation

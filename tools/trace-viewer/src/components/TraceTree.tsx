@@ -22,7 +22,7 @@ interface TraceTreeProps {
 
 function flattenTree(
     span: TraceSpan,
-    depth = 0,
+    depth,
     expandedSet: Set<string>,
     index = { current: 0 }
 ): TreeNode[] {
@@ -63,7 +63,7 @@ function getSpanLabel(span: TraceSpan): { label: string; color: string; icon: st
     // Event processing
     if (span.operationName === "tenex.event.process") {
         const content = attrs["event.content"];
-        const preview = content ? content.substring(0, 50) + "..." : "Event";
+        const preview = content ? `${content.substring(0, 50)}...` : "Event";
         return { label: preview, color: "cyan", icon: "📨" };
     }
 
@@ -281,7 +281,7 @@ function SpanDetail({ span }: { span: TraceSpan }) {
                         {Object.entries(span.attributes).map(([key, value]) => {
                             let displayValue = String(value);
                             if (typeof value === "string" && value.length > 100) {
-                                displayValue = value.substring(0, 100) + "...";
+                                displayValue = `${value.substring(0, 100)}...`;
                             }
                             return (
                                 <Box key={key}>
@@ -306,7 +306,7 @@ function SpanDetail({ span }: { span: TraceSpan }) {
                                 {Object.entries(event.attributes).map(([key, value]) => {
                                     let displayValue = String(value);
                                     if (typeof value === "string" && value.length > 200) {
-                                        displayValue = value.substring(0, 200) + "...";
+                                        displayValue = `${value.substring(0, 200)}...`;
                                     }
                                     return (
                                         <Box key={key} marginLeft={2}>

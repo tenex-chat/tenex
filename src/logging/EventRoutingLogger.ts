@@ -122,7 +122,7 @@ export class EventRoutingLogger {
 
         try {
             // Append to JSONL file (one JSON object per line)
-            await fs.appendFile(filepath, JSON.stringify(logEntry) + "\n", "utf-8");
+            await fs.appendFile(filepath, `${JSON.stringify(logEntry)}\n`, "utf-8");
         } catch (error) {
             console.error("[EventRoutingLogger] Failed to write log:", error);
         }
@@ -159,7 +159,7 @@ export class EventRoutingLogger {
 
         try {
             // Append to JSONL file (one JSON object per line)
-            await fs.appendFile(filepath, JSON.stringify(logEntry) + "\n", "utf-8");
+            await fs.appendFile(filepath, `${JSON.stringify(logEntry)}\n`, "utf-8");
         } catch (error) {
             console.error("[EventRoutingLogger] Failed to write filter log:", error);
         }

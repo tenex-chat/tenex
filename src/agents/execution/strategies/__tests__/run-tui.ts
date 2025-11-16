@@ -109,7 +109,7 @@ async function main() {
                 }
             }
 
-            console.log(`   Visible events:`);
+            console.log("   Visible events:");
             for (const event of scenario.events) {
                 const isVisible = visibleEventIds.has(event.id!);
                 const symbol = isVisible ? "✓" : "✗";

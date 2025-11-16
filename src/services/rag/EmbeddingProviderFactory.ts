@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "node:path";
 import { fileExists, readJsonFile } from "@/lib/fs";
 import { ConfigService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -71,7 +71,7 @@ export class EmbeddingProviderFactory {
      * Create an embedding provider based on configuration
      */
     static async create(customConfig?: EmbeddingConfig): Promise<EmbeddingProvider> {
-        const config = customConfig || (await this.loadConfiguration());
+        const config = customConfig || (await EmbeddingProviderFactory.loadConfiguration());
 
         logger.debug(`Creating embedding provider: ${config.provider}/${config.model}`);
 
@@ -81,8 +81,6 @@ export class EmbeddingProviderFactory {
                     throw new Error("OpenAI API key is required for OpenAI embedding provider");
                 }
                 return new OpenAIEmbeddingProvider(config.apiKey, config.model);
-
-            case "local":
             default:
                 return new LocalTransformerEmbeddingProvider(config.model);
         }
@@ -99,7 +97,7 @@ export class EmbeddingProviderFactory {
             const projectPath = process.cwd();
             const projectConfigPath = path.join(
                 configService.getProjectPath(projectPath),
-                this.EMBED_CONFIG_FILE
+                EmbeddingProviderFactory.EMBED_CONFIG_FILE
             );
 
             if (await fileExists(projectConfigPath)) {
@@ -108,16 +106,16 @@ export class EmbeddingProviderFactory {
                     logger.warn(
                         `Invalid project embedding config at ${projectConfigPath}, using defaults`
                     );
-                    return this.DEFAULT_CONFIG;
+                    return EmbeddingProviderFactory.DEFAULT_CONFIG;
                 }
                 logger.debug(`Loaded project embedding config from ${projectConfigPath}`);
-                return this.parseConfig(projectConfig);
+                return EmbeddingProviderFactory.parseConfig(projectConfig);
             }
 
             // Fall back to global config
             const globalConfigPath = path.join(
                 configService.getGlobalPath(),
-                this.EMBED_CONFIG_FILE
+                EmbeddingProviderFactory.EMBED_CONFIG_FILE
             );
 
             if (await fileExists(globalConfigPath)) {
@@ -126,18 +124,18 @@ export class EmbeddingProviderFactory {
                     logger.warn(
                         `Invalid global embedding config at ${globalConfigPath}, using defaults`
                     );
-                    return this.DEFAULT_CONFIG;
+                    return EmbeddingProviderFactory.DEFAULT_CONFIG;
                 }
                 logger.debug(`Loaded global embedding config from ${globalConfigPath}`);
-                return this.parseConfig(globalConfig);
+                return EmbeddingProviderFactory.parseConfig(globalConfig);
             }
 
             // Use default if no config found
             logger.debug("No embedding configuration found, using defaults");
-            return this.DEFAULT_CONFIG;
+            return EmbeddingProviderFactory.DEFAULT_CONFIG;
         } catch (error) {
             logger.warn("Failed to load embedding configuration, using defaults", { error });
-            return this.DEFAULT_CONFIG;
+            return EmbeddingProviderFactory.DEFAULT_CONFIG;
         }
     }
 
@@ -146,7 +144,7 @@ export class EmbeddingProviderFactory {
      */
     private static parseConfig(raw: RawEmbeddingConfig): EmbeddingConfig {
         // Support both old format (just model string) and new format
-        if (typeof raw === "string" || (raw && raw.model && !raw.provider)) {
+        if (typeof raw === "string" || (raw?.model && !raw.provider)) {
             // Old format or just model specified
             const modelId = typeof raw === "string" ? raw : raw.model;
 
@@ -168,7 +166,7 @@ export class EmbeddingProviderFactory {
         // New format with explicit provider
         return {
             provider: raw.provider || "local",
-            model: raw.model || this.DEFAULT_CONFIG.model,
+            model: raw.model || EmbeddingProviderFactory.DEFAULT_CONFIG.model,
             apiKey: raw.apiKey || process.env.OPENAI_API_KEY,
         };
     }
@@ -187,7 +185,7 @@ export class EmbeddingProviderFactory {
                 ? configService.getGlobalPath()
                 : configService.getProjectPath(process.cwd());
 
-        const configPath = path.join(basePath, this.EMBED_CONFIG_FILE);
+        const configPath = path.join(basePath, EmbeddingProviderFactory.EMBED_CONFIG_FILE);
 
         // Don't save API key to file
         const configToSave = {

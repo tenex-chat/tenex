@@ -34,9 +34,7 @@ async function executeDelegateFollowup(
     // Check for self-delegation (not allowed in delegate_followup tool)
     if (recipientPubkey === context.agent.pubkey) {
         throw new Error(
-            "Self-delegation is not permitted with the delegate_followup tool. " +
-                `Agent "${context.agent.slug}" cannot send follow-up questions to itself. ` +
-                "Use the delegate_phase tool if you need to transition phases within the same agent."
+            `Self-delegation is not permitted with the delegate_followup tool. Agent "${context.agent.slug}" cannot send follow-up questions to itself. Use the delegate_phase tool if you need to transition phases within the same agent.`
         );
     }
 

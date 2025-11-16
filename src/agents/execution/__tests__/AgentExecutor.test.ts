@@ -57,8 +57,6 @@ describe("AgentExecutor", () => {
                         logResponse: () => {},
                     }),
                 },
-                agents: new Map(),
-                getLessonsForAgent: () => [],
                 project: {
                     tags: [
                         ["title", "Test Project"],

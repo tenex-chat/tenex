@@ -33,7 +33,10 @@ export class AgentRouter {
                 const agent = projectContext.getAgentByPubkey(pubkey);
                 if (agent) {
                     // Check if this is a global agent that needs project validation
-                    if (agent.isGlobal && !this.validateProjectContext(event, projectContext)) {
+                    if (
+                        agent.isGlobal &&
+                        !AgentRouter.validateProjectContext(event, projectContext)
+                    ) {
                         logger.info(
                             chalk.gray(
                                 `Skipping global agent ${agent.slug} - event not for this project context`
@@ -76,7 +79,7 @@ export class AgentRouter {
         event: NDKEvent,
         projectContext: ProjectContext
     ): AgentInstance | null {
-        const agents = this.resolveTargetAgents(event, projectContext);
+        const agents = AgentRouter.resolveTargetAgents(event, projectContext);
         return agents.length > 0 ? agents[0] : null;
     }
 

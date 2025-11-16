@@ -106,9 +106,8 @@ describe("PM Tool Filtering", () => {
             toolNames = toolNames.filter((name) => {
                 if (isPM) {
                     return name !== "delegate"; // Remove delegate for PM
-                } else {
-                    return name !== "delegate_phase"; // Remove delegate_phase for non-PM
                 }
+                return name !== "delegate_phase"; // Remove delegate_phase for non-PM
             });
         }
 

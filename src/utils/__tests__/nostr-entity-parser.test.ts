@@ -17,7 +17,7 @@ describe("nostr-entity-parser", () => {
 
         it("should parse hex pubkey with nostr: prefix", () => {
             const pubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser("nostr:" + pubkey, ndk)).toBe(pubkey);
+            expect(parseNostrUser(`nostr:${pubkey}`, ndk)).toBe(pubkey);
         });
 
         it("should parse npub", () => {
@@ -31,7 +31,7 @@ describe("nostr-entity-parser", () => {
             const npub = "npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m";
             const expectedPubkey =
                 "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser("nostr:" + npub, ndk)).toBe(expectedPubkey);
+            expect(parseNostrUser(`nostr:${npub}`, ndk)).toBe(expectedPubkey);
         });
 
         it("should parse nprofile", () => {
@@ -62,7 +62,7 @@ describe("nostr-entity-parser", () => {
 
         it("should strip nostr: prefix", () => {
             const eventId = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(normalizeNostrIdentifier("nostr:" + eventId)).toBe(eventId);
+            expect(normalizeNostrIdentifier(`nostr:${eventId}`)).toBe(eventId);
         });
 
         it("should normalize nevent", () => {
@@ -117,7 +117,7 @@ describe("nostr-entity-parser", () => {
                 },
             } as any;
 
-            const result = await parseNostrEvent("nostr:" + nevent, mockNdk);
+            const result = await parseNostrEvent(`nostr:${nevent}`, mockNdk);
             expect(result).toBeTruthy();
         });
 

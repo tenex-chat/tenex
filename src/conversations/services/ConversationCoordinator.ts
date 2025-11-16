@@ -38,9 +38,7 @@ export class ConversationCoordinator {
     ) {
         if (!projectPath || projectPath === "undefined") {
             throw new Error(
-                "ConversationCoordinator requires a valid projectPath. " +
-                    "Received: " +
-                    String(projectPath)
+                `ConversationCoordinator requires a valid projectPath. Received: ${String(projectPath)}`
             );
         }
 

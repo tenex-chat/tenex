@@ -31,7 +31,7 @@ describe("Throttling Middleware", () => {
         };
 
         // Wrap the stream using the middleware
-        const wrapped = await middleware.wrapStream!({ doStream: mockDoStream });
+        const wrapped = await middleware.wrapStream?.({ doStream: mockDoStream });
 
         // Collect all chunks from the wrapped stream
         const collectedChunks: any[] = [];
@@ -82,7 +82,7 @@ describe("Throttling Middleware", () => {
         };
 
         // Wrap the stream
-        const wrapped = await middleware.wrapStream!({ doStream: mockDoStream });
+        const wrapped = await middleware.wrapStream?.({ doStream: mockDoStream });
 
         // Collect chunks
         const collectedChunks: any[] = [];
@@ -148,7 +148,7 @@ describe("Throttling Middleware", () => {
         };
 
         // Wrap the stream
-        const wrapped = await middleware.wrapStream!({ doStream: mockDoStream });
+        const wrapped = await middleware.wrapStream?.({ doStream: mockDoStream });
 
         // Collect chunks
         const collectedChunks: any[] = [];
@@ -218,7 +218,7 @@ describe("Throttling Middleware", () => {
         };
 
         // Wrap the stream
-        const wrapped = await middleware.wrapStream!({ doStream: mockDoStream });
+        const wrapped = await middleware.wrapStream?.({ doStream: mockDoStream });
 
         // Collect chunks
         const collectedChunks: any[] = [];
@@ -277,7 +277,7 @@ describe("Throttling Middleware", () => {
         };
 
         // Wrap the stream using the middleware
-        const wrapped = await middleware.wrapStream!({ doStream: mockDoStream });
+        const wrapped = await middleware.wrapStream?.({ doStream: mockDoStream });
 
         // Collect all chunks from the wrapped stream
         const collectedChunks: any[] = [];

@@ -15,7 +15,7 @@ export class ConversationSummarizer {
             // Get LLM configuration
             const llmConfig = await configService.loadTenexLLMs();
             const metadataConfig =
-                llmConfig.configurations["metadata"] ||
+                llmConfig.configurations.metadata ||
                 llmConfig.configurations[llmConfig.default || ""] ||
                 null;
 

@@ -45,7 +45,7 @@ function formatResults(
         score: result.score,
         content:
             result.document.content.length > 500
-                ? result.document.content.substring(0, 500) + "..."
+                ? `${result.document.content.substring(0, 500)}...`
                 : result.document.content,
         ...(includeMetadata && {
             metadata: result.document.metadata,

@@ -1,5 +1,5 @@
-import * as os from "os";
-import * as path from "path";
+import * as os from "node:os";
+import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import { type Connection, type Table, connect } from "@lancedb/lancedb";

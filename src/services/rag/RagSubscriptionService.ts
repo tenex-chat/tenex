@@ -1,8 +1,8 @@
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
-import * as fs from "fs/promises";
 import { RAGService } from "./RAGService";
 
 /**
@@ -130,10 +130,7 @@ export class RagSubscriptionService {
             new URL(resourceUri);
         } catch {
             throw new Error(
-                `Invalid resourceUri: "${resourceUri}". ` +
-                    'Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ' +
-                    "This appears to be a tool name or invalid format. " +
-                    "If you're using a resource template, you must first expand it with parameters to get the actual URI."
+                `Invalid resourceUri: "${resourceUri}". Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). This appears to be a tool name or invalid format. If you're using a resource template, you must first expand it with parameters to get the actual URI.`
             );
         }
 
@@ -197,10 +194,7 @@ export class RagSubscriptionService {
                 new URL(subscription.resourceUri);
             } catch {
                 throw new Error(
-                    `Invalid resourceUri: "${subscription.resourceUri}". ` +
-                        'Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). ' +
-                        "This appears to be a tool name or invalid format. " +
-                        "If you're using a resource template, you must first expand it with parameters to get the actual URI."
+                    `Invalid resourceUri: "${subscription.resourceUri}". Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). This appears to be a tool name or invalid format. If you're using a resource template, you must first expand it with parameters to get the actual URI.`
                 );
             }
 
@@ -237,9 +231,7 @@ export class RagSubscriptionService {
                     // Server doesn't support subscriptions, use polling instead
                     subscriptionSupported = false;
                     logger.warn(
-                        `Server '${subscription.mcpServerId}' does not support resource subscriptions. ` +
-                            `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
-                            "Call pollResource() manually or set up a polling interval."
+                        `Server '${subscription.mcpServerId}' does not support resource subscriptions. Subscription '${subscription.subscriptionId}' will use polling mode. Call pollResource() manually or set up a polling interval.`
                     );
                     process.exit(1);
                 } else {
@@ -295,7 +287,7 @@ export class RagSubscriptionService {
             subscription.lastDocumentIngested = content.substring(0, 200); // Store snippet
             subscription.updatedAt = Date.now();
             subscription.status = SubscriptionStatus.RUNNING;
-            delete subscription.lastError;
+            subscription.lastError = undefined;
 
             await this.saveSubscriptions();
 

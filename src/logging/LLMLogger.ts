@@ -49,10 +49,6 @@ export class LLMLogger {
     private logDir: string | null = null;
     private agent: string | null = null;
 
-    constructor() {
-        // Public constructor for dependency injection
-    }
-
     /**
      * Initialize the logger with a project path
      * Must be called before using the logger
@@ -182,7 +178,7 @@ export class LLMLogger {
             // Append to JSONL file (one JSON object per line)
             await fs.appendFile(
                 filepath,
-                JSON.stringify({ ...logEntry, type: "request" }) + "\n",
+                `${JSON.stringify({ ...logEntry, type: "request" })}\n`,
                 "utf-8"
             );
         } catch (error) {
@@ -249,7 +245,7 @@ export class LLMLogger {
             // Append response entry
             await fs.appendFile(
                 filepath,
-                JSON.stringify({ ...responseEntry, type: "response" }) + "\n",
+                `${JSON.stringify({ ...responseEntry, type: "response" })}\n`,
                 "utf-8"
             );
         } catch (error) {

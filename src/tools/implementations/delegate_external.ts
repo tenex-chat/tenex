@@ -40,9 +40,7 @@ async function executeDelegateExternal(
     // Check for self-delegation (only allowed when targeting a different project)
     if (pubkey === context.agent.pubkey && !projectId) {
         throw new Error(
-            "Self-delegation is not permitted with the delegate_external tool unless targeting a different project. " +
-                `Agent "${context.agent.slug}" cannot delegate to itself as an external agent without specifying a projectId. ` +
-                "Use the delegate_phase tool if you need to transition phases within the same agent, or provide a projectId to delegate to yourself in a different project context."
+            `Self-delegation is not permitted with the delegate_external tool unless targeting a different project. Agent "${context.agent.slug}" cannot delegate to itself as an external agent without specifying a projectId. Use the delegate_phase tool if you need to transition phases within the same agent, or provide a projectId to delegate to yourself in a different project context.`
         );
     }
 

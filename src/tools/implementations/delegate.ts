@@ -63,9 +63,7 @@ async function executeDelegate(
 
     if (selfDelegationAttempts.length > 0) {
         throw new Error(
-            "Self-delegation is not permitted with the delegate tool. " +
-                `Agent "${context.agent.slug}" cannot delegate to itself. ` +
-                "Use the delegate_phase tool if you need to transition phases within the same agent."
+            `Self-delegation is not permitted with the delegate tool. Agent "${context.agent.slug}" cannot delegate to itself. Use the delegate_phase tool if you need to transition phases within the same agent.`
         );
     }
 
@@ -111,9 +109,8 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
 
             if (recipients.length === 1) {
                 return `Delegating to ${recipients[0]}`;
-            } else {
-                return `Delegating to ${recipients.length} recipients`;
             }
+            return `Delegating to ${recipients.length} recipients`;
         },
         enumerable: false,
         configurable: true,

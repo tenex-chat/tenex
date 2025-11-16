@@ -66,7 +66,8 @@ export class TreeBuilder {
         // and the last 'e' tag is the direct parent (if multiple e tags)
         if (eTags.length === 1) {
             return eTags[0][1]; // Single e tag is the parent
-        } else if (eTags.length > 1) {
+        }
+        if (eTags.length > 1) {
             // Check for 'reply' marker
             const replyTag = eTags.find((tag) => tag[3] === "reply");
             if (replyTag) {

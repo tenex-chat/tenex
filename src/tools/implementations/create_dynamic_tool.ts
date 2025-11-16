@@ -1,10 +1,10 @@
-import { join } from "path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
-import { mkdir, writeFile } from "fs/promises";
 import { z } from "zod";
 
 const createDynamicToolSchema = z.object({
@@ -78,7 +78,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
         execute: async (input: ${name.charAt(0).toUpperCase() + name.slice(1)}Input) => {
             ${implementation
                 .split("\n")
-                .map((line) => "            " + line)
+                .map((line) => `            ${line}`)
                 .join("\n")
                 .trim()}
         },

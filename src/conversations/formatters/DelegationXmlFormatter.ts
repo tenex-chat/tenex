@@ -28,13 +28,13 @@ export class DelegationXmlFormatter {
         const phaseAttr = delegation.phase ? ` phase="${delegation.phase}"` : "";
 
         let xml = `${eventPrefix}<delegation from="${delegation.from}" recipients="${recipientsAttr}" id="${delegation.id}"${phaseAttr}>`;
-        xml += `\n    <delegation-request>${this.escapeXml(delegation.message)}</delegation-request>`;
+        xml += `\n    <delegation-request>${DelegationXmlFormatter.escapeXml(delegation.message)}</delegation-request>`;
 
         // Add responses
         for (const response of delegation.responses) {
             const statusAttr = response.status === "error" ? ' error="true"' : "";
             const eventIdAttr = debug ? ` event-id="${response.eventId.substring(0, 8)}"` : "";
-            xml += `\n    <response from="${response.from}"${statusAttr}${eventIdAttr}>${this.escapeXml(response.content)}</response>`;
+            xml += `\n    <response from="${response.from}"${statusAttr}${eventIdAttr}>${DelegationXmlFormatter.escapeXml(response.content)}</response>`;
         }
 
         // Add pending placeholders for recipients without responses

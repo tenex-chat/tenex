@@ -102,11 +102,11 @@ export class AgentPublisher {
 
             // Add trace context as a tag on the Nostr event
             for (const event of events) {
-                if (carrier["traceparent"]) {
-                    event.tags.push(["trace_context", carrier["traceparent"]]);
+                if (carrier.traceparent) {
+                    event.tags.push(["trace_context", carrier.traceparent]);
                     logger.debug("[AgentPublisher] Injected trace context into delegation event", {
                         eventId: event.id?.substring(0, 8),
-                        traceparent: carrier["traceparent"].substring(0, 32) + "...",
+                        traceparent: `${carrier.traceparent.substring(0, 32)}...`,
                     });
                 }
             }

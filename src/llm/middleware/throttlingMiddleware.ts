@@ -1,7 +1,7 @@
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { logger } from "@/utils/logger";
 import type { Experimental_LanguageModelV1Middleware, LanguageModelV1StreamPart } from "ai";
-import * as fs from "fs/promises";
 
 // Type guards for stream parts with delta content
 interface TextDeltaChunk {
@@ -95,7 +95,7 @@ export function throttlingMiddleware(
                         rawPayload: chunk,
                     };
 
-                    await fs.appendFile(logFile, JSON.stringify(rawChunkLog) + "\n", "utf8");
+                    await fs.appendFile(logFile, `${JSON.stringify(rawChunkLog)}\n`, "utf8");
 
                     logger.debug("[ThrottlingMiddleware] Received chunk", {
                         timestamp: new Date().toISOString(),
@@ -382,16 +382,14 @@ export function throttlingMiddleware(
                     // Write summary to debug file
                     await fs.appendFile(
                         logFile,
-                        "\n" +
-                            JSON.stringify({
-                                type: "STREAM_SUMMARY",
-                                timestamp: new Date().toISOString(),
-                                totalDuration: finalTime - startTime,
-                                totalChunks,
-                                totalFlushes,
-                                logFile,
-                            }) +
-                            "\n",
+                        `\n${JSON.stringify({
+                            type: "STREAM_SUMMARY",
+                            timestamp: new Date().toISOString(),
+                            totalDuration: finalTime - startTime,
+                            totalChunks,
+                            totalFlushes,
+                            logFile,
+                        })}\n`,
                         "utf8"
                     );
                 },

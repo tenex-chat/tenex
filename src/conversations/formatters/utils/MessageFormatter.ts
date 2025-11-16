@@ -38,9 +38,9 @@ export class MessageFormatter {
         const lastSpace = truncated.lastIndexOf(" ");
 
         if (lastSpace > maxLength * 0.7) {
-            return truncated.substring(0, lastSpace) + "...";
+            return `${truncated.substring(0, lastSpace)}...`;
         }
 
-        return truncated + "...";
+        return `${truncated}...`;
     }
 }

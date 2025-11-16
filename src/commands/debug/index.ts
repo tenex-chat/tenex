@@ -441,7 +441,7 @@ export async function runDebugThreadedFormatter(
                 }
             }
 
-            console.log(chalk.cyan("\n" + "═".repeat(80) + "\n"));
+            console.log(chalk.cyan(`\n${"═".repeat(80)}\n`));
 
             logger.info("Strategy formatting complete");
         }); // End projectContextStore.run()

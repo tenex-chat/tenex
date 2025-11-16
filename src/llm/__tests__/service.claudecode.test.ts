@@ -33,10 +33,10 @@ describe("LLMService Claude Code Integration", () => {
             expect(result.appendSystemPrompt).toContain("[System]: Additional context here");
             expect(result.appendSystemPrompt).toContain("[User]: Hello");
             // Verify order is preserved
-            const systemIndex = result.appendSystemPrompt!.indexOf(
+            const systemIndex = result.appendSystemPrompt?.indexOf(
                 "[System]: Additional context here"
             );
-            const userIndex = result.appendSystemPrompt!.indexOf("[User]: Hello");
+            const userIndex = result.appendSystemPrompt?.indexOf("[User]: Hello");
             expect(systemIndex).toBeLessThan(userIndex);
         });
 
@@ -74,9 +74,9 @@ describe("LLMService Claude Code Integration", () => {
             expect(result.appendSystemPrompt).toContain("[Assistant]: Assistant response");
 
             // Verify order
-            const userIndex = result.appendSystemPrompt!.indexOf("[User]: User says hello");
-            const systemIndex = result.appendSystemPrompt!.indexOf("[System]: Phase transition");
-            const assistantIndex = result.appendSystemPrompt!.indexOf(
+            const userIndex = result.appendSystemPrompt?.indexOf("[User]: User says hello");
+            const systemIndex = result.appendSystemPrompt?.indexOf("[System]: Phase transition");
+            const assistantIndex = result.appendSystemPrompt?.indexOf(
                 "[Assistant]: Assistant response"
             );
             expect(userIndex).toBeLessThan(systemIndex);

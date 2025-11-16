@@ -44,14 +44,12 @@ export class AgentRegistry {
     constructor(projectPath: string, metadataPath: string) {
         if (!projectPath || projectPath === "undefined") {
             throw new Error(
-                "AgentRegistry requires a valid projectPath. " + "Received: " + String(projectPath)
+                `AgentRegistry requires a valid projectPath. Received: ${String(projectPath)}`
             );
         }
         if (!metadataPath || metadataPath === "undefined") {
             throw new Error(
-                "AgentRegistry requires a valid metadataPath. " +
-                    "Received: " +
-                    String(metadataPath)
+                `AgentRegistry requires a valid metadataPath. Received: ${String(metadataPath)}`
             );
         }
         this.projectPath = projectPath;
@@ -156,9 +154,7 @@ export class AgentRegistry {
             const pmEventId = agentEventIds[0];
             if (failedAgents.includes(pmEventId)) {
                 throw new Error(
-                    "Critical agent failed to load. " +
-                        `Agent event ID ${pmEventId} could not be fetched. ` +
-                        "This might be due to network issues or the event not being available on the configured relays."
+                    `Critical agent failed to load. Agent event ID ${pmEventId} could not be fetched. This might be due to network issues or the event not being available on the configured relays.`
                 );
             }
             logger.warn(

@@ -40,46 +40,45 @@ export class ModelSelector {
             ]);
 
             if (selectedModel === "__manual__") {
-                return await this.promptManualModel(currentModel || "llama3.1:8b");
-            }
-
-            return selectedModel;
-        } else {
-            console.log(chalk.yellow("⚠️  No Ollama models found. Make sure Ollama is running."));
-            console.log(chalk.gray("Showing popular models (you'll need to pull them first)."));
-
-            const popular = getPopularOllamaModels();
-            const choices = [];
-            for (const [category, models] of Object.entries(popular)) {
-                choices.push(new inquirer.Separator(`--- ${category} ---`));
-                choices.push(
-                    ...models.map((m) => ({
-                        name: m,
-                        value: m,
-                    }))
-                );
-            }
-
-            choices.push(new inquirer.Separator());
-            choices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__" });
-
-            const { selectedModel } = await inquirer.prompt([
-                {
-                    type: "list",
-                    name: "selectedModel",
-                    message: "Select model:",
-                    default: currentModel,
-                    choices,
-                    pageSize: 15,
-                },
-            ]);
-
-            if (selectedModel === "__manual__") {
-                return await this.promptManualModel(currentModel || "llama3.1:8b");
+                return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
             }
 
             return selectedModel;
         }
+        console.log(chalk.yellow("⚠️  No Ollama models found. Make sure Ollama is running."));
+        console.log(chalk.gray("Showing popular models (you'll need to pull them first)."));
+
+        const popular = getPopularOllamaModels();
+        const choices = [];
+        for (const [category, models] of Object.entries(popular)) {
+            choices.push(new inquirer.Separator(`--- ${category} ---`));
+            choices.push(
+                ...models.map((m) => ({
+                    name: m,
+                    value: m,
+                }))
+            );
+        }
+
+        choices.push(new inquirer.Separator());
+        choices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__" });
+
+        const { selectedModel } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "selectedModel",
+                message: "Select model:",
+                default: currentModel,
+                choices,
+                pageSize: 15,
+            },
+        ]);
+
+        if (selectedModel === "__manual__") {
+            return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
+        }
+
+        return selectedModel;
     }
 
     /**
@@ -142,56 +141,54 @@ export class ModelSelector {
             ]);
 
             if (selectedModel === "__manual__") {
-                return await this.promptManualModel(currentModel || "openai/gpt-4");
+                return await ModelSelector.promptManualModel(currentModel || "openai/gpt-4");
             }
 
             return selectedModel;
-        } else {
-            console.log(chalk.yellow("⚠️  Failed to fetch models from OpenRouter API"));
-            console.log(
-                chalk.gray("You can still enter a model ID manually or select from popular models.")
-            );
+        }
+        console.log(chalk.yellow("⚠️  Failed to fetch models from OpenRouter API"));
+        console.log(
+            chalk.gray("You can still enter a model ID manually or select from popular models.")
+        );
 
-            const { selectionMethod } = await inquirer.prompt([
+        const { selectionMethod } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "selectionMethod",
+                message: "How would you like to select the model?",
+                choices: [
+                    { name: "Quick select from popular models", value: "quick" },
+                    { name: "Type model ID manually", value: "manual" },
+                ],
+            },
+        ]);
+
+        if (selectionMethod === "quick") {
+            const popular = getPopularModels();
+            const choices = [];
+            for (const [category, models] of Object.entries(popular)) {
+                choices.push(new inquirer.Separator(`--- ${category} ---`));
+                choices.push(
+                    ...models.map((m) => ({
+                        name: m,
+                        value: m,
+                    }))
+                );
+            }
+
+            const { selectedModel } = await inquirer.prompt([
                 {
                     type: "list",
-                    name: "selectionMethod",
-                    message: "How would you like to select the model?",
-                    choices: [
-                        { name: "Quick select from popular models", value: "quick" },
-                        { name: "Type model ID manually", value: "manual" },
-                    ],
+                    name: "selectedModel",
+                    message: "Select model:",
+                    default: currentModel,
+                    choices,
+                    pageSize: 15,
                 },
             ]);
-
-            if (selectionMethod === "quick") {
-                const popular = getPopularModels();
-                const choices = [];
-                for (const [category, models] of Object.entries(popular)) {
-                    choices.push(new inquirer.Separator(`--- ${category} ---`));
-                    choices.push(
-                        ...models.map((m) => ({
-                            name: m,
-                            value: m,
-                        }))
-                    );
-                }
-
-                const { selectedModel } = await inquirer.prompt([
-                    {
-                        type: "list",
-                        name: "selectedModel",
-                        message: "Select model:",
-                        default: currentModel,
-                        choices,
-                        pageSize: 15,
-                    },
-                ]);
-                return selectedModel;
-            } else {
-                return await this.promptManualModel(currentModel || "openai/gpt-4");
-            }
+            return selectedModel;
         }
+        return await ModelSelector.promptManualModel(currentModel || "openai/gpt-4");
     }
 
     /**

@@ -32,7 +32,7 @@ describe("Logger", () => {
         });
 
         it("should log info messages at default level", () => {
-            delete process.env.LOG_LEVEL;
+            process.env.LOG_LEVEL = undefined;
             logger.info("info message");
             expect(consoleLogSpy).toHaveBeenCalledTimes(1);
         });

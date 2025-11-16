@@ -181,7 +181,7 @@ function InteractiveTUI() {
         const color = isVisible ? "green" : "dim";
         const symbol = isVisible ? "✓" : "✗";
         const connector = isLast ? "└─" : "├─";
-        const line = depth > 0 ? prefix + connector + " " : "";
+        const line = depth > 0 ? `${prefix + connector} ` : "";
 
         const author =
             scenario.agents.find((a) => a.agent.pubkey === event.pubkey)?.agent.name ||

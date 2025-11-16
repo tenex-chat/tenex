@@ -46,7 +46,9 @@ export class ConfigurationManager {
                     type: "input",
                     name: "inputModel",
                     message: "Enter model name:",
-                    default: this.getDefaultModelForProvider(provider as AISdkProvider),
+                    default: ConfigurationManager.getDefaultModelForProvider(
+                        provider as AISdkProvider
+                    ),
                     validate: (input: string) => {
                         if (!input.trim()) return "Model name is required";
                         return true;
@@ -65,7 +67,7 @@ export class ConfigurationManager {
                 validate: (input: string) => {
                     if (!input) return true;
                     const num = Number.parseFloat(input);
-                    if (isNaN(num) || num < 0 || num > 2)
+                    if (Number.isNaN(num) || num < 0 || num > 2)
                         return "Temperature must be between 0 and 2";
                     return true;
                 },
@@ -77,7 +79,8 @@ export class ConfigurationManager {
                 validate: (input: string) => {
                     if (!input) return true;
                     const num = Number.parseInt(input);
-                    if (isNaN(num) || num <= 0) return "Max tokens must be a positive number";
+                    if (Number.isNaN(num) || num <= 0)
+                        return "Max tokens must be a positive number";
                     return true;
                 },
             },

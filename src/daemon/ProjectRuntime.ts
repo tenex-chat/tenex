@@ -91,7 +91,7 @@ export class ProjectRuntime {
                 }
                 actualRepoPath = clonedPath;
             } else {
-                logger.info(`Initializing new git repository`, { projectId: this.projectId });
+                logger.info("Initializing new git repository", { projectId: this.projectId });
                 actualRepoPath = await initializeGitRepository(this.projectPath);
             }
 
@@ -134,7 +134,7 @@ export class ProjectRuntime {
             // Start status publisher
             this.statusPublisher = new StatusPublisher();
             await projectContextStore.run(this.context, async () => {
-                await this.statusPublisher!.startPublishing(this.projectPath, this.context);
+                await this.statusPublisher?.startPublishing(this.projectPath, this.context);
             });
 
             this.isRunning = true;
@@ -341,7 +341,7 @@ export class ProjectRuntime {
                         slug: mcpTool.slug,
                     });
                 } catch (error) {
-                    logger.error(`[ProjectRuntime] Failed to install MCP tool`, {
+                    logger.error("[ProjectRuntime] Failed to install MCP tool", {
                         eventId: eventId.substring(0, 12),
                         error: error instanceof Error ? error.message : String(error),
                     });
@@ -349,7 +349,7 @@ export class ProjectRuntime {
                 }
             }
 
-            logger.info(`[ProjectRuntime] MCP tool installation complete`, {
+            logger.info("[ProjectRuntime] MCP tool installation complete", {
                 total: mcpEventIds.length,
                 success: installedCount.success,
                 failed: installedCount.failed,
@@ -365,7 +365,7 @@ export class ProjectRuntime {
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());
 
-                logger.info(`[ProjectRuntime] MCP service initialized`, {
+                logger.info("[ProjectRuntime] MCP service initialized", {
                     runningServers: runningServers.length,
                     runningServerNames: runningServers,
                     availableTools: availableTools.length,

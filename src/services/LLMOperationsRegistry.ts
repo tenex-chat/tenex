@@ -21,10 +21,10 @@ class LLMOperationsRegistry {
     private changeListeners = new Set<() => void>();
 
     static getInstance(): LLMOperationsRegistry {
-        if (!this.instance) {
-            this.instance = new LLMOperationsRegistry();
+        if (!LLMOperationsRegistry.instance) {
+            LLMOperationsRegistry.instance = new LLMOperationsRegistry();
         }
-        return this.instance;
+        return LLMOperationsRegistry.instance;
     }
 
     registerOperation(context: ExecutionContext): AbortSignal {

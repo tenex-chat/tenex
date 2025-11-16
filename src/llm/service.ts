@@ -472,9 +472,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
-            prepareStep?: (step: { messages: ModelMessage[]; stepNumber: number }) => {
-                messages?: ModelMessage[];
-            } | void;
+            prepareStep?: (step: { messages: ModelMessage[]; stepNumber: number }) =>
+                | {
+                      messages?: ModelMessage[];
+                  }
+                | undefined;
         }
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
@@ -623,7 +625,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     chunk,
                 });
                 break;
-            case "error":
+            case "error": {
                 // Extract detailed error information
                 const errorMsg =
                     chunk.error instanceof Error ? chunk.error.message : String(chunk.error);
@@ -637,6 +639,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 });
                 this.emit("stream-error", { error: chunk.error });
                 break;
+            }
             default:
                 // Log unknown chunk types for debugging
                 logger.debug("[LLMService] Unknown chunk type", {

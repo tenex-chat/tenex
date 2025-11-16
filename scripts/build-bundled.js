@@ -36,8 +36,8 @@ async function buildAll() {
     try {
         console.log("🏗️  Building TENEX CLI...");
 
-        const { execSync } = await import("child_process");
-        const { existsSync, mkdirSync } = await import("fs");
+        const { execSync } = await import("node:child_process");
+        const { existsSync, mkdirSync } = await import("node:fs");
 
         // Ensure dist directory exists
         if (!existsSync("dist")) {

@@ -116,41 +116,40 @@ async function executeAgentsWrite(
                 pubkey: agent.pubkey,
             },
         };
-    } else {
-        logger.info(`Creating new agent: ${slug}`);
-
-        // Create agent config
-        const agentConfig = {
-            name,
-            role,
-            description,
-            instructions,
-            useCriteria,
-            llmConfig,
-            tools,
-            phases,
-        };
-
-        // Use ensureAgent to create and register the agent
-        const agent = await projectContext.agentRegistry.ensureAgent(
-            slug,
-            agentConfig,
-            projectContext.project
-        );
-
-        logger.info(`Successfully created agent "${name}" (${slug})`);
-        logger.info(`  Pubkey: ${agent.pubkey}`);
-
-        return {
-            success: true,
-            message: `Successfully created agent "${name}"`,
-            agent: {
-                slug,
-                name,
-                pubkey: agent.pubkey,
-            },
-        };
     }
+    logger.info(`Creating new agent: ${slug}`);
+
+    // Create agent config
+    const agentConfig = {
+        name,
+        role,
+        description,
+        instructions,
+        useCriteria,
+        llmConfig,
+        tools,
+        phases,
+    };
+
+    // Use ensureAgent to create and register the agent
+    const agent = await projectContext.agentRegistry.ensureAgent(
+        slug,
+        agentConfig,
+        projectContext.project
+    );
+
+    logger.info(`Successfully created agent "${name}" (${slug})`);
+    logger.info(`  Pubkey: ${agent.pubkey}`);
+
+    return {
+        success: true,
+        message: `Successfully created agent "${name}"`,
+        agent: {
+            slug,
+            name,
+            pubkey: agent.pubkey,
+        },
+    };
 }
 
 /**

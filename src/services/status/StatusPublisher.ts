@@ -41,10 +41,6 @@ export class StatusPublisher {
     private statusInterval?: NodeJS.Timeout;
     private projectContext?: ProjectContext;
 
-    constructor() {
-        // No dependencies needed
-    }
-
     async startPublishing(projectPath: string, projectContext?: ProjectContext): Promise<void> {
         // Store the project context if provided (for daemon mode)
         this.projectContext = projectContext;

@@ -159,7 +159,7 @@ export class JaegerClient {
                 if (!childrenMap.has(parentId)) {
                     childrenMap.set(parentId, []);
                 }
-                childrenMap.get(parentId)!.push(span);
+                childrenMap.get(parentId)?.push(span);
                 console.error(
                     `[JaegerClient] Found child: ${span.operationName} (${span.spanID.substring(0, 8)}) -> parent: ${parentId.substring(0, 8)}`
                 );
@@ -198,10 +198,7 @@ export class JaegerClient {
 
             // Try to get event name from 'event' field, otherwise use first field key
             const eventName =
-                eventAttributes["event"] ||
-                eventAttributes["name"] ||
-                log.fields[0]?.key ||
-                "event";
+                eventAttributes.event || eventAttributes.name || log.fields[0]?.key || "event";
 
             return {
                 name: eventName,
@@ -266,7 +263,7 @@ export class JaegerClient {
         const contentTag = rootSpan.tags.find((t) => t.key === "event.content");
         if (contentTag?.value) {
             const content = String(contentTag.value);
-            return content.length > 60 ? content.substring(0, 60) + "..." : content;
+            return content.length > 60 ? `${content.substring(0, 60)}...` : content;
         }
 
         // Try to get agent name for agent executions

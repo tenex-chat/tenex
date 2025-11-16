@@ -165,7 +165,7 @@ export function createMockFS(): MockFS {
             if (options?.recursive) {
                 let currentPath = "";
                 for (const part of path.split("/").filter(Boolean)) {
-                    currentPath += "/" + part;
+                    currentPath += `/${part}`;
                     directories.add(currentPath);
                 }
             }
@@ -176,7 +176,7 @@ export function createMockFS(): MockFS {
                 throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
             }
             const entries: string[] = [];
-            const prefix = path.endsWith("/") ? path : path + "/";
+            const prefix = path.endsWith("/") ? path : `${path}/`;
 
             // Find files in this directory
             for (const filePath of files.keys()) {

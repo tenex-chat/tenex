@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { RAGService } from "@/services/rag/RAGService";
 import { RagSubscriptionService, SubscriptionStatus } from "@/services/rag/RagSubscriptionService";
-import * as fs from "fs/promises";
 import { createRAGSubscriptionCreateTool } from "../rag_subscription_create";
 import { createRAGSubscriptionDeleteTool } from "../rag_subscription_delete";
 import { createRAGSubscriptionGetTool } from "../rag_subscription_get";

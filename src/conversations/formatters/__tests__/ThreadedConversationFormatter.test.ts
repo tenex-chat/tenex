@@ -107,9 +107,9 @@ describe("ThreadedConversationFormatter", () => {
             // Find the branch with agent
             const agentBranch = agentBranches[0].children.find((c) => c.event.id === "2");
             expect(agentBranch).toBeDefined();
-            expect(agentBranch!.event.id).toBe("2");
-            expect(agentBranch!.children).toHaveLength(1);
-            expect(agentBranch!.children[0].event.id).toBe("3");
+            expect(agentBranch?.event.id).toBe("2");
+            expect(agentBranch?.children).toHaveLength(1);
+            expect(agentBranch?.children[0].event.id).toBe("3");
 
             // The other branch should also be included for context
             const otherBranch = agentBranches[0].children.find((c) => c.event.id === "4");

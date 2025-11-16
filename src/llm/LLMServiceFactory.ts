@@ -105,7 +105,7 @@ export class LLMServiceFactory {
                             // Custom URL - ensure it ends with /api
                             baseURL = config.apiKey.endsWith("/api")
                                 ? config.apiKey
-                                : config.apiKey.replace(/\/$/, "") + "/api";
+                                : `${config.apiKey.replace(/\/$/, "")}/api`;
                         }
 
                         // Create Ollama provider with custom base URL if provided

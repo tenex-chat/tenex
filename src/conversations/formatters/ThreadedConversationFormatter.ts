@@ -107,7 +107,7 @@ export class ThreadedConversationFormatter {
         const result: string[] = [];
         for (let i = 0; i < agentBranches.length; i++) {
             if (i > 0) {
-                result.push("\n" + "─".repeat(60) + "\n");
+                result.push(`\n${"─".repeat(60)}\n`);
             }
             result.push(this.formatThread(agentBranches[i], options));
         }
@@ -160,10 +160,9 @@ export class ThreadedConversationFormatter {
                     ...node,
                     children: prunedChildren,
                 };
-            } else {
-                // This node and ALL its descendants are in the active branch
-                return null;
             }
+            // This node and ALL its descendants are in the active branch
+            return null;
         }
 
         // Node is not in active branch - keep it and recursively prune children

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import * as path from "path";
-import * as fs from "fs/promises";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { RAGService } from "../RAGService";
 import { RagSubscriptionService, SubscriptionStatus } from "../RagSubscriptionService";
 

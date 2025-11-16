@@ -92,7 +92,7 @@ export class ProjectContext {
 
         let projectManagerAgent: AgentInstance | undefined;
 
-        if (pmAgentTag && pmAgentTag[1]) {
+        if (pmAgentTag?.[1]) {
             const pmEventId = pmAgentTag[1];
             logger.info("Found explicit PM designation in project tags");
 
@@ -243,7 +243,7 @@ export class ProjectContext {
         );
 
         let pmEventId: string;
-        if (pmAgentTag && pmAgentTag[1]) {
+        if (pmAgentTag?.[1]) {
             pmEventId = pmAgentTag[1];
         } else {
             // Fallback to first agent

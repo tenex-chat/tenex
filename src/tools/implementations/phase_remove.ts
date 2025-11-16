@@ -64,7 +64,7 @@ async function executeRemovePhase(
         // Update phases in stored data
         if (Object.keys(agent.phases).length === 0) {
             // Remove phases property if empty
-            delete storedAgent.phases;
+            storedAgent.phases = undefined;
         } else {
             storedAgent.phases = agent.phases;
         }

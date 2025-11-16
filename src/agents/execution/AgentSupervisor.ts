@@ -464,10 +464,9 @@ export class AgentSupervisor {
 
             // Combine all system messages into one
             return systemMessages.map((msg) => msg.message.content).join("\n\n");
-        } else {
-            // Fallback minimal prompt
-            return `You are ${this.context.agent.name}. ${this.context.agent.instructions || ""}`;
         }
+        // Fallback minimal prompt
+        return `You are ${this.context.agent.name}. ${this.context.agent.instructions || ""}`;
     }
 
     /**

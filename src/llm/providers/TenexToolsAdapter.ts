@@ -40,15 +40,15 @@ export class TenexToolsAdapter {
                         return {
                             content: [{ type: "text", text: result }],
                         };
-                    } else if (result && typeof result === "object") {
+                    }
+                    if (result && typeof result === "object") {
                         return {
                             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                         };
-                    } else {
-                        return {
-                            content: [{ type: "text", text: String(result) }],
-                        };
                     }
+                    return {
+                        content: [{ type: "text", text: String(result) }],
+                    };
                 } catch (error) {
                     logger.error(`Error executing tool ${name}:`, error);
                     return {

@@ -1,10 +1,10 @@
-import { watch } from "fs";
-import { homedir } from "os";
-import { basename, join } from "path";
+import { watch } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/registry";
 import { logger } from "@/utils/logger";
-import { readdir, stat } from "fs/promises";
 import { debounce } from "lodash";
 
 /**
@@ -50,7 +50,7 @@ export class DynamicToolService {
             await stat(this.dynamicToolsPath);
         } catch {
             // Directory doesn't exist, create it
-            const { mkdir } = await import("fs/promises");
+            const { mkdir } = await import("node:fs/promises");
             await mkdir(this.dynamicToolsPath, { recursive: true });
             logger.debug("[DynamicToolService] Created dynamic tools directory", {
                 path: this.dynamicToolsPath,

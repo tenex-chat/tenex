@@ -89,7 +89,7 @@ describe("StatusPublisher with NDK utilities", () => {
                 expect(statusMessage).toBeDefined();
 
                 // Parse the event from the message
-                const [, eventData] = JSON.parse(statusMessage!.message);
+                const [, eventData] = JSON.parse(statusMessage?.message);
 
                 // Verify event structure
                 expect(eventData.kind).toBe(NDKKind.Text);
@@ -213,7 +213,7 @@ describe("StatusPublisher with NDK utilities", () => {
                 const statusMessage = relay.messageLog.find(
                     (log) => log.direction === "out" && log.message.includes("EVENT")
                 );
-                const [, eventData] = JSON.parse(statusMessage!.message);
+                const [, eventData] = JSON.parse(statusMessage?.message);
 
                 // Verify agent tags
                 const agentTags = eventData.tags.filter((tag: string[]) => tag[0] === "agent");
