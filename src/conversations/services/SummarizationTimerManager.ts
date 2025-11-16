@@ -18,7 +18,7 @@ export class SummarizationTimerManager {
    * Initialize the timer manager and load configuration
    */
   async initialize(): Promise<void> {
-    const config = await configService.loadTenexConfig();
+    const { config } = await configService.loadConfig();
     this.timeoutMs = config.summarization?.inactivityTimeout || SUMMARIZATION_DEFAULTS.INACTIVITY_TIMEOUT_MS;
     logger.info(`[SummarizationTimerManager] Initialized with ${this.timeoutMs}ms timeout`);
   }

@@ -1,5 +1,5 @@
 import type { ProjectRuntime } from "../ProjectRuntime";
-import type { ProjectInfo } from "./types";
+import type { ProjectInfo, ConversationInfo } from "./types";
 
 export function areProjectListsEqual(a: ProjectInfo[], b: ProjectInfo[]): boolean {
   if (a.length !== b.length) return false;
@@ -38,4 +38,29 @@ export function extractProjectInfo(runtimes: Map<string, ProjectRuntime>): Proje
   }
 
   return projectList;
+}
+
+export function extractCachedConversations(runtimes: Map<string, ProjectRuntime>): ConversationInfo[] {
+  const conversations: ConversationInfo[] = [];
+
+  for (const [projectId, runtime] of runtimes) {
+    const context = runtime.getContext();
+    if (!context?.conversationCoordinator) continue;
+
+    const cachedConversations = context.conversationCoordinator.getAllConversations();
+
+    for (const conv of cachedConversations) {
+      const lastEvent = conv.history[conv.history.length - 1];
+      conversations.push({
+        id: conv.id,
+        title: conv.title || conv.metadata.summary || "Untitled Conversation",
+        summary: conv.metadata.summary,
+        lastActivity: lastEvent?.created_at || 0,
+        projectId,
+      });
+    }
+  }
+
+  // Sort by last activity (most recent first)
+  return conversations.sort((a, b) => b.lastActivity - a.lastActivity);
 }

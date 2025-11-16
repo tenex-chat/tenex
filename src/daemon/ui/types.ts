@@ -15,6 +15,14 @@ export interface AgentInfo {
   lessonsCount: number;
 }
 
-export type ViewMode = "projects" | "agents" | "agent-detail";
+export interface ConversationInfo {
+  id: string;
+  title: string;
+  summary?: string;
+  lastActivity: number;
+  projectId: string;
+}
+
+export type ViewMode = "projects" | "conversations" | "agents" | "agent-detail";
 
 export type ActionType = "kill" | "restart";
