@@ -19,7 +19,12 @@ export interface TenexConfig {
   // Logging configuration
   logging?: {
     logFile?: string; // Path to log file (default: ~/.tenex/daemon.log)
-    level?: 'silent' | 'error' | 'warn' | 'info' | 'debug'; // Log level (inherits from LOG_LEVEL env var if not set)
+    level?: "silent" | "error" | "warn" | "info" | "debug"; // Log level (inherits from LOG_LEVEL env var if not set)
+  };
+
+  // Summarization configuration
+  summarization?: {
+    inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 300000 = 5 minutes)
   };
 
   // Project fields (optional for global config)
@@ -35,7 +40,10 @@ export const TenexConfigSchema = z.object({
   relays: z.array(z.string()).optional(),
   logging: z.object({
     logFile: z.string().optional(),
-    level: z.enum(['silent', 'error', 'warn', 'info', 'debug']).optional(),
+    level: z.enum(["silent", "error", "warn", "info", "debug"]).optional(),
+  }).optional(),
+  summarization: z.object({
+    inactivityTimeout: z.number().optional(),
   }).optional(),
   description: z.string().optional(),
   repoUrl: z.string().optional(),

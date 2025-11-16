@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { ProjectRuntime } from "./ProjectRuntime";
+import { ConversationFetcher, type ConversationData } from "@/conversations/services/ConversationFetcher";
+import { CONVERSATION_UI } from "@/conversations/constants";
+import { formatTimeAgo, formatUptime } from "@/utils/time";
 
 interface ProcessManagerUIProps {
   runtimes: Map<string, ProjectRuntime>;
@@ -18,20 +21,9 @@ interface ProjectInfo {
   agentCount: number;
 }
 
-type ActionType = "kill" | "restart";
 
-/**
- * Format uptime from a start time
- */
-function formatUptime(startTime: Date | null): string {
-  if (!startTime) return "N/A";
-  const now = new Date();
-  const diff = now.getTime() - startTime.getTime();
-  const hours = Math.floor(diff / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  const seconds = Math.floor((diff % 60000) / 1000);
-  return `${hours}h ${minutes}m ${seconds}s`;
-}
+type ActionType = "kill" | "restart";
+type ViewMode = "projects" | "conversations";
 
 /**
  * Check if two project lists are equivalent (shallow comparison of key fields)
@@ -78,15 +70,16 @@ function extractProjectInfo(runtimes: Map<string, ProjectRuntime>): ProjectInfo[
   return projectList;
 }
 
-export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: ProcessManagerUIProps) {
-  const { exit } = useApp();
+export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: ProcessManagerUIProps): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [conversations, setConversations] = useState<ConversationData[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>("projects");
   const [statusMessage, setStatusMessage] = useState<string>("");
 
   // Update project list only when data actually changes
-  useEffect(() => {
-    const updateProjects = () => {
+  useEffect((): (() => void) => {
+    const updateProjects = (): void => {
       const newProjects = extractProjectInfo(runtimes);
 
       // Only update state if the project list has actually changed
@@ -104,17 +97,38 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
     return () => clearInterval(interval);
   }, [runtimes]);
 
+  // Fetch conversations from Nostr
+  useEffect((): (() => void) => {
+    const fetchConversations = async (): Promise<void> => {
+      try {
+        const conversations = await ConversationFetcher.fetchRecentConversations();
+        setConversations(conversations);
+      } catch (error) {
+        console.error("Failed to fetch conversations:", error);
+      }
+    };
+
+    fetchConversations();
+    const interval = setInterval(fetchConversations, CONVERSATION_UI.REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Helper: Handle navigation (up/down arrows)
-  const handleNavigation = (direction: "up" | "down") => {
+  const handleNavigation = (direction: "up" | "down"): void => {
+    const maxIndex = viewMode === "projects"
+      ? projects.length - 1
+      : conversations.length - 1;
+
     if (direction === "up") {
       setSelectedIndex((prev) => Math.max(0, prev - 1));
     } else {
-      setSelectedIndex((prev) => Math.min(projects.length - 1, prev + 1));
+      setSelectedIndex((prev) => Math.min(maxIndex, prev + 1));
     }
   };
 
   // Helper: Perform action (kill or restart) on selected project
-  const performAction = async (action: ActionType) => {
+  const performAction = async (action: ActionType): Promise<void> => {
     if (projects.length === 0) return;
 
     const project = projects[selectedIndex];
@@ -158,12 +172,26 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
       handleNavigation("down");
     }
 
-    if (input === "k") {
-      performAction("kill");
+    // Switch view modes
+    if (input === "c") {
+      setViewMode("conversations");
+      setSelectedIndex(0);
     }
 
-    if (input === "r") {
-      performAction("restart");
+    if (input === "p") {
+      setViewMode("projects");
+      setSelectedIndex(0);
+    }
+
+    // Actions only work in projects view
+    if (viewMode === "projects") {
+      if (input === "k") {
+        performAction("kill");
+      }
+
+      if (input === "r") {
+        performAction("restart");
+      }
     }
   });
 
@@ -178,38 +206,82 @@ export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: Proce
 
       {/* Instructions */}
       <Box marginBottom={1}>
-        <Text dimColor>Use ↑/↓ to navigate | k: kill | r: restart | q/ESC: close</Text>
+        <Text dimColor>
+          Use ↑/↓ to navigate | p: projects | c: conversations
+          {viewMode === "projects" ? " | k: kill | r: restart" : ""} | q/ESC: close
+        </Text>
       </Box>
 
-      {/* Project List */}
-      {projects.length === 0 ? (
-        <Box>
-          <Text dimColor>No running projects</Text>
-        </Box>
-      ) : (
-        <Box flexDirection="column">
-          {projects.map((project, index) => {
-            const isSelected = index === selectedIndex;
-            const statusIcon = project.isRunning ? "🟢" : "🔴";
+      {/* View Mode Indicator */}
+      <Box marginBottom={1}>
+        <Text bold color={viewMode === "projects" ? "green" : "yellow"}>
+          [{viewMode === "projects" ? "Projects" : "Conversations"}]
+        </Text>
+      </Box>
 
-            return (
-              <Box key={project.projectId}>
-                <Text backgroundColor={isSelected ? "blue" : undefined} color={isSelected ? "white" : undefined}>
-                  {isSelected ? "▶ " : "  "}
-                  {statusIcon} {project.title}
-                </Text>
-                <Text dimColor>
-                  {" | "}
-                  Uptime: {formatUptime(project.startTime)}
-                  {" | "}
-                  Events: {project.eventCount}
-                  {" | "}
-                  Agents: {project.agentCount}
-                </Text>
-              </Box>
-            );
-          })}
-        </Box>
+      {/* Content based on view mode */}
+      {viewMode === "projects" ? (
+        // Projects View
+        projects.length === 0 ? (
+          <Box>
+            <Text dimColor>No running projects</Text>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            {projects.map((project, index) => {
+              const isSelected = index === selectedIndex;
+              const statusIcon = project.isRunning ? "🟢" : "🔴";
+
+              return (
+                <Box key={project.projectId}>
+                  <Text backgroundColor={isSelected ? "blue" : undefined} color={isSelected ? "white" : undefined}>
+                    {isSelected ? "▶ " : "  "}
+                    {statusIcon} {project.title}
+                  </Text>
+                  <Text dimColor>
+                    {" | "}
+                    Uptime: {formatUptime(project.startTime)}
+                    {" | "}
+                    Events: {project.eventCount}
+                    {" | "}
+                    Agents: {project.agentCount}
+                  </Text>
+                </Box>
+              );
+            })}
+          </Box>
+        )
+      ) : (
+        // Conversations View
+        conversations.length === 0 ? (
+          <Box>
+            <Text dimColor>No recent conversations</Text>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            {conversations.map((conv, index) => {
+              const isSelected = index === selectedIndex;
+              const timeAgo = formatTimeAgo(conv.lastActivity);
+
+              return (
+                <Box key={conv.id} flexDirection="column" marginBottom={1}>
+                  <Text backgroundColor={isSelected ? "blue" : undefined} color={isSelected ? "white" : undefined}>
+                    {isSelected ? "▶ " : "  "}
+                    💬 {conv.title}
+                  </Text>
+                  {conv.summary && (
+                    <Text dimColor marginLeft={4}>
+                      {conv.summary}
+                    </Text>
+                  )}
+                  <Text dimColor marginLeft={4}>
+                    Last activity: {timeAgo}
+                  </Text>
+                </Box>
+              );
+            })}
+          </Box>
+        )
       )}
 
       {/* Status Message */}

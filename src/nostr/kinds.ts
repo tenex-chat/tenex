@@ -13,6 +13,9 @@ export const NDKKind = {
     ...BaseNDKKind,
 
     // Standard NIP kinds not in NDK
+    ConversationRoot: 11, // Agent request (conversation root)
+    EventMetadata: 513, // Event metadata (titles, summaries)
+    GenericReply: 1111, // Generic reply (NOT kind 1)
     AgentRequest: 4133, // NIP-90 Agent Request
     AgentNudge: 4201, // Agent Nudge - system prompt injection
 

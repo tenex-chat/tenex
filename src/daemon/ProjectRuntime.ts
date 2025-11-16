@@ -16,6 +16,7 @@ import { mcpService } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
+import chalk from "chalk";
 
 /**
  * Self-contained runtime for a single project.
@@ -66,6 +67,9 @@ export class ProjectRuntime {
       return;
     }
 
+    const projectTitle = this.project.tagValue("title") || "Untitled";
+    console.log(chalk.yellow(`🚀 Starting project: ${chalk.bold(projectTitle)}`));
+
     logger.info(`Starting project runtime: ${this.projectId}`, {
       title: this.project.tagValue("title"),
     });
@@ -109,8 +113,8 @@ export class ProjectRuntime {
       // Load MCP tools from project event
       await this.initializeMCPTools();
 
-      // Initialize conversation coordinator with metadata path
-      this.conversationCoordinator = new ConversationCoordinator(this.metadataPath);
+      // Initialize conversation coordinator with metadata path and context
+      this.conversationCoordinator = new ConversationCoordinator(this.metadataPath, undefined, this.context);
       await this.conversationCoordinator.initialize();
 
       // Set conversation coordinator in context
@@ -136,6 +140,10 @@ export class ProjectRuntime {
         agentCount: this.context.agents.size,
         pmPubkey: this.context.projectManager?.pubkey?.slice(0, 8),
       });
+
+      console.log(chalk.green(`✅ Project started: ${chalk.bold(projectTitle)}`));
+      console.log(chalk.gray(`   Agents: ${this.context.agents.size} | Path: ${this.projectPath}`));
+      console.log();
     } catch (error) {
       logger.error(`Failed to start project runtime: ${this.projectId}`, {
         error: error instanceof Error ? error.message : String(error),
@@ -185,6 +193,9 @@ export class ProjectRuntime {
       return;
     }
 
+    const projectTitle = this.project.tagValue("title") || "Untitled";
+    console.log(chalk.yellow(`🛑 Stopping project: ${chalk.bold(projectTitle)}`));
+
     logger.info(`Stopping project runtime: ${this.projectId}`, {
       uptime: this.startTime ? Date.now() - this.startTime.getTime() : 0,
       eventsProcessed: this.eventCount,
@@ -214,6 +225,11 @@ export class ProjectRuntime {
     this.isRunning = false;
 
     logger.info(`Project runtime stopped: ${this.projectId}`);
+
+    const uptime = this.startTime ? Math.round((Date.now() - this.startTime.getTime()) / 1000) : 0;
+    console.log(chalk.green(`✅ Project stopped: ${chalk.bold(projectTitle)}`));
+    console.log(chalk.gray(`   Uptime: ${uptime}s | Events processed: ${this.eventCount}`));
+    console.log();
   }
 
   /**

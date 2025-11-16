@@ -9,6 +9,10 @@ import { ConversationPersistenceService, type IConversationPersistenceService } 
 import { ConversationStore } from "./ConversationStore";
 import { ThreadService } from "./ThreadService";
 import { ParticipationIndex } from "./ParticipationIndex";
+import { ConversationSummarizer } from "./ConversationSummarizer";
+import { SummarizationTimerManager } from "./SummarizationTimerManager";
+import type { ProjectContext } from "@/services/ProjectContext";
+import { NDKKind } from "@/nostr/kinds";
 
 /**
  * Coordinates between all conversation services.
@@ -18,6 +22,7 @@ export class ConversationCoordinator {
   private store: ConversationStore;
   private persistence: IConversationPersistenceService;
   private eventProcessor: ConversationEventProcessor;
+  private timerManager?: SummarizationTimerManager;
 
   // NEW: Expose decomposed services for strategies to use
   public readonly threadService = new ThreadService();
@@ -25,7 +30,8 @@ export class ConversationCoordinator {
 
   constructor(
     projectPath: string,
-    persistence?: ConversationPersistenceAdapter
+    persistence?: ConversationPersistenceAdapter,
+    context?: ProjectContext
   ) {
     if (!projectPath || projectPath === "undefined") {
       throw new Error(
@@ -40,6 +46,12 @@ export class ConversationCoordinator {
       persistence || new FileSystemAdapter(projectPath)
     );
     this.eventProcessor = new ConversationEventProcessor();
+
+    // Create summarization services if context is provided
+    if (context) {
+      const summarizer = new ConversationSummarizer(context);
+      this.timerManager = new SummarizationTimerManager(summarizer);
+    }
   }
 
   /**
@@ -48,6 +60,11 @@ export class ConversationCoordinator {
   async initialize(): Promise<void> {
     await this.persistence.initialize();
     await this.loadConversations();
+
+    // Initialize timer manager if present
+    if (this.timerManager) {
+      await this.timerManager.initialize();
+    }
 
     // Build participation indices for loaded conversations
     for (const conversation of this.store.getAll()) {
@@ -124,6 +141,11 @@ export class ConversationCoordinator {
 
     this.eventProcessor.processIncomingEvent(conversation, event);
 
+    // Schedule summarization if not a metadata event
+    if (this.timerManager && event.kind !== NDKKind.EventMetadata) {
+      this.timerManager.scheduleSummarization(conversation);
+    }
+
     // NEW: Update participation index whenever events are added
     this.participationIndex.buildIndex(conversationId, conversation.history);
 
@@ -191,6 +213,11 @@ export class ConversationCoordinator {
    * Clean up and save all conversations
    */
   async cleanup(): Promise<void> {
+    // Clear all summarization timers
+    if (this.timerManager) {
+      this.timerManager.clearAllTimers();
+    }
+
     const promises: Promise<void>[] = [];
     for (const conversation of this.store.getAll()) {
       promises.push(this.persistence.save(conversation));
