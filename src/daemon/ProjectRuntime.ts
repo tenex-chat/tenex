@@ -72,12 +72,16 @@ export class ProjectRuntime {
 
     logger.info(`Starting project runtime: ${this.projectId}`, {
       title: this.project.tagValue("title"),
+      metadataPath: this.metadataPath,
+      projectPath: this.projectPath,
     });
 
     try {
       // Create TENEX metadata directories: ~/.tenex/projects/<dTag>/{conversations,logs}
+      logger.debug(`Creating metadata directories at: ${this.metadataPath}`);
       await fs.mkdir(path.join(this.metadataPath, "conversations"), { recursive: true });
       await fs.mkdir(path.join(this.metadataPath, "logs"), { recursive: true });
+      logger.debug(`Metadata directories created successfully`);
 
       // Clone git repository to user-facing location: ~/tenex/<dTag>/<branchName>/
       const repoUrl = this.project.repo;
@@ -114,8 +118,11 @@ export class ProjectRuntime {
       await this.initializeMCPTools();
 
       // Initialize conversation coordinator with metadata path and context
+      logger.debug(`Initializing ConversationCoordinator with metadataPath: ${this.metadataPath}`);
       this.conversationCoordinator = new ConversationCoordinator(this.metadataPath, undefined, this.context);
+      logger.debug(`ConversationCoordinator created, calling initialize()`);
       await this.conversationCoordinator.initialize();
+      logger.debug(`ConversationCoordinator initialized successfully`);
 
       // Set conversation coordinator in context
       this.context.conversationCoordinator = this.conversationCoordinator;
