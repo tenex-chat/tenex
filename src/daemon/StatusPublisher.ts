@@ -1,3 +1,4 @@
+import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import type { ProjectContext } from "@/services/ProjectContext";
@@ -94,11 +95,16 @@ export class DaemonStatusPublisher {
 
         // Build agent status data
         const agents = Array.from(context.agents.values());
-        const agentStatus = agents.map((agent: any) => {
-            const agentData: any = {
+        const agentStatus = agents.map((agent: AgentInstance) => {
+            const agentData: {
+                pubkey: string;
+                slug: string;
+                model?: string;
+                pm?: boolean;
+                tools?: string[];
+            } = {
                 pubkey: agent.pubkey,
                 slug: agent.slug,
-                model: agent.model,
             };
 
             // Mark the PM agent
@@ -165,10 +171,9 @@ export class DaemonStatusPublisher {
                 id: projectId,
                 title: context.project.tagValue("title") || "Untitled",
                 agentCount: agents.length,
-                agents: agents.map((a: any) => ({
+                agents: agents.map((a: AgentInstance) => ({
                     pubkey: a.pubkey,
                     slug: a.slug,
-                    model: a.model,
                     isPM: a.pubkey === context.projectManager?.pubkey,
                 })),
             };

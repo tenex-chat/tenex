@@ -11,7 +11,6 @@ import { createProviderRegistry } from "ai";
 import type { ModelMessage } from "ai";
 import { claudeCode } from "ai-sdk-provider-claude-code";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
-import chalk from "chalk";
 import { z } from "zod";
 
 export enum ClaudeCodeMode {

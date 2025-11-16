@@ -182,7 +182,7 @@ export class Daemon {
         const ndk = getNDK();
 
         // Use subscribe instead of fetchEvents to get initial projects + continuous updates
-        return new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve) => {
             const subscription = ndk.subscribe(
                 {
                     kinds: [31933],
@@ -1069,6 +1069,63 @@ export class Daemon {
             logger.info(`Project runtime restarted: ${projectId}`);
         } catch (error) {
             logger.error(`Failed to restart project runtime: ${projectId}`, {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Start a specific project runtime
+     * @param projectId - The project ID to start
+     * @throws Error if the project is not found or already running
+     */
+    async startRuntime(projectId: string): Promise<void> {
+        // Check if already running
+        if (this.activeRuntimes.has(projectId)) {
+            throw new Error(`Runtime already running: ${projectId}`);
+        }
+
+        // Check if project exists in known projects
+        const project = this.knownProjects.get(projectId);
+        if (!project) {
+            throw new Error(`Project not found: ${projectId}`);
+        }
+
+        logger.info(`Starting project runtime: ${projectId}`, {
+            title: project.tagValue("title"),
+        });
+
+        try {
+            // Check if this project is currently being started
+            const startingPromise = this.startingRuntimes.get(projectId);
+            if (startingPromise) {
+                await startingPromise;
+                return;
+            }
+
+            // Create startup promise to prevent concurrent startups
+            const startupPromise = (async () => {
+                const newRuntime = new ProjectRuntime(project, this.projectsBase);
+                await newRuntime.start();
+                return newRuntime;
+            })();
+
+            this.startingRuntimes.set(projectId, startupPromise);
+
+            try {
+                const runtime = await startupPromise;
+                this.activeRuntimes.set(projectId, runtime);
+
+                // Update subscription with this project's agent pubkeys
+                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+
+                logger.info(`Project runtime started: ${projectId}`);
+            } finally {
+                this.startingRuntimes.delete(projectId);
+            }
+        } catch (error) {
+            logger.error(`Failed to start project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
             });
             throw error;

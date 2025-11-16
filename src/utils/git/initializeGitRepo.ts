@@ -91,20 +91,6 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
 }
 
 /**
- * Check if a directory is empty (no files/folders except .tenex)
- */
-async function isDirectoryEmpty(dir: string): Promise<boolean> {
-    try {
-        const entries = await fs.readdir(dir);
-        // Filter out .tenex directory
-        const nonTenexEntries = entries.filter((entry) => entry !== ".tenex");
-        return nonTenexEntries.length === 0;
-    } catch {
-        return true;
-    }
-}
-
-/**
  * Clone a git repository into a directory
  * @param repoUrl - The git repository URL to clone
  * @param projectBaseDir - The base project directory (will clone into {projectBaseDir}/{branchName})

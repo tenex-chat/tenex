@@ -1,9 +1,5 @@
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { type Span, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-
-const tracer = trace.getTracer("tenex.conversation");
+import type { Span } from "@opentelemetry/api";
 
 /**
  * Manages conversation-level metadata for tracing.

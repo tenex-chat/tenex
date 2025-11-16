@@ -115,7 +115,7 @@ export class TerminalInputManager {
         // Handle Ctrl+C (exit)
         if (key === "\u0003") {
             logger.info("Received Ctrl+C");
-            process.emit("SIGINT" as any);
+            process.emit("SIGINT", "SIGINT");
             return;
         }
 

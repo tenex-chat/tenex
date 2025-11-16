@@ -11,6 +11,7 @@ import {
     type LanguageModelUsage,
     type ProviderRegistry,
     type StepResult,
+    type TelemetrySettings,
     type TextStreamPart,
     extractReasoningMiddleware,
     generateObject,
@@ -25,7 +26,6 @@ import type { z } from "zod";
 import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
 import { providerSupportsStreaming } from "./provider-configs";
 import {
-    type LanguageModelWithTools,
     ensureBuiltInTools,
     hasTools,
 } from "./providers/ClaudeCodeToolsHelper";
@@ -170,7 +170,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      * Get full telemetry configuration for AI SDK
      * Captures EVERYTHING for debugging - no privacy filters
      */
-    private getFullTelemetryConfig(): any {
+    private getFullTelemetryConfig(): TelemetrySettings {
         return {
             isEnabled: true,
             functionId: `${this.agentSlug || "unknown"}.${this.provider}.${this.model}`,
@@ -359,11 +359,22 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 for (const step of result.steps) {
                     if (step.toolCalls) {
                         for (const toolCall of step.toolCalls) {
-                            const tc = toolCall as any;
-                            if (tc.dynamic === true && tc.invalid === true && tc.error) {
+                            // Check if this is a dynamic tool call that's invalid
+                            if (
+                                "dynamic" in toolCall &&
+                                toolCall.dynamic === true &&
+                                toolCall.invalid === true &&
+                                toolCall.error
+                            ) {
+                                const error =
+                                    typeof toolCall.error === "object" &&
+                                    toolCall.error !== null &&
+                                    "name" in toolCall.error
+                                        ? (toolCall.error as { name: string }).name
+                                        : "Unknown error";
                                 invalidToolCalls.push({
-                                    toolName: tc.toolName || "unknown",
-                                    error: tc.error.name || "Unknown error",
+                                    toolName: toolCall.toolName,
+                                    error,
                                 });
                             }
                         }
@@ -667,11 +678,21 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                         if (step.toolCalls) {
                             for (const toolCall of step.toolCalls) {
                                 // Check if this is a dynamic tool call that's invalid
-                                const tc = toolCall as any;
-                                if (tc.dynamic === true && tc.invalid === true && tc.error) {
+                                if (
+                                    "dynamic" in toolCall &&
+                                    toolCall.dynamic === true &&
+                                    toolCall.invalid === true &&
+                                    toolCall.error
+                                ) {
+                                    const error =
+                                        typeof toolCall.error === "object" &&
+                                        toolCall.error !== null &&
+                                        "name" in toolCall.error
+                                            ? (toolCall.error as { name: string }).name
+                                            : "Unknown error";
                                     invalidToolCalls.push({
-                                        toolName: tc.toolName || "unknown",
-                                        error: tc.error.name || "Unknown error",
+                                        toolName: toolCall.toolName,
+                                        error,
                                     });
                                 }
                             }

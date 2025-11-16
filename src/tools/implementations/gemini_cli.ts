@@ -1,7 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
-import { LLMService } from "@/llm/service";
 import { LLMLogger } from "@/logging/LLMLogger";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { formatAnyError } from "@/utils/error-formatter";
@@ -27,7 +26,7 @@ async function executeGeminiCli(
     input: GeminiCliInput,
     context: ExecutionContext
 ): Promise<GeminiCliOutput> {
-    const { prompt, title } = input;
+    const { prompt } = input;
     const startTime = Date.now();
 
     logger.debug("[gemini_cli] Starting execution with LLMService", {
@@ -61,7 +60,7 @@ async function executeGeminiCli(
             messageCount++;
         });
 
-        llmService.on("complete", ({ message, steps, usage }) => {
+        llmService.on("complete", ({ steps }) => {
             logger.info("[gemini_cli] 🏁 STREAM COMPLETE EVENT:", {
                 stepCount: steps?.length || 0,
                 hasSteps: !!steps,

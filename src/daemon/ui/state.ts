@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { AgentInfo, ProjectInfo, ViewMode } from "./types";
+import type { AgentInfo, ViewMode } from "./types";
 
 export interface ViewState {
     viewMode: ViewMode;

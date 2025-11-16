@@ -1,3 +1,4 @@
+import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useReducer } from "react";
 import type { ProjectRuntime } from "./ProjectRuntime";
@@ -11,14 +12,18 @@ import { areProjectListsEqual, extractCachedConversations, extractProjectInfo } 
 import { VIEW_INSTRUCTIONS, getViewTitle } from "./ui/viewConfig";
 
 interface ProcessManagerUIProps {
+    knownProjects: Map<string, NDKProject>;
     runtimes: Map<string, ProjectRuntime>;
+    onStart: (projectId: string) => Promise<void>;
     onKill: (projectId: string) => Promise<void>;
     onRestart: (projectId: string) => Promise<void>;
     onClose: () => void;
 }
 
 export function ProcessManagerUI({
+    knownProjects,
     runtimes,
+    onStart,
     onKill,
     onRestart,
     onClose,
@@ -29,7 +34,7 @@ export function ProcessManagerUI({
 
     useEffect((): (() => void) => {
         const updateProjects = (): void => {
-            const newProjects = extractProjectInfo(runtimes);
+            const newProjects = extractProjectInfo(knownProjects, runtimes);
             setProjects((prev) => {
                 if (areProjectListsEqual(prev, newProjects)) {
                     return prev;
@@ -41,7 +46,7 @@ export function ProcessManagerUI({
         updateProjects();
         const interval = setInterval(updateProjects, 1000);
         return () => clearInterval(interval);
-    }, [runtimes]);
+    }, [knownProjects, runtimes]);
 
     useEffect((): (() => void) => {
         const updateConversations = (): void => {
@@ -161,6 +166,21 @@ export function ProcessManagerUI({
         dispatch({ type: "NAVIGATE", direction, maxIndex });
     };
 
+    const performStart = async (projectId: string, title: string): Promise<void> => {
+        dispatch({ type: "SET_STATUS", message: `Starting ${title}...` });
+
+        try {
+            await onStart(projectId);
+            dispatch({ type: "SET_STATUS", message: `Started ${title}` });
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            dispatch({
+                type: "SET_STATUS",
+                message: `Failed to start ${title}: ${errorMessage}`,
+            });
+        }
+    };
+
     const performAction = async (action: ActionType): Promise<void> => {
         if (projects.length === 0) return;
 
@@ -215,7 +235,13 @@ export function ProcessManagerUI({
             if (viewState.viewMode === "projects" && projects.length > 0) {
                 const project = projects[viewState.selectedIndex];
                 if (project) {
-                    loadAgents(project.projectId);
+                    if (project.isRunning) {
+                        // Running project - expand to show agents
+                        loadAgents(project.projectId);
+                    } else {
+                        // Offline project - start it
+                        performStart(project.projectId, project.title);
+                    }
                 }
             } else if (viewState.viewMode === "agents" && viewState.agents.length > 0) {
                 const agent = viewState.agents[viewState.selectedIndex];

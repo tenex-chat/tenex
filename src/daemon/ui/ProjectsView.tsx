@@ -12,7 +12,7 @@ export function ProjectsView({ projects, selectedIndex }: ProjectsViewProps): JS
     if (projects.length === 0) {
         return (
             <Box>
-                <Text dimColor>No running projects</Text>
+                <Text dimColor>No projects found</Text>
             </Box>
         );
     }

@@ -1,6 +1,8 @@
+import type { ExportResult } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import {
     SEMRESATTRS_SERVICE_NAME,
@@ -21,10 +23,10 @@ const traceExporter = new OTLPTraceExporter({
 
 let collectorAvailable = true;
 
-class ErrorHandlingExporterWrapper {
+class ErrorHandlingExporterWrapper implements SpanExporter {
     private hasLoggedError = false;
 
-    export(spans: any[], resultCallback: (result: any) => void): void {
+    export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
         traceExporter.export(spans, (result) => {
             if (result.error && collectorAvailable) {
                 const errorMessage = result.error?.message || String(result.error);
@@ -51,13 +53,13 @@ class ErrorHandlingExporterWrapper {
     }
 }
 
-const wrappedExporter = new ErrorHandlingExporterWrapper() as any;
+const wrappedExporter = new ErrorHandlingExporterWrapper();
 
 // Create a wrapper processor that enriches span names before exporting
 class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
     private enricher = new ToolCallSpanProcessor();
 
-    onEnd(span: any): void {
+    onEnd(span: ReadableSpan): void {
         // First enrich the span name
         this.enricher.onEnd(span);
         // Then pass to batch processor

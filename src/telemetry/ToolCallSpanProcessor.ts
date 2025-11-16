@@ -25,7 +25,8 @@ export class ToolCallSpanProcessor implements SpanProcessor {
             if (toolName && typeof toolName === "string") {
                 // Include agent slug in the span name for better visibility
                 const prefix = agentPrefix ? `[${agentPrefix}] ` : "";
-                (span as any).name = `${prefix}ai.toolCall.${toolName}`;
+                // ReadableSpan has readonly name, but we can mutate it via the underlying object
+                (span as ReadableSpan & { name: string }).name = `${prefix}ai.toolCall.${toolName}`;
             }
         }
 
@@ -35,7 +36,7 @@ export class ToolCallSpanProcessor implements SpanProcessor {
             if (model && typeof model === "string") {
                 const shortModel = model.split("/").pop() || model;
                 const prefix = agentPrefix ? `[${agentPrefix}] ` : "";
-                (span as any).name = `${prefix}${span.name}.${shortModel}`;
+                (span as ReadableSpan & { name: string }).name = `${prefix}${span.name}.${shortModel}`;
             }
         }
 
@@ -43,7 +44,7 @@ export class ToolCallSpanProcessor implements SpanProcessor {
         if (span.name === "tenex.agent.execute" && agentPrefix) {
             const phase = span.attributes?.["conversation.phase"];
             const phaseStr = phase ? `.${phase}` : "";
-            (span as any).name = `[${agentPrefix}] agent.execute${phaseStr}`;
+            (span as ReadableSpan & { name: string }).name = `[${agentPrefix}] agent.execute${phaseStr}`;
         }
     }
 

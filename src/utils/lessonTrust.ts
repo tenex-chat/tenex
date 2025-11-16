@@ -9,11 +9,11 @@ import type { Hexpubkey } from "@nostr-dev-kit/ndk";
  * - The lesson content and metadata
  * - The agent definition the lesson is for
  *
- * @param lesson The lesson event to assess
- * @param publisherPubkey The pubkey that published the lesson
+ * @param _lesson The lesson event to assess (currently unused)
+ * @param _publisherPubkey The pubkey that published the lesson (currently unused)
  * @returns true if the lesson should be trusted and stored, false otherwise
  */
-export function shouldTrustLesson(lesson: NDKAgentLesson, publisherPubkey: Hexpubkey): boolean {
+export function shouldTrustLesson(_lesson: NDKAgentLesson, _publisherPubkey: Hexpubkey): boolean {
     // For now, trust all lessons
     // Future implementations may add:
     // - Whitelist/blacklist checks

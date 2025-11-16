@@ -1,5 +1,5 @@
 import { logger } from "@/utils/logger";
-import { render } from "ink";
+import { render, type Instance } from "ink";
 import React from "react";
 import type { Daemon } from "./Daemon";
 import { ProcessManagerUI } from "./ProcessManagerUI";
@@ -10,7 +10,7 @@ import { ProcessManagerUI } from "./ProcessManagerUI";
  */
 export class ProcessManagerController {
     private daemon: Daemon;
-    private renderInstance: any = null;
+    private renderInstance: Instance | null = null;
     private onCloseCallback: (() => void) | null = null;
 
     constructor(daemon: Daemon, onCloseCallback?: () => void) {
@@ -27,11 +27,14 @@ export class ProcessManagerController {
             return;
         }
 
+        const knownProjects = this.daemon.getKnownProjects();
         const runtimes = this.daemon.getActiveRuntimes();
 
         this.renderInstance = render(
             <ProcessManagerUI
+                knownProjects={knownProjects}
                 runtimes={runtimes}
+                onStart={this.startRuntime.bind(this)}
                 onKill={this.killRuntime.bind(this)}
                 onRestart={this.restartRuntime.bind(this)}
                 onClose={this.hide.bind(this)}
@@ -55,6 +58,14 @@ export class ProcessManagerController {
                 this.onCloseCallback();
             }
         }
+    }
+
+    /**
+     * Start a project runtime using the Daemon's public API
+     */
+    private async startRuntime(projectId: string): Promise<void> {
+        logger.info(`Requesting start for project runtime: ${projectId}`);
+        await this.daemon.startRuntime(projectId);
     }
 
     /**

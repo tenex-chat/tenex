@@ -154,7 +154,7 @@ interface DebugThreadedFormatterOptions {
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
     try {
         // Load project context
-        const { context, projectPath, metadataPath } = await loadProjectContext(options.project);
+        const { context } = await loadProjectContext(options.project);
 
         // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
         await projectContextStore.run(context, async () => {
@@ -277,7 +277,7 @@ export async function runDebugThreadedFormatter(
 ): Promise<void> {
     try {
         // Load project context
-        const { context, projectPath, metadataPath } = await loadProjectContext(options.project);
+        const { context } = await loadProjectContext(options.project);
 
         // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
         await projectContextStore.run(context, async () => {
@@ -324,7 +324,7 @@ export async function runDebugThreadedFormatter(
             ]);
 
             const eventArray = [...Array.from(rootEvents), ...Array.from(replyEvents)].sort(
-                (a, b) => a.created_at! - b.created_at!
+                (a, b) => (a.created_at || 0) - (b.created_at || 0)
             );
 
             logger.info(`Found ${eventArray.length} events in conversation`);
