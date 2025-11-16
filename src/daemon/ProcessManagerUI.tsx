@@ -1,254 +1,291 @@
-import React, { useState, useEffect, useReducer } from "react";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useReducer } from "react";
 import type { ProjectRuntime } from "./ProjectRuntime";
-import { ProjectsView } from "./ui/ProjectsView";
-import { AgentsView } from "./ui/AgentsView";
 import { AgentDetailView } from "./ui/AgentDetailView";
+import { AgentsView } from "./ui/AgentsView";
 import { ConversationsView } from "./ui/ConversationsView";
-import type { ProjectInfo, ConversationInfo, ActionType } from "./ui/types";
-import { areProjectListsEqual, extractProjectInfo, extractCachedConversations } from "./ui/utils";
-import { viewReducer, initialViewState } from "./ui/state";
+import { ProjectsView } from "./ui/ProjectsView";
+import { initialViewState, viewReducer } from "./ui/state";
+import type { ActionType, ConversationInfo, ProjectInfo } from "./ui/types";
+import { areProjectListsEqual, extractCachedConversations, extractProjectInfo } from "./ui/utils";
 import { VIEW_INSTRUCTIONS, getViewTitle } from "./ui/viewConfig";
 
 interface ProcessManagerUIProps {
-  runtimes: Map<string, ProjectRuntime>;
-  onKill: (projectId: string) => Promise<void>;
-  onRestart: (projectId: string) => Promise<void>;
-  onClose: () => void;
+    runtimes: Map<string, ProjectRuntime>;
+    onKill: (projectId: string) => Promise<void>;
+    onRestart: (projectId: string) => Promise<void>;
+    onClose: () => void;
 }
 
-export function ProcessManagerUI({ runtimes, onKill, onRestart, onClose }: ProcessManagerUIProps): JSX.Element {
-  const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
+export function ProcessManagerUI({
+    runtimes,
+    onKill,
+    onRestart,
+    onClose,
+}: ProcessManagerUIProps): JSX.Element {
+    const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
+    const [projects, setProjects] = useState<ProjectInfo[]>([]);
+    const [conversations, setConversations] = useState<ConversationInfo[]>([]);
 
-  useEffect((): (() => void) => {
-    const updateProjects = (): void => {
-      const newProjects = extractProjectInfo(runtimes);
-      setProjects((prev) => {
-        if (areProjectListsEqual(prev, newProjects)) {
-          return prev;
-        }
-        return newProjects;
-      });
-    };
-
-    updateProjects();
-    const interval = setInterval(updateProjects, 1000);
-    return () => clearInterval(interval);
-  }, [runtimes]);
-
-  useEffect((): (() => void) => {
-    const updateConversations = (): void => {
-      const cachedConversations = extractCachedConversations(runtimes);
-      setConversations(cachedConversations);
-    };
-
-    updateConversations();
-    const interval = setInterval(updateConversations, 2000);
-    return () => clearInterval(interval);
-  }, [runtimes]);
-
-  const loadAgents = (projectId: string): void => {
-    try {
-      const runtime = runtimes.get(projectId);
-      if (!runtime) {
-        dispatch({ type: "SET_STATUS", message: "Error: Project runtime not found" });
-        return;
-      }
-
-      const context = runtime.getContext();
-      if (!context) {
-        dispatch({ type: "SET_STATUS", message: "Error: Project context not available - project may still be initializing" });
-        return;
-      }
-
-      const allAgents = context.agentRegistry?.getAllAgents();
-      if (!allAgents) {
-        dispatch({ type: "SET_STATUS", message: "Error: Agent registry not available" });
-        return;
-      }
-
-      const agentInfoList = allAgents.map((agent) => {
-        const lessons = context.getLessonsForAgent?.(agent.pubkey) || [];
-        return {
-          pubkey: agent.pubkey,
-          name: agent.name,
-          role: agent.role,
-          description: agent.description,
-          lessonsCount: lessons.length,
+    useEffect((): (() => void) => {
+        const updateProjects = (): void => {
+            const newProjects = extractProjectInfo(runtimes);
+            setProjects((prev) => {
+                if (areProjectListsEqual(prev, newProjects)) {
+                    return prev;
+                }
+                return newProjects;
+            });
         };
-      });
 
-      dispatch({ type: "VIEW_AGENTS", projectId, agents: agentInfoList });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      dispatch({ type: "SET_STATUS", message: `Error loading agents: ${errorMessage}` });
-    }
-  };
+        updateProjects();
+        const interval = setInterval(updateProjects, 1000);
+        return () => clearInterval(interval);
+    }, [runtimes]);
 
-  const loadAgentDetails = (agentPubkey: string): void => {
-    try {
-      if (!viewState.selectedProjectId) {
-        dispatch({ type: "SET_STATUS", message: "Error: No project selected" });
-        return;
-      }
+    useEffect((): (() => void) => {
+        const updateConversations = (): void => {
+            const cachedConversations = extractCachedConversations(runtimes);
+            setConversations(cachedConversations);
+        };
 
-      const runtime = runtimes.get(viewState.selectedProjectId);
-      if (!runtime) {
-        dispatch({ type: "SET_STATUS", message: "Error: Project runtime not found" });
-        return;
-      }
+        updateConversations();
+        const interval = setInterval(updateConversations, 2000);
+        return () => clearInterval(interval);
+    }, [runtimes]);
 
-      const context = runtime.getContext();
-      if (!context) {
-        dispatch({ type: "SET_STATUS", message: "Error: Project context not available" });
-        return;
-      }
+    const loadAgents = (projectId: string): void => {
+        try {
+            const runtime = runtimes.get(projectId);
+            if (!runtime) {
+                dispatch({ type: "SET_STATUS", message: "Error: Project runtime not found" });
+                return;
+            }
 
-      const agent = context.agentRegistry?.getAgentByPubkey(agentPubkey);
-      if (!agent) {
-        dispatch({ type: "SET_STATUS", message: "Error: Agent not found in registry" });
-        return;
-      }
+            const context = runtime.getContext();
+            if (!context) {
+                dispatch({
+                    type: "SET_STATUS",
+                    message:
+                        "Error: Project context not available - project may still be initializing",
+                });
+                return;
+            }
 
-      const lessons = context.getLessonsForAgent?.(agentPubkey) || [];
-      dispatch({ type: "VIEW_AGENT_DETAIL", agent, lessons });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      dispatch({ type: "SET_STATUS", message: `Error loading agent details: ${errorMessage}` });
-    }
-  };
+            const allAgents = context.agentRegistry?.getAllAgents();
+            if (!allAgents) {
+                dispatch({ type: "SET_STATUS", message: "Error: Agent registry not available" });
+                return;
+            }
 
-  const navigateBack = (): void => {
-    if (viewState.viewMode === "projects") {
-      onClose();
-    } else {
-      dispatch({ type: "NAVIGATE_BACK" });
-    }
-  };
+            const agentInfoList = allAgents.map((agent) => {
+                const lessons = context.getLessonsForAgent?.(agent.pubkey) || [];
+                return {
+                    pubkey: agent.pubkey,
+                    name: agent.name,
+                    role: agent.role,
+                    description: agent.description,
+                    lessonsCount: lessons.length,
+                };
+            });
 
-  const handleNavigation = (direction: "up" | "down"): void => {
-    let maxIndex: number;
-    switch (viewState.viewMode) {
-      case "projects":
-        maxIndex = projects.length - 1;
-        break;
-      case "agents":
-        maxIndex = viewState.agents.length - 1;
-        break;
-      case "agent-detail":
-      case "conversations":
-        return;
-      default:
-        maxIndex = 0;
-    }
+            dispatch({ type: "VIEW_AGENTS", projectId, agents: agentInfoList });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            dispatch({ type: "SET_STATUS", message: `Error loading agents: ${errorMessage}` });
+        }
+    };
 
-    dispatch({ type: "NAVIGATE", direction, maxIndex });
-  };
+    const loadAgentDetails = (agentPubkey: string): void => {
+        try {
+            if (!viewState.selectedProjectId) {
+                dispatch({ type: "SET_STATUS", message: "Error: No project selected" });
+                return;
+            }
 
-  const performAction = async (action: ActionType): Promise<void> => {
-    if (projects.length === 0) return;
+            const runtime = runtimes.get(viewState.selectedProjectId);
+            if (!runtime) {
+                dispatch({ type: "SET_STATUS", message: "Error: Project runtime not found" });
+                return;
+            }
 
-    const project = projects[viewState.selectedIndex];
-    if (!project) return;
+            const context = runtime.getContext();
+            if (!context) {
+                dispatch({ type: "SET_STATUS", message: "Error: Project context not available" });
+                return;
+            }
 
-    const actionVerb = action === "kill" ? "Killing" : "Restarting";
-    const actionPastTense = action === "kill" ? "Killed" : "Restarted";
+            const agent = context.agentRegistry?.getAgentByPubkey(agentPubkey);
+            if (!agent) {
+                dispatch({ type: "SET_STATUS", message: "Error: Agent not found in registry" });
+                return;
+            }
 
-    dispatch({ type: "SET_STATUS", message: `${actionVerb} ${project.title}...` });
+            const lessons = context.getLessonsForAgent?.(agentPubkey) || [];
+            dispatch({ type: "VIEW_AGENT_DETAIL", agent, lessons });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            dispatch({
+                type: "SET_STATUS",
+                message: `Error loading agent details: ${errorMessage}`,
+            });
+        }
+    };
 
-    try {
-      if (action === "kill") {
-        await onKill(project.projectId);
-      } else {
-        await onRestart(project.projectId);
-      }
-      dispatch({ type: "SET_STATUS", message: `${actionPastTense} ${project.title}` });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      dispatch({ type: "SET_STATUS", message: `Failed to ${action} ${project.title}: ${errorMessage}` });
-    }
-  };
+    const navigateBack = (): void => {
+        if (viewState.viewMode === "projects") {
+            onClose();
+        } else {
+            dispatch({ type: "NAVIGATE_BACK" });
+        }
+    };
 
-  useInput((input, key) => {
-    if (viewState.statusMessage) {
-      dispatch({ type: "CLEAR_STATUS" });
-    }
+    const handleNavigation = (direction: "up" | "down"): void => {
+        let maxIndex: number;
+        switch (viewState.viewMode) {
+            case "projects":
+                maxIndex = projects.length - 1;
+                break;
+            case "conversations":
+                maxIndex = conversations.length - 1;
+                break;
+            case "agents":
+                maxIndex = viewState.agents.length - 1;
+                break;
+            case "agent-detail":
+                return;
+            default:
+                maxIndex = 0;
+        }
 
-    if (key.escape || key.backspace) {
-      navigateBack();
-      return;
-    }
+        dispatch({ type: "NAVIGATE", direction, maxIndex });
+    };
 
-    if (input === "q" && viewState.viewMode === "projects") {
-      onClose();
-      return;
-    }
+    const performAction = async (action: ActionType): Promise<void> => {
+        if (projects.length === 0) return;
 
-    if (key.upArrow) {
-      handleNavigation("up");
-    }
-
-    if (key.downArrow) {
-      handleNavigation("down");
-    }
-
-    if (key.return) {
-      if (viewState.viewMode === "projects" && projects.length > 0) {
         const project = projects[viewState.selectedIndex];
-        if (project) {
-          loadAgents(project.projectId);
+        if (!project) return;
+
+        const actionVerb = action === "kill" ? "Killing" : "Restarting";
+        const actionPastTense = action === "kill" ? "Killed" : "Restarted";
+
+        dispatch({ type: "SET_STATUS", message: `${actionVerb} ${project.title}...` });
+
+        try {
+            if (action === "kill") {
+                await onKill(project.projectId);
+            } else {
+                await onRestart(project.projectId);
+            }
+            dispatch({ type: "SET_STATUS", message: `${actionPastTense} ${project.title}` });
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            dispatch({
+                type: "SET_STATUS",
+                message: `Failed to ${action} ${project.title}: ${errorMessage}`,
+            });
         }
-      } else if (viewState.viewMode === "agents" && viewState.agents.length > 0) {
-        const agent = viewState.agents[viewState.selectedIndex];
-        if (agent) {
-          loadAgentDetails(agent.pubkey);
+    };
+
+    useInput((input, key) => {
+        if (viewState.statusMessage) {
+            dispatch({ type: "CLEAR_STATUS" });
         }
-      }
-      return;
-    }
 
-    if (viewState.viewMode === "projects") {
-      if (input === "k") {
-        performAction("kill");
-      }
+        if (key.escape || key.backspace) {
+            navigateBack();
+            return;
+        }
 
-      if (input === "r") {
-        performAction("restart");
-      }
-    }
-  });
+        if (input === "q" && viewState.viewMode === "projects") {
+            onClose();
+            return;
+        }
 
-  const projectTitle = projects.find(p => p.projectId === viewState.selectedProjectId)?.title;
-  const viewTitle = getViewTitle(viewState.viewMode, {
-    projectTitle,
-    agentName: viewState.selectedAgent?.name,
-  });
+        if (key.upArrow) {
+            handleNavigation("up");
+        }
 
-  return (
-    <Box flexDirection="column" padding={1}>
-      <Box marginBottom={1}>
-        <Text bold color="cyan">🚀 TENEX Process Manager</Text>
-      </Box>
+        if (key.downArrow) {
+            handleNavigation("down");
+        }
 
-      <Box marginBottom={1}>
-        <Text dimColor>{VIEW_INSTRUCTIONS[viewState.viewMode]}</Text>
-      </Box>
+        if (key.return) {
+            if (viewState.viewMode === "projects" && projects.length > 0) {
+                const project = projects[viewState.selectedIndex];
+                if (project) {
+                    loadAgents(project.projectId);
+                }
+            } else if (viewState.viewMode === "agents" && viewState.agents.length > 0) {
+                const agent = viewState.agents[viewState.selectedIndex];
+                if (agent) {
+                    loadAgentDetails(agent.pubkey);
+                }
+            }
+            return;
+        }
 
-      <Box marginBottom={1}>
-        <Text bold color="green">{viewTitle}</Text>
-      </Box>
+        if (viewState.viewMode === "projects") {
+            if (input === "c") {
+                dispatch({ type: "VIEW_CONVERSATIONS" });
+            }
 
-      {viewState.viewMode === "projects" && <ProjectsView projects={projects} selectedIndex={viewState.selectedIndex} />}
-      {viewState.viewMode === "agents" && <AgentsView agents={viewState.agents} selectedIndex={viewState.selectedIndex} />}
-      {viewState.viewMode === "agent-detail" && viewState.selectedAgent && <AgentDetailView agent={viewState.selectedAgent} lessons={viewState.agentLessons} />}
+            if (input === "k") {
+                performAction("kill");
+            }
 
-      {viewState.statusMessage && (
-        <Box marginTop={1}>
-          <Text color="yellow">{viewState.statusMessage}</Text>
+            if (input === "r") {
+                performAction("restart");
+            }
+        }
+    });
+
+    const projectTitle = projects.find((p) => p.projectId === viewState.selectedProjectId)?.title;
+    const viewTitle = getViewTitle(viewState.viewMode, {
+        projectTitle,
+        agentName: viewState.selectedAgent?.name,
+    });
+
+    return (
+        <Box flexDirection="column" padding={1}>
+            <Box marginBottom={1}>
+                <Text bold color="cyan">
+                    🚀 TENEX Process Manager
+                </Text>
+            </Box>
+
+            <Box marginBottom={1}>
+                <Text dimColor>{VIEW_INSTRUCTIONS[viewState.viewMode]}</Text>
+            </Box>
+
+            <Box marginBottom={1}>
+                <Text bold color="green">
+                    {viewTitle}
+                </Text>
+            </Box>
+
+            {viewState.viewMode === "projects" && (
+                <ProjectsView projects={projects} selectedIndex={viewState.selectedIndex} />
+            )}
+            {viewState.viewMode === "conversations" && (
+                <ConversationsView
+                    conversations={conversations}
+                    selectedIndex={viewState.selectedIndex}
+                />
+            )}
+            {viewState.viewMode === "agents" && (
+                <AgentsView agents={viewState.agents} selectedIndex={viewState.selectedIndex} />
+            )}
+            {viewState.viewMode === "agent-detail" && viewState.selectedAgent && (
+                <AgentDetailView agent={viewState.selectedAgent} lessons={viewState.agentLessons} />
+            )}
+
+            {viewState.statusMessage && (
+                <Box marginTop={1}>
+                    <Text color="yellow">{viewState.statusMessage}</Text>
+                </Box>
+            )}
         </Box>
-      )}
-    </Box>
-  );
+    );
 }

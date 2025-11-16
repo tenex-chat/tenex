@@ -1,9 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { ProjectRuntime } from "../ProjectRuntime";
-import { NDKProject } from "@nostr-dev-kit/ndk";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { ProjectRuntime } from "../ProjectRuntime";
 
 describe("ProjectRuntime.start()", () => {
     let tempDir: string;
@@ -51,7 +51,9 @@ describe("ProjectRuntime.start()", () => {
     test("should fail with undefined in allowedPaths", async () => {
         // First, set up MCP config with undefined in allowedPaths
         const configService = await import("@/services/ConfigService");
-        const originalLoadConfig = configService.configService.loadConfig.bind(configService.configService);
+        const originalLoadConfig = configService.configService.loadConfig.bind(
+            configService.configService
+        );
 
         // Mock loadConfig to return MCP config with undefined in allowedPaths
         configService.configService.loadConfig = async () => {

@@ -100,7 +100,9 @@ export class MCPManager {
         if (config.allowedPaths && config.allowedPaths.length > 0 && this.projectPath) {
             const resolvedProjectPath = path.resolve(this.projectPath);
             // Filter out undefined/null values from allowedPaths
-            const validAllowedPaths = config.allowedPaths.filter((p): p is string => typeof p === "string" && p.length > 0);
+            const validAllowedPaths = config.allowedPaths.filter(
+                (p): p is string => typeof p === "string" && p.length > 0
+            );
             const isAllowed = validAllowedPaths.some((allowedPath) => {
                 const resolvedAllowedPath = path.resolve(allowedPath);
                 return (
