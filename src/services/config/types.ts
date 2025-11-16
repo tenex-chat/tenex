@@ -16,6 +16,12 @@ export interface TenexConfig {
   projectsBase?: string; // Base directory for all projects (default: ~/tenex)
   relays?: string[]; // Nostr relay URLs
 
+  // Logging configuration
+  logging?: {
+    logFile?: string; // Path to log file (default: ~/.tenex/daemon.log)
+    level?: 'silent' | 'error' | 'warn' | 'info' | 'debug'; // Log level (inherits from LOG_LEVEL env var if not set)
+  };
+
   // Project fields (optional for global config)
   description?: string;
   repoUrl?: string;
@@ -27,6 +33,10 @@ export const TenexConfigSchema = z.object({
   tenexPrivateKey: z.string().optional(),
   projectsBase: z.string().optional(),
   relays: z.array(z.string()).optional(),
+  logging: z.object({
+    logFile: z.string().optional(),
+    level: z.enum(['silent', 'error', 'warn', 'info', 'debug']).optional(),
+  }).optional(),
   description: z.string().optional(),
   repoUrl: z.string().optional(),
   projectNaddr: z.string().optional(),
@@ -53,23 +63,10 @@ export interface LLMConfiguration {
  * Main LLM configuration structure
  */
 export interface TenexLLMs {
-  providers: {
-    openrouter?: {
-      apiKey: string;
-    };
-    anthropic?: {
-      apiKey: string;
-    };
-    openai?: {
-      apiKey: string;
-    };
-    claudeCode?: {
-      apiKey: string;
-    };
-  };
-  configurations: {
-    [name: string]: LLMConfiguration;
-  };
+  providers: Record<string, {
+    apiKey: string;
+  }>;
+  configurations: Record<string, LLMConfiguration>;
   default?: string;
 }
 
@@ -82,10 +79,10 @@ export const LLMConfigurationSchema = z.object({
 }).passthrough(); // Allow additional properties
 
 export const TenexLLMsSchema = z.object({
-  providers: z.record(z.object({
+  providers: z.record(z.string(), z.object({
     apiKey: z.string(),
   })).default({}),
-  configurations: z.record(LLMConfigurationSchema).default({}),
+  configurations: z.record(z.string(), LLMConfigurationSchema).default({}),
   default: z.string().optional(),
 });
 
@@ -110,14 +107,14 @@ export interface TenexMCP {
 export const MCPServerConfigSchema = z.object({
   command: z.string(),
   args: z.array(z.string()),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   description: z.string().optional(),
   allowedPaths: z.array(z.string()).optional(),
   eventId: z.string().optional(),
 });
 
 export const TenexMCPSchema = z.object({
-  servers: z.record(MCPServerConfigSchema).default({}),
+  servers: z.record(z.string(), MCPServerConfigSchema).default({}),
   enabled: z.boolean().default(true),
 });
 

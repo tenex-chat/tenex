@@ -1,4 +1,8 @@
 import chalk from "chalk";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import type { TenexConfig } from "@/services/config/types";
 
 const levels: Record<string, number> = {
   silent: 0,
@@ -36,17 +40,60 @@ const emojis = {
   debug: "🔍",
 };
 
+// File logging state
+let logFilePath: string | null = null;
+
+// Helper to format timestamp for file output
+function formatTimestamp(): string {
+  const now = new Date();
+  return now.toISOString().replace('T', ' ').split('.')[0];
+}
+
+// Helper to write to log file
+function writeToFile(level: string, message: string, args: unknown[]): void {
+  if (!logFilePath) return;
+
+  const timestamp = formatTimestamp();
+  const argsStr = args.length > 0 ? ' ' + args.map(arg =>
+    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+  ).join(' ') : '';
+
+  const logLine = `[${timestamp}] ${level.toUpperCase()}: ${message}${argsStr}\n`;
+
+  fs.appendFileSync(logFilePath, logLine);
+}
+
+// Initialize daemon logging
+function initDaemonLogging(config: TenexConfig): void {
+  const defaultLogPath = path.join(os.homedir(), '.tenex', 'daemon.log');
+  logFilePath = config.logging?.logFile || defaultLogPath;
+
+  // Ensure directory exists
+  const logDir = path.dirname(logFilePath);
+  fs.mkdirSync(logDir, { recursive: true });
+}
+
 // Main logger object
 export const logger = {
+  initDaemonLogging,
+
   error: (message: string, error?: unknown) => {
     if (getCurrentLevel() >= levels.error) {
-      console.error(colors.error(`${emojis.error} ${message}`), error || "");
+      if (logFilePath) {
+        writeToFile('error', message, error ? [error] : []);
+      } else {
+        console.error(colors.error(`${emojis.error} ${message}`), error || "");
+      }
     }
   },
 
   warn: (message: string, ...args: unknown[]) => {
     if (getCurrentLevel() >= levels.warn) {
-      console.warn(colors.warn(`${emojis.warn} ${message}`), ...args);
+      if (logFilePath) {
+        writeToFile('warn', message, args);
+      } else {
+        console.warn(colors.warn(`${emojis.warn} ${message}`), ...args);
+      }
     }
   },
 
@@ -56,19 +103,31 @@ export const logger = {
 
   info: (message: string, ...args: unknown[]) => {
     if (getCurrentLevel() >= levels.info) {
-      console.log(colors.info(`${emojis.info} ${message}`), ...args);
+      if (logFilePath) {
+        writeToFile('info', message, args);
+      } else {
+        console.log(colors.info(`${emojis.info} ${message}`), ...args);
+      }
     }
   },
 
   success: (message: string, ...args: unknown[]) => {
     if (getCurrentLevel() >= levels.info) {
-      console.log(colors.success(`${emojis.success} ${message}`), ...args);
+      if (logFilePath) {
+        writeToFile('success', message, args);
+      } else {
+        console.log(colors.success(`${emojis.success} ${message}`), ...args);
+      }
     }
   },
 
   debug: (message: string, ...args: unknown[]) => {
     if (isDebugEnabled() && getCurrentLevel() >= levels.debug) {
-      console.log(colors.debug(`${emojis.debug} ${message}`), ...args);
+      if (logFilePath) {
+        writeToFile('debug', message, args);
+      } else {
+        console.log(colors.debug(`${emojis.debug} ${message}`), ...args);
+      }
     }
   },
 };

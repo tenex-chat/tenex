@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import { compileMessagesForClaudeCode, convertSystemMessagesForResume } from "./utils/claudeCodePromptCompiler";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
+import { ensureBuiltInTools, hasTools, type LanguageModelWithTools } from "./providers/ClaudeCodeToolsHelper";
 import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
 import { isAISdkProvider } from "./type-guards";
 import { providerSupportsStreaming } from "./provider-configs";
@@ -213,6 +214,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             }
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
+            // Attach built-in tools to prevent "invalid tool call" errors
+            baseModel = ensureBuiltInTools(baseModel);
         } else if (this.registry) {
             // Standard providers use registry
             baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
@@ -247,8 +250,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         // Preserve tools property from baseModel if it exists
         // wrapLanguageModel doesn't preserve custom properties, so we need to manually copy them
-        if ('tools' in baseModel && (baseModel as any).tools) {
-            (wrappedModel as any).tools = (baseModel as any).tools;
+        if (hasTools(baseModel)) {
+            return Object.assign(wrappedModel, { tools: baseModel.tools }) as LanguageModel;
         }
 
         return wrappedModel;
@@ -323,7 +326,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             const result = await generateText({
                 model,
                 messages: processedMessages,
-                tools: 'tools' in model && model.tools ? { ...model.tools, ...tools } : tools,
+                tools: hasTools(model) ? { ...model.tools, ...tools } : tools,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
 
@@ -495,7 +498,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            tools: 'tools' in model && model.tools ? { ...model.tools, ...tools } : tools,
+            tools: hasTools(model) ? { ...model.tools, ...tools } : tools,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -916,7 +919,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         tools: Record<string, AISdkTool> | undefined
     ): Promise<{ object: T; usage: LanguageModelUsage }> {
         // Merge model.tools with provided tools if model has built-in tools
-        const mergedTools = 'tools' in languageModel && languageModel.tools
+        const mergedTools = hasTools(languageModel)
             ? { ...languageModel.tools, ...(tools || {}) }
             : tools;
 

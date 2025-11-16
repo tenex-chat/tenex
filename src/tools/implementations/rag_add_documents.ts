@@ -41,14 +41,14 @@ const ragAddDocumentsSchema = z.object({
         z.object({
             content: z.string().nullable().describe("Text content of the document"),
             file_path: z.string().nullable().describe("Path to file to read content from"),
-            metadata: z.record(z.unknown()).nullable().describe("Optional metadata for the document"),
+            metadata: z.record(z.string(), z.unknown()).nullable().describe("Optional metadata for the document"),
             source: z.string().nullable().describe("Source identifier for the document"),
             id: z.string().nullable().describe("Optional unique identifier for the document"),
         }),
         // Option 2: URI-based
         z.object({
             uri: z.string().describe("URI to fetch content from (file://, https://, etc.)"),
-            metadata: z.record(z.unknown()).nullable().describe("Optional metadata for the document"),
+            metadata: z.record(z.string(), z.unknown()).nullable().describe("Optional metadata for the document"),
             source: z.string().nullable().describe("Source identifier for the document"),
             id: z.string().nullable().describe("Optional unique identifier for the document"),
         })

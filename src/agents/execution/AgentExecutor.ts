@@ -1,6 +1,7 @@
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError, formatStreamError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import chalk from "chalk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage, Tool as CoreTool } from "ai";
 import type { CompleteEvent } from "@/llm/service";
@@ -115,6 +116,13 @@ export class AgentExecutor {
                             "conversation.message_count": conversation.history.length,
                         });
                     }
+
+                    // Get the model info early for console output
+                    const llmService = context.agent.createLLMService({});
+                    const modelInfo = llmService.model || "unknown";
+
+                    // Display execution start in console
+                    console.log(chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}] ━━━`));
 
                     logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
                         agent: context.agent.slug,
@@ -276,6 +284,9 @@ export class AgentExecutor {
             content: completionEvent?.message || "",
             usage: completionEvent?.usage
         }, eventContext);
+
+        // Display completion in console
+        console.log(chalk.green(`\n✅ ${context.agent.slug} completed`));
 
         logger.info("[AgentExecutor] 🎯 Published final completion event", {
             agent: context.agent.slug,
@@ -441,6 +452,9 @@ export class AgentExecutor {
                 agentName: context.agent.slug,
             });
 
+            // Stream content to console
+            process.stdout.write(chalk.white(event.delta));
+
             // Publish chunks for display
             if (supportsStreaming) {
                 contentBuffer += event.delta;
@@ -453,6 +467,9 @@ export class AgentExecutor {
         });
 
         llmService.on("reasoning", async (event) => {
+            // Stream reasoning to console in gray
+            process.stdout.write(chalk.gray(event.delta));
+
             // Only accumulate in buffer for streaming providers
             // Non-streaming providers publish each chunk directly
             if (supportsStreaming) {
@@ -533,6 +550,10 @@ export class AgentExecutor {
         // Tool tracker is always provided from executeWithSupervisor
 
         llmService.on("tool-will-execute", async (event) => {
+            // Display tool execution in console
+            const argsPreview = JSON.stringify(event.args).substring(0, 50);
+            console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${JSON.stringify(event.args).length > 50 ? '...' : ''})`));
+
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,

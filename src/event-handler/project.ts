@@ -120,7 +120,13 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
 
     // Fetch and install new agent definitions using shared function
     if (newAgentEventIds.length > 0) {
-      await installAgentsFromEvents(newAgentEventIds, projectPath, ndkProject, getNDK());
+      await installAgentsFromEvents(
+        newAgentEventIds,
+        projectPath,
+        ndkProject,
+        getNDK(),
+        currentContext.agentRegistry
+      );
     }
 
     // Process MCP tool changes

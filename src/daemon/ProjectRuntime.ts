@@ -49,7 +49,8 @@ export class ProjectRuntime {
     this.dTag = dTag;
     this.projectId = `31933:${project.pubkey}:${dTag}`;
 
-    // User's git repository: {projectsBase}/{dTag}
+    // User's git repository base: {projectsBase}/{dTag}
+    // (The actual repo will be at {projectsBase}/{dTag}/{branchName} after initialization)
     this.projectPath = path.join(projectsBase, dTag);
 
     // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
@@ -74,15 +75,25 @@ export class ProjectRuntime {
       await fs.mkdir(path.join(this.metadataPath, "conversations"), { recursive: true });
       await fs.mkdir(path.join(this.metadataPath, "logs"), { recursive: true });
 
-      // Clone git repository to user-facing location: ~/tenex/<dTag>/
+      // Clone git repository to user-facing location: ~/tenex/<dTag>/<branchName>/
       const repoUrl = this.project.repo;
+      let actualRepoPath: string;
+
       if (repoUrl) {
         logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
-        await cloneGitRepository(repoUrl, this.projectPath);
+        const clonedPath = await cloneGitRepository(repoUrl, this.projectPath);
+        if (!clonedPath) {
+          throw new Error(`Failed to clone repository: ${repoUrl}`);
+        }
+        actualRepoPath = clonedPath;
       } else {
         logger.info(`Initializing new git repository`, { projectId: this.projectId });
-        await initializeGitRepository(this.projectPath);
+        actualRepoPath = await initializeGitRepository(this.projectPath);
       }
+
+      // Update projectPath to point to the actual repository location
+      this.projectPath = actualRepoPath;
+      logger.info(`Git repository ready at: ${this.projectPath}`);
 
       // Initialize components
       const agentRegistry = new AgentRegistry(this.projectPath, this.metadataPath);

@@ -27,7 +27,7 @@ export interface AgentInstallResult {
  * @param ndkProject - Optional NDK project for publishing events
  * @param customSlug - Optional custom slug for the agent
  * @param ndk - Optional NDK instance (will use default if not provided)
- * @param agentRegistry - Optional AgentRegistry to use (will create new if not provided)
+ * @param agentRegistry - AgentRegistry to use (required - cannot be created without metadataPath)
  * @returns Result of the installation
  */
 export async function installAgentFromEvent(
@@ -69,8 +69,15 @@ export async function installAgentFromEvent(
     // Generate slug from name if not provided
     const slug = customSlug || toKebabCase(agentDef.title);
 
-    // Use provided registry or create new one
-    const registry = agentRegistry || new AgentRegistry(projectPath);
+    // Require registry to be provided - we can't create one without metadataPath
+    if (!agentRegistry) {
+      return {
+        success: false,
+        error: "AgentRegistry must be provided - cannot create one without metadataPath",
+      };
+    }
+
+    const registry = agentRegistry;
     // Note: loadFromProject is called by ProjectManager, not here
 
     // Check if agent already exists

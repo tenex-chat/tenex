@@ -30,6 +30,9 @@ export const daemonCommand = new Command("daemon")
       options.config ? path.dirname(options.config) : undefined
     );
 
+    // Initialize daemon logging
+    logger.initDaemonLogging(globalConfig);
+
     // Get whitelisted pubkeys
     let whitelistedPubkeys = configService.getWhitelistedPubkeys(options.whitelist, globalConfig);
 
