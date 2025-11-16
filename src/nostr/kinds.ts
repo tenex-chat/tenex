@@ -13,7 +13,9 @@ export const NDKKind = {
     ...BaseNDKKind,
 
     // Standard NIP kinds not in NDK
+    AgentLesson: 4129, // Agent Lesson - learned knowledge
     AgentRequest: 4133, // NIP-90 Agent Request
+    AgentDefinition: 4199, // Agent Definition
     AgentNudge: 4201, // Agent Nudge - system prompt injection
 
     // Tenex custom kinds (2xxxx range)

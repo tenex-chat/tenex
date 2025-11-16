@@ -477,15 +477,42 @@ export class Daemon {
   }
 
   /**
-   * Update subscription with agent pubkeys from all active runtimes
+   * Collect all agent pubkeys and definition IDs from active runtimes
+   */
+  private collectAgentData(): { pubkeys: Set<Hexpubkey>; definitionIds: Set<string> } {
+    const pubkeys = new Set<Hexpubkey>();
+    const definitionIds = new Set<string>();
+
+    for (const [pid, rt] of this.activeRuntimes) {
+      const context = rt.getContext();
+      if (!context) {
+        throw new Error(`Runtime for project ${pid} has no context during agent collection`);
+      }
+
+      const agents = context.agentRegistry.getAllAgents();
+      for (const agent of agents) {
+        pubkeys.add(agent.pubkey);
+
+        // Collect agent definition event IDs for lesson monitoring
+        if (agent.eventId) {
+          definitionIds.add(agent.eventId);
+        }
+      }
+    }
+
+    return { pubkeys, definitionIds };
+  }
+
+  /**
+   * Update subscription with agent pubkeys and definition IDs from all active runtimes
    */
   private async updateSubscriptionWithProjectAgents(projectId: string, _runtime: ProjectRuntime): Promise<void> {
     if (!this.subscriptionManager) return;
 
     try {
-      // Collect all agent pubkeys from all active project runtimes
-      const allAgentPubkeys = new Set<Hexpubkey>();
+      const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } = this.collectAgentData();
 
+      // Track which projects each agent belongs to
       for (const [pid, rt] of this.activeRuntimes) {
         const context = rt.getContext();
         if (!context) {
@@ -494,8 +521,6 @@ export class Daemon {
 
         const agents = context.agentRegistry.getAllAgents();
         for (const agent of agents) {
-          allAgentPubkeys.add(agent.pubkey);
-          // Also track which projects this agent belongs to
           if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
             this.agentPubkeyToProjects.set(agent.pubkey, new Set());
           }
@@ -508,12 +533,14 @@ export class Daemon {
         }
       }
 
-      logger.debug("Updating subscription with agent pubkeys from active projects", {
+      logger.debug("Updating subscription with agent data from active projects", {
         activeProjects: this.activeRuntimes.size,
         totalAgentPubkeys: allAgentPubkeys.size,
+        totalAgentDefinitionIds: allAgentDefinitionIds.size,
       });
 
       this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
+      this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
     } catch (error) {
       logger.error("Failed to update subscription with project agents", {
         projectId,
@@ -821,7 +848,6 @@ export class Daemon {
     knownProjects: number;
     activeProjects: number;
     agents: number;
-    memory: NodeJS.MemoryUsage;
     uptime: number;
   } {
     // Count total agents across all known projects
@@ -836,7 +862,6 @@ export class Daemon {
       knownProjects: this.knownProjects.size,
       activeProjects: this.activeRuntimes.size,
       agents: totalAgents,
-      memory: process.memoryUsage(),
       uptime: process.uptime(),
     };
   }
@@ -934,24 +959,17 @@ export class Daemon {
         }
       });
 
-      // Collect all agent pubkeys from remaining active runtimes
-      const allAgentPubkeys = new Set<Hexpubkey>();
-      for (const [_pid, rt] of this.activeRuntimes) {
-        const context = rt.getContext();
-        if (context) {
-          const agents = context.agentRegistry.getAllAgents();
-          for (const agent of agents) {
-            allAgentPubkeys.add(agent.pubkey);
-          }
-        }
-      }
+      // Collect all agent pubkeys and definition IDs from remaining active runtimes
+      const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } = this.collectAgentData();
 
       logger.debug("Updating subscription after runtime removed", {
         removedProject: projectId,
         remainingAgents: allAgentPubkeys.size,
+        remainingDefinitions: allAgentDefinitionIds.size,
       });
 
       this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
+      this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
     } catch (error) {
       logger.error("Failed to update subscription after runtime removed", {
         projectId,

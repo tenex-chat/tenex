@@ -2,6 +2,7 @@ import type { NDKEvent, NDKFilter, NDKSubscription, Hexpubkey } from "@nostr-dev
 import type NDK from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
+import { NDKKind } from "@/nostr/kinds";
 
 /**
  * Manages a single subscription for all projects and agents.
@@ -29,6 +30,12 @@ export class SubscriptionManager {
   private agentPubkeys: Set<Hexpubkey> = new Set();
 
   /**
+   * Agent definition event IDs we're monitoring for lessons
+   * Format: event ID of the NDKAgentDefinition (kind 4199)
+   */
+  private agentDefinitionIds: Set<string> = new Set();
+
+  /**
    * Track if we need to restart the subscription
    */
   private restartPending = false;
@@ -54,6 +61,7 @@ export class SubscriptionManager {
       whitelistedPubkeys: Array.from(this.whitelistedPubkeys).map(p => p.slice(0, 8)),
       knownProjects: this.knownProjects.size,
       agentPubkeys: this.agentPubkeys.size,
+      agentDefinitionIds: this.agentDefinitionIds.size,
     });
 
     await this.createSubscription();
@@ -76,6 +84,7 @@ export class SubscriptionManager {
       whitelistedAuthors: this.whitelistedPubkeys.size,
       trackedProjects: this.knownProjects.size,
       trackedAgents: this.agentPubkeys.size,
+      trackedDefinitions: this.agentDefinitionIds.size,
     });
 
     // Log the actual filters being used
@@ -137,6 +146,29 @@ export class SubscriptionManager {
         "#p": Array.from(this.agentPubkeys),
         limit: 0,
       });
+    }
+
+    // Filter 3: Agent lessons - monitor both:
+    // A. Lessons published by our agents
+    // B. Lessons referencing our agent definitions (via e-tag)
+    if (this.agentPubkeys.size > 0 || this.agentDefinitionIds.size > 0) {
+      // Filter 3a: Lessons published by our agents
+      if (this.agentPubkeys.size > 0) {
+        filters.push({
+          kinds: [NDKKind.AgentLesson],
+          authors: Array.from(this.agentPubkeys),
+          limit: 0,
+        });
+      }
+
+      // Filter 3b: Lessons referencing our agent definitions
+      if (this.agentDefinitionIds.size > 0) {
+        filters.push({
+          kinds: [NDKKind.AgentLesson],
+          "#e": Array.from(this.agentDefinitionIds),
+          limit: 0,
+        });
+      }
     }
 
     return filters;
@@ -230,6 +262,22 @@ export class SubscriptionManager {
   }
 
   /**
+   * Manually update agent definition IDs (called by ProjectContextManager)
+   */
+  updateAgentDefinitionIds(eventIds: string[]): void {
+    const oldSize = this.agentDefinitionIds.size;
+    this.agentDefinitionIds = new Set(eventIds);
+
+    if (oldSize !== this.agentDefinitionIds.size) {
+      logger.debug("Agent definition IDs updated", {
+        old: oldSize,
+        new: this.agentDefinitionIds.size,
+      });
+      this.scheduleRestart();
+    }
+  }
+
+  /**
    * Stop the subscription
    */
   stop(): void {
@@ -254,6 +302,7 @@ export class SubscriptionManager {
     whitelistedPubkeys: number;
     knownProjects: number;
     agentPubkeys: number;
+    agentDefinitionIds: number;
     restartPending: boolean;
   } {
     return {
@@ -261,6 +310,7 @@ export class SubscriptionManager {
       whitelistedPubkeys: this.whitelistedPubkeys.size,
       knownProjects: this.knownProjects.size,
       agentPubkeys: this.agentPubkeys.size,
+      agentDefinitionIds: this.agentDefinitionIds.size,
       restartPending: this.restartPending,
     };
   }

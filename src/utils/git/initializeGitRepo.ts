@@ -117,6 +117,17 @@ export async function cloneGitRepository(repoUrl: string, projectBaseDir: string
     // Ensure project base directory exists
     await fs.mkdir(projectBaseDir, { recursive: true });
 
+    // First check if we can detect an existing repo in common branch names
+    const commonBranches = ["main", "master", "develop"];
+    for (const branchName of commonBranches) {
+      const possibleDir = path.join(projectBaseDir, branchName);
+      if (await isGitRepository(possibleDir)) {
+        logger.info("Found existing git repository", { targetDir: possibleDir });
+        return possibleDir;
+      }
+    }
+
+    // No existing repo found, proceed with cloning
     // Clone into a temporary directory to detect the default branch
     const tempDir = path.join(projectBaseDir, ".git-clone-temp");
 
@@ -134,7 +145,7 @@ export async function cloneGitRepository(repoUrl: string, projectBaseDir: string
     // The final target directory with branch name
     const targetDir = path.join(projectBaseDir, branchName);
 
-    // Check if target already exists
+    // Check if target already exists (in case it's not one of the common branches we checked)
     try {
       await fs.access(targetDir);
       logger.warn("Target directory already exists, removing temp clone", { targetDir });

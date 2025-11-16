@@ -108,7 +108,6 @@ export const daemonCommand = new Command("daemon")
       console.log(chalk.gray(`   Known Projects: ${status.knownProjects}`));
       console.log(chalk.gray(`   Active Projects: ${status.activeProjects}`));
       console.log(chalk.gray(`   Total Agents: ${status.agents}`));
-      console.log(chalk.gray(`   Memory: ${Math.round(status.memory.heapUsed / 1024 / 1024)} MB`));
       console.log();
 
       // Start terminal input manager

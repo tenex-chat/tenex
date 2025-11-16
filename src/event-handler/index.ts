@@ -174,9 +174,13 @@ export class EventHandler {
       case 513: // NDKEventMetadata
         await this.handleMetadataEvent(event);
         break;
-      
+
       case NDKKind.TenexStopCommand: // Stop LLM operations
         await this.handleStopEvent(event);
+        break;
+
+      case NDKKind.AgentLesson:
+        await this.handleLessonEvent(event);
         break;
 
       default:
@@ -309,16 +313,16 @@ export class EventHandler {
 
   private async handleStopEvent(event: NDKEvent): Promise<void> {
     const eTags = event.getMatchingTags("e");
-    
+
     if (eTags.length === 0) {
       logger.warn("[EventHandler] Stop event received with no e-tags", {
         eventId: event.id?.substring(0, 8)
       });
       return;
     }
-    
+
     let totalStopped = 0;
-    
+
     for (const [_, eventId] of eTags) {
       const stopped = llmOpsRegistry.stopByEventId(eventId);
       if (stopped > 0) {
@@ -326,12 +330,72 @@ export class EventHandler {
         totalStopped += stopped;
       }
     }
-    
+
     if (totalStopped === 0) {
       logger.info("[EventHandler] No active operations to stop");
     } else {
       logger.info(`[EventHandler] Total operations stopped: ${totalStopped}`, {
         activeRemaining: llmOpsRegistry.getActiveOperationsCount()
+      });
+    }
+  }
+
+  private async handleLessonEvent(event: NDKEvent): Promise<void> {
+    const { NDKAgentLesson } = await import("@/events/NDKAgentLesson");
+    const { shouldTrustLesson } = await import("@/utils/lessonTrust");
+
+    const lesson = NDKAgentLesson.from(event);
+
+    // Check if we should trust this lesson
+    if (!shouldTrustLesson(lesson, event.pubkey)) {
+      logger.debug("Lesson event rejected by trust check", {
+        eventId: event.id?.substring(0, 8),
+        publisher: event.pubkey.substring(0, 8),
+      });
+      return;
+    }
+
+    const agentDefinitionId = lesson.agentDefinitionId;
+
+    if (!agentDefinitionId) {
+      logger.warn("Lesson event missing agent definition ID (e-tag)", {
+        eventId: event.id?.substring(0, 8),
+        publisher: event.pubkey.substring(0, 8),
+      });
+      return;
+    }
+
+    try {
+      const projectCtx = getProjectContext();
+
+      // Find the agent(s) that match this definition ID
+      const agents = Array.from(projectCtx.agents.values()).filter(
+        agent => agent.eventId === agentDefinitionId
+      );
+
+      if (agents.length === 0) {
+        logger.debug("Lesson event for unknown agent definition", {
+          eventId: event.id?.substring(0, 8),
+          agentDefinitionId: agentDefinitionId.substring(0, 8),
+        });
+        return;
+      }
+
+      // Store the lesson for each matching agent
+      for (const agent of agents) {
+        projectCtx.addLesson(agent.pubkey, lesson);
+        logger.info("Stored lesson for agent", {
+          agentSlug: agent.slug,
+          agentPubkey: agent.pubkey.substring(0, 8),
+          lessonTitle: lesson.title,
+          lessonId: event.id?.substring(0, 8),
+          publisher: event.pubkey.substring(0, 8),
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to handle lesson event", {
+        eventId: event.id,
+        error: formatAnyError(error),
       });
     }
   }
