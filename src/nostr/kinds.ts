@@ -13,6 +13,9 @@ export const NDKKind = {
     ...BaseNDKKind,
 
     // Standard NIP kinds not in NDK
+    ConversationRoot: 11 as BaseNDKKind, // Agent request (conversation root)
+    EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
+    GenericReply: 1111 as BaseNDKKind, // Generic reply (NOT kind 1)
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
     AgentRequest: 4133 as BaseNDKKind, // NIP-90 Agent Request
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition

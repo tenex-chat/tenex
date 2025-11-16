@@ -161,7 +161,7 @@ export class ConversationEventProcessor {
     timestamp?: number;
   } | null {
     // Check if event has ["status", "completed"] tag
-    const isCompletion = event.tags?.some((tag) => 
+    const isCompletion = event.tags?.some((tag) =>
       tag[0] === "status" && tag[1] === "completed"
     );
 
