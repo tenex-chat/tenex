@@ -8,6 +8,8 @@ export interface AgentState {
 export interface Conversation {
     id: string;
     title?: string;
+    phase?: string;
+    phaseStartedAt?: number;
     history: NDKEvent[]; // The SINGLE source of truth for all events/messages
     agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
     metadata: ConversationMetadata;

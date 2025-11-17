@@ -78,6 +78,7 @@ export interface CompleteEvent {
     steps: StepResult<Record<string, AISdkTool>>[];
     usage: LanguageModelUsageWithCostUsd;
     finishReason?: string;
+    reasoning?: string;
 }
 
 /**

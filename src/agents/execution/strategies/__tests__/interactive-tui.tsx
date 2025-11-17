@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+/* @ts-nocheck */
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
 import { DelegationRegistry } from "@/services/DelegationRegistry";

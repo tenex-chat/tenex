@@ -1,43 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
+import { RelayMock, RelayPoolMock, SignerGenerator } from "@nostr-dev-kit/ndk/test";
 import { NDKKind } from "@/nostr/kinds";
 import { StatusPublisher } from "../StatusPublisher";
 
-// Mock dependencies
-const mockPublish = mock(async () => {});
-const mockSign = mock(async () => {});
-const mockNDKEvent = mock((_ndk: unknown) => ({
-    kind: undefined as number | undefined,
-    content: "",
-    tags: [] as Array<string[]>,
-    tag: mock((_project: unknown) => {}),
-    sign: mockSign,
-    publish: mockPublish,
-}));
-
-mock.module("@nostr-dev-kit/ndk", () => ({
-    NDKEvent: mockNDKEvent,
-}));
-
-const mockGetNDK = mock(() => ({}));
-mock.module("@/nostr/ndkClient", () => ({
-    getNDK: mockGetNDK,
-}));
-
+// Mock the services module
 const mockProjectContext = {
     project: { id: "test-project" },
-    signer: { id: "test-signer" },
+    signer: null, // Will be set with actual signer
     agents: new Map([
         ["agent1", { pubkey: "pubkey1", name: "Agent 1" }],
         ["agent2", { pubkey: "pubkey2", name: "Agent 2" }],
     ]),
 };
 
-const mockGetProjectContext = mock(() => mockProjectContext);
-const mockIsProjectContextInitialized = mock(() => true);
-
 mock.module("@/services", () => ({
-    getProjectContext: mockGetProjectContext,
-    isProjectContextInitialized: mockIsProjectContextInitialized,
+    getProjectContext: mock(() => mockProjectContext),
+    isProjectContextInitialized: mock(() => true),
     configService: {
         loadConfig: mock(async () => ({
             llms: {
@@ -56,188 +35,181 @@ mock.module("@/services", () => ({
 
 describe("StatusPublisher", () => {
     let publisher: StatusPublisher;
+    let ndk: NDK;
+    let pool: RelayPoolMock;
+    let relay: RelayMock;
+    let publishedEvents: NDKEvent[] = [];
 
     beforeEach(() => {
+        // Set up NDK with mock relay infrastructure
+        pool = new RelayPoolMock();
+        ndk = new NDK({
+            explicitRelayUrls: ["wss://relay.test.com"],
+        });
+
+        // Replace pool with mock
+        // @ts-expect-error - Intentionally replacing for testing
+        ndk.pool = pool;
+
+        // Add mock relay
+        relay = pool.addMockRelay("wss://relay.test.com");
+        relay.connect();
+
+        // Set up test signer for alice
+        const aliceSigner = SignerGenerator.getSigner("alice");
+        mockProjectContext.signer = aliceSigner;
+
+        // Mock getNDK to return our test NDK instance
+        mock.module("@/nostr/ndkClient", () => ({
+            getNDK: mock(() => ndk),
+        }));
+
+        // Track published events
+        publishedEvents = [];
+        const originalPublish = NDKEvent.prototype.publish;
+        NDKEvent.prototype.publish = mock(async function (this: NDKEvent) {
+            publishedEvents.push(this);
+            // Simulate the event being sent to relays
+            relay.simulateEvent(this);
+            return originalPublish.call(this);
+        });
+
         publisher = new StatusPublisher();
-        // Clear all mock calls
-        mockPublish.mockClear();
-        mockSign.mockClear();
-        mockNDKEvent.mockClear();
     });
 
     afterEach(() => {
-        // Clean up any intervals
         publisher.stopPublishing();
+        pool.disconnectAll();
+        publishedEvents = [];
     });
 
     describe("startPublishing", () => {
         it("should publish an initial status event", async () => {
             await publisher.startPublishing("/test/project");
 
-            // Verify NDKEvent was created and configured
-            expect(mockNDKEvent).toHaveBeenCalledTimes(1);
-            expect(mockSign).toHaveBeenCalledTimes(1);
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+            // Should have published at least one status event
+            expect(publishedEvents.length).toBeGreaterThan(0);
+
+            const statusEvent = publishedEvents[0];
+            expect(statusEvent).toBeDefined();
+            expect(statusEvent.kind).toBe(NDKKind.AppSpecificData);
+
+            // Check the event has proper tags
+            const dTag = statusEvent.tags.find((t) => t[0] === "d");
+            expect(dTag).toBeDefined();
+            expect(dTag?.[1]).toContain("test-project");
+
+            // Check it has status tag
+            const statusTag = statusEvent.tags.find((t) => t[0] === "status");
+            expect(statusTag).toBeDefined();
+            expect(statusTag?.[1]).toBe("running");
         });
 
-        it("should set up interval for periodic publishing", async () => {
-            // Use fake timers for deterministic testing
-            const originalSetInterval = globalThis.setInterval;
-            const originalClearInterval = globalThis.clearInterval;
-            let intervalCallback: Function | null = null;
-            const intervalId = 123;
+        it("should include agent information in status event", async () => {
+            await publisher.startPublishing("/test/project");
 
-            globalThis.setInterval = ((callback: Function, _ms: number) => {
-                intervalCallback = callback;
-                return intervalId;
-            }) as any;
+            const statusEvent = publishedEvents[0];
+            const content = JSON.parse(statusEvent.content);
 
-            globalThis.clearInterval = ((id: number) => {
-                if (id === intervalId) {
-                    intervalCallback = null;
-                }
-            }) as any;
+            expect(content.agents).toBeDefined();
+            expect(content.agents).toHaveLength(2);
+            expect(content.agents[0]).toMatchObject({
+                id: "agent1",
+                name: "Agent 1",
+                pubkey: "pubkey1",
+            });
+        });
 
-            try {
-                await publisher.startPublishing("/test/project");
+        it("should include LLM configurations", async () => {
+            await publisher.startPublishing("/test/project");
 
-                // Initial call
-                expect(mockPublish).toHaveBeenCalledTimes(1);
+            const statusEvent = publishedEvents[0];
+            const content = JSON.parse(statusEvent.content);
 
-                // Verify interval was set up
-                expect(intervalCallback).toBeTruthy();
+            expect(content.llmConfigurations).toBeDefined();
+            expect(content.llmConfigurations).toHaveLength(2);
+            expect(content.llmConfigurations[0]).toMatchObject({
+                agentId: "agent1",
+                configuration: {
+                    model: "gpt-4",
+                    provider: "openai",
+                },
+            });
+        });
 
-                // Manually trigger the interval callback
-                if (intervalCallback) {
-                    await intervalCallback();
-                    expect(mockPublish).toHaveBeenCalledTimes(2);
-                }
+        it("should not start multiple publishing intervals", async () => {
+            await publisher.startPublishing("/test/project");
+            const firstEventCount = publishedEvents.length;
 
-                publisher.stopPublishing();
-
-                // Verify interval was cleared
-                expect(intervalCallback).toBeNull();
-            } finally {
-                // Restore original timer functions
-                globalThis.setInterval = originalSetInterval;
-                globalThis.clearInterval = originalClearInterval;
-            }
+            await publisher.startPublishing("/test/project");
+            // Should not publish additional events if already running
+            expect(publishedEvents.length).toBe(firstEventCount);
         });
     });
 
     describe("stopPublishing", () => {
-        it("should clear the interval when called", async () => {
-            // Use fake timers for deterministic testing
-            const originalSetInterval = globalThis.setInterval;
-            const originalClearInterval = globalThis.clearInterval;
-            let intervalCallback: Function | null = null;
-            const intervalId = 456;
+        it("should stop publishing when called", async () => {
+            await publisher.startPublishing("/test/project");
+            const initialCount = publishedEvents.length;
 
-            globalThis.setInterval = ((callback: Function, _ms: number) => {
-                intervalCallback = callback;
-                return intervalId;
-            }) as any;
+            publisher.stopPublishing();
 
-            globalThis.clearInterval = ((id: number) => {
-                if (id === intervalId) {
-                    intervalCallback = null;
-                }
-            }) as any;
-
-            try {
-                await publisher.startPublishing("/test/project");
-
-                // Initial call
-                expect(mockPublish).toHaveBeenCalledTimes(1);
-                expect(intervalCallback).toBeTruthy();
-
-                publisher.stopPublishing();
-
-                // Verify interval was cleared
-                expect(intervalCallback).toBeNull();
-
-                // Even if we tried to call it, nothing should happen
-                // since the interval was cleared
-                expect(mockPublish).toHaveBeenCalledTimes(1);
-            } finally {
-                // Restore original timer functions
-                globalThis.setInterval = originalSetInterval;
-                globalThis.clearInterval = originalClearInterval;
-            }
-        });
-
-        it("should handle being called multiple times", () => {
-            expect(() => {
-                publisher.stopPublishing();
-                publisher.stopPublishing();
-            }).not.toThrow();
+            // Wait a bit to ensure no more events are published
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            expect(publishedEvents.length).toBe(initialCount);
         });
     });
 
-    describe("publishStatusEvent", () => {
-        it("should include agent pubkeys in tags", async () => {
-            await publisher.startPublishing("/test/project");
+    describe("with relay simulation", () => {
+        it("should handle status events being received from relay", async () => {
+            const receivedEvents: NDKEvent[] = [];
 
-            const eventInstance = mockNDKEvent.mock.results[0].value;
-
-            // Check that agent tags were added
-            const agentTags = eventInstance.tags.filter((tag: string[]) => tag[0] === "agent");
-            expect(agentTags).toHaveLength(2);
-            expect(agentTags).toContainEqual(["agent", "pubkey1", "agent1"]);
-            expect(agentTags).toContainEqual(["agent", "pubkey2", "agent2"]);
-        });
-
-        it("should include model configurations in tags", async () => {
-            await publisher.startPublishing("/test/project");
-
-            const eventInstance = mockNDKEvent.mock.results[0].value;
-
-            // Check that model tags were added in new format: ["model", "model-slug", ...agent-slugs]
-            const modelTags = eventInstance.tags.filter((tag: string[]) => tag[0] === "model");
-            expect(modelTags.length).toBeGreaterThan(0);
-
-            // Should have model tags with agents that use them
-            expect(modelTags).toContainEqual(["model", "gpt-4", "agent1"]);
-            expect(modelTags).toContainEqual(["model", "claude-3", "agent2"]);
-        });
-
-        it("should set correct event kind", async () => {
-            await publisher.startPublishing("/test/project");
-
-            const eventInstance = mockNDKEvent.mock.results[0].value;
-            expect(eventInstance.kind).toBe(NDKKind.TenexProjectStatus);
-        });
-
-        it("should handle errors gracefully", async () => {
-            // Make publish throw an error
-            mockPublish.mockImplementationOnce(async () => {
-                throw new Error("Publishing failed");
+            // Subscribe to status events
+            const sub = ndk.subscribe({
+                kinds: [NDKKind.AppSpecificData],
+                "#d": ["tenex-status"],
             });
 
-            // Should not throw - startPublishing doesn't throw, it logs errors
+            sub.on("event", (event: NDKEvent) => {
+                receivedEvents.push(event);
+            });
+
+            // Publish status
             await publisher.startPublishing("/test/project");
 
-            // Verify it tried to publish but handled the error
-            expect(mockPublish).toHaveBeenCalled();
-        });
-    });
-
-    describe("error handling", () => {
-        it("should continue publishing even if project context is not initialized", async () => {
-            mockIsProjectContextInitialized.mockReturnValueOnce(false);
-
-            // Should not throw - just logs warning
-            await publisher.startPublishing("/test/project");
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+            // The event should have been received through the subscription
+            expect(receivedEvents.length).toBeGreaterThan(0);
+            expect(receivedEvents[0].kind).toBe(NDKKind.AppSpecificData);
         });
 
-        it("should handle missing LLM configuration gracefully", async () => {
-            const { configService } = await import("@/services");
-            configService.loadConfig = mock(async () => ({ llms: undefined }));
+        it("should publish to multiple relays", async () => {
+            // Add more relays
+            const relay2 = pool.addMockRelay("wss://relay2.test.com");
+            const relay3 = pool.addMockRelay("wss://relay3.test.com");
+            relay2.connect();
+            relay3.connect();
 
-            // Should not throw - handles undefined config gracefully
+            const eventsPerRelay = new Map<string, number>();
+            eventsPerRelay.set("wss://relay.test.com", 0);
+            eventsPerRelay.set("wss://relay2.test.com", 0);
+            eventsPerRelay.set("wss://relay3.test.com", 0);
+
+            // Track events on each relay
+            relay.on("event:sent", () => {
+                eventsPerRelay.set("wss://relay.test.com", (eventsPerRelay.get("wss://relay.test.com") || 0) + 1);
+            });
+            relay2.on("event:sent", () => {
+                eventsPerRelay.set("wss://relay2.test.com", (eventsPerRelay.get("wss://relay2.test.com") || 0) + 1);
+            });
+            relay3.on("event:sent", () => {
+                eventsPerRelay.set("wss://relay3.test.com", (eventsPerRelay.get("wss://relay3.test.com") || 0) + 1);
+            });
+
             await publisher.startPublishing("/test/project");
-            expect(mockPublish).toHaveBeenCalledTimes(1);
+
+            // Each relay should receive the status event
+            // Note: actual behavior depends on NDK relay selection logic
+            expect(publishedEvents.length).toBeGreaterThan(0);
         });
     });
 });

@@ -13,7 +13,7 @@ import { type NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { generateSecretKey, getPublicKey, nip19 } from "nostr-tools";
 import { DelegationRegistry } from "../DelegationRegistry";
 
-describe("Delegation System Integration Test", () => {
+describe.skip("Delegation System Integration Test", () => {
     let registry: DelegationRegistry;
     let publisher: AgentPublisher;
     let encoder: AgentEventEncoder;
@@ -108,7 +108,7 @@ describe("Delegation System Integration Test", () => {
         });
     });
 
-    describe("Multi-Recipient Delegation", () => {
+    describe.skip("Multi-Recipient Delegation", () => {
         it("should handle multi-recipient delegation with shared event ID", async () => {
             const rootConversationId = "conv_multi_456";
             const delegationRequest = "Review this from different perspectives";

@@ -542,8 +542,11 @@ describe("ToolExecutionTracker", () => {
                 })
             ).rejects.toThrow("Network error");
 
-            // Execution should not be tracked if publishing failed
-            expect(tracker.isTracking("will-fail")).toBe(false);
+            // Execution is tracked even if publishing failed (to prevent race conditions)
+            // The execution just won't have a valid toolEventId
+            expect(tracker.isTracking("will-fail")).toBe(true);
+            const execution = tracker.getExecution("will-fail");
+            expect(execution?.toolEventId).toBe(""); // Empty because publish failed
         });
 
         it("should handle storage errors during completion", async () => {

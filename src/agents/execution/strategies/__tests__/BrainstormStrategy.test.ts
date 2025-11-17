@@ -63,11 +63,9 @@ describe("BrainstormStrategy", () => {
             tools: [],
         } as any,
         triggeringEvent,
-        conversationCoordinator: {
-            getConversation: () => conversation,
-        } as any,
+        getConversation: () => conversation,
         projectPath: "/test/path",
-    });
+    } as any);
 
     describe("buildMessages", () => {
         it("should include only selected responses based on kind:7 reactions", async () => {

@@ -1,5 +1,7 @@
-import type { AgentInstance } from "./types";
 import type { ToolName } from "@/tools/types";
+import type { AgentInstance } from "./types";
+
+type AgentPhaseInfo = Pick<AgentInstance, "phases"> | { phases?: Record<string, string> };
 
 /**
  * Core tools that ALL agents must have access to regardless of configuration.
@@ -25,7 +27,7 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
  * Note: Since PM is now dynamic (first agent in project), we can't determine
  * PM-specific tools here. Tool assignment should be done via agent definition events.
  */
-export function getDefaultToolsForAgent(_agent: AgentInstance): ToolName[] {
+export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
     // Default tools for all agents
     // Specific tools should be configured via agent definition events
     // NOTE: delegate, delegate_phase, delegate_external, and delegate_followup are NOT included here
@@ -65,7 +67,7 @@ export const PHASE_MANAGEMENT_TOOLS: ToolName[] = ["phase_add", "phase_remove"];
  * Get the correct delegate tools for an agent based on whether they have phases defined
  * This is the SINGLE source of truth for delegate tool assignment
  */
-export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): ToolName[] {
+export function getDelegateToolsForAgent(agent: AgentPhaseInfo): ToolName[] {
     const tools: ToolName[] = [];
 
     // All agents get ask tool

@@ -5,27 +5,20 @@ import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
-import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import { Lockfile } from "@/utils/lockfile";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
-import {
-    ROOT_CONTEXT,
-    SpanStatusCode,
-    context as otelContext,
-    propagation,
-    trace,
-} from "@opentelemetry/api";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import type { ProjectRuntime } from "./ProjectRuntime";
 import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
 import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
 import { isDropped, isRoutedToProject } from "./types";
-
-const tracer = trace.getTracer("tenex.daemon");
+import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
+import { logDropped, logRouted } from "./utils/routing-log";
 
 /**
  * Main daemon that manages all projects in a single process.
@@ -70,8 +63,6 @@ export class Daemon {
             return;
         }
 
-        logger.debug("Starting TENEX Daemon");
-
         try {
             // 1. Initialize base directories
             await this.initializeDirectories();
@@ -90,11 +81,6 @@ export class Daemon {
             if (this.whitelistedPubkeys.length === 0) {
                 throw new Error("No whitelisted pubkeys configured. Run 'tenex setup' first.");
             }
-
-            logger.debug("Loaded configuration", {
-                whitelistedPubkeys: this.whitelistedPubkeys.map((p) => p.slice(0, 8)),
-                projectsBase: this.projectsBase,
-            });
 
             // 5. Initialize NDK
             await initNDK();
@@ -120,11 +106,6 @@ export class Daemon {
 
             this.isRunning = true;
 
-            const stats = this.runtimeLifecycle?.getStats() || { activeCount: 0 };
-            logger.debug("TENEX Daemon started successfully", {
-                knownProjects: this.knownProjects.size,
-                activeProjects: stats.activeCount,
-            });
         } catch (error) {
             logger.error("Failed to start daemon", {
                 error: error instanceof Error ? error.message : String(error),
@@ -159,7 +140,6 @@ export class Daemon {
             await fs.mkdir(dir, { recursive: true });
         }
 
-        logger.debug("Initialized daemon directories", { daemonDir: this.daemonDir });
     }
 
     /**
@@ -185,72 +165,24 @@ export class Daemon {
      * Handle incoming events from the subscription (telemetry wrapper)
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
-        // Never route certain event kinds - check this FIRST before creating telemetry traces
+        // Skip unroutable event kinds
         if (AgentEventDecoder.isNeverRouteKind(event)) {
-            await this.processDroppedEvent(
-                event,
-                `Event kind ${event.kind} is in NEVER_ROUTE_EVENT_KINDS`
-            );
+            await logDropped(this.routingLogger, event, `Event kind ${event.kind} is never routed`);
             return;
         }
 
-        // Extract trace context from event tags if present (for delegation linking)
-        const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
-        let parentContext = ROOT_CONTEXT;
-        if (traceContextTag) {
-            const carrier = { traceparent: traceContextTag[1] };
-            parentContext = propagation.extract(ROOT_CONTEXT, carrier);
-        }
+        const span = createEventSpan(event);
 
-        // Determine conversation ID for tagging
-        const conversationSpanManager = getConversationSpanManager();
-        let conversationId = AgentEventDecoder.getConversationRoot(event);
-        if (!conversationId && event.id) {
-            conversationId = event.id;
-        }
-
-        // Create telemetry span with conversation attributes
-        const span = tracer.startSpan(
-            "tenex.event.process",
-            {
-                attributes: {
-                    "event.id": event.id,
-                    "event.kind": event.kind || 0,
-                    "event.pubkey": event.pubkey,
-                    "event.created_at": event.created_at || 0,
-                    "event.content": event.content,
-                    "event.content_length": event.content.length,
-                    "event.tags": JSON.stringify(event.tags),
-                    "event.tag_count": event.tags.length,
-                    "event.has_trace_context": !!traceContextTag,
-                    // Add conversation tracking attributes
-                    "conversation.id": conversationId || "unknown",
-                    "conversation.is_root": !AgentEventDecoder.getConversationRoot(event),
-                },
-            },
-            parentContext
-        );
-
-        // Track message sequence in conversation
-        if (conversationId) {
-            conversationSpanManager.incrementMessageCount(conversationId, span);
-        }
-
-        // Execute business logic within telemetry context
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
                 await this.processIncomingEvent(event, span);
-                span.setStatus({ code: SpanStatusCode.OK });
+                endSpanSuccess(span);
             } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
                 logger.error("Error handling incoming event", {
                     error: error instanceof Error ? error.message : String(error),
                     eventId: event.id,
-                    eventKind: event.kind,
                 });
-            } finally {
-                span.end();
+                endSpanError(span, error);
             }
         });
     }
@@ -267,46 +199,31 @@ export class Daemon {
 
         // Handle project events (kind 31933)
         if (eventType === "project") {
-            span.addEvent("routing_decision", { decision: "project_event", reason: "kind_31933" });
+            addRoutingEvent(span, "project_event", { reason: "kind_31933" });
             await this.handleProjectEvent(event);
-            await this.routingLogger.logRoutingDecision({
-                event,
-                routingDecision: "project_event",
-                targetProjectId: this.buildProjectId(event),
-                routingMethod: "none",
-                reason: "Project creation/update event",
-            });
+            await logDropped(this.routingLogger, event, "Project creation/update event");
             return;
         }
 
-        // Handle lesson events (kind 4129) - hydrate into ACTIVE runtimes only, don't start new ones
+        // Handle lesson events (kind 4129)
         if (eventType === "lesson") {
-            span.addEvent("routing_decision", { decision: "lesson_event", reason: "kind_4129" });
+            addRoutingEvent(span, "lesson_event", { reason: "kind_4129" });
             await this.handleLessonEvent(event);
-            await this.routingLogger.logRoutingDecision({
-                event,
-                routingDecision: "lesson_hydration",
-                targetProjectId: null,
-                routingMethod: "none",
-                reason: "Lesson event - hydrated into active runtimes only",
-            });
+            await logDropped(this.routingLogger, event, "Lesson event - hydrated into active runtimes only");
             return;
         }
 
-        // Filter out events published BY agents unless they explicitly p-tag someone in the system
+        // Filter out agent events without p-tags
         if (
             DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
             !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects)
         ) {
-            span.addEvent("routing_decision", {
-                decision: "dropped",
-                reason: "agent_event_without_p_tags",
-            });
-            await this.processDroppedEvent(event, "Agent event without p-tags to system entities");
+            addRoutingEvent(span, "dropped", { reason: "agent_event_without_p_tags" });
+            await logDropped(this.routingLogger, event, "Agent event without p-tags to system entities");
             return;
         }
 
-        // Determine target project using DaemonRouter
+        // Determine target project
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         const routingResult = DaemonRouter.determineTargetProject(
             event,
@@ -316,40 +233,17 @@ export class Daemon {
         );
 
         if (!routingResult.projectId) {
-            span.addEvent("routing_decision", {
-                decision: "dropped",
-                reason: routingResult.reason,
-            });
-            await this.processDroppedEvent(event, routingResult.reason);
+            addRoutingEvent(span, "dropped", { reason: routingResult.reason });
+            await logDropped(this.routingLogger, event, routingResult.reason);
             return;
         }
 
-        // Route to project
-        span.setAttributes({
-            "project.id": routingResult.projectId,
-            "routing.decision": "route_to_project",
-            "routing.method": routingResult.method,
+        addRoutingEvent(span, "route_to_project", {
+            projectId: routingResult.projectId,
+            method: routingResult.method
         });
 
         await this.routeEventToProject(event, routingResult, span);
-    }
-
-    /**
-     * Handle dropped events (business logic helper)
-     */
-    private async processDroppedEvent(event: NDKEvent, reason: string): Promise<void> {
-        logger.debug("Dropping event", {
-            eventId: event.id.slice(0, 8),
-            kind: event.kind,
-            reason,
-        });
-        await this.routingLogger.logRoutingDecision({
-            event,
-            routingDecision: "dropped",
-            targetProjectId: null,
-            routingMethod: "none",
-            reason,
-        });
     }
 
     /**
@@ -370,20 +264,10 @@ export class Daemon {
         }
 
         const projectId = routingResult.projectId;
-
-        // Get the project
         const project = this.knownProjects.get(projectId);
         if (!project) {
-            span.addEvent("error", { error: "unknown_project" });
-            logger.warn("Unknown project referenced", { projectId });
-            await this.routingLogger.logRoutingDecision({
-                event,
-                routingDecision: "dropped",
-                targetProjectId: projectId,
-                routingMethod: routingResult.method,
-                matchedTags: routingResult.matchedTags,
-                reason: "Project not found in known projects",
-            });
+            addRoutingEvent(span, "error", { error: "unknown_project" });
+            await logDropped(this.routingLogger, event, "Project not found in known projects");
             return;
         }
 
@@ -397,54 +281,25 @@ export class Daemon {
                 runtime = existingRuntime;
             } else {
                 // Start the project runtime lazily
-                const projectTitle = project.tagValue("title");
-                span.addEvent("project_runtime_start", {
-                    "project.title": projectTitle || "untitled",
-                });
-
+                addRoutingEvent(span, "project_runtime_start", { title: project.tagValue("title") || "untitled" });
                 runtime = await this.runtimeLifecycle.getOrStartRuntime(projectId, project);
                 runtimeAction = "started";
-
-                // Update subscription with this project's agent pubkeys
                 await this.updateSubscriptionWithProjectAgents(projectId, runtime);
             }
         } catch (error) {
-            logger.error("Failed to get/start runtime", {
-                projectId,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            await this.routingLogger.logRoutingDecision({
-                event,
-                routingDecision: "dropped",
-                targetProjectId: projectId,
-                routingMethod: routingResult.method,
-                matchedTags: routingResult.matchedTags,
-                reason: "Failed to start runtime",
-            });
+            logger.error("Failed to get/start runtime", { projectId, error });
+            await logDropped(this.routingLogger, event, "Failed to start runtime");
             return;
         }
 
         // Log successful routing
-        await this.routingLogger.logRoutingDecision({
-            event,
-            routingDecision: "routed",
-            targetProjectId: projectId,
-            routingMethod: routingResult.method,
-            matchedTags: routingResult.matchedTags,
-            runtimeAction,
-        });
+        await logRouted(this.routingLogger, event, projectId, routingResult.method, routingResult.matchedTags);
 
         // Handle the event with crash isolation
         try {
             await runtime.handleEvent(event);
         } catch (error) {
-            span.recordException(error as Error);
-            logger.error("Project runtime crashed while handling event", {
-                projectId,
-                eventId: event.id,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            // Project crashed, but daemon continues
+            logger.error("Project runtime crashed", { projectId, eventId: event.id });
             await this.runtimeLifecycle.handleRuntimeCrash(projectId, runtime);
             throw error; // Re-throw to mark span as error
         }
@@ -523,12 +378,6 @@ export class Daemon {
                 }
             }
 
-            logger.debug("Updating subscription with agent data from active projects", {
-                activeProjects: activeRuntimes.size,
-                totalAgentPubkeys: allAgentPubkeys.size,
-                totalAgentDefinitionIds: allAgentDefinitionIds.size,
-            });
-
             this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
             this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
         } catch (error) {
@@ -547,36 +396,17 @@ export class Daemon {
         const project = new NDKProject(getNDK(), event.rawEvent());
         const isNewProject = !this.knownProjects.has(projectId);
 
-        logger.info("Processing project event", {
-            projectId,
-            title: project.tagValue("title"),
-            isUpdate: !isNewProject,
-            isNewProject,
-        });
-
-        // Update known projects
         this.knownProjects.set(projectId, project);
 
-        // If this is a new project, update the subscription manager
+        // Update subscription for new projects
         if (isNewProject && this.subscriptionManager) {
-            logger.info("New project discovered, updating subscription manager", {
-                projectId,
-                title: project.tagValue("title"),
-            });
-            const projectIds = Array.from(this.knownProjects.keys());
-            this.subscriptionManager.updateKnownProjects(projectIds);
+            this.subscriptionManager.updateKnownProjects(Array.from(this.knownProjects.keys()));
         }
 
-        // If project is active, route to runtime's EventHandler for incremental update
+        // Route to active runtime if exists
         const runtime = this.runtimeLifecycle?.getRuntime(projectId);
         if (runtime) {
-            logger.info("Routing project update to runtime's EventHandler for incremental update");
-
-            // Route the project event to the runtime's event handler
-            // This will trigger incremental updates (add/remove agents, MCP tools, etc.)
             await runtime.handleEvent(event);
-
-            // Update subscription with potentially new agent pubkeys
             await this.updateSubscriptionWithProjectAgents(projectId, runtime);
         }
     }
@@ -593,10 +423,6 @@ export class Daemon {
 
         // Check if we should trust this lesson
         if (!shouldTrustLesson(lesson, event.pubkey)) {
-            logger.debug("Lesson event rejected by trust check", {
-                eventId: event.id?.substring(0, 8),
-                publisher: event.pubkey?.substring(0, 8),
-            });
             return;
         }
 
@@ -634,14 +460,6 @@ export class Daemon {
                 for (const agent of matchingAgents) {
                     context.addLesson(agent.pubkey, lesson);
                     hydratedCount++;
-                    logger.info("Stored lesson for agent", {
-                        projectId: projectId.substring(0, 16),
-                        agentSlug: agent.slug,
-                        agentPubkey: agent.pubkey.substring(0, 8),
-                        lessonTitle: lesson.title,
-                        lessonId: event.id?.substring(0, 8),
-                        publisher: event.pubkey?.substring(0, 8),
-                    });
                 }
             } catch (error) {
                 logger.error("Failed to hydrate lesson into project", {
@@ -651,13 +469,6 @@ export class Daemon {
             }
         }
 
-        if (hydratedCount === 0) {
-            logger.debug("Lesson event not hydrated (no matching active runtimes)", {
-                eventId: event.id?.substring(0, 8),
-                agentDefinitionId: agentDefinitionId.substring(0, 8),
-                activeRuntimeCount: activeRuntimes.size,
-            });
-        }
     }
 
     /**
@@ -665,10 +476,7 @@ export class Daemon {
      */
     private setupShutdownHandlers(): void {
         const shutdown = async (signal: string): Promise<void> => {
-            logger.info(`Received ${signal}, starting graceful shutdown`);
-
             if (!this.isRunning) {
-                logger.info("Daemon not running, exiting");
                 process.exit(0);
             }
 
@@ -699,7 +507,6 @@ export class Daemon {
                 const conversationSpanManager = getConversationSpanManager();
                 conversationSpanManager.shutdown();
 
-                logger.info("Graceful shutdown complete");
                 process.exit(0);
             } catch (error) {
                 logger.error("Error during shutdown", {
@@ -790,7 +597,6 @@ export class Daemon {
             throw new Error("RuntimeLifecycle not initialized");
         }
 
-        logger.info(`Killing project runtime: ${projectId}`);
 
         try {
             await this.runtimeLifecycle.stopRuntime(projectId);
@@ -798,7 +604,6 @@ export class Daemon {
             // Update subscription to remove this project's agent pubkeys
             await this.updateSubscriptionAfterRuntimeRemoved(projectId);
 
-            logger.info(`Project runtime killed: ${projectId}`);
         } catch (error) {
             logger.error(`Failed to kill project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -822,7 +627,6 @@ export class Daemon {
             throw new Error(`Project not found: ${projectId}`);
         }
 
-        logger.info(`Restarting project runtime: ${projectId}`);
 
         try {
             const runtime = await this.runtimeLifecycle.restartRuntime(projectId, project);
@@ -830,7 +634,6 @@ export class Daemon {
             // Update subscription with potentially new agent pubkeys
             await this.updateSubscriptionWithProjectAgents(projectId, runtime);
 
-            logger.info(`Project runtime restarted: ${projectId}`);
         } catch (error) {
             logger.error(`Failed to restart project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -855,17 +658,12 @@ export class Daemon {
             throw new Error(`Project not found: ${projectId}`);
         }
 
-        logger.info(`Starting project runtime: ${projectId}`, {
-            title: project.tagValue("title"),
-        });
-
         try {
             const runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
 
             // Update subscription with this project's agent pubkeys
             await this.updateSubscriptionWithProjectAgents(projectId, runtime);
 
-            logger.info(`Project runtime started: ${projectId}`);
         } catch (error) {
             logger.error(`Failed to start project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -894,12 +692,6 @@ export class Daemon {
             const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
                 this.collectAgentData();
 
-            logger.debug("Updating subscription after runtime removed", {
-                removedProject: projectId,
-                remainingAgents: allAgentPubkeys.size,
-                remainingDefinitions: allAgentDefinitionIds.size,
-            });
-
             this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
             this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
         } catch (error) {
@@ -919,7 +711,6 @@ export class Daemon {
             return;
         }
 
-        logger.info("Stopping daemon");
 
         this.isRunning = false;
 
@@ -945,7 +736,6 @@ export class Daemon {
         const conversationSpanManager = getConversationSpanManager();
         conversationSpanManager.shutdown();
 
-        logger.info("Daemon stopped");
     }
 }
 

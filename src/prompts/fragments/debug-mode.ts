@@ -40,6 +40,9 @@ ONLY reply to the question being asked; do NOT perform any other action, do NOT 
 /**
  * Helper function to check if debug mode is enabled
  */
-export function isDebugMode(triggeringEvent: NDKEvent): boolean {
-    return triggeringEvent.content.includes("#debug") || false;
+export function isDebugMode(triggeringEvent: NDKEvent | undefined): boolean {
+    if (!triggeringEvent || !triggeringEvent.content) {
+        return false;
+    }
+    return triggeringEvent.content.includes("#debug");
 }

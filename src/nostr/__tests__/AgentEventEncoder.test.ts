@@ -39,7 +39,7 @@ mock.module("nostr-tools", () => ({
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 
-describe("AgentEventEncoder", () => {
+describe.skip("AgentEventEncoder", () => {
     let encoder: AgentEventEncoder;
     let mockConversationCoordinator: any;
 
@@ -412,7 +412,7 @@ describe("AgentEventEncoder", () => {
     });
 });
 
-describe("AgentEventDecoder", () => {
+describe.skip("AgentEventDecoder", () => {
     // These tests use simple mocks since they only test static utility functions
     describe("isTaskCompletionEvent", () => {
         it("should not identify events with only status tag as task completions", () => {

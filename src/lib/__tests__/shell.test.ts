@@ -9,11 +9,11 @@ describe("shell utilities", () => {
         });
 
         it("should throw error for invalid input", async () => {
-            await expect(which("")).rejects.toThrow("Command cannot be empty or whitespace");
+            await expect(which("")).rejects.toThrow("Invalid command parameter: must be a non-empty string");
             await expect(which("   ")).rejects.toThrow("Command cannot be empty or whitespace");
-            await expect(which(null as any)).rejects.toThrow("Invalid command parameter");
-            await expect(which(undefined as any)).rejects.toThrow("Invalid command parameter");
-            await expect(which(123 as any)).rejects.toThrow("Invalid command parameter");
+            await expect(which(null as any)).rejects.toThrow("Invalid command parameter: must be a non-empty string");
+            await expect(which(undefined as any)).rejects.toThrow("Invalid command parameter: must be a non-empty string");
+            await expect(which(123 as any)).rejects.toThrow("Invalid command parameter: must be a non-empty string");
         });
 
         it("should return null for non-existent command", async () => {

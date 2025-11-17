@@ -1,8 +1,15 @@
-import type { AgentInstance } from "@/agents/types";
 import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
+type MinimalAgentView = {
+    name: string;
+    slug: string;
+    pubkey: string;
+    role: string;
+    instructions: string;
+};
+
 export interface SignedAgent {
-    agent: AgentInstance;
+    agent: MinimalAgentView;
     signer: NDKPrivateKeySigner;
 }
 
@@ -31,13 +38,12 @@ export class SignedEventGenerator {
         const signer = NDKPrivateKeySigner.generate();
         const user = await signer.user();
 
-        const agent: AgentInstance = {
+        const agent: MinimalAgentView = {
             name,
             slug,
             pubkey: user.pubkey,
             role,
             instructions: `I am ${name}, a ${role}`,
-            tools: [],
         };
 
         return { agent, signer };
@@ -107,7 +113,7 @@ export class SignedEventGenerator {
         request: string,
         parentEvent: NDKEvent,
         rootEvent: NDKEvent,
-        conversationId: string
+        _conversationId: string
     ): Promise<NDKEvent> {
         const event = new NDKEvent(this.ndk);
         event.kind = 1111;

@@ -28,5 +28,13 @@
         "isolatedModules": true
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"],
-    "exclude": ["node_modules/**", "dist/**", "**/*.test.ts", "**/*.spec.ts", "src/test-utils/**/*"]
+    "exclude": [
+        "node_modules/**",
+        "dist/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/*.test.tsx",
+        "src/test-utils/**/*",
+        "src/agents/execution/strategies/__tests__/**/*"
+    ]
 }

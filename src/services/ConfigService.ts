@@ -274,6 +274,7 @@ export class ConfigService {
             tools?: Record<string, unknown>;
             agentName?: string;
             projectPath?: string;
+            sessionId?: string;
         }
     ): LLMService {
         const config = this.getLLMConfig(configName);

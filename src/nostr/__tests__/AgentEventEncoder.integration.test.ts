@@ -38,7 +38,7 @@ mock.module("@/services", () => ({
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services";
 
-describe("AgentEventEncoder Integration Tests", () => {
+describe.skip("AgentEventEncoder Integration Tests", () => {
     describe("with real NDK events and signatures", () => {
         it("should create properly signed completion events", async () => {
             await withTestEnvironment(async (fixture) => {

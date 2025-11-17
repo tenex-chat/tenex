@@ -22,9 +22,6 @@ export class ProgressMonitor {
 
             const result = await generateText({
                 model: this.reviewModel,
-                ...("tools" in this.reviewModel && this.reviewModel.tools
-                    ? { tools: this.reviewModel.tools }
-                    : {}),
                 messages: [
                     {
                         role: "user",

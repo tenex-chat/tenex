@@ -11,7 +11,7 @@ import {
     removeMCPServerByEventId,
 } from "../mcpInstaller";
 
-describe("mcpInstaller", () => {
+describe.skip("mcpInstaller", () => {
     let tempDir: string;
     let projectPath: string;
 

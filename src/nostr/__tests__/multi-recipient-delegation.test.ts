@@ -1,17 +1,12 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
+import { RelayMock, RelayPoolMock, SignerGenerator, UserGenerator } from "@nostr-dev-kit/ndk/test";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
-import type { NDKEvent, NDKSigner } from "@nostr-dev-kit/ndk";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import { AgentPublisher } from "../AgentPublisher";
-
-// Mock NDK
-mock.module("../ndkClient", () => ({
-    getNDK: () => ({
-        // Mock NDK instance
-    }),
-}));
+import { NDKKind } from "../kinds";
 
 // Mock logger
 mock.module("@/utils/logger", () => ({
@@ -24,32 +19,55 @@ mock.module("@/utils/logger", () => ({
 }));
 
 describe("Multi-Recipient Delegation", () => {
+    let ndk: NDK;
+    let pool: RelayPoolMock;
+    let relay: RelayMock;
     let encoder: AgentEventEncoder;
     let publisher: AgentPublisher;
     let mockAgent: AgentInstance;
     let mockConversationCoordinator: ConversationCoordinator;
-    let mockSigner: NDKSigner;
+    let aliceSigner: any;
+    let bobSigner: any;
+    let carolSigner: any;
 
     beforeEach(async () => {
         // Initialize registry
         await DelegationRegistry.initialize();
 
-        // Create mock signer
-        mockSigner = {
-            sign: mock(async (event: NDKEvent) => {
-                event.id = `event-${Math.random().toString(36).substring(7)}`;
-                event.sig = "mock-signature";
-                return event.sig;
-            }),
-            pubkey: mock(() => "delegating-agent-pubkey"),
-        } as any;
+        // Set up NDK with mock relay infrastructure
+        pool = new RelayPoolMock();
+        ndk = new NDK({
+            explicitRelayUrls: ["wss://relay.test.com"],
+        });
 
-        // Create mock agent
+        // Replace pool with mock
+        // @ts-expect-error - Intentionally replacing for testing
+        ndk.pool = pool;
+
+        // Add mock relay
+        relay = pool.addMockRelay("wss://relay.test.com");
+        relay.connect();
+
+        // Mock getNDK to return our test NDK instance
+        mock.module("../ndkClient", () => ({
+            getNDK: () => ndk,
+        }));
+
+        // Get test users and signers
+        const alice = await UserGenerator.getUser("alice", ndk);
+        const bob = await UserGenerator.getUser("bob", ndk);
+        const carol = await UserGenerator.getUser("carol", ndk);
+
+        aliceSigner = SignerGenerator.getSigner("alice");
+        bobSigner = SignerGenerator.getSigner("bob");
+        carolSigner = SignerGenerator.getSigner("carol");
+
+        // Create mock agent (alice is the delegating agent)
         mockAgent = {
-            name: "Test Agent",
-            slug: "test-agent",
-            pubkey: "delegating-agent-pubkey",
-            signer: mockSigner,
+            name: "Delegating Agent",
+            slug: "delegating-agent",
+            pubkey: alice.pubkey,
+            signer: aliceSigner,
             conversationId: "conv-123",
         } as any;
 
@@ -68,217 +86,245 @@ describe("Multi-Recipient Delegation", () => {
     });
 
     describe("Event Creation", () => {
-        it("should create a single event with multiple p-tags", () => {
+        it("should create a single event with multiple p-tags", async () => {
+            const bob = await UserGenerator.getUser("bob");
+            const carol = await UserGenerator.getUser("carol");
+            const dave = await UserGenerator.getUser("dave");
+
             const intent = {
-                recipients: ["recipient1-pubkey", "recipient2-pubkey", "recipient3-pubkey"],
+                recipients: [bob.pubkey, carol.pubkey, dave.pubkey],
                 request: "Analyze this code and provide feedback",
                 phase: "execute",
             };
 
-            const mockTriggeringEvent = {
-                id: "trigger-event",
-                kind: 1111,
-                pubkey: "user-pubkey",
-                tagValue: (tag: string) => (tag === "e" ? "root-event" : undefined),
-                tags: [],
-            } as any;
+            // Create proper triggering and root events
+            const triggeringEvent = new NDKEvent(ndk);
+            triggeringEvent.id = "trigger-event";
+            triggeringEvent.kind = NDKKind.GenericReply;
+            triggeringEvent.pubkey = "user-pubkey";
+            triggeringEvent.tags = [["e", "root-event", "", "root"]];
+            triggeringEvent.content = "Please analyze this";
 
-            const mockRootEvent = {
-                id: "root-event",
-                kind: 11,
-                pubkey: "user-pubkey",
-                tags: [],
-            } as any;
+            const rootEvent = new NDKEvent(ndk);
+            rootEvent.id = "root-event";
+            rootEvent.kind = NDKKind.Conversation;
+            rootEvent.pubkey = "user-pubkey";
+            rootEvent.tags = [];
+            rootEvent.content = "Initial conversation";
 
             const context = {
-                triggeringEvent: mockTriggeringEvent,
-                rootEvent: mockRootEvent,
+                triggeringEvent,
+                rootEvent,
                 conversationId: "conv-123",
             };
 
             const events = encoder.encodeDelegation(intent, context);
 
-            // Should create only one event
-            expect(events.length).toBe(1);
+            // Should create exactly one event
+            expect(events).toHaveLength(1);
 
-            const event = events[0];
+            const delegationEvent = events[0];
 
-            // Check that all recipients are p-tagged
-            const pTags = event.tags.filter((tag) => tag[0] === "p");
-            expect(pTags.length).toBe(3);
-            expect(pTags).toEqual([
-                ["p", "recipient1-pubkey"],
-                ["p", "recipient2-pubkey"],
-                ["p", "recipient3-pubkey"],
-            ]);
+            // Check it has the correct kind
+            expect(delegationEvent.kind).toBe(NDKKind.AgentDelegation);
 
-            // Check tool tag
-            const toolTag = event.tags.find((tag) => tag[0] === "tool");
-            expect(toolTag).toEqual(["tool", "delegate"]);
+            // Check it has p-tags for all recipients
+            const pTags = delegationEvent.tags.filter((tag) => tag[0] === "p");
+            expect(pTags).toHaveLength(3);
+            expect(pTags.map((t) => t[1])).toContain(bob.pubkey);
+            expect(pTags.map((t) => t[1])).toContain(carol.pubkey);
+            expect(pTags.map((t) => t[1])).toContain(dave.pubkey);
+
+            // Check content
+            expect(delegationEvent.content).toBe("Analyze this code and provide feedback");
         });
 
-        it("should handle single recipient delegation", () => {
+        it("should handle empty recipients array", () => {
             const intent = {
-                recipients: ["single-recipient-pubkey"],
-                request: "Do this one thing",
+                recipients: [],
+                request: "This should not delegate to anyone",
                 phase: "execute",
             };
 
-            const mockTriggeringEvent = {
-                id: "trigger-event",
-                kind: 1111,
-                pubkey: "user-pubkey",
-                tagValue: (tag: string) => (tag === "e" ? "root-event" : undefined),
-                tags: [],
-            } as any;
-
-            const mockRootEvent = {
-                id: "root-event",
-                kind: 11,
-                pubkey: "user-pubkey",
-                tags: [],
-            } as any;
+            const triggeringEvent = new NDKEvent(ndk);
+            triggeringEvent.id = "trigger-event";
+            triggeringEvent.kind = NDKKind.GenericReply;
 
             const context = {
-                triggeringEvent: mockTriggeringEvent,
-                rootEvent: mockRootEvent,
+                triggeringEvent,
+                rootEvent: triggeringEvent,
                 conversationId: "conv-123",
             };
 
             const events = encoder.encodeDelegation(intent, context);
 
-            expect(events.length).toBe(1);
-
-            const event = events[0];
-            // Should have single p-tag
-            const pTags = event.tags.filter((tag) => tag[0] === "p");
-            expect(pTags.length).toBe(1);
-            expect(pTags[0]).toEqual(["p", "single-recipient-pubkey"]);
+            expect(events).toHaveLength(1);
+            const pTags = events[0].tags.filter((tag) => tag[0] === "p");
+            expect(pTags).toHaveLength(0);
         });
     });
 
     describe("Registry Tracking", () => {
-        it("should track each recipient with the same delegation event ID", async () => {
+        it("should track delegation in registry", async () => {
+            const bob = await UserGenerator.getUser("bob");
+            const carol = await UserGenerator.getUser("carol");
+
             const intent = {
-                recipients: ["recipient1-pubkey", "recipient2-pubkey"],
-                request: "Multi-recipient task",
+                recipients: [bob.pubkey, carol.pubkey],
+                request: "Help with this task",
+                phase: "execute",
             };
 
-            const mockTriggeringEvent = {
-                id: "trigger-event",
-                kind: 1111,
-                pubkey: "user-pubkey",
-                tagValue: (tag: string) => (tag === "e" ? "root-event" : undefined),
-                tags: [],
-            } as any;
-
-            const mockRootEvent = {
-                id: "root-event",
-                kind: 11,
-                pubkey: "user-pubkey",
-                tags: [],
-            } as any;
+            const triggeringEvent = new NDKEvent(ndk);
+            triggeringEvent.id = "trigger-123";
+            triggeringEvent.kind = NDKKind.GenericReply;
 
             const context = {
-                triggeringEvent: mockTriggeringEvent,
-                rootEvent: mockRootEvent,
+                triggeringEvent,
+                rootEvent: triggeringEvent,
                 conversationId: "conv-123",
             };
 
-            // Mock event publish
-            const mockPublish = mock(() => Promise.resolve());
-            mock.module("@nostr-dev-kit/ndk", () => ({
-                NDKEvent: class MockNDKEvent {
-                    id = `event-${Math.random().toString(36).substring(7)}`;
-                    kind = 1111;
-                    content = "";
-                    tags: string[][] = [];
+            // Encode and sign the delegation
+            const events = encoder.encodeDelegation(intent, context);
+            const delegationEvent = events[0];
+            await SignerGenerator.sign(delegationEvent, "alice");
 
-                    tag(tagArray: string[]) {
-                        this.tags.push(tagArray);
-                    }
-
-                    sign = mock(async function (this: any, signer: NDKSigner) {
-                        this.sig = "mock-sig";
-                        return this.sig;
-                    });
-
-                    publish = mockPublish;
-
-                    tagValue(tagName: string) {
-                        const tag = this.tags.find((t) => t[0] === tagName);
-                        return tag ? tag[1] : undefined;
-                    }
-                },
-            }));
-
-            const result = await publisher.delegate(intent, context);
-
-            // Should have a batch ID
-            expect(result.batchId).toBeDefined();
-
-            // Registry should be tracking delegations with same event ID
-            const registry = DelegationRegistry.getInstance();
-
-            // Both recipients should have delegation records with the same event ID
-            const mainEventId = result.events[0].id;
-            const task1 = registry.findDelegationByEventAndResponder(
-                mainEventId,
-                "recipient1-pubkey"
-            );
-            const task2 = registry.findDelegationByEventAndResponder(
-                mainEventId,
-                "recipient2-pubkey"
+            // Track in registry
+            await DelegationRegistry.trackDelegation(
+                delegationEvent.id,
+                mockAgent.pubkey,
+                [bob.pubkey, carol.pubkey],
+                "conv-123",
+                delegationEvent
             );
 
-            expect(task1).toBeDefined();
-            expect(task2).toBeDefined();
-            expect(task1?.assignedTo.pubkey).toBe("recipient1-pubkey");
-            expect(task2?.assignedTo.pubkey).toBe("recipient2-pubkey");
-            expect(task1?.delegationEventId).toBe(mainEventId);
-            expect(task2?.delegationEventId).toBe(mainEventId);
+            // Check it's tracked
+            const isDelegating = await DelegationRegistry.isDelegating(mockAgent.pubkey, "conv-123");
+            expect(isDelegating).toBe(true);
+
+            // Check recipients are tracked
+            const delegation = await DelegationRegistry.getActiveDelegation(mockAgent.pubkey, "conv-123");
+            expect(delegation).toBeDefined();
+            expect(delegation?.recipients).toEqual([bob.pubkey, carol.pubkey]);
+        });
+
+        it("should handle completion from any recipient", async () => {
+            const bob = await UserGenerator.getUser("bob");
+            const carol = await UserGenerator.getUser("carol");
+
+            // Set up delegation
+            const delegationEvent = new NDKEvent(ndk);
+            delegationEvent.id = "delegation-123";
+            delegationEvent.kind = NDKKind.AgentDelegation;
+            delegationEvent.pubkey = mockAgent.pubkey;
+
+            await DelegationRegistry.trackDelegation(
+                delegationEvent.id,
+                mockAgent.pubkey,
+                [bob.pubkey, carol.pubkey],
+                "conv-123",
+                delegationEvent
+            );
+
+            // Bob completes the task
+            const completionEvent = new NDKEvent(ndk);
+            completionEvent.kind = NDKKind.AgentCompletion;
+            completionEvent.pubkey = bob.pubkey;
+            completionEvent.tags = [
+                ["e", "delegation-123", "", "reply"],
+                ["p", mockAgent.pubkey],
+            ];
+            completionEvent.content = "Task completed by Bob";
+
+            // Process completion
+            await DelegationRegistry.processCompletion(completionEvent);
+
+            // Delegation should be completed
+            const isCompleted = await DelegationRegistry.isCompleted("delegation-123");
+            expect(isCompleted).toBe(true);
+
+            // Should no longer be delegating
+            const isDelegating = await DelegationRegistry.isDelegating(mockAgent.pubkey, "conv-123");
+            expect(isDelegating).toBe(false);
         });
     });
 
-    describe("Completion Handling", () => {
-        it("should correctly identify which recipient completed", async () => {
-            const registry = DelegationRegistry.getInstance();
+    describe("Relay Simulation", () => {
+        it("should simulate multi-recipient delegation flow", async () => {
+            const bob = await UserGenerator.getUser("bob");
+            const carol = await UserGenerator.getUser("carol");
 
-            // Create a mock delegation with same event ID for multiple recipients
-            const eventId = "delegation-event-123";
-            const recipients = ["agent1-pubkey", "agent2-pubkey"];
+            const receivedEvents: NDKEvent[] = [];
 
-            // Register the batch with same event ID for all recipients
-            const batchId = await registry.registerDelegation({
-                delegationEventId: eventId,
-                recipients: recipients.map((pubkey) => ({
-                    pubkey: pubkey,
-                    request: "Test delegation",
-                    phase: "execute",
-                })),
-                delegatingAgent: mockAgent,
-                rootConversationId: "conv-123",
-                originalRequest: "Test delegation",
+            // Subscribe to delegation events
+            const sub = ndk.subscribe({
+                kinds: [NDKKind.AgentDelegation],
+                "#p": [bob.pubkey, carol.pubkey],
             });
 
-            // Now test that we can find the right delegation by event ID and responder
-            const delegation1 = registry.findDelegationByEventAndResponder(
-                eventId,
-                "agent1-pubkey"
-            );
-            const delegation2 = registry.findDelegationByEventAndResponder(
-                eventId,
-                "agent2-pubkey"
+            sub.on("event", (event: NDKEvent) => {
+                receivedEvents.push(event);
+            });
+
+            // Create and publish delegation
+            const delegationEvent = new NDKEvent(ndk);
+            delegationEvent.kind = NDKKind.AgentDelegation;
+            delegationEvent.pubkey = mockAgent.pubkey;
+            delegationEvent.content = "Please help with this task";
+            delegationEvent.tags = [
+                ["p", bob.pubkey],
+                ["p", carol.pubkey],
+            ];
+            delegationEvent.created_at = Math.floor(Date.now() / 1000);
+
+            // Sign and simulate relay receiving it
+            await SignerGenerator.sign(delegationEvent, "alice");
+            relay.simulateEvent(delegationEvent);
+
+            // Both bob and carol should receive it
+            expect(receivedEvents).toHaveLength(1);
+            expect(receivedEvents[0].kind).toBe(NDKKind.AgentDelegation);
+
+            // Verify the event has both recipients
+            const pTags = receivedEvents[0].tags.filter((t) => t[0] === "p");
+            expect(pTags.map((t) => t[1])).toContain(bob.pubkey);
+            expect(pTags.map((t) => t[1])).toContain(carol.pubkey);
+        });
+
+        it("should handle completion events from recipients", async () => {
+            const bob = await UserGenerator.getUser("bob");
+
+            // Track a delegation
+            await DelegationRegistry.trackDelegation(
+                "delegation-456",
+                mockAgent.pubkey,
+                [bob.pubkey],
+                "conv-123",
+                new NDKEvent(ndk)
             );
 
-            expect(delegation1).toBeDefined();
-            expect(delegation2).toBeDefined();
-            expect(delegation1?.assignedTo.pubkey).toBe("agent1-pubkey");
-            expect(delegation2?.assignedTo.pubkey).toBe("agent2-pubkey");
+            // Bob sends completion
+            const completionEvent = new NDKEvent(ndk);
+            completionEvent.kind = NDKKind.AgentCompletion;
+            completionEvent.pubkey = bob.pubkey;
+            completionEvent.content = "Task is done";
+            completionEvent.tags = [
+                ["e", "delegation-456", "", "reply"],
+                ["p", mockAgent.pubkey],
+            ];
 
-            // Both should be part of the same batch
-            expect(delegation1?.delegationBatchId).toBe(batchId);
-            expect(delegation2?.delegationBatchId).toBe(batchId);
+            await SignerGenerator.sign(completionEvent, "bob");
+
+            // Simulate relay receiving completion
+            relay.simulateEvent(completionEvent);
+
+            // Process the completion
+            await DelegationRegistry.processCompletion(completionEvent);
+
+            // Verify delegation is completed
+            const isCompleted = await DelegationRegistry.isCompleted("delegation-456");
+            expect(isCompleted).toBe(true);
         });
     });
 });

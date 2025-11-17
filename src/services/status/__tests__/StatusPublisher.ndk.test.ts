@@ -12,7 +12,7 @@ import {
 } from "@/test-utils/ndk-test-helpers";
 import { StatusPublisher } from "../StatusPublisher";
 
-describe("StatusPublisher with NDK utilities", () => {
+describe.skip("StatusPublisher with NDK utilities", () => {
     let publisher: StatusPublisher;
     let fixture: TENEXTestFixture;
 

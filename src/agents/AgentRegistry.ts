@@ -195,6 +195,11 @@ export class AgentRegistry {
                     ? new NDKPrivateKeySigner(config.nsec)
                     : NDKPrivateKeySigner.generate();
 
+                const initialTools =
+                    config.tools?.filter((tool) => isValidToolName(tool))?.map(
+                        (tool) => tool as ToolName
+                    ) ?? undefined;
+
                 storedAgent = {
                     eventId: config.eventId,
                     nsec: signer.nsec,
@@ -205,7 +210,7 @@ export class AgentRegistry {
                     instructions: config.instructions,
                     useCriteria: config.useCriteria,
                     llmConfig: config.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                    tools: config.tools || getDefaultToolsForAgent(config),
+                    tools: initialTools ?? getDefaultToolsForAgent(config),
                     phase: config.phase,
                     phases: config.phases,
                     projects: this.projectDTag ? [this.projectDTag] : [],
@@ -488,7 +493,7 @@ export class AgentRegistry {
 
         // Normalize tools
         const normalizedTools = this.normalizeAgentTools(newToolNames, agent);
-        const validToolNames = normalizedTools.filter(isValidToolName);
+        const validToolNames = normalizedTools.filter(isValidToolName) as ToolName[];
 
         // Update in memory
         agent.tools = validToolNames;

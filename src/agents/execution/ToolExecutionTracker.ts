@@ -57,9 +57,9 @@
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import type { Tool as CoreTool } from "ai";
 
 /**
  * Represents a tracked tool execution
@@ -92,7 +92,7 @@ export interface TrackExecutionOptions {
     /** Arguments passed to the tool */
     args: unknown;
     /** Available tools for human-readable content generation */
-    toolsObject: Record<string, CoreTool>;
+    toolsObject: Record<string, AISdkTool>;
     /** Publisher for Nostr events */
     agentPublisher: AgentPublisher;
     /** Context for event publishing */
@@ -413,7 +413,7 @@ export class ToolExecutionTracker {
     private getHumanReadableContent(
         toolName: string,
         args: unknown,
-        toolsObject: Record<string, CoreTool>
+        toolsObject: Record<string, AISdkTool>
     ): string {
         // Check if the tool has a custom human-readable content generator
         const tool = toolsObject[toolName];

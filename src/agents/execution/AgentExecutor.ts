@@ -249,6 +249,10 @@ export class AgentExecutor {
             throw streamError;
         }
 
+        if (!completionEvent) {
+            throw new Error("LLM execution completed without producing a completion event");
+        }
+
         // Create event context for supervisor
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
@@ -614,7 +618,9 @@ export class AgentExecutor {
 
         try {
             // Create prepareStep callback for message injection
-            const prepareStep = (step: { messages: ModelMessage[]; stepNumber: number }): void => {
+            const prepareStep = (
+                step: { messages: ModelMessage[]; stepNumber: number }
+            ): { messages?: ModelMessage[] } | undefined => {
                 if (injectedEvents.length > 0) {
                     // Add trace event for message injection processing
                     const activeSpan = trace.getActiveSpan();
@@ -653,15 +659,15 @@ export class AgentExecutor {
                     // Clear the queue after preparing them
                     injectedEvents.length = 0;
 
-                    // Insert new messages after the system prompt but before the rest of history
                     return {
                         messages: [
-                            step.messages[0], // Keep the original system prompt
-                            ...newMessages, // Inject new user messages
-                            ...step.messages.slice(1), // The rest of the conversation history
+                            step.messages[0],
+                            ...newMessages,
+                            ...step.messages.slice(1),
                         ],
                     };
                 }
+                return undefined;
             };
 
             await llmService.stream(messages, toolsObject, { abortSignal, prepareStep });

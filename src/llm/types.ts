@@ -49,4 +49,7 @@ export interface ModelConfig {
     maxTokens?: number;
 }
 
-export type LanguageModelUsageWithCostUsd = LanguageModelUsage & { costUsd?: number };
+export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
+    costUsd?: number;
+    model?: string;
+};

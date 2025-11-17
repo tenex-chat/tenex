@@ -207,8 +207,8 @@ describe("ThreadWithMemoryStrategy - Fix Verification", () => {
             conversationCoordinator: {
                 threadService,
                 participationIndex,
-                getConversation: () => conversation,
             },
+            getConversation: () => conversation,
             isDelegationCompletion: false,
         } as any as ExecutionContext;
     });
