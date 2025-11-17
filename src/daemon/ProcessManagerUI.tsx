@@ -5,7 +5,9 @@ import type { ProjectRuntime } from "./ProjectRuntime";
 import { AgentDetailView } from "./ui/AgentDetailView";
 import { AgentsView } from "./ui/AgentsView";
 import { ConversationsView } from "./ui/ConversationsView";
+import { LessonDetailView } from "./ui/LessonDetailView";
 import { ProjectsView } from "./ui/ProjectsView";
+import { SystemPromptView } from "./ui/SystemPromptView";
 import { initialViewState, viewReducer } from "./ui/state";
 import type { ActionType, ConversationInfo, ProjectInfo } from "./ui/types";
 import { areProjectListsEqual, extractCachedConversations, extractProjectInfo } from "./ui/utils";
@@ -158,6 +160,11 @@ export function ProcessManagerUI({
                 maxIndex = viewState.agents.length - 1;
                 break;
             case "agent-detail":
+                // 1 for system prompt + lessons
+                maxIndex = viewState.agentLessons.length;
+                break;
+            case "lesson-detail":
+            case "system-prompt":
                 return;
             default:
                 maxIndex = 0;
@@ -248,6 +255,18 @@ export function ProcessManagerUI({
                 if (agent) {
                     loadAgentDetails(agent.pubkey);
                 }
+            } else if (viewState.viewMode === "agent-detail") {
+                if (viewState.selectedIndex === 0) {
+                    // View system prompt
+                    dispatch({ type: "VIEW_SYSTEM_PROMPT" });
+                } else if (viewState.agentLessons.length > 0) {
+                    // View lesson (selectedIndex - 1 because index 0 is system prompt)
+                    const lessonIndex = viewState.selectedIndex - 1;
+                    const lesson = viewState.agentLessons[lessonIndex];
+                    if (lesson) {
+                        dispatch({ type: "VIEW_LESSON_DETAIL", lesson });
+                    }
+                }
             }
             return;
         }
@@ -271,6 +290,7 @@ export function ProcessManagerUI({
     const viewTitle = getViewTitle(viewState.viewMode, {
         projectTitle,
         agentName: viewState.selectedAgent?.name,
+        lessonTitle: viewState.selectedLesson?.title,
     });
 
     return (
@@ -304,7 +324,17 @@ export function ProcessManagerUI({
                 <AgentsView agents={viewState.agents} selectedIndex={viewState.selectedIndex} />
             )}
             {viewState.viewMode === "agent-detail" && viewState.selectedAgent && (
-                <AgentDetailView agent={viewState.selectedAgent} lessons={viewState.agentLessons} />
+                <AgentDetailView
+                    agent={viewState.selectedAgent}
+                    lessons={viewState.agentLessons}
+                    selectedIndex={viewState.selectedIndex}
+                />
+            )}
+            {viewState.viewMode === "lesson-detail" && viewState.selectedLesson && (
+                <LessonDetailView lesson={viewState.selectedLesson} />
+            )}
+            {viewState.viewMode === "system-prompt" && viewState.selectedAgent && (
+                <SystemPromptView agent={viewState.selectedAgent} />
             )}
 
             {viewState.statusMessage && (

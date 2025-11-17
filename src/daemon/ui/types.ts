@@ -23,6 +23,6 @@ export interface ConversationInfo {
     projectId: string;
 }
 
-export type ViewMode = "projects" | "conversations" | "agents" | "agent-detail";
+export type ViewMode = "projects" | "conversations" | "agents" | "agent-detail" | "lesson-detail" | "system-prompt";
 
 export type ActionType = "kill" | "restart";

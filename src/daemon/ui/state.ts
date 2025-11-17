@@ -9,6 +9,7 @@ export interface ViewState {
     selectedAgent: AgentInstance | null;
     agents: AgentInfo[];
     agentLessons: NDKAgentLesson[];
+    selectedLesson: NDKAgentLesson | null;
     statusMessage: string;
 }
 
@@ -18,6 +19,8 @@ export type ViewAction =
     | { type: "NAVIGATE"; direction: "up" | "down"; maxIndex: number }
     | { type: "VIEW_AGENTS"; projectId: string; agents: AgentInfo[] }
     | { type: "VIEW_AGENT_DETAIL"; agent: AgentInstance; lessons: NDKAgentLesson[] }
+    | { type: "VIEW_LESSON_DETAIL"; lesson: NDKAgentLesson }
+    | { type: "VIEW_SYSTEM_PROMPT" }
     | { type: "VIEW_CONVERSATIONS" }
     | { type: "NAVIGATE_BACK" };
 
@@ -28,6 +31,7 @@ export const initialViewState: ViewState = {
     selectedAgent: null,
     agents: [],
     agentLessons: [],
+    selectedLesson: null,
     statusMessage: "",
 };
 
@@ -63,6 +67,21 @@ export function viewReducer(state: ViewState, action: ViewAction): ViewState {
                 selectedIndex: 0,
             };
 
+        case "VIEW_LESSON_DETAIL":
+            return {
+                ...state,
+                viewMode: "lesson-detail",
+                selectedLesson: action.lesson,
+                selectedIndex: 0,
+            };
+
+        case "VIEW_SYSTEM_PROMPT":
+            return {
+                ...state,
+                viewMode: "system-prompt",
+                selectedIndex: 0,
+            };
+
         case "VIEW_CONVERSATIONS":
             return {
                 ...state,
@@ -71,6 +90,21 @@ export function viewReducer(state: ViewState, action: ViewAction): ViewState {
             };
 
         case "NAVIGATE_BACK":
+            if (state.viewMode === "system-prompt") {
+                return {
+                    ...state,
+                    viewMode: "agent-detail",
+                    selectedIndex: 0,
+                };
+            }
+            if (state.viewMode === "lesson-detail") {
+                return {
+                    ...state,
+                    viewMode: "agent-detail",
+                    selectedLesson: null,
+                    selectedIndex: 0,
+                };
+            }
             if (state.viewMode === "agent-detail") {
                 return {
                     ...state,

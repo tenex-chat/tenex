@@ -22,25 +22,13 @@ export function AgentsView({ agents, selectedIndex }: AgentsViewProps): JSX.Elem
                 const isSelected = index === selectedIndex;
 
                 return (
-                    <Box key={agent.pubkey} flexDirection="column" marginBottom={1}>
-                        <Text
-                            backgroundColor={isSelected ? "blue" : undefined}
-                            color={isSelected ? "white" : undefined}
-                        >
-                            {isSelected ? "▶ " : "  "}👤 {agent.name}
-                        </Text>
-                        <Text dimColor marginLeft={4}>
-                            Role: {agent.role}
-                        </Text>
-                        {agent.description && (
-                            <Text dimColor marginLeft={4}>
-                                {agent.description}
-                            </Text>
-                        )}
-                        <Text dimColor marginLeft={4}>
-                            Lessons: {agent.lessonsCount}
-                        </Text>
-                    </Box>
+                    <Text
+                        key={agent.pubkey}
+                        backgroundColor={isSelected ? "blue" : undefined}
+                        color={isSelected ? "white" : undefined}
+                    >
+                        {isSelected ? "▶ " : "  "}👤 {agent.name} ({agent.lessonsCount} lessons)
+                    </Text>
                 );
             })}
         </Box>
