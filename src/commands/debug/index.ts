@@ -154,7 +154,7 @@ interface DebugThreadedFormatterOptions {
 export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): Promise<void> {
     try {
         // Load project context
-        const { context } = await loadProjectContext(options.project);
+        const { context, projectPath } = await loadProjectContext(options.project);
 
         // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
         await projectContextStore.run(context, async () => {
@@ -235,14 +235,15 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                     if (msg.metadata?.description) {
                         console.log(chalk.dim(`Description: ${msg.metadata.description}`));
                     }
-                    if (msg.metadata?.cacheable) {
-                        console.log(chalk.green(`✓ Cacheable (key: ${msg.metadata.cacheKey})`));
-                    }
                     console.log();
 
                     // Format and display message content
+                    const messageContent =
+                        typeof msg.message.content === "string"
+                            ? msg.message.content
+                            : JSON.stringify(msg.message.content, null, 2);
                     const formattedContent = formatContentWithEnhancements(
-                        msg.message.content,
+                        messageContent,
                         true
                     );
                     console.log(formattedContent);
@@ -277,7 +278,7 @@ export async function runDebugThreadedFormatter(
 ): Promise<void> {
     try {
         // Load project context
-        const { context } = await loadProjectContext(options.project);
+        const { context, metadataPath, projectPath } = await loadProjectContext(options.project);
 
         // Wrap all operations in projectContextStore.run() to establish AsyncLocalStorage context
         await projectContextStore.run(context, async () => {
@@ -396,10 +397,16 @@ export async function runDebugThreadedFormatter(
                 logger.info("Created temporary conversation for debug purposes");
             }
 
+            const { AgentPublisher } = await import("@/nostr/AgentPublisher");
+            const mockAgentPublisher = new AgentPublisher(selectedAgent);
+
             const mockContext: ExecutionContext = {
                 agent: selectedAgent,
+                projectPath,
                 conversationId: options.conversationId,
                 conversationCoordinator,
+                triggeringEvent,
+                agentPublisher: mockAgentPublisher,
                 getConversation: () =>
                     conversationCoordinator.getConversation(options.conversationId),
                 isDelegationCompletion: false,

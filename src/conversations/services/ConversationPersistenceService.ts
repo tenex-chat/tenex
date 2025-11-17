@@ -106,6 +106,7 @@ export class InMemoryPersistenceAdapter implements ConversationPersistenceAdapte
             eventCount: conversation.history.length,
             agentCount: conversation.agentStates.size,
             archived: false,
+            phase: conversation.phase,
         });
     }
 

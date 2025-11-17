@@ -24,6 +24,7 @@ export interface Conversation {
 }
 
 export interface ConversationMetadata {
+    phase?: string;
     branch?: string; // Git branch for execution phase
     summary?: string; // Current understanding/summary
     requirements?: string; // Captured requirements

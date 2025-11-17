@@ -93,7 +93,7 @@ export const agentRemoveCommand = new Command("remove")
                 }
 
                 // Remove agent completely
-                await agentStorage.removeAgent(pubkey);
+                await agentStorage.deleteAgent(pubkey);
                 logger.info(`✅ Agent "${agent.name}" completely removed`);
             }
 

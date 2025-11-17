@@ -8,6 +8,7 @@ export interface ConversationMetadata {
     eventCount: number;
     agentCount: number;
     archived?: boolean;
+    phase?: string;
 }
 
 export interface ConversationSearchCriteria {
@@ -16,6 +17,7 @@ export interface ConversationSearchCriteria {
     dateTo?: number;
     agentPubkey?: string;
     archived?: boolean;
+    phase?: string;
 }
 
 export interface ConversationPersistenceAdapter {

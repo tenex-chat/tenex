@@ -89,7 +89,7 @@ export class ThreadService {
                     if (e.id === rootId) return false; // Skip root itself
                     return e.tagValue("e") === rootId;
                 })
-                .sort((a, b) => a.created_at - b.created_at);
+                .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 
             logger.debug("[ThreadService] Found root-level replies", {
                 count: rootReplies.length,
@@ -117,11 +117,11 @@ export class ThreadService {
                         if (e.id === currentLevel.id || e.id === nextInChain.id) return false;
                         return e.tagValue("e") === currentLevel.id;
                     })
-                    .sort((a, b) => a.created_at - b.created_at);
+                    .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 
                 // Add siblings before the next in chain
                 for (const sibling of siblings) {
-                    if (sibling.created_at < nextInChain.created_at) {
+                    if ((sibling.created_at ?? 0) < (nextInChain.created_at ?? 0)) {
                         completeThread.push(sibling);
                     }
                 }
@@ -157,7 +157,7 @@ export class ThreadService {
             .filter((e) => {
                 return e.tagValue("e") === parentId;
             })
-            .sort((a, b) => a.created_at - b.created_at);
+            .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 
         for (const child of children) {
             descendants.push(child);

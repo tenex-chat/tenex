@@ -22,7 +22,7 @@ export class AgentMetadataStore {
     }
 
     get<T = unknown>(key: string): T | undefined {
-        return this.data.get(key);
+        return this.data.get(key) as T | undefined;
     }
 
     set(key: string, value: unknown): void {

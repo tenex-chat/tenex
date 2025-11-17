@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
+import type { AgentInstance } from "@/agents/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
@@ -11,6 +12,8 @@ import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import { context as otelContext, trace } from "@opentelemetry/api";
+import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
+import type { RoutingDecision } from "./routing/DaemonRouter";
 import type { ProjectRuntime } from "./ProjectRuntime";
 import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
@@ -19,6 +22,8 @@ import type { DaemonStatus } from "./types";
 import { isDropped, isRoutedToProject } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
+
+const tracer = trace.getTracer("tenex.daemon");
 
 /**
  * Main daemon that manages all projects in a single process.
@@ -251,11 +256,7 @@ export class Daemon {
      */
     private async routeEventToProject(
         event: NDKEvent,
-        routingResult: {
-            projectId: string;
-            method: "a_tag" | "p_tag_agent" | "none";
-            matchedTags: string[];
-        },
+        routingResult: RoutingDecision,
         span: ReturnType<typeof tracer.startSpan>
     ): Promise<void> {
         if (!this.runtimeLifecycle) {
@@ -272,7 +273,6 @@ export class Daemon {
         }
 
         // Get or start the runtime using RuntimeLifecycle
-        let runtimeAction: "existing" | "started" = "existing";
         let runtime;
 
         try {
@@ -281,9 +281,10 @@ export class Daemon {
                 runtime = existingRuntime;
             } else {
                 // Start the project runtime lazily
-                addRoutingEvent(span, "project_runtime_start", { title: project.tagValue("title") || "untitled" });
+                addRoutingEvent(span, "project_runtime_start", {
+                    title: project.tagValue("title") || "untitled",
+                });
                 runtime = await this.runtimeLifecycle.getOrStartRuntime(projectId, project);
-                runtimeAction = "started";
                 await this.updateSubscriptionWithProjectAgents(projectId, runtime);
             }
         } catch (error) {
@@ -293,7 +294,13 @@ export class Daemon {
         }
 
         // Log successful routing
-        await logRouted(this.routingLogger, event, projectId, routingResult.method, routingResult.matchedTags);
+        await logRouted(
+            this.routingLogger,
+            event,
+            projectId,
+            routingResult.method,
+            routingResult.matchedTags
+        );
 
         // Handle the event with crash isolation
         try {
@@ -450,7 +457,7 @@ export class Daemon {
                 // Find agents in this project that match the definition ID
                 const matchingAgents = context.agentRegistry
                     .getAllAgents()
-                    .filter((agent) => agent.eventId === agentDefinitionId);
+                    .filter((agent: AgentInstance) => agent.eventId === agentDefinitionId);
 
                 if (matchingAgents.length === 0) {
                     continue;
@@ -475,7 +482,7 @@ export class Daemon {
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
-        const shutdown = async (signal: string): Promise<void> => {
+        const shutdown = async (): Promise<void> => {
             if (!this.isRunning) {
                 process.exit(0);
             }
@@ -516,8 +523,8 @@ export class Daemon {
             }
         };
 
-        process.on("SIGTERM", () => shutdown("SIGTERM"));
-        process.on("SIGINT", () => shutdown("SIGINT"));
+        process.on("SIGTERM", () => shutdown());
+        process.on("SIGINT", () => shutdown());
         process.on("SIGHUP", () => shutdown("SIGHUP"));
 
         // Handle uncaught exceptions

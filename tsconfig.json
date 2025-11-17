@@ -35,6 +35,7 @@
         "**/*.spec.ts",
         "**/*.test.tsx",
         "src/test-utils/**/*",
-        "src/agents/execution/strategies/__tests__/**/*"
+        "src/agents/execution/strategies/__tests__/**/*",
+        "src/daemon/**/*.tsx"
     ]
 }

@@ -109,7 +109,7 @@ export const daemonCommand = new Command("daemon")
             console.log(chalk.blue("📊 Initial Status:"));
             console.log(chalk.gray(`   Known Projects: ${status.knownProjects}`));
             console.log(chalk.gray(`   Active Projects: ${status.activeProjects}`));
-            console.log(chalk.gray(`   Total Agents: ${status.agents}`));
+            console.log(chalk.gray(`   Total Agents: ${status.totalAgents}`));
             console.log();
 
             // Start terminal input manager

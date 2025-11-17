@@ -39,7 +39,7 @@ export class ToolMessageStorage {
                             type: "tool-call" as const,
                             toolCallId: toolCall.toolCallId,
                             toolName: toolCall.toolName,
-                            args: toolCall.input,
+                            input: toolCall.input,
                         },
                     ],
                 },

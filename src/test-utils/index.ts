@@ -9,7 +9,7 @@
  */
 
 export * from "./conversational-logger";
-export * from "./e2e-conversational-setup";
+// export * from "./e2e-conversational-setup"; // File removed
 export * from "./mock-factories";
 export * from "./mock-llm";
 export * from "./mock-setup";

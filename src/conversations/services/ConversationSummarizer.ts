@@ -13,11 +13,10 @@ export class ConversationSummarizer {
     async summarizeAndPublish(conversation: Conversation): Promise<void> {
         try {
             // Get LLM configuration
-            const llmConfig = await configService.loadTenexLLMs();
+            const { llms } = await configService.loadConfig();
             const metadataConfig =
-                llmConfig.configurations.metadata ||
-                llmConfig.configurations[llmConfig.default || ""] ||
-                null;
+                llms.configurations.metadata ||
+                (llms.default ? llms.configurations[llms.default] : undefined);
 
             if (!metadataConfig) {
                 console.warn("No LLM configuration available for metadata generation");
@@ -25,14 +24,13 @@ export class ConversationSummarizer {
             }
 
             // Create LLM service
-            const llmService = await llmServiceFactory.createService(
+            const llmService = llmServiceFactory.createService(
                 this.context.llmLogger,
-                metadataConfig.provider,
-                metadataConfig.model,
-                metadataConfig.temperature || 0.7,
-                metadataConfig.maxTokens || 1000,
-                `summarizer-${conversation.id}`,
-                "summarizer"
+                metadataConfig,
+                {
+                    agentName: "summarizer",
+                    sessionId: `summarizer-${conversation.id}`,
+                }
             );
 
             // Prepare conversation content
@@ -50,8 +48,8 @@ export class ConversationSummarizer {
             }
 
             // Generate title and summary
-            const result = await llmService.generateObject({
-                messages: [
+            const { object: result } = await llmService.generateObject(
+                [
                     {
                         role: "system",
                         content: `You are a helpful assistant that generates concise titles and summaries for technical conversations.
@@ -64,13 +62,13 @@ Focus on what was accomplished or discussed, not on the process.`,
                         content: `Please generate a title and summary for this conversation:\n\n${conversationContent}`,
                     },
                 ],
-                schema: z.object({
+                z.object({
                     title: z.string().describe("A concise title for the conversation (5-10 words)"),
                     summary: z
                         .string()
                         .describe("A 2-3 sentence summary of key points and progress"),
-                }),
-            });
+                })
+            );
 
             // Publish metadata event
             const ndk = getNDK();
@@ -90,7 +88,7 @@ Focus on what was accomplished or discussed, not on the process.`,
 
             // Sign and publish
             if (this.context.signer) {
-                await this.context.signer.sign(event);
+                await event.sign(this.context.signer);
                 await event.publish();
                 console.log(
                     `Published metadata for conversation ${conversation.id}: ${result.title}`

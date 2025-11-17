@@ -1,57 +1,78 @@
 /**
  * Integration test to verify the unified delegation approach works correctly
- * This test simulates the actual flow without needing full E2E infrastructure
+ * This test uses NDK test utilities for realistic simulation
  */
 
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
+import { RelayMock, RelayPoolMock, SignerGenerator, UserGenerator } from "@nostr-dev-kit/ndk/test";
 import type { AgentInstance } from "@/agents/types";
-import { DelegationCompletionHandler } from "@/event-handler/DelegationCompletionHandler";
-import { AgentEventEncoder } from "@/nostr/AgentEventEncoder";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { getNDK } from "@/nostr/ndkClient";
-import { logger } from "@/utils/logger";
-import { type NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { generateSecretKey, getPublicKey, nip19 } from "nostr-tools";
 import { DelegationRegistry } from "../DelegationRegistry";
+import { DelegationCompletionHandler } from "@/event-handler/DelegationCompletionHandler";
+import { logger } from "@/utils/logger";
 
-describe.skip("Delegation System Integration Test", () => {
+describe("Delegation System Integration Test", () => {
+    let ndk: NDK;
+    let pool: RelayPoolMock;
+    let relay: RelayMock;
     let registry: DelegationRegistry;
-    let publisher: AgentPublisher;
-    let encoder: AgentEventEncoder;
-
-    // Create test agents with proper keys
-    const createTestAgent = (name: string): AgentInstance => {
-        const secretKey = generateSecretKey();
-        const pubkey = getPublicKey(secretKey);
-        const nsec = nip19.nsecEncode(secretKey);
-
-        return {
-            slug: name,
-            name,
-            pubkey,
-            signer: new NDKPrivateKeySigner(nsec),
-            prompts: { systemPrompt: "test" },
-            description: `Test agent ${name}`,
-            capabilities: [],
-            model: "test-model",
-            nsec,
-            project: undefined,
-        };
-    };
-
-    const delegatingAgent = createTestAgent("delegator");
-    const recipient1 = createTestAgent("recipient1");
-    const recipient2 = createTestAgent("recipient2");
-    const recipient3 = createTestAgent("recipient3");
-
-    beforeAll(async () => {
-        await DelegationRegistry.initialize();
-        registry = DelegationRegistry.getInstance();
-    });
+    let delegatingAgent: AgentInstance;
+    let recipient1: AgentInstance;
+    let recipient2: AgentInstance;
+    let recipient3: AgentInstance;
 
     beforeEach(async () => {
+        // Initialize registry
+        await DelegationRegistry.initialize();
+        registry = DelegationRegistry.getInstance();
         await registry.clear();
-        encoder = new AgentEventEncoder(delegatingAgent);
-        publisher = new AgentPublisher(delegatingAgent, undefined as any);
+
+        // Set up NDK with mock relay infrastructure
+        pool = new RelayPoolMock();
+        ndk = new NDK({
+            explicitRelayUrls: ["wss://relay.test.com"],
+        });
+
+        // @ts-expect-error - Replace pool with mock
+        ndk.pool = pool;
+
+        // Add mock relay
+        relay = pool.addMockRelay("wss://relay.test.com");
+        relay.connect();
+
+        // Create test agents using deterministic NDK users
+        const alice = await UserGenerator.getUser("alice", ndk);
+        const bob = await UserGenerator.getUser("bob", ndk);
+        const carol = await UserGenerator.getUser("carol", ndk);
+        const dave = await UserGenerator.getUser("dave", ndk);
+
+        delegatingAgent = {
+            slug: "delegator",
+            name: "Delegating Agent",
+            pubkey: alice.pubkey,
+            signer: SignerGenerator.getSigner("alice"),
+        } as AgentInstance;
+
+        recipient1 = {
+            slug: "recipient1",
+            name: "Recipient 1",
+            pubkey: bob.pubkey,
+            signer: SignerGenerator.getSigner("bob"),
+        } as AgentInstance;
+
+        recipient2 = {
+            slug: "recipient2",
+            name: "Recipient 2",
+            pubkey: carol.pubkey,
+            signer: SignerGenerator.getSigner("carol"),
+        } as AgentInstance;
+
+        recipient3 = {
+            slug: "recipient3",
+            name: "Recipient 3",
+            pubkey: dave.pubkey,
+            signer: SignerGenerator.getSigner("dave"),
+        } as AgentInstance;
     });
 
     describe("Single-Recipient Delegation", () => {

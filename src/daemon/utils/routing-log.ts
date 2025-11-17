@@ -42,7 +42,7 @@ export function logRouted(
     routingLogger: EventRoutingLogger,
     event: NDKEvent,
     projectId: string,
-    method: "a_tag" | "p_tag_agent",
+    method: "a_tag" | "p_tag_agent" | "none",
     matchedTags: string[]
 ) {
     logger.debug("Routing event to project", {

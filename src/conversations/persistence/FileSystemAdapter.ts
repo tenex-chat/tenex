@@ -86,7 +86,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
             if (!parseResult.success) {
                 logger.error("Invalid conversation data", {
                     id: conversationId,
-                    errors: parseResult.error.errors,
+                    errors: parseResult.error.issues,
                 });
                 return null;
             }
@@ -302,7 +302,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
             const parseResult = MetadataFileSchema.safeParse(rawData);
             if (!parseResult.success) {
                 logger.error("Invalid metadata file structure", {
-                    errors: parseResult.error.errors,
+                    errors: parseResult.error.issues,
                 });
                 return { conversations: [] };
             }

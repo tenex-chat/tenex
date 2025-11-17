@@ -5,7 +5,8 @@ import { logger } from "@/utils/logger";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { type Provider, type ProviderRegistry, createProviderRegistry } from "ai";
+import { createProviderRegistry } from "ai";
+import type { ProviderV2 } from "@ai-sdk/provider";
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createOllama } from "ollama-ai-provider-v2";
@@ -16,8 +17,8 @@ import { LLMService } from "./service";
  * Factory for creating LLM services with proper provider initialization
  */
 export class LLMServiceFactory {
-    private providers: Map<string, Provider> = new Map();
-    private registry: ProviderRegistry | null = null;
+    private providers: Map<string, ProviderV2> = new Map();
+    private registry: ReturnType<typeof createProviderRegistry> | null = null;
     private claudeCodeApiKey: string | null = null; // Store Claude Code API key for runtime use
     private geminiCliEnabled = false;
     private initialized = false;
@@ -64,11 +65,6 @@ export class LLMServiceFactory {
                             name,
                             createOpenRouter({
                                 apiKey: config.apiKey,
-                                usage: { include: true },
-                                headers: {
-                                    "X-Title": "TENEX",
-                                    "HTTP-Referer": "https://github.com/tenex-chat/tenex",
-                                },
                             })
                         );
                         logger.debug("[LLMServiceFactory] Initialized OpenRouter provider");
@@ -111,7 +107,7 @@ export class LLMServiceFactory {
                         // Create Ollama provider with custom base URL if provided
                         const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
 
-                        this.providers.set(name, ollamaProvider as Provider);
+                        this.providers.set(name, ollamaProvider as ProviderV2);
                         logger.debug(
                             `[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || "default (http://localhost:11434)"}`
                         );
@@ -130,7 +126,7 @@ export class LLMServiceFactory {
                     case "gemini-cli": {
                         this.providers.set(
                             name,
-                            createGeminiProvider({ authType: "oauth-personal" }) as Provider
+                            createGeminiProvider({ authType: "oauth-personal" }) as ProviderV2
                         );
                         this.geminiCliEnabled = true;
                         logger.debug("[LLMServiceFactory] Initialized Gemini CLI provider");
@@ -149,10 +145,7 @@ export class LLMServiceFactory {
 
         // Create the provider registry with all configured providers
         if (this.providers.size > 0) {
-            const providerObject: Record<string, Provider> = {};
-            for (const [name, provider] of this.providers.entries()) {
-                providerObject[name] = provider;
-            }
+            const providerObject = Object.fromEntries(this.providers.entries());
             this.registry = createProviderRegistry(providerObject);
             logger.debug(
                 `[LLMServiceFactory] Created provider registry with ${this.providers.size} providers`
@@ -237,26 +230,22 @@ export class LLMServiceFactory {
                 : [];
 
             // Create Claude Code provider with runtime configuration
-            const claudeCodeConfig = {
-                defaultSettings: {
-                    permissionMode: "bypassPermissions",
-                    cwd: context?.projectPath,
-                },
-                mcpServers: mcpServersConfig,
+            const defaultSettings: ClaudeCodeSettings = {
+                permissionMode: "bypassPermissions",
+                cwd: context?.projectPath,
                 allowedTools,
+                mcpServers: mcpServersConfig,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),
+                    info: (message: string) => logger.info("[ClaudeCode]", message),
+                    debug: (message: string) => logger.debug("[ClaudeCode]", message),
                 },
             };
 
-            // Create the provider function that can accept resume parameter
-            const providerFunction = (
-                model: string,
-                options?: ClaudeCodeSettings
-            ): ReturnType<ReturnType<typeof createClaudeCode>> => {
-                return createClaudeCode(claudeCodeConfig)(model, options);
-            };
+            const providerFunction = createClaudeCode({
+                defaultSettings,
+            });
 
             return new LLMService(
                 llmLogger,
@@ -267,8 +256,7 @@ export class LLMServiceFactory {
                 config.maxTokens,
                 providerFunction,
                 context?.sessionId,
-                agentSlug,
-                context?.progressMonitor
+                agentSlug
             );
         }
 
@@ -294,9 +282,8 @@ export class LLMServiceFactory {
             config.temperature,
             config.maxTokens,
             undefined,
-            undefined,
-            agentSlug,
-            context?.progressMonitor
+            context?.sessionId,
+            agentSlug
         );
     }
 
