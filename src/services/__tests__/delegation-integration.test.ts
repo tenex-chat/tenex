@@ -129,7 +129,7 @@ describe("Delegation System Integration Test", () => {
         });
     });
 
-    describe.skip("Multi-Recipient Delegation", () => {
+    describe("Multi-Recipient Delegation", () => {
         it("should handle multi-recipient delegation with shared event ID", async () => {
             const rootConversationId = "conv_multi_456";
             const delegationRequest = "Review this from different perspectives";
@@ -275,8 +275,8 @@ describe("Delegation System Integration Test", () => {
 
     describe("No Synthetic IDs Verification", () => {
         it("should never create synthetic IDs in the new system", async () => {
-            const logSpy = jest.spyOn(logger, "info");
-            const debugSpy = jest.spyOn(logger, "debug");
+            const logSpy = spyOn(logger, "info");
+            const debugSpy = spyOn(logger, "debug");
 
             // Test single recipient
             await registry.registerDelegation({
