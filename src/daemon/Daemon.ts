@@ -19,26 +19,29 @@ import {
     propagation,
     trace,
 } from "@opentelemetry/api";
-import { ProjectRuntime } from "./ProjectRuntime";
+import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
+import { DaemonRouter } from "./routing/DaemonRouter";
+import { SubscriptionFilterBuilder } from "./filters/SubscriptionFilterBuilder";
+import type {
+    ProjectId,
+    RoutingDecision,
+    RuntimeStatus,
+    DaemonStatus,
+} from "./types";
+import { toProjectId, isRoutedToProject, isDropped } from "./types";
 
 const tracer = trace.getTracer("tenex.daemon");
 
 /**
- * Event kinds that should never be routed to projects.
- * These events are informational or transient and don't require processing.
- */
-const NEVER_ROUTE_EVENT_KINDS = [
-    NDKKind.TenexProjectStatus,
-    NDKKind.TenexStreamingResponse,
-    NDKKind.TenexAgentTypingStart,
-    NDKKind.TenexAgentTypingStop,
-    NDKKind.TenexOperationsStatus,
-];
-
-/**
  * Main daemon that manages all projects in a single process.
  * Uses lazy loading - projects only start when they receive events.
+ *
+ * This class now focuses on orchestration, delegating specific responsibilities to:
+ * - RuntimeLifecycle: Runtime management (start/stop/restart)
+ * - DaemonRouter: Event routing decisions
+ * - SubscriptionFilterBuilder: Filter construction
+ * - AgentEventDecoder: Event classification
  */
 export class Daemon {
     private ndk: NDK | null = null;
@@ -51,10 +54,11 @@ export class Daemon {
     private shutdownHandlers: Array<() => Promise<void>> = [];
     private lockfile: Lockfile | null = null;
 
+    // Runtime management delegated to RuntimeLifecycle
+    private runtimeLifecycle: RuntimeLifecycle | null = null;
+
     // Project management
     private knownProjects = new Map<string, NDKProject>(); // All discovered projects
-    private activeRuntimes = new Map<string, ProjectRuntime>(); // Only active projects
-    private startingRuntimes = new Map<string, Promise<ProjectRuntime>>(); // Projects currently being started
 
     // Agent pubkey mapping for routing (pubkey -> project IDs)
     private agentPubkeyToProjects = new Map<Hexpubkey, Set<string>>();
@@ -102,7 +106,10 @@ export class Daemon {
             await initNDK();
             this.ndk = getNDK();
 
-            // 6. Initialize subscription manager (before discovery)
+            // 6. Initialize runtime lifecycle manager
+            this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
+
+            // 7. Initialize subscription manager (before discovery)
             this.subscriptionManager = new SubscriptionManager(
                 this.ndk,
                 this.handleIncomingEvent.bind(this), // Pass event handler
@@ -110,21 +117,22 @@ export class Daemon {
                 this.routingLogger
             );
 
-            // 7. Discover existing projects (but don't start them)
+            // 8. Discover existing projects (but don't start them)
             // This will update the subscription manager with projects and agents
             await this.discoverProjects();
 
-            // 8. Start subscription (now it has projects and agents)
+            // 9. Start subscription (now it has projects and agents)
             await this.subscriptionManager.start();
 
-            // 9. Setup graceful shutdown
+            // 10. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
 
+            const stats = this.runtimeLifecycle?.getStats() || { activeCount: 0 };
             logger.debug("TENEX Daemon started successfully", {
                 knownProjects: this.knownProjects.size,
-                activeProjects: this.activeRuntimes.size,
+                activeProjects: stats.activeCount,
             });
         } catch (error) {
             logger.error("Failed to start daemon", {
@@ -263,7 +271,7 @@ export class Daemon {
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
         // Never route certain event kinds - check this FIRST before creating telemetry traces
-        if (event.kind && NEVER_ROUTE_EVENT_KINDS.includes(event.kind)) {
+        if (AgentEventDecoder.isNeverRouteKind(event)) {
             await this.processDroppedEvent(
                 event,
                 `Event kind ${event.kind} is in NEVER_ROUTE_EVENT_KINDS`
@@ -339,8 +347,11 @@ export class Daemon {
         event: NDKEvent,
         span: ReturnType<typeof tracer.startSpan>
     ): Promise<void> {
+        // Classify event type
+        const eventType = AgentEventDecoder.classifyForDaemon(event);
+
         // Handle project events (kind 31933)
-        if (event.kind === 31933) {
+        if (eventType === "project") {
             span.addEvent("routing_decision", { decision: "project_event", reason: "kind_31933" });
             await this.handleProjectEvent(event);
             await this.routingLogger.logRoutingDecision({
@@ -354,7 +365,7 @@ export class Daemon {
         }
 
         // Handle lesson events (kind 4129) - hydrate into ACTIVE runtimes only, don't start new ones
-        if (event.kind === NDKKind.AgentLesson) {
+        if (eventType === "lesson") {
             span.addEvent("routing_decision", { decision: "lesson_event", reason: "kind_4129" });
             await this.handleLessonEvent(event);
             await this.routingLogger.logRoutingDecision({
@@ -368,7 +379,10 @@ export class Daemon {
         }
 
         // Filter out events published BY agents unless they explicitly p-tag someone in the system
-        if (this.isAgentEvent(event) && !this.hasPTagsToSystemEntities(event)) {
+        if (
+            DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
+            !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects)
+        ) {
             span.addEvent("routing_decision", {
                 decision: "dropped",
                 reason: "agent_event_without_p_tags",
@@ -377,8 +391,15 @@ export class Daemon {
             return;
         }
 
-        // Determine target project
-        const routingResult = await this.determineTargetProject(event);
+        // Determine target project using DaemonRouter
+        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+        const routingResult = DaemonRouter.determineTargetProject(
+            event,
+            this.knownProjects,
+            this.agentPubkeyToProjects,
+            activeRuntimes
+        );
+
         if (!routingResult.projectId) {
             span.addEvent("routing_decision", {
                 decision: "dropped",
@@ -428,60 +449,64 @@ export class Daemon {
         },
         span: ReturnType<typeof tracer.startSpan>
     ): Promise<void> {
+        if (!this.runtimeLifecycle) {
+            logger.error("RuntimeLifecycle not initialized");
+            return;
+        }
+
         const projectId = routingResult.projectId;
 
-        // Get or start the project runtime
-        let runtime = this.activeRuntimes.get(projectId);
+        // Get the project
+        const project = this.knownProjects.get(projectId);
+        if (!project) {
+            span.addEvent("error", { error: "unknown_project" });
+            logger.warn("Unknown project referenced", { projectId });
+            await this.routingLogger.logRoutingDecision({
+                event,
+                routingDecision: "dropped",
+                targetProjectId: projectId,
+                routingMethod: routingResult.method,
+                matchedTags: routingResult.matchedTags,
+                reason: "Project not found in known projects",
+            });
+            return;
+        }
+
+        // Get or start the runtime using RuntimeLifecycle
         let runtimeAction: "existing" | "started" = "existing";
+        let runtime;
 
-        if (!runtime) {
-            // Check if this project is currently being started
-            const startingPromise = this.startingRuntimes.get(projectId);
-            if (startingPromise) {
-                runtime = await startingPromise;
+        try {
+            const existingRuntime = this.runtimeLifecycle.getRuntime(projectId);
+            if (existingRuntime) {
+                runtime = existingRuntime;
             } else {
-                // Start the project runtime
-                const project = this.knownProjects.get(projectId);
-                if (!project) {
-                    span.addEvent("error", { error: "unknown_project" });
-                    logger.warn("Unknown project referenced", { projectId });
-                    await this.routingLogger.logRoutingDecision({
-                        event,
-                        routingDecision: "dropped",
-                        targetProjectId: projectId,
-                        routingMethod: routingResult.method,
-                        matchedTags: routingResult.matchedTags,
-                        reason: "Project not found in known projects",
-                    });
-                    return;
-                }
-
                 // Start the project runtime lazily
                 const projectTitle = project.tagValue("title");
                 span.addEvent("project_runtime_start", {
                     "project.title": projectTitle || "untitled",
                 });
 
-                // Create startup promise to prevent concurrent startups
-                const startupPromise = (async () => {
-                    const newRuntime = new ProjectRuntime(project, this.projectsBase);
-                    await newRuntime.start();
-                    return newRuntime;
-                })();
+                runtime = await this.runtimeLifecycle.getOrStartRuntime(projectId, project);
+                runtimeAction = "started";
 
-                this.startingRuntimes.set(projectId, startupPromise);
-
-                try {
-                    runtime = await startupPromise;
-                    this.activeRuntimes.set(projectId, runtime);
-                    runtimeAction = "started";
-
-                    // Update subscription with this project's agent pubkeys
-                    await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-                } finally {
-                    this.startingRuntimes.delete(projectId);
-                }
+                // Update subscription with this project's agent pubkeys
+                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
             }
+        } catch (error) {
+            logger.error("Failed to get/start runtime", {
+                projectId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            await this.routingLogger.logRoutingDecision({
+                event,
+                routingDecision: "dropped",
+                targetProjectId: projectId,
+                routingMethod: routingResult.method,
+                matchedTags: routingResult.matchedTags,
+                reason: "Failed to start runtime",
+            });
+            return;
         }
 
         // Log successful routing
@@ -505,8 +530,7 @@ export class Daemon {
                 error: error instanceof Error ? error.message : String(error),
             });
             // Project crashed, but daemon continues
-            this.activeRuntimes.delete(projectId);
-            await runtime.stop().catch(() => {}); // Best effort cleanup
+            await this.runtimeLifecycle.handleRuntimeCrash(projectId, runtime);
             throw error; // Re-throw to mark span as error
         }
     }
@@ -518,7 +542,12 @@ export class Daemon {
         const pubkeys = new Set<Hexpubkey>();
         const definitionIds = new Set<string>();
 
-        for (const [pid, rt] of this.activeRuntimes) {
+        if (!this.runtimeLifecycle) {
+            return { pubkeys, definitionIds };
+        }
+
+        const activeRuntimes = this.runtimeLifecycle.getActiveRuntimes();
+        for (const [pid, rt] of activeRuntimes) {
             const context = rt.getContext();
             if (!context) {
                 throw new Error(
@@ -554,7 +583,8 @@ export class Daemon {
                 this.collectAgentData();
 
             // Track which projects each agent belongs to
-            for (const [pid, rt] of this.activeRuntimes) {
+            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+            for (const [pid, rt] of activeRuntimes) {
                 const context = rt.getContext();
                 if (!context) {
                     throw new Error(
@@ -579,7 +609,7 @@ export class Daemon {
             }
 
             logger.debug("Updating subscription with agent data from active projects", {
-                activeProjects: this.activeRuntimes.size,
+                activeProjects: activeRuntimes.size,
                 totalAgentPubkeys: allAgentPubkeys.size,
                 totalAgentDefinitionIds: allAgentDefinitionIds.size,
             });
@@ -623,7 +653,7 @@ export class Daemon {
         }
 
         // If project is active, route to runtime's EventHandler for incremental update
-        const runtime = this.activeRuntimes.get(projectId);
+        const runtime = this.runtimeLifecycle?.getRuntime(projectId);
         if (runtime) {
             logger.info("Routing project update to runtime's EventHandler for incremental update");
 
@@ -668,7 +698,8 @@ export class Daemon {
         // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
         let hydratedCount = 0;
 
-        for (const [projectId, runtime] of this.activeRuntimes) {
+        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+        for (const [projectId, runtime] of activeRuntimes) {
             try {
                 const context = runtime.getContext();
                 if (!context) {
@@ -709,182 +740,9 @@ export class Daemon {
             logger.debug("Lesson event not hydrated (no matching active runtimes)", {
                 eventId: event.id?.substring(0, 8),
                 agentDefinitionId: agentDefinitionId.substring(0, 8),
-                activeRuntimeCount: this.activeRuntimes.size,
+                activeRuntimeCount: activeRuntimes.size,
             });
         }
-    }
-
-    /**
-     * Check if an event was published by an agent in the system
-     */
-    private isAgentEvent(event: NDKEvent): boolean {
-        return this.agentPubkeyToProjects.has(event.pubkey);
-    }
-
-    /**
-     * Check if an event has p-tags pointing to system entities (whitelisted pubkeys or other agents)
-     */
-    private hasPTagsToSystemEntities(event: NDKEvent): boolean {
-        const pTags = event.tags.filter((t) => t[0] === "p");
-
-        for (const tag of pTags) {
-            const pubkey = tag[1];
-            if (!pubkey) {
-                continue;
-            }
-
-            // Check if p-tag points to a whitelisted pubkey
-            if (this.whitelistedPubkeys.includes(pubkey as Hexpubkey)) {
-                return true;
-            }
-
-            // Check if p-tag points to another agent in the system
-            if (this.agentPubkeyToProjects.has(pubkey as Hexpubkey)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Determine which project an event should be routed to
-     */
-    private async determineTargetProject(event: NDKEvent): Promise<{
-        projectId: string | null;
-        method: "a_tag" | "p_tag_agent" | "none";
-        matchedTags: string[];
-        reason: string;
-    }> {
-        // Check for explicit project A-tags
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
-        const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
-
-        logger.debug("Checking A-tags for project routing", {
-            eventId: event.id.slice(0, 8),
-            aTagsFound: projectATags.length,
-            aTags: projectATags.map((t) => t[1]),
-        });
-
-        for (const tag of projectATags) {
-            const aTagValue = tag[1];
-            if (aTagValue && this.knownProjects.has(aTagValue)) {
-                const project = this.knownProjects.get(aTagValue);
-                if (!project) {
-                    throw new Error(
-                        `Project ${aTagValue} not found in knownProjects despite has() check`
-                    );
-                }
-
-                logger.info("Routing event to project via A-tag", {
-                    eventId: event.id.slice(0, 8),
-                    eventKind: event.kind,
-                    projectId: aTagValue,
-                    projectTitle: project.tagValue("title"),
-                });
-
-                return {
-                    projectId: aTagValue,
-                    method: "a_tag",
-                    matchedTags: [aTagValue],
-                    reason: `Matched project A-tag: ${aTagValue}`,
-                };
-            }
-        }
-
-        if (projectATags.length > 0) {
-            logger.debug("A-tags found but no matching known projects", {
-                eventId: event.id.slice(0, 8),
-                projectATags: projectATags.map((t) => t[1]),
-                knownProjects: Array.from(this.knownProjects.keys()),
-            });
-        }
-
-        // Check for agent P-tags (find project by agent pubkey)
-        const pTags = event.tags.filter((t) => t[0] === "p");
-
-        logger.debug("Checking P-tags for agent routing", {
-            eventId: event.id.slice(0, 8),
-            pTagsFound: pTags.length,
-            pTags: pTags.map((t) => t[1]?.slice(0, 8)),
-        });
-
-        for (const tag of pTags) {
-            const pubkey = tag[1];
-            if (!pubkey) {
-                continue;
-            }
-
-            // Check if this pubkey belongs to any active project's agents
-            const projectIds = this.agentPubkeyToProjects.get(pubkey as Hexpubkey);
-            if (projectIds && projectIds.size > 0) {
-                // Use the first project (in practice, agents should belong to one project)
-                const projectId = Array.from(projectIds)[0];
-
-                const project = this.knownProjects.get(projectId);
-                if (!project) {
-                    throw new Error(
-                        `Project ${projectId} not found in knownProjects despite being in agentPubkeyToProjects mapping`
-                    );
-                }
-
-                const runtime = this.activeRuntimes.get(projectId);
-                if (!runtime) {
-                    throw new Error(
-                        `Runtime for project ${projectId} not found in activeRuntimes despite being in agentPubkeyToProjects mapping`
-                    );
-                }
-
-                // Get agent from runtime - it MUST exist since we found it in agentPubkeyToProjects
-                const context = runtime.getContext();
-                if (!context) {
-                    throw new Error(`Runtime for project ${projectId} has no context`);
-                }
-
-                const agent = context.agentRegistry.getAllAgents().find((a) => a.pubkey === pubkey);
-                if (!agent) {
-                    throw new Error(
-                        `Agent ${pubkey.slice(0, 8)} not found in project ${projectId} despite being in agentPubkeyToProjects mapping`
-                    );
-                }
-
-                logger.info("Routing event to project via agent P-tag", {
-                    eventId: event.id.slice(0, 8),
-                    eventKind: event.kind,
-                    projectId,
-                    projectTitle: project.tagValue("title"),
-                    agentPubkey: pubkey.slice(0, 8),
-                    agentSlug: agent.slug,
-                });
-
-                return {
-                    projectId,
-                    method: "p_tag_agent",
-                    matchedTags: [pubkey],
-                    reason: `Matched agent P-tag: ${pubkey.slice(0, 8)}`,
-                };
-            }
-        }
-
-        // No match found
-        const reason =
-            projectATags.length > 0
-                ? `A-tags found but no matching known projects: ${projectATags.map((t) => t[1]).join(", ")}`
-                : pTags.length > 0
-                  ? `P-tags found but no matching agents: ${pTags.map((t) => t[1]?.slice(0, 8)).join(", ")}`
-                  : "No A-tags or P-tags found";
-
-        logger.debug("No project match found", {
-            eventId: event.id.slice(0, 8),
-            reason,
-        });
-
-        return {
-            projectId: null,
-            method: "none",
-            matchedTags: [],
-            reason,
-        };
     }
 
     /**
@@ -908,15 +766,9 @@ export class Daemon {
                 }
 
                 // Stop all active project runtimes
-                for (const [projectId, runtime] of this.activeRuntimes) {
-                    logger.info(`Stopping project runtime: ${projectId}`);
-                    await runtime.stop().catch((error) => {
-                        logger.error(`Error stopping project runtime: ${projectId}`, {
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    });
+                if (this.runtimeLifecycle) {
+                    await this.runtimeLifecycle.stopAllRuntimes();
                 }
-                this.activeRuntimes.clear();
 
                 // Run custom shutdown handlers
                 for (const handler of this.shutdownHandlers) {
@@ -975,13 +827,7 @@ export class Daemon {
     /**
      * Get daemon status
      */
-    getStatus(): {
-        running: boolean;
-        knownProjects: number;
-        activeProjects: number;
-        agents: number;
-        uptime: number;
-    } {
+    getStatus(): DaemonStatus {
         // Count total agents across all known projects
         let totalAgents = 0;
         for (const project of this.knownProjects.values()) {
@@ -989,12 +835,19 @@ export class Daemon {
             totalAgents += agentTags.length;
         }
 
+        const runtimeStats = this.runtimeLifecycle?.getStats() || {
+            activeCount: 0,
+            startingCount: 0,
+        };
+
         return {
             running: this.isRunning,
             knownProjects: this.knownProjects.size,
-            activeProjects: this.activeRuntimes.size,
-            agents: totalAgents,
+            activeProjects: runtimeStats.activeCount,
+            startingProjects: runtimeStats.startingCount,
+            totalAgents,
             uptime: process.uptime(),
+            memoryUsage: process.memoryUsage(),
         };
     }
 
@@ -1009,7 +862,7 @@ export class Daemon {
      * Get active runtimes
      */
     getActiveRuntimes(): Map<string, ProjectRuntime> {
-        return this.activeRuntimes;
+        return this.runtimeLifecycle?.getActiveRuntimes() || new Map();
     }
 
     /**
@@ -1018,17 +871,14 @@ export class Daemon {
      * @throws Error if the runtime is not found or not running
      */
     async killRuntime(projectId: string): Promise<void> {
-        const runtime = this.activeRuntimes.get(projectId);
-
-        if (!runtime) {
-            throw new Error(`Runtime not found: ${projectId}`);
+        if (!this.runtimeLifecycle) {
+            throw new Error("RuntimeLifecycle not initialized");
         }
 
         logger.info(`Killing project runtime: ${projectId}`);
 
         try {
-            await runtime.stop();
-            this.activeRuntimes.delete(projectId);
+            await this.runtimeLifecycle.stopRuntime(projectId);
 
             // Update subscription to remove this project's agent pubkeys
             await this.updateSubscriptionAfterRuntimeRemoved(projectId);
@@ -1048,20 +898,19 @@ export class Daemon {
      * @throws Error if the runtime is not found or restart fails
      */
     async restartRuntime(projectId: string): Promise<void> {
-        const runtime = this.activeRuntimes.get(projectId);
+        if (!this.runtimeLifecycle) {
+            throw new Error("RuntimeLifecycle not initialized");
+        }
 
-        if (!runtime) {
-            throw new Error(`Runtime not found: ${projectId}`);
+        const project = this.knownProjects.get(projectId);
+        if (!project) {
+            throw new Error(`Project not found: ${projectId}`);
         }
 
         logger.info(`Restarting project runtime: ${projectId}`);
 
         try {
-            // Stop the runtime
-            await runtime.stop();
-
-            // Start it again
-            await runtime.start();
+            const runtime = await this.runtimeLifecycle.restartRuntime(projectId, project);
 
             // Update subscription with potentially new agent pubkeys
             await this.updateSubscriptionWithProjectAgents(projectId, runtime);
@@ -1081,9 +930,8 @@ export class Daemon {
      * @throws Error if the project is not found or already running
      */
     async startRuntime(projectId: string): Promise<void> {
-        // Check if already running
-        if (this.activeRuntimes.has(projectId)) {
-            throw new Error(`Runtime already running: ${projectId}`);
+        if (!this.runtimeLifecycle) {
+            throw new Error("RuntimeLifecycle not initialized");
         }
 
         // Check if project exists in known projects
@@ -1097,33 +945,12 @@ export class Daemon {
         });
 
         try {
-            // Check if this project is currently being started
-            const startingPromise = this.startingRuntimes.get(projectId);
-            if (startingPromise) {
-                await startingPromise;
-                return;
-            }
+            const runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
 
-            // Create startup promise to prevent concurrent startups
-            const startupPromise = (async () => {
-                const newRuntime = new ProjectRuntime(project, this.projectsBase);
-                await newRuntime.start();
-                return newRuntime;
-            })();
+            // Update subscription with this project's agent pubkeys
+            await this.updateSubscriptionWithProjectAgents(projectId, runtime);
 
-            this.startingRuntimes.set(projectId, startupPromise);
-
-            try {
-                const runtime = await startupPromise;
-                this.activeRuntimes.set(projectId, runtime);
-
-                // Update subscription with this project's agent pubkeys
-                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
-
-                logger.info(`Project runtime started: ${projectId}`);
-            } finally {
-                this.startingRuntimes.delete(projectId);
-            }
+            logger.info(`Project runtime started: ${projectId}`);
         } catch (error) {
             logger.error(`Failed to start project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -1187,16 +1014,11 @@ export class Daemon {
         }
 
         // Stop all active project runtimes
-        for (const [projectId, runtime] of this.activeRuntimes) {
-            await runtime.stop().catch((error) => {
-                logger.error(`Error stopping project runtime: ${projectId}`, {
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            });
+        if (this.runtimeLifecycle) {
+            await this.runtimeLifecycle.stopAllRuntimes();
         }
 
         // Clear state
-        this.activeRuntimes.clear();
         this.knownProjects.clear();
 
         // Release lockfile

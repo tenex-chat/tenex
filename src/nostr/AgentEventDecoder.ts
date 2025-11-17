@@ -250,4 +250,122 @@ export class AgentEventDecoder {
             .map((tag) => tag[1])
             .filter((id): id is string => !!id);
     }
+
+    // ============================================================================
+    // Daemon-specific event classification methods
+    // These are used by the daemon for routing and filtering decisions
+    // ============================================================================
+
+    /**
+     * Event kinds that should never be routed to projects.
+     * These events are informational or transient and don't require processing.
+     */
+    private static readonly NEVER_ROUTE_EVENT_KINDS = [
+        NDKKind.TenexProjectStatus,
+        NDKKind.TenexStreamingResponse,
+        NDKKind.TenexAgentTypingStart,
+        NDKKind.TenexAgentTypingStop,
+        NDKKind.TenexOperationsStatus,
+    ];
+
+    /**
+     * Check if an event kind should never be routed to projects
+     * @param event - The event to check
+     * @returns True if the event should not be routed
+     */
+    static isNeverRouteKind(event: NDKEvent): boolean {
+        return event.kind !== undefined && this.NEVER_ROUTE_EVENT_KINDS.includes(event.kind);
+    }
+
+    /**
+     * Check if this is a project event (kind 31933)
+     * @param event - The event to check
+     * @returns True if this is a project creation/update event
+     */
+    static isProjectEvent(event: NDKEvent): boolean {
+        return event.kind === 31933;
+    }
+
+    /**
+     * Check if this is a lesson event (kind 4129)
+     * @param event - The event to check
+     * @returns True if this is an agent lesson event
+     */
+    static isLessonEvent(event: NDKEvent): boolean {
+        return event.kind === NDKKind.AgentLesson;
+    }
+
+    /**
+     * Extract project ID from a project event
+     * Format: "31933:authorPubkey:dTag"
+     * @param event - Project event (kind 31933)
+     * @returns Project ID string or null if not a valid project event
+     */
+    static extractProjectId(event: NDKEvent): string | null {
+        if (!this.isProjectEvent(event)) {
+            return null;
+        }
+
+        const dTag = event.tags.find((t) => t[0] === "d")?.[1];
+        if (!dTag) {
+            return null;
+        }
+
+        return `31933:${event.pubkey}:${dTag}`;
+    }
+
+    /**
+     * Extract agent definition ID from a lesson event
+     * @param event - Lesson event (kind 4129)
+     * @returns Agent definition event ID or null
+     */
+    static extractAgentDefinitionIdFromLesson(event: NDKEvent): string | null {
+        if (!this.isLessonEvent(event)) {
+            return null;
+        }
+
+        // Lesson events reference agent definitions via e-tag
+        const eTag = event.tags.find((t) => t[0] === "e")?.[1];
+        return eTag || null;
+    }
+
+    /**
+     * Check if event has project A-tags
+     * @param event - The event to check
+     * @returns True if event has A-tags referencing projects (31933:...)
+     */
+    static hasProjectATags(event: NDKEvent): boolean {
+        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        return aTags.some((t) => t[1]?.startsWith("31933:"));
+    }
+
+    /**
+     * Extract project A-tags from an event
+     * @param event - The event to analyze
+     * @returns Array of project IDs from A-tags
+     */
+    static extractProjectATags(event: NDKEvent): string[] {
+        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        return aTags
+            .filter((t) => t[1]?.startsWith("31933:"))
+            .map((t) => t[1])
+            .filter((id): id is string => !!id);
+    }
+
+    /**
+     * Classify event type for daemon routing
+     * @param event - The event to classify
+     * @returns Event classification for routing decisions
+     */
+    static classifyForDaemon(
+        event: NDKEvent
+    ): "never_route" | "project" | "lesson" | "conversation" | "unknown" {
+        if (this.isNeverRouteKind(event)) return "never_route";
+        if (this.isProjectEvent(event)) return "project";
+        if (this.isLessonEvent(event)) return "lesson";
+        if (event.kind === NDKKind.GenericReply || event.kind === NDKKind.Thread) {
+            return "conversation";
+        }
+        return "unknown";
+    }
 }
