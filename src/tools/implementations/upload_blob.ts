@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";

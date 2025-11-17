@@ -1,5 +1,5 @@
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
     type FormatterOptions,
     ThreadedConversationFormatter,

@@ -1,6 +1,6 @@
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { ModelMessage } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { LLMService } from "../service";
 import {
     compileMessagesForClaudeCode,
@@ -14,8 +14,8 @@ describe("LLMService Claude Code Integration", () => {
     beforeEach(() => {
         // Mock logger
         llmLogger = {
-            logLLMRequest: vi.fn().mockResolvedValue(undefined),
-            logLLMResponse: vi.fn().mockResolvedValue(undefined),
+            logLLMRequest: mock(() => Promise.resolve(undefined)),
+            logLLMResponse: mock(() => Promise.resolve(undefined)),
         } as unknown as LLMLogger;
     });
 
@@ -190,10 +190,10 @@ describe("LLMService Claude Code Integration", () => {
 
     describe("getLanguageModel with Claude Code", () => {
         it("should use resume option when sessionId is provided", () => {
-            const mockProviderFunction = vi.fn().mockReturnValue({
-                doGenerate: vi.fn(),
-                doStream: vi.fn(),
-            });
+            const mockProviderFunction = mock(() => ({
+                doGenerate: mock(() => {}),
+                doStream: mock(() => {}),
+            }));
 
             service = new LLMService(
                 llmLogger,
@@ -219,9 +219,9 @@ describe("LLMService Claude Code Integration", () => {
         });
 
         it("should compile messages when NOT resuming", () => {
-            const mockProviderFunction = vi.fn().mockReturnValue({
-                doGenerate: vi.fn(),
-                doStream: vi.fn(),
+            const mockProviderFunction = mock(() => ({
+                doGenerate: mock(() => {}),
+                doStream: mock(() => {}),
             });
 
             service = new LLMService(

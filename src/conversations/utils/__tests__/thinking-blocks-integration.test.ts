@@ -2,7 +2,7 @@
  * Integration test for thinking block filtering in real-world scenarios
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { isOnlyThinkingBlocks, stripThinkingBlocks } from "../content-utils";
 
 describe("Thinking Blocks - Real World Integration", () => {

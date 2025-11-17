@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { readPathTool } from "../implementations/read_path";
 import { shellTool } from "../implementations/shell";
-import { type ToolName, getAllTools, getTool, getTools } from "../registry";
+import type { ToolName } from "../types";
+import { getAllTools, getTool, getTools } from "../registry";
 
 describe("Tool Registry", () => {
     describe("getTool", () => {

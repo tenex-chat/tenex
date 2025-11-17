@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services";
 import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
+import { TagExtractor } from "./TagExtractor";
 
 /**
  * AgentEventDecoder - Utilities for decoding and analyzing Nostr events
@@ -367,5 +368,69 @@ export class AgentEventDecoder {
             return "conversation";
         }
         return "unknown";
+    }
+
+    /**
+     * Check if an event is a brainstorm event
+     * @param event - The event to check
+     * @returns True if this is a brainstorm event (kind 11 with mode=brainstorm)
+     */
+    static isBrainstormEvent(event: NDKEvent): boolean {
+        if (event.kind !== 11) return false;
+        return TagExtractor.hasMode(event, "brainstorm");
+    }
+
+    /**
+     * Check if an event is a conversation root
+     * @param event - The event to check
+     * @returns True if this is a conversation root event
+     */
+    static isConversationRoot(event: NDKEvent): boolean {
+        return event.kind === NDKKind.ConversationRoot;
+    }
+
+    /**
+     * Check if an event is a thread event
+     * @param event - The event to check
+     * @returns True if this is a thread event
+     */
+    static isThreadEvent(event: NDKEvent): boolean {
+        return event.kind === NDKKind.Thread;
+    }
+
+    /**
+     * Check if an event is a generic reply
+     * @param event - The event to check
+     * @returns True if this is a generic reply event
+     */
+    static isGenericReply(event: NDKEvent): boolean {
+        return event.kind === NDKKind.GenericReply;
+    }
+
+    /**
+     * Check if an event is a config update
+     * @param event - The event to check
+     * @returns True if this is a config update event
+     */
+    static isConfigUpdate(event: NDKEvent): boolean {
+        return event.kind === NDKKind.ConfigUpdate;
+    }
+
+    /**
+     * Check if an event is a metadata event
+     * @param event - The event to check
+     * @returns True if this is a metadata event
+     */
+    static isMetadata(event: NDKEvent): boolean {
+        return event.kind === NDKKind.Metadata;
+    }
+
+    /**
+     * Check if an event is a stop command
+     * @param event - The event to check
+     * @returns True if this is a stop command event
+     */
+    static isStopCommand(event: NDKEvent): boolean {
+        return event.kind === NDKKind.TenexStop;
     }
 }

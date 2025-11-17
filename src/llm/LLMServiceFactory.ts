@@ -1,6 +1,6 @@
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { LLMConfiguration } from "@/services/config/types";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";

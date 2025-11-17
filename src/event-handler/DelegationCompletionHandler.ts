@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
+import { TagExtractor } from "@/nostr/TagExtractor";
 import { getProjectContext } from "@/services";
 import type { DelegationRecord } from "@/services/DelegationRegistry";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
@@ -37,8 +38,8 @@ export class DelegationCompletionHandler {
             eventId: event.id?.substring(0, 8),
             from: event.pubkey.substring(0, 16),
             conversationId: conversation.id.substring(0, 8),
-            hasStatusTag: !!event.tagValue("status"),
-            status: event.tagValue("status"),
+            hasStatusTag: !!TagExtractor.getTagValue(event, "status"),
+            status: TagExtractor.getTagValue(event, "status"),
         });
 
         // We need to find the delegation by conversation key.
@@ -48,16 +49,15 @@ export class DelegationCompletionHandler {
         // - We need to find who delegated TO this responder
 
         // First, let's check if this is a response to a delegation by looking at e-tags
-        const eTags = event.getMatchingTags("e");
+        const eTags = TagExtractor.getETags(event);
 
         logger.debug("🔍 Checking e-tags for delegation references", {
             eTagCount: eTags.length,
-            eTags: eTags.map((tag) => tag[1]?.substring(0, 8)),
+            eTags: eTags.map((id) => id?.substring(0, 8)),
         });
 
         // For each e-tag, check if it's a delegation event we're tracking
-        for (const eTagArray of eTags) {
-            const eTag = eTagArray[1]; // e-tag value is at index 1
+        for (const eTag of eTags) {
             if (!eTag) continue;
 
             // Use the registry's method to find delegation by event ID and responder
@@ -73,7 +73,7 @@ export class DelegationCompletionHandler {
                         from: event.pubkey.substring(0, 16),
                         to: potentialContext.delegatingAgent.pubkey.substring(0, 16),
                         status: potentialContext.status,
-                        isExplicitCompletion: event.tagValue("status") === "completed",
+                        isExplicitCompletion: TagExtractor.getTagValue(event, "status") === "completed",
                     }
                 );
                 break;
@@ -83,9 +83,8 @@ export class DelegationCompletionHandler {
         // Alternative: Try using conversation key if we can determine the delegator
         if (!delegationContext) {
             // Look for p-tags that might indicate who we're responding to
-            const pTags = event.getMatchingTags("p");
-            for (const pTagArray of pTags) {
-                const delegatorPubkey = pTagArray[1];
+            const pTags = TagExtractor.getPTags(event);
+            for (const delegatorPubkey of pTags) {
                 if (!delegatorPubkey) continue;
 
                 // Try to find delegation using conversation key
@@ -131,7 +130,7 @@ export class DelegationCompletionHandler {
                 toPubkey: event.pubkey,
                 completionEventId: event.id,
                 response: event.content,
-                summary: event.tagValue("summary"),
+                summary: TagExtractor.getTagValue(event, "summary"),
             });
 
             // Check if this batch was already handled synchronously

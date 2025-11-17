@@ -3,7 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { NDKKind } from "@/nostr/kinds";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { configService } from "@/services";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
@@ -19,17 +18,12 @@ import {
     propagation,
     trace,
 } from "@opentelemetry/api";
+import type { ProjectRuntime } from "./ProjectRuntime";
 import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
 import { DaemonRouter } from "./routing/DaemonRouter";
-import { SubscriptionFilterBuilder } from "./filters/SubscriptionFilterBuilder";
-import type {
-    ProjectId,
-    RoutingDecision,
-    RuntimeStatus,
-    DaemonStatus,
-} from "./types";
-import { toProjectId, isRoutedToProject, isDropped } from "./types";
+import type { DaemonStatus } from "./types";
+import { isDropped, isRoutedToProject } from "./types";
 
 const tracer = trace.getTracer("tenex.daemon");
 
@@ -117,14 +111,11 @@ export class Daemon {
                 this.routingLogger
             );
 
-            // 8. Discover existing projects (but don't start them)
-            // This will update the subscription manager with projects and agents
-            await this.discoverProjects();
-
-            // 9. Start subscription (now it has projects and agents)
+            // 8. Start subscription immediately
+            // Projects will be discovered naturally as events arrive
             await this.subscriptionManager.start();
 
-            // 10. Setup graceful shutdown
+            // 9. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -177,82 +168,6 @@ export class Daemon {
     private async acquireDaemonLock(): Promise<void> {
         this.lockfile = new Lockfile(Lockfile.getDefaultPath());
         await this.lockfile.acquire();
-    }
-
-    /**
-     * Discover existing projects from Nostr (but don't start them)
-     * Uses subscribe() with EOSE to wait for initial load, but keeps subscription active
-     * for continuous updates
-     */
-    private async discoverProjects(): Promise<void> {
-        logger.debug("Discovering existing projects from whitelisted pubkeys");
-
-        const ndk = getNDK();
-
-        // Use subscribe instead of fetchEvents to get initial projects + continuous updates
-        return new Promise<void>((resolve) => {
-            const subscription = ndk.subscribe(
-                {
-                    kinds: [31933],
-                    authors: this.whitelistedPubkeys,
-                },
-                {
-                    closeOnEose: true, // Close after initial load since SubscriptionManager will handle ongoing updates
-                }
-            );
-
-            subscription.on("event", (event: NDKEvent) => {
-                try {
-                    const projectId = this.buildProjectId(event);
-                    const project = NDKProject.from(event);
-                    this.knownProjects.set(projectId, project);
-
-                    logger.debug(`Discovered project: ${projectId}`, {
-                        title: project.tagValue("title"),
-                    });
-                } catch (error) {
-                    logger.error("Failed to process project", {
-                        error: error instanceof Error ? error.message : String(error),
-                        eventId: event.id,
-                    });
-                }
-            });
-
-            subscription.on("eose", () => {
-                logger.debug(`Found ${this.knownProjects.size} projects during initial discovery`);
-
-                // Update subscription manager with discovered projects
-                const projectIds = Array.from(this.knownProjects.keys());
-
-                if (this.subscriptionManager) {
-                    this.subscriptionManager.updateKnownProjects(projectIds);
-                    // Agent pubkeys will be added when projects start and load their agents
-                }
-
-                logger.debug("Known projects updated", {
-                    old: 0,
-                    new: this.knownProjects.size,
-                });
-
-                resolve();
-            });
-
-            // Add error handling
-            subscription.on("close", () => {
-                logger.debug("Project discovery subscription closed after EOSE");
-            });
-
-            // Set a timeout to prevent hanging forever
-            const timeout = setTimeout(() => {
-                logger.warn("Project discovery timed out after 30s");
-                subscription.stop();
-                resolve(); // Resolve anyway, we'll work with what we got
-            }, 30000);
-
-            subscription.on("eose", () => {
-                clearTimeout(timeout);
-            });
-        });
     }
 
     /**

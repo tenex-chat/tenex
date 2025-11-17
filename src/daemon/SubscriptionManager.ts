@@ -3,6 +3,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
+import { SubscriptionFilterBuilder, type SubscriptionConfig } from "./filters/SubscriptionFilterBuilder";
 
 /**
  * Manages a single subscription for all projects and agents.
@@ -77,7 +78,14 @@ export class SubscriptionManager {
             this.subscription = null;
         }
 
-        const filters = this.buildFilters();
+        // Build filters using the centralized SubscriptionFilterBuilder
+        const config: SubscriptionConfig = {
+            whitelistedPubkeys: this.whitelistedPubkeys,
+            knownProjects: this.knownProjects,
+            agentPubkeys: this.agentPubkeys,
+            agentDefinitionIds: this.agentDefinitionIds,
+        };
+        const filters = SubscriptionFilterBuilder.buildFilters(config);
 
         logger.debug("Creating subscription with filters", {
             filterCount: filters.length,
@@ -115,61 +123,6 @@ export class SubscriptionManager {
         this.subscription.on("eose", () => {
             logger.debug("Subscription EOSE received");
         });
-    }
-
-    /**
-     * Build the subscription filters
-     */
-    private buildFilters(): NDKFilter[] {
-        const filters: NDKFilter[] = [];
-
-        // Filter 0: Project events (kind 31933) from whitelisted pubkeys
-        // This ensures we receive project creation and update events
-        if (this.whitelistedPubkeys.size > 0) {
-            filters.push({
-                kinds: [31933],
-                authors: Array.from(this.whitelistedPubkeys),
-            });
-        }
-
-        // Filter 1: Events tagging our known projects
-        if (this.knownProjects.size > 0) {
-            filters.push({
-                "#a": Array.from(this.knownProjects),
-                limit: 0,
-            });
-        }
-
-        // Filter 2: Events mentioning our agents
-        if (this.agentPubkeys.size > 0) {
-            filters.push({
-                "#p": Array.from(this.agentPubkeys),
-                limit: 0,
-            });
-        }
-
-        // Filter 3: Agent lessons - monitor both:
-        // A. Lessons published by our agents
-        // B. Lessons referencing our agent definitions (via e-tag)
-        if (this.agentPubkeys.size > 0 || this.agentDefinitionIds.size > 0) {
-            // Filter 3a: Lessons published by our agents
-            if (this.agentPubkeys.size > 0) {
-                filters.push({
-                    kinds: [NDKKind.AgentLesson],
-                    authors: Array.from(this.agentPubkeys),
-                });
-            }
-
-            // Filter 3b: Lessons referencing our agent definitions
-            if (this.agentDefinitionIds.size > 0) {
-                filters.push({
-                    kinds: [NDKKind.AgentLesson],
-                    "#e": Array.from(this.agentDefinitionIds),
-                });
-            }
-        }
-
-        return filters;
     }
 
     /**

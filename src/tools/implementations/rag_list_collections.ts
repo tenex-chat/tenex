@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { RAGService } from "@/services/rag/RAGService";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
 import { z } from "zod";

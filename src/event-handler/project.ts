@@ -1,6 +1,7 @@
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
+import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
 import { mcpService } from "../services/mcp/MCPManager";
 import {
@@ -21,19 +22,15 @@ import { logger } from "../utils/logger";
  * 5. Updates the ProjectContext with the new configuration
  */
 export async function handleProjectEvent(event: NDKEvent, projectPath: string): Promise<void> {
-    const title = event.tags.find((tag) => tag[0] === "title")?.[1] || "Untitled";
+    const title = TagExtractor.getTagValue(event, "title") || "Untitled";
     logger.info(`📋 Project event update received: ${title}`);
 
     // Extract agent event IDs from the project
-    const agentEventIds = event.tags
-        .filter((tag) => tag[0] === "agent" && tag[1])
-        .map((tag) => tag[1])
+    const agentEventIds = TagExtractor.getTagValues(event, "agent")
         .filter((id): id is string => typeof id === "string");
 
     // Extract MCP tool event IDs from the project
-    const mcpEventIds = event.tags
-        .filter((tag) => tag[0] === "mcp" && tag[1])
-        .map((tag) => tag[1])
+    const mcpEventIds = TagExtractor.getTagValues(event, "mcp")
         .filter((id): id is string => typeof id === "string");
 
     if (agentEventIds.length > 0) {
@@ -54,7 +51,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
 
         // Check if this is the same project that's currently loaded
         const currentProjectDTag = currentContext.project.dTag;
-        const eventDTag = event.tags.find((tag) => tag[0] === "d")?.[1];
+        const eventDTag = TagExtractor.getDTag(event);
 
         if (currentProjectDTag !== eventDTag) {
             logger.debug("Project event is for a different project, skipping", {

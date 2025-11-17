@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier, parseNostrUser } from "@/utils/nostr-entity-parser";

@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";

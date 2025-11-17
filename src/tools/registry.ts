@@ -8,6 +8,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import { mcpService } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
+import type { AISdkTool, ToolFactory, ToolName } from "./types";
 import { createAddPhaseTool } from "./implementations/add_phase";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
@@ -48,64 +49,6 @@ import { createCancelScheduledTaskTool } from "./implementations/schedule_task_c
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
-
-/**
- * Tool names available in the system
- */
-export type ToolName =
-    | "read_path"
-    | "codebase_search"
-    | "lesson_learn"
-    | "lesson_get"
-    | "shell"
-    | "agents_discover"
-    | "agents_hire"
-    | "agents_list"
-    | "agents_read"
-    | "agents_write"
-    | "discover_capabilities"
-    | "delegate"
-    | "delegate_phase"
-    | "delegate_followup"
-    | "ask"
-    | "nostr_projects"
-    | "claude_code"
-    | "gemini_cli"
-    | "create_project"
-    | "delegate_external"
-    | "report_write"
-    | "report_read"
-    | "reports_list"
-    | "report_delete"
-    | "phase_add"
-    | "phase_remove"
-    | "schedule_task"
-    | "schedule_tasks_list"
-    | "schedule_task_cancel"
-    | "create_dynamic_tool"
-    | "upload_blob"
-    | "rag_create_collection"
-    | "rag_add_documents"
-    | "rag_query"
-    | "rag_delete_collection"
-    | "rag_list_collections"
-    | "rag_subscription_create"
-    | "rag_subscription_list"
-    | "rag_subscription_get"
-    | "rag_subscription_delete";
-
-/**
- * AI SDK Tool type - tools with optional human-readable content generation
- * The getHumanReadableContent function is attached as a non-enumerable property
- */
-export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
-    getHumanReadableContent?: (args: TInput) => string;
-};
-
-/**
- * Tool factory type - functions that create AI SDK tools with context
- */
-export type ToolFactory = (context: ExecutionContext) => AISdkTool<unknown, unknown>;
 
 /**
  * Registry of tool factories
@@ -230,7 +173,7 @@ export function getAllTools(context: ExecutionContext): AISdkTool<unknown, unkno
  * @returns Array of all tool names in the registry
  */
 export function getAllToolNames(): ToolName[] {
-    return Object.keys(toolFactories);
+    return Object.keys(toolFactories) as ToolName[];
 }
 
 /**

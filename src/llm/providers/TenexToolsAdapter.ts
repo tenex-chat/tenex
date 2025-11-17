@@ -1,4 +1,4 @@
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { type SdkMcpServer, createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
 import { z } from "zod";

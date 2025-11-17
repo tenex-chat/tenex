@@ -39,6 +39,26 @@ export class MockLLMService implements LLMService {
             }
         }
 
+        // Load responses directly from config
+        if (config.responses) {
+            for (const response of config.responses) {
+                // Convert simple response format to MockLLMResponse
+                if ('match' in response) {
+                    // Simple format with match pattern
+                    this.responses.push({
+                        trigger: {
+                            userMessage: response.match,
+                        },
+                        response: response.response,
+                        priority: response.priority || 0,
+                    });
+                } else {
+                    // Full MockLLMResponse format
+                    this.responses.push(response);
+                }
+            }
+        }
+
         // Sort by priority
         this.responses.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
@@ -76,6 +96,10 @@ export class MockLLMService implements LLMService {
                       } catch {
                           args = {};
                       }
+                  } else if (typeof tc === "object" && "name" in tc) {
+                      // Direct ToolCall format
+                      functionName = tc.name;
+                      args = tc.params || {};
                   } else {
                       functionName = "unknown";
                   }

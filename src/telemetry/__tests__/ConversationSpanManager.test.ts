@@ -1,183 +1,140 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { createMockNDKEvent } from "@/test-utils/mock-factories";
-import { ConversationSpanManager } from "../ConversationSpanManager";
+import { ConversationSpanManager, getConversationSpanManager, resetConversationSpanManager } from "../ConversationSpanManager";
+import type { Span } from "@opentelemetry/api";
 
 describe("ConversationSpanManager", () => {
     let manager: ConversationSpanManager;
+    let mockSpan: Span;
 
     beforeEach(() => {
-        manager = new ConversationSpanManager();
+        // Reset singleton before each test
+        resetConversationSpanManager();
+        manager = getConversationSpanManager();
+
+        // Create a mock span
+        mockSpan = {
+            setAttributes: mock(() => {}),
+            setAttribute: mock(() => {}),
+            addEvent: mock(() => {}),
+            setStatus: mock(() => {}),
+            updateName: mock(() => {}),
+            end: mock(() => {}),
+            isRecording: () => true,
+            recordException: mock(() => {}),
+            spanContext: () => ({
+                traceId: "test-trace-id",
+                spanId: "test-span-id",
+                traceFlags: 0,
+            }),
+        } as any;
     });
 
     afterEach(() => {
         manager.shutdown();
     });
 
-    it("should create a conversation span for events with conversation root", () => {
-        const mockEvent = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", "conversation_root_123"]],
-            content: "Hello",
+    it("should increment message count and set span attributes", () => {
+        const conversationId = "conversation_root_123";
+
+        manager.incrementMessageCount(conversationId, mockSpan);
+
+        // Check that attributes were set on the span
+        expect(mockSpan.setAttributes).toHaveBeenCalledWith({
+            "conversation.message_sequence": 1,
         });
 
-        const span = manager.getOrCreateConversationSpan(mockEvent);
-        expect(span).not.toBeNull();
+        // Check message count
+        expect(manager.getMessageCount(conversationId)).toBe(1);
 
+        // Check stats
         const stats = manager.getStats();
-        expect(stats.activeConversations).toBe(1);
+        expect(stats.trackedConversations).toBe(1);
         expect(stats.totalMessages).toBe(1);
     });
 
-    it("should return null for events without conversation root", () => {
-        const mockEvent = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [],
-            content: "Hello",
-        });
+    it("should track multiple messages in same conversation", () => {
+        const conversationId = "conversation_root_123";
 
-        const span = manager.getOrCreateConversationSpan(mockEvent);
-        expect(span).toBeNull();
+        // Add first message
+        manager.incrementMessageCount(conversationId, mockSpan);
+        expect(manager.getMessageCount(conversationId)).toBe(1);
+
+        // Add second message
+        manager.incrementMessageCount(conversationId, mockSpan);
+        expect(manager.getMessageCount(conversationId)).toBe(2);
+
+        // Check that second call set correct sequence number
+        expect(mockSpan.setAttributes).toHaveBeenCalledWith({
+            "conversation.message_sequence": 2,
+        });
 
         const stats = manager.getStats();
-        expect(stats.activeConversations).toBe(0);
-    });
-
-    it("should reuse existing conversation span for multiple messages", () => {
-        const conversationRoot = "conversation_root_123";
-
-        const event1 = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", conversationRoot]],
-            content: "Message 1",
-        });
-
-        const event2 = createMockNDKEvent({
-            id: "event2",
-            kind: 11,
-            pubkey: "user2",
-            tags: [["E", conversationRoot]],
-            content: "Message 2",
-        });
-
-        const span1 = manager.getOrCreateConversationSpan(event1);
-        const span2 = manager.getOrCreateConversationSpan(event2);
-
-        // Should return the same span
-        expect(span1).toBe(span2);
-
-        const stats = manager.getStats();
-        expect(stats.activeConversations).toBe(1);
+        expect(stats.trackedConversations).toBe(1);
         expect(stats.totalMessages).toBe(2);
     });
 
-    it("should create separate spans for different conversations", () => {
-        const event1 = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", "conversation_A"]],
-            content: "Message A",
-        });
+    it("should track multiple conversations separately", () => {
+        const conversationA = "conversation_A";
+        const conversationB = "conversation_B";
 
-        const event2 = createMockNDKEvent({
-            id: "event2",
-            kind: 11,
-            pubkey: "user2",
-            tags: [["E", "conversation_B"]],
-            content: "Message B",
-        });
+        manager.incrementMessageCount(conversationA, mockSpan);
+        manager.incrementMessageCount(conversationB, mockSpan);
+        manager.incrementMessageCount(conversationA, mockSpan);
 
-        const span1 = manager.getOrCreateConversationSpan(event1);
-        const span2 = manager.getOrCreateConversationSpan(event2);
-
-        // Should be different spans
-        expect(span1).not.toBe(span2);
+        expect(manager.getMessageCount(conversationA)).toBe(2);
+        expect(manager.getMessageCount(conversationB)).toBe(1);
 
         const stats = manager.getStats();
-        expect(stats.activeConversations).toBe(2);
-        expect(stats.totalMessages).toBe(2);
+        expect(stats.trackedConversations).toBe(2);
+        expect(stats.totalMessages).toBe(3);
     });
 
-    it("should finalize conversations", () => {
-        const mockEvent = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", "conversation_root_123"]],
-            content: "Hello",
-        });
+    it("should return 0 for unknown conversation", () => {
+        expect(manager.getMessageCount("unknown_conversation")).toBe(0);
 
-        manager.getOrCreateConversationSpan(mockEvent);
-
-        let stats = manager.getStats();
-        expect(stats.activeConversations).toBe(1);
-
-        manager.finalizeConversation("conversation_root_123");
-
-        stats = manager.getStats();
-        expect(stats.activeConversations).toBe(0);
+        const stats = manager.getStats();
+        expect(stats.trackedConversations).toBe(0);
+        expect(stats.totalMessages).toBe(0);
     });
 
     it("should handle shutdown gracefully", () => {
-        const event1 = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", "conversation_A"]],
-            content: "Message A",
-        });
+        const conversationA = "conversation_A";
+        const conversationB = "conversation_B";
 
-        const event2 = createMockNDKEvent({
-            id: "event2",
-            kind: 11,
-            pubkey: "user2",
-            tags: [["E", "conversation_B"]],
-            content: "Message B",
-        });
-
-        manager.getOrCreateConversationSpan(event1);
-        manager.getOrCreateConversationSpan(event2);
+        manager.incrementMessageCount(conversationA, mockSpan);
+        manager.incrementMessageCount(conversationB, mockSpan);
 
         let stats = manager.getStats();
-        expect(stats.activeConversations).toBe(2);
+        expect(stats.trackedConversations).toBe(2);
+        expect(stats.totalMessages).toBe(2);
 
         manager.shutdown();
 
         stats = manager.getStats();
-        expect(stats.activeConversations).toBe(0);
+        expect(stats.trackedConversations).toBe(0);
+        expect(stats.totalMessages).toBe(0);
     });
 
-    it("should support both E and A tags for conversation root", () => {
-        const eventWithE = createMockNDKEvent({
-            id: "event1",
-            kind: 11,
-            pubkey: "user1",
-            tags: [["E", "conversation_E"]],
-            content: "Message E",
-        });
+    it("should handle singleton pattern correctly", () => {
+        const manager1 = getConversationSpanManager();
+        const manager2 = getConversationSpanManager();
 
-        const eventWithA = createMockNDKEvent({
-            id: "event2",
-            kind: 11,
-            pubkey: "user2",
-            tags: [["A", "conversation_A"]],
-            content: "Message A",
-        });
+        expect(manager1).toBe(manager2);
 
-        const span1 = manager.getOrCreateConversationSpan(eventWithE);
-        const span2 = manager.getOrCreateConversationSpan(eventWithA);
+        manager1.incrementMessageCount("test", mockSpan);
+        expect(manager2.getMessageCount("test")).toBe(1);
+    });
 
-        expect(span1).not.toBeNull();
-        expect(span2).not.toBeNull();
-        expect(span1).not.toBe(span2);
+    it("should reset singleton properly", () => {
+        const manager1 = getConversationSpanManager();
+        manager1.incrementMessageCount("test", mockSpan);
+        expect(manager1.getMessageCount("test")).toBe(1);
 
-        const stats = manager.getStats();
-        expect(stats.activeConversations).toBe(2);
+        resetConversationSpanManager();
+
+        const manager2 = getConversationSpanManager();
+        expect(manager2).not.toBe(manager1);
+        expect(manager2.getMessageCount("test")).toBe(0);
     });
 });

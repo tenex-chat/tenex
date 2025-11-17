@@ -6,6 +6,7 @@ import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import "./test-mocks"; // Import shared mocks
 
 /**
  * Test public broadcast handling:

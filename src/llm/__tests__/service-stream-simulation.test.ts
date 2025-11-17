@@ -1,7 +1,7 @@
 import type { LLMLogger } from "@/logging/LLMLogger";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { createProviderRegistry } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { LLMService } from "../service";
 
 describe("LLMService Stream Simulation", () => {
@@ -12,8 +12,8 @@ describe("LLMService Stream Simulation", () => {
     beforeEach(() => {
         // Mock logger
         llmLogger = {
-            logLLMRequest: vi.fn().mockResolvedValue(undefined),
-            logLLMResponse: vi.fn().mockResolvedValue(undefined),
+            logLLMRequest: mock(() => Promise.resolve(undefined)),
+            logLLMResponse: mock(() => Promise.resolve(undefined)),
         } as unknown as LLMLogger;
     });
 
@@ -29,7 +29,7 @@ describe("LLMService Stream Simulation", () => {
             // Mock claudeCode provider function
             () =>
                 ({
-                    doGenerate: vi.fn().mockResolvedValue({
+                    doGenerate: mock(() => Promise.resolve({
                         content: [
                             { type: "text", text: "This is a complete response from Claude Code" },
                         ],
@@ -46,9 +46,9 @@ describe("LLMService Stream Simulation", () => {
                             body: "test",
                         },
                         providerMetadata: {},
-                    }),
+                    })),
                     // Add doStream method for middleware compatibility
-                    doStream: vi.fn().mockResolvedValue({
+                    doStream: mock(() => Promise.resolve({
                         stream: new ReadableStream({
                             async start(controller) {
                                 controller.enqueue({
@@ -65,7 +65,7 @@ describe("LLMService Stream Simulation", () => {
                         }),
                         warnings: [],
                         rawResponse: {},
-                    }),
+                    })),
                 }) as any,
             undefined, // No session ID
             "test-agent" // Agent slug for test
@@ -118,7 +118,7 @@ describe("LLMService Stream Simulation", () => {
         );
 
         // Spy on the private simulateStream method
-        const simulateStreamSpy = vi.spyOn(service as any, "simulateStream");
+        const simulateStreamSpy = spyOn(service as any, "simulateStream");
 
         // This will fail because we don't have a real OpenAI provider,
         // but we're just checking that simulateStream is not called
@@ -142,9 +142,9 @@ describe("LLMService Stream Simulation", () => {
             undefined,
             () =>
                 ({
-                    doGenerate: vi.fn(),
+                    doGenerate: mock(() => {}),
                     // Add doStream method for middleware compatibility
-                    doStream: vi.fn().mockResolvedValue({
+                    doStream: mock(() => Promise.resolve({
                         stream: new ReadableStream({
                             async start(controller) {
                                 controller.enqueue({
@@ -173,14 +173,14 @@ describe("LLMService Stream Simulation", () => {
                         }),
                         warnings: [],
                         rawResponse: {},
-                    }),
+                    })),
                 }) as any,
             undefined, // No session ID
             "test-agent" // Agent slug for test
         );
 
         // Mock the complete method to return tool calls
-        vi.spyOn(service, "complete").mockResolvedValue({
+        spyOn(service, "complete").mockResolvedValue({
             text: "I'll help you with that.",
             usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
             steps: [],

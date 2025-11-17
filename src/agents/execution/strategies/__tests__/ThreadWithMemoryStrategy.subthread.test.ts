@@ -4,6 +4,7 @@ import { ThreadService } from "@/conversations/services/ThreadService";
 import type { Conversation } from "@/conversations/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
+import "./test-mocks"; // Import shared mocks
 describe("ThreadWithMemoryStrategy - Sub-thread Bug Reproduction", () => {
     let threadService: ThreadService;
     let participationIndex: ParticipationIndex;

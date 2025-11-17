@@ -5,7 +5,9 @@ import { ThreadService } from "@/conversations/services/ThreadService";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
+import "./test-mocks"; // Import shared mocks
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import "./test-mocks"; // Import shared mocks
 
 /**
  * Test using exact events from production issue:

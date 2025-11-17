@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { TagExtractor } from "@/nostr/TagExtractor";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -151,12 +152,12 @@ export class AgentRouter {
         event: NDKEvent,
         projectContext: ProjectContext
     ): boolean {
-        const aTag = event.tags.find((tag) => tag[0] === "a");
-        if (!aTag || !aTag[1]) {
+        const aTags = TagExtractor.getATags(event);
+        if (aTags.length === 0) {
             return true; // No project reference - allow routing (backward compatibility)
         }
 
-        const parts = aTag[1].split(":");
+        const parts = aTags[0].split(":");
         if (parts.length !== 3 || parts[0] !== "31933") {
             return true; // Not a valid project reference - allow routing
         }

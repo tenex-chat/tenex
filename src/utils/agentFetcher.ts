@@ -1,5 +1,31 @@
 import type NDK from "@nostr-dev-kit/ndk";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "./logger";
+
+/**
+ * Fetches an agent event from Nostr
+ * @param eventId - The ID of the event containing the agent
+ * @param ndk - The NDK instance to use for fetching
+ * @returns The agent event or null if not found
+ */
+export async function fetchAgent(eventId: string, ndk: NDK): Promise<NDKEvent | null> {
+    try {
+        // Strip "nostr:" prefix if present
+        const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
+
+        const event = await ndk.fetchEvent(cleanEventId, { groupable: false });
+
+        if (!event) {
+            logger.debug(`Agent event not found: ${cleanEventId}`);
+            return null;
+        }
+
+        return event;
+    } catch (error) {
+        logger.error(`Failed to fetch agent event: ${eventId}`, error);
+        return null;
+    }
+}
 
 /**
  * Fetches an agent definition from a Nostr event

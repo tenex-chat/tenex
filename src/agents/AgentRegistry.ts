@@ -8,6 +8,7 @@ import { getProjectContext } from "@/services";
 import { configService } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { isValidToolName } from "@/tools/registry";
+import type { ToolName } from "@/tools/types";
 import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -512,9 +513,10 @@ export class AgentRegistry {
         agent: { phases?: Record<string, string> }
     ): string[] {
         // Filter out delegation and phase management tools
-        const toolNames = requestedTools.filter(
-            (tool) => !DELEGATE_TOOLS.includes(tool) && !PHASE_MANAGEMENT_TOOLS.includes(tool)
-        );
+        const toolNames = requestedTools.filter((tool) => {
+            const typedTool = tool as ToolName;
+            return !DELEGATE_TOOLS.includes(typedTool) && !PHASE_MANAGEMENT_TOOLS.includes(typedTool);
+        });
 
         // Add delegation tools based on phases
         const delegateTools = getDelegateToolsForAgent(agent);

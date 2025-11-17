@@ -53,8 +53,12 @@ export interface MockLLMConfig {
     /** Scenarios to load */
     scenarios?: MockLLMScenario[];
     /** Custom responses for matching specific patterns */
-    responses?: Array<{
-        match: RegExp | string;
-        response: MockLLMResponse["response"];
-    }>;
+    responses?: Array<
+        | {
+              match: RegExp | string;
+              response: MockLLMResponse["response"];
+              priority?: number;
+          }
+        | MockLLMResponse
+    >;
 }

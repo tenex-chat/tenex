@@ -6,6 +6,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { ThreadWithMemoryStrategy } from "../ThreadWithMemoryStrategy";
 
+import "./test-mocks"; // Import shared mocks
 // Mock dependencies
 mock.module("@/conversations/persistence/ToolMessageStorage", () => ({
     toolMessageStorage: {

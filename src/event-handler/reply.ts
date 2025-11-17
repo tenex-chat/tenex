@@ -8,6 +8,7 @@ import type { Conversation, ConversationCoordinator } from "../conversations";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 // New refactored modules
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
+import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
@@ -28,8 +29,7 @@ interface EventHandlerContext {
 function isBrainstormEvent(event: NDKEvent): boolean {
     if (event.kind !== 11) return false;
 
-    const modeTags = event.tags.filter((tag) => tag[0] === "mode" && tag[1] === "brainstorm");
-    return modeTags.length > 0;
+    return TagExtractor.hasMode(event, "brainstorm");
 }
 
 /**
@@ -51,7 +51,7 @@ export const handleChatMessage = async (
     const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
 
     // DEBUG: Log filtering decision for delegation events
-    const pTags = event.tags.filter((tag) => tag[0] === "p").map((tag) => tag[1]);
+    const pTags = TagExtractor.getPTags(event);
     const systemPubkeys = Array.from(projectCtx.agents.values()).map((a) => a.pubkey);
     logger.debug("[EventFilter] Checking event", {
         eventId: event.id?.substring(0, 8),

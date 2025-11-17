@@ -1,9 +1,10 @@
 import type { ConversationCoordinator } from "@/conversations/coordinator/ConversationCoordinator";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ExecutionContext } from "../../types";
 import { ThreadWithMemoryStrategy } from "../ThreadWithMemoryStrategy";
 
+import "./test-mocks"; // Import shared mocks
 describe("ThreadWithMemoryStrategy - Context Duplication Fix", () => {
     let strategy: ThreadWithMemoryStrategy;
     let mockContext: ExecutionContext;
@@ -27,13 +28,13 @@ describe("ThreadWithMemoryStrategy - Context Duplication Fix", () => {
             },
             conversationCoordinator: {
                 threadService: {
-                    getThreadToEvent: vi.fn(),
+                    getThreadToEvent: mock(() => undefined),
                 },
                 participationIndex: {
-                    getAgentParticipations: vi.fn(),
+                    getAgentParticipations: mock(() => []),
                 },
-                getConversation: vi.fn(() => mockConversation),
             } as unknown as ConversationCoordinator,
+            getConversation: mock(() => mockConversation),
             isDelegationCompletion: false,
         } as ExecutionContext;
     });

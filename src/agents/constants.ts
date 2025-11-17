@@ -1,10 +1,11 @@
 import type { AgentInstance } from "./types";
+import type { ToolName } from "@/tools/types";
 
 /**
  * Core tools that ALL agents must have access to regardless of configuration.
  * These are fundamental capabilities that every agent needs.
  */
-export const CORE_AGENT_TOOLS = [
+export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_get", // All agents should access lessons
     "lesson_learn", // All agents should be able to learn
     "read_path", // All agents need file system access
@@ -24,12 +25,12 @@ export const CORE_AGENT_TOOLS = [
  * Note: Since PM is now dynamic (first agent in project), we can't determine
  * PM-specific tools here. Tool assignment should be done via agent definition events.
  */
-export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
+export function getDefaultToolsForAgent(_agent: AgentInstance): ToolName[] {
     // Default tools for all agents
     // Specific tools should be configured via agent definition events
     // NOTE: delegate, delegate_phase, delegate_external, and delegate_followup are NOT included here
     // They are added via getDelegateToolsForAgent based on PM status
-    const tools = [
+    const tools: ToolName[] = [
         "read_path",
         "lesson_learn",
         "codebase_search",
@@ -47,7 +48,7 @@ export function getDefaultToolsForAgent(_agent: AgentInstance): string[] {
 /**
  * Delegate tools that should be excluded from configuration and TenexProjectStatus events
  */
-export const DELEGATE_TOOLS = [
+export const DELEGATE_TOOLS: ToolName[] = [
     "ask",
     "delegate",
     "delegate_phase",
@@ -58,14 +59,14 @@ export const DELEGATE_TOOLS = [
 /**
  * Phase management tools
  */
-export const PHASE_MANAGEMENT_TOOLS = ["phase_add", "phase_remove"] as const;
+export const PHASE_MANAGEMENT_TOOLS: ToolName[] = ["phase_add", "phase_remove"];
 
 /**
  * Get the correct delegate tools for an agent based on whether they have phases defined
  * This is the SINGLE source of truth for delegate tool assignment
  */
-export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): string[] {
-    const tools: string[] = [];
+export function getDelegateToolsForAgent(agent: { phases?: Record<string, string> }): ToolName[] {
+    const tools: ToolName[] = [];
 
     // All agents get ask tool
     tools.push("ask");

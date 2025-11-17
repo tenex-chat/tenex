@@ -4,7 +4,9 @@ import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { ExecutionContext } from "../../types";
+import "./test-mocks"; // Import shared mocks
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
+import "./test-mocks"; // Import shared mocks
 import { MOCK_AGENTS, MockEventGenerator } from "./mock-event-generator";
 
 describe("FlattenedChronologicalStrategy - Mock Scenarios", () => {

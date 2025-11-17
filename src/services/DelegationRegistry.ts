@@ -863,6 +863,19 @@ export class DelegationRegistry extends EventEmitter {
     }
 
     /**
+     * Clear all delegations and batches (for testing purposes)
+     */
+    async clear(): Promise<void> {
+        this.delegations.clear();
+        this.batches.clear();
+        this.syncHandledBatches.clear();
+        this.agentDelegations.clear();
+        this.conversationDelegations.clear();
+        this.isDirty = true;
+        logger.debug("Registry cleared");
+    }
+
+    /**
      * Find delegation records by event ID and responder pubkey
      * Used when processing completion events
      *

@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { RAGService } from "@/services/rag/RAGService";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";

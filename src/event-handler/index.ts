@@ -1,4 +1,5 @@
 import { NDKKind } from "@/nostr/kinds";
+import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/utils/error-formatter";
 import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -272,10 +273,10 @@ export class EventHandler {
 
             // Check for tools configuration change
             // Extract all tool tags - these represent the exhaustive list of tools the agent should have
-            const toolTags = event.tags.filter((tag) => tag[0] === "tool");
+            const toolTags = TagExtractor.getToolTags(event);
             if (toolTags.length > 0) {
-                // Extract tool names from tags (format: ["tool", "<tool-name>"])
-                const newToolNames = toolTags.map((tag) => tag[1]).filter((name) => name);
+                // Extract tool names from tags
+                const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
 
                 logger.debug("Received tools config change request", {
                     agentPubkey,
@@ -435,8 +436,7 @@ export class EventHandler {
     private isBrainstormEvent(event: NDKEvent): boolean {
         if (event.kind !== NDKKind.Thread) return false;
 
-        const modeTags = event.tags.filter((tag) => tag[0] === "mode" && tag[1] === "brainstorm");
-        return modeTags.length > 0;
+        return TagExtractor.hasMode(event, "brainstorm");
     }
 
     /**

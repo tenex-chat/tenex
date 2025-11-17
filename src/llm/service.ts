@@ -1,6 +1,6 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { LLMLogger } from "@/logging/LLMLogger";
-import type { AISdkTool } from "@/tools/registry";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { JSONValue } from "@ai-sdk/provider";
 import { SpanStatusCode, trace } from "@opentelemetry/api";

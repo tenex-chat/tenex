@@ -5,6 +5,7 @@ import type { Conversation } from "@/conversations/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { ThreadWithMemoryStrategy } from "../ThreadWithMemoryStrategy";
+import "./test-mocks"; // Import shared mocks for NDK/PubkeyNameRepository
 
 // Note: For this test we'll work with the real strategy but simplified context
 // since mocking is complex in Bun and we want to test the actual logic
@@ -104,10 +105,10 @@ describe("ThreadWithMemoryStrategy", () => {
                 conversationCoordinator: {
                     threadService,
                     participationIndex,
-                    getConversation: () => conversation,
                 } as any,
+                getConversation: () => conversation,
                 isDelegationCompletion: false,
-            };
+            } as ExecutionContext;
 
             // Build messages
             const messages = await strategy.buildMessages(context, context.triggeringEvent);

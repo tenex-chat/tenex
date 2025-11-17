@@ -1,2 +1,2 @@
 export { ConversationCoordinator } from "./services/ConversationCoordinator";
-export * from "./types";
+export type { AgentState, Conversation, ConversationMetadata } from "./types";

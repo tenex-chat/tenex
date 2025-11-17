@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { Lockfile } from "../lockfile";
 
 describe("Lockfile", () => {
@@ -81,7 +81,7 @@ describe("Lockfile", () => {
         await fs.writeFile(testLockfilePath, JSON.stringify(lockInfo), "utf-8");
 
         // Spy on process.kill to simulate EPERM error
-        const killSpy = vi.spyOn(process, "kill").mockImplementation((pid: number) => {
+        const killSpy = spyOn(process, "kill").mockImplementation((pid: number) => {
             const error = new Error("Operation not permitted") as NodeJS.ErrnoException;
             error.code = "EPERM";
             throw error;

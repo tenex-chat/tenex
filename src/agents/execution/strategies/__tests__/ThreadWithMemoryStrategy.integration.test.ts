@@ -3,6 +3,7 @@ import { ParticipationIndex } from "@/conversations/services/ParticipationIndex"
 import { ThreadService } from "@/conversations/services/ThreadService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
+import "./test-mocks"; // Import shared mocks
 describe("ThreadWithMemoryStrategy Integration", () => {
     // Helper to create mock events
     const createMockEvent = (
@@ -10,16 +11,22 @@ describe("ThreadWithMemoryStrategy Integration", () => {
         pubkey: string,
         parentId?: string,
         content?: string
-    ): NDKEvent =>
-        ({
+    ): NDKEvent => {
+        const tags = parentId ? [["e", parentId]] : [];
+        return {
             id,
             pubkey,
             created_at: Date.now() / 1000,
             kind: 1,
-            tags: parentId ? [["e", parentId]] : [],
+            tags,
             content: content || `Message ${id}`,
             sig: "mock-sig",
-        }) as NDKEvent;
+            tagValue: (tagName: string) => {
+                const tag = tags.find((t) => t[0] === tagName);
+                return tag ? tag[1] : undefined;
+            },
+        } as any as NDKEvent;
+    };
 
     describe("Example scenario verification", () => {
         it("should correctly identify threads for Agent 2 at message 4.2", () => {
