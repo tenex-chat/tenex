@@ -8,7 +8,6 @@ import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
 import { trace } from "@opentelemetry/api";
 import { getAgentWorktrees, type WorktreeMetadata } from "@/utils/worktree/metadata";
-import { listWorktrees } from "@/utils/git/initializeGitRepo";
 import * as fs from "node:fs/promises";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { ExecutionContext } from "./types";
