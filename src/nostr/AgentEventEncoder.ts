@@ -24,6 +24,7 @@ export interface DelegationIntent {
     request: string;
     phase?: string;
     phaseInstructions?: string; // Instructions to be passed with phase delegation
+    branch?: string;
     type?: "delegation" | "delegation_followup" | "ask";
 }
 
@@ -288,8 +289,8 @@ export class AgentEventEncoder {
         }
 
         // Branch metadata if provided (for worktree support)
-        if ((intent as any).branch) {
-            event.tag(["branch", (intent as any).branch]);
+        if (intent.branch) {
+            event.tag(["branch", intent.branch]);
         }
 
         // Add standard metadata

@@ -23,6 +23,12 @@ const delegatePhaseSchema = z.object({
             "The request or question to delegate - this will be what the recipient processes."
         ),
     title: z.string().nullable().describe("Title for this conversation (if not already set)."),
+    branch: z
+        .string()
+        .optional()
+        .describe(
+            "Optional git branch name for worktree isolation. Creates a new worktree for the delegated work."
+        ),
 });
 
 type DelegatePhaseInput = z.infer<typeof delegatePhaseSchema>;
@@ -33,7 +39,7 @@ async function executeDelegatePhase(
     input: DelegatePhaseInput,
     context: ExecutionContext
 ): Promise<DelegatePhaseOutput> {
-    const { phase, recipients, prompt, title } = input;
+    const { phase, recipients, prompt, title, branch } = input;
 
     // Validate that the phase exists in the agent's phases configuration
     if (!context.agent.phases) {
@@ -118,6 +124,7 @@ async function executeDelegatePhase(
         request: prompt,
         phase: actualPhaseName, // Include phase in the delegation intent
         phaseInstructions: phase_instructions, // Pass phase instructions to be included in event tags
+        branch, // Pass branch for worktree isolation
     });
 
     logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
