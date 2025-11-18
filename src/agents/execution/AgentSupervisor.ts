@@ -7,6 +7,9 @@ import { getProjectContext, isProjectContextInitialized } from "@/services";
 import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
 import { trace } from "@opentelemetry/api";
+import { getAgentWorktrees, type WorktreeMetadata } from "@/utils/worktree/metadata";
+import { listWorktrees } from "@/utils/git/initializeGitRepo";
+import * as fs from "node:fs/promises";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { ExecutionContext } from "./types";
 
@@ -25,6 +28,7 @@ export class AgentSupervisor {
     private maxContinuationAttempts = 3;
     private lastInvalidReason: string | undefined;
     private phaseValidationDecision: string | undefined;
+    private worktreeCleanupDecision: string | undefined;
 
     constructor(
         private agent: AgentInstance,
@@ -113,6 +117,7 @@ export class AgentSupervisor {
     reset(): void {
         this.invalidReason = undefined;
         this.phaseValidationDecision = undefined;
+        this.worktreeCleanupDecision = undefined;
         // Don't reset continuationAttempts or lastInvalidReason - track across the entire execution
         // Keep toolTracker state to accumulate phase usage
     }
@@ -318,6 +323,62 @@ export class AgentSupervisor {
             }
         }
 
+        // Fourth validation: Check for worktrees created by this agent
+        const worktreeCheck = await this.checkWorktreeCreation();
+        if (worktreeCheck.created) {
+            logger.info("[AgentSupervisor] Worktrees were created, validating cleanup", {
+                agent: this.agent.slug,
+                worktreeCount: worktreeCheck.worktrees.length,
+                branches: worktreeCheck.worktrees.map((wt) => wt.branch),
+            });
+
+            // Ask agent about worktree cleanup
+            const cleanupPrompt = await this.validateWorktreeCleanup(
+                completionEvent.message,
+                worktreeCheck.worktrees
+            );
+
+            if (cleanupPrompt) {
+                // Check if we're stuck in a loop asking about worktree cleanup
+                if (this.lastInvalidReason === cleanupPrompt) {
+                    logger.warn(
+                        "[AgentSupervisor] ⚠️ Agent stuck ignoring worktree cleanup request, forcing completion",
+                        {
+                            agent: this.agent.slug,
+                            attempts: this.continuationAttempts,
+                            worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
+                        }
+                    );
+                    return true;
+                }
+
+                logger.info("[AgentSupervisor] ❌ INVALID: Worktrees need cleanup decision", {
+                    agent: this.agent.slug,
+                    worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
+                    attempts: this.continuationAttempts,
+                });
+
+                if (activeSpan) {
+                    activeSpan.addEvent("supervisor.worktree_cleanup_needed", {
+                        "worktree.count": worktreeCheck.worktrees.length,
+                        "worktree.branches": worktreeCheck.worktrees
+                            .map((wt) => wt.branch)
+                            .join(", "),
+                    });
+                }
+
+                this.invalidReason = cleanupPrompt;
+                this.lastInvalidReason = cleanupPrompt;
+                this.continuationAttempts++;
+                return false;
+            }
+
+            logger.info("[AgentSupervisor] ✓ Worktree cleanup addressed", {
+                agent: this.agent.slug,
+                worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
+            });
+        }
+
         // All validations passed - publish any decisions before completing
         if (this.phaseValidationDecision) {
             logger.info("[AgentSupervisor] 📝 Publishing phase validation decision", {
@@ -327,6 +388,20 @@ export class AgentSupervisor {
             await agentPublisher.conversation(
                 {
                     content: this.phaseValidationDecision,
+                    isReasoning: true,
+                },
+                eventContext
+            );
+        }
+
+        if (this.worktreeCleanupDecision) {
+            logger.info("[AgentSupervisor] 📝 Publishing worktree cleanup decision", {
+                agent: this.agent.slug,
+                decisionLength: this.worktreeCleanupDecision.length,
+            });
+            await agentPublisher.conversation(
+                {
+                    content: this.worktreeCleanupDecision,
                     isReasoning: true,
                 },
                 eventContext
@@ -501,5 +576,125 @@ Respond in one of two formats:
 - "CONTINUE: [brief explanation of what you will do next]" if you should execute your phases for a more complete response. Be specific about which phase you'll execute and why.`;
 
         return { system, user };
+    }
+
+    /**
+     * Check for worktrees created by this agent
+     */
+    async checkWorktreeCreation(): Promise<{ created: boolean; worktrees: WorktreeMetadata[] }> {
+        const agentWorktrees = await getAgentWorktrees(
+            this.context.projectPath,
+            this.agent.pubkey,
+            this.context.conversationId
+        );
+
+        const activeWorktrees: WorktreeMetadata[] = [];
+
+        // Check if these worktrees still exist
+        for (const worktree of agentWorktrees) {
+            try {
+                await fs.access(worktree.path);
+                // Only consider worktrees that haven't been merged or deleted
+                if (!worktree.mergedAt && !worktree.deletedAt) {
+                    activeWorktrees.push(worktree);
+                }
+            } catch {
+                // Worktree path doesn't exist anymore
+                logger.debug("[AgentSupervisor] Worktree path no longer exists", {
+                    branch: worktree.branch,
+                    path: worktree.path,
+                });
+            }
+        }
+
+        logger.info("[AgentSupervisor] Worktree check complete", {
+            agent: this.agent.slug,
+            totalFound: agentWorktrees.length,
+            activeCount: activeWorktrees.length,
+            branches: activeWorktrees.map((wt) => wt.branch),
+        });
+
+        return {
+            created: activeWorktrees.length > 0,
+            worktrees: activeWorktrees,
+        };
+    }
+
+    /**
+     * Validate if worktree cleanup was addressed
+     * @param completionContent - The agent's response
+     * @param worktrees - The worktrees created by this agent
+     * @returns continuation instruction if agent should cleanup worktrees, empty string if addressed
+     */
+    async validateWorktreeCleanup(
+        completionContent: string,
+        worktrees: WorktreeMetadata[]
+    ): Promise<string> {
+        logger.info("[AgentSupervisor] 🔍 Validating worktree cleanup", {
+            agent: this.agent.slug,
+            worktreeCount: worktrees.length,
+            branches: worktrees.map((wt) => wt.branch),
+            responseLength: completionContent.length,
+        });
+
+        // Check if the agent's response mentions any of the worktree branches
+        const mentionedBranches = worktrees.filter((wt) =>
+            completionContent.toLowerCase().includes(wt.branch.toLowerCase())
+        );
+
+        // Check for common cleanup-related keywords
+        const cleanupKeywords = [
+            "merge",
+            "merged",
+            "delete",
+            "deleted",
+            "remove",
+            "removed",
+            "keep",
+            "keeping",
+            "retain",
+            "leave",
+            "worktree",
+            "branch",
+            "cleanup",
+            "clean up",
+        ];
+
+        const hasCleanupKeywords = cleanupKeywords.some((keyword) =>
+            completionContent.toLowerCase().includes(keyword)
+        );
+
+        // If response mentions branches and cleanup keywords, assume it was addressed
+        if (mentionedBranches.length > 0 && hasCleanupKeywords) {
+            logger.info("[AgentSupervisor] ✓ Worktree cleanup appears to be addressed", {
+                agent: this.agent.slug,
+                mentionedBranches: mentionedBranches.map((wt) => wt.branch),
+                hasCleanupKeywords,
+            });
+            this.worktreeCleanupDecision = `Agent addressed worktree cleanup for branches: ${mentionedBranches.map((wt) => wt.branch).join(", ")}`;
+            return "";
+        }
+
+        // Build the cleanup prompt
+        const branchList = worktrees
+            .map((wt) => `- Branch "${wt.branch}" (created from ${wt.parentBranch})`)
+            .join("\n");
+
+        const cleanupPrompt = `You created the following git worktree${worktrees.length > 1 ? "s" : ""} during this task:
+${branchList}
+
+Please specify what should be done with ${worktrees.length > 1 ? "these worktrees" : "this worktree"}:
+- MERGE: If the work is complete and should be merged back to the parent branch
+- DELETE: If the worktree is no longer needed and can be removed
+- KEEP: If the worktree should remain for future work
+
+Use appropriate git commands (git merge, git worktree remove, etc.) to perform the cleanup, or clearly state your decision if you want to keep ${worktrees.length > 1 ? "them" : "it"}.`;
+
+        logger.info("[AgentSupervisor] 📋 Worktree cleanup needed", {
+            agent: this.agent.slug,
+            prompt: cleanupPrompt.substring(0, 200),
+        });
+
+        return cleanupPrompt;
     }
 }

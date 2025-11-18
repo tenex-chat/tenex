@@ -287,6 +287,11 @@ export class AgentEventEncoder {
             }
         }
 
+        // Branch metadata if provided (for worktree support)
+        if ((intent as any).branch) {
+            event.tag(["branch", (intent as any).branch]);
+        }
+
         // Add standard metadata
         this.addStandardTags(event, context);
 
