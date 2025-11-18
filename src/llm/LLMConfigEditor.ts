@@ -1,4 +1,4 @@
-import { configService } from "@/services";
+import { config } from "@/services";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -10,12 +10,10 @@ import { ProviderConfigUI } from "./utils/ProviderConfigUI";
 
 /**
  * LLM Configuration Editor - Simple menu orchestrator
+ * Note: LLM configs are now global only (no project-level llms.json)
  */
 export class LLMConfigEditor {
-    constructor(
-        private configPath: string,
-        private isGlobal = true
-    ) {}
+    constructor() {}
 
     async showMainMenu(): Promise<void> {
         const llmsConfig = await this.loadConfig();
@@ -127,17 +125,11 @@ export class LLMConfigEditor {
     }
 
     private async loadConfig(): Promise<TenexLLMs> {
-        return await configService.loadTenexLLMs(
-            this.isGlobal ? configService.getGlobalPath() : this.configPath
-        );
+        return await config.loadTenexLLMs(config.getGlobalPath());
     }
 
-    private async saveConfig(config: TenexLLMs): Promise<void> {
-        if (this.isGlobal) {
-            await configService.saveGlobalLLMs(config);
-        } else {
-            await configService.saveProjectLLMs(this.configPath, config);
-        }
-        await llmServiceFactory.initializeProviders(config.providers);
+    private async saveConfig(llmsConfig: TenexLLMs): Promise<void> {
+        await config.saveGlobalLLMs(llmsConfig);
+        await llmServiceFactory.initializeProviders(llmsConfig.providers);
     }
 }

@@ -7,7 +7,7 @@ export function setupServicesMock(projectPath = "/test/project"): void {
     mock.module("@/services", () => ({
         getProjectContext: () => ({
             projectPath,
-            configService: {
+            config: {
                 getProjectPath: () => projectPath,
                 getProject: () => ({
                     name: "test-project",

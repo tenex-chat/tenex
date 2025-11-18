@@ -75,8 +75,15 @@ export class RuntimeLifecycle {
      */
     async startRuntime(projectId: string, project: NDKProject): Promise<ProjectRuntime> {
         // Check if already running
-        if (this.activeRuntimes.has(projectId)) {
-            throw new Error(`Runtime already running: ${projectId}`);
+        const existingRuntime = this.activeRuntimes.get(projectId);
+        if (existingRuntime) {
+            const status = existingRuntime.getStatus();
+            if (status.isRunning) {
+                throw new Error(`Runtime already running: ${projectId}`);
+            }
+            // Runtime exists but is not running - remove it and allow restart
+            logger.info(`Removing stale runtime for ${projectId}`);
+            this.activeRuntimes.delete(projectId);
         }
 
         // Check if already starting

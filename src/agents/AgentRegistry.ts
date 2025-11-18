@@ -5,7 +5,7 @@ import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getProjectContext } from "@/services";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
@@ -297,7 +297,7 @@ export class AgentRegistry {
             createLLMService: (options) => {
                 const projectCtx = getProjectContext();
                 const llmLogger = projectCtx.llmLogger.withAgent(storedAgent.name);
-                return configService.createLLMService(
+                return config.createLLMService(
                     llmLogger,
                     agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
                     {
@@ -556,7 +556,7 @@ export class AgentRegistry {
             const projectEvent = ndkProject;
 
             // Load whitelisted pubkeys from config
-            const { config: tenexConfig } = await configService.loadConfig(this.projectPath);
+            const { config: tenexConfig } = await config.loadConfig(this.projectPath);
             const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
 
             await AgentPublisher.publishAgentCreation(
@@ -587,8 +587,8 @@ export class AgentRegistry {
         }
 
         // Load whitelisted pubkeys from config
-        const { config } = await configService.loadConfig(this.projectPath);
-        const whitelistedPubkeys = config.whitelistedPubkeys || [];
+        const { config: tenexConfig } = await config.loadConfig(this.projectPath);
+        const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
 
         // Combine project agents and whitelisted pubkeys for contact list
         const contactList = [...new Set([...projectAgentPubkeys, ...whitelistedPubkeys])];

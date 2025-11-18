@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { StoredAgentData } from "@/agents/types";
 import { ensureDirectory, fileExists } from "@/lib/fs";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
@@ -36,7 +36,7 @@ export class AgentStorage {
     private index: AgentIndex | null = null;
 
     constructor() {
-        this.agentsDir = path.join(os.homedir(), ".tenex", "agents");
+        this.agentsDir = config.getConfigPath("agents");
         this.indexPath = path.join(this.agentsDir, "index.json");
     }
 

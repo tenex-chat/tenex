@@ -51,12 +51,12 @@ describe("ProjectRuntime.start()", () => {
     test("should fail with undefined in allowedPaths", async () => {
         // First, set up MCP config with undefined in allowedPaths
         const configService = await import("@/services/ConfigService");
-        const originalLoadConfig = configService.configService.loadConfig.bind(
-            configService.configService
+        const originalLoadConfig = config.config.loadConfig.bind(
+            config.configService
         );
 
         // Mock loadConfig to return MCP config with undefined in allowedPaths
-        configService.configService.loadConfig = async () => {
+        config.config.loadConfig = async () => {
             const result = await originalLoadConfig();
             result.mcp = {
                 enabled: true,
@@ -92,6 +92,6 @@ describe("ProjectRuntime.start()", () => {
         await expect(runtime.start()).rejects.toThrow(/paths\[0\]/);
 
         // Restore original
-        configService.configService.loadConfig = originalLoadConfig;
+        config.config.loadConfig = originalLoadConfig;
     });
 });

@@ -1,4 +1,5 @@
 import * as os from "node:os";
+import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
@@ -31,7 +32,7 @@ export class RAGDatabaseManager {
         this.dataDir =
             dataDir ||
             process.env.LANCEDB_DATA_DIR ||
-            path.join(os.homedir(), ".tenex", "data", "lancedb");
+            path.join(config.getConfigPath("data"), "lancedb");
 
         logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
     }

@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { getDaemon } from "@/daemon";
 import { TerminalInputManager } from "@/daemon/TerminalInputManager";
 import { getNDK } from "@/nostr/ndkClient";
-import { configService, dynamicToolService } from "@/services";
+import { config, dynamicToolService } from "@/services";
 import { SchedulerService } from "@/services/SchedulerService";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
@@ -25,7 +25,7 @@ export const daemonCommand = new Command("daemon")
         }
 
         // Load configuration
-        const { config: globalConfig, llms: globalLLMs } = await configService.loadConfig(
+        const { config: globalConfig, llms: globalLLMs } = await config.loadConfig(
             options.config ? path.dirname(options.config) : undefined
         );
 
@@ -33,7 +33,7 @@ export const daemonCommand = new Command("daemon")
         logger.initDaemonLogging(globalConfig);
 
         // Get whitelisted pubkeys
-        let whitelistedPubkeys = configService.getWhitelistedPubkeys(
+        let whitelistedPubkeys = config.getWhitelistedPubkeys(
             options.whitelist,
             globalConfig
         );
@@ -56,7 +56,7 @@ export const daemonCommand = new Command("daemon")
             const setupConfig = await runInteractiveSetup();
 
             // Save the setup configuration and reload
-            await configService.saveGlobalConfig(setupConfig);
+            await config.saveGlobalConfig(setupConfig);
             whitelistedPubkeys = setupConfig.whitelistedPubkeys || [];
         }
 

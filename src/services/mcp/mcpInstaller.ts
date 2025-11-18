@@ -1,5 +1,5 @@
 import type { NDKMCPTool } from "@/events/NDKMCPTool";
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 import type { MCPServerConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 
@@ -30,8 +30,8 @@ export async function installMCPServerFromEvent(
     };
 
     // Load existing MCP config from the project's .tenex directory
-    const tenexPath = configService.getProjectPath(projectPath);
-    const mcpConfig = await configService.loadTenexMCP(tenexPath);
+    const tenexPath = config.getProjectPath(projectPath);
+    const mcpConfig = await config.loadTenexMCP(tenexPath);
 
     // Check if this event ID is already installed (only if we have an event ID)
     if (mcpTool.id && (await isMCPToolInstalled(projectPath, mcpTool.id))) {
@@ -57,7 +57,7 @@ export async function installMCPServerFromEvent(
     mcpConfig.servers[serverName] = serverConfig;
 
     // Save config (saveProjectMCP expects the project root path)
-    await configService.saveProjectMCP(projectPath, mcpConfig);
+    await config.saveProjectMCP(projectPath, mcpConfig);
 
     logger.info(`Auto-installed MCP server: ${serverName}`, {
         projectPath,
@@ -72,8 +72,8 @@ export async function installMCPServerFromEvent(
  */
 export async function isMCPToolInstalled(projectPath: string, eventId: string): Promise<boolean> {
     // Load from the project's .tenex directory
-    const tenexPath = configService.getProjectPath(projectPath);
-    const mcpConfig = await configService.loadTenexMCP(tenexPath);
+    const tenexPath = config.getProjectPath(projectPath);
+    const mcpConfig = await config.loadTenexMCP(tenexPath);
 
     // Check if any server has this event ID
     for (const serverConfig of Object.values(mcpConfig.servers)) {
@@ -90,8 +90,8 @@ export async function isMCPToolInstalled(projectPath: string, eventId: string): 
  */
 export async function getInstalledMCPEventIds(projectPath: string): Promise<Set<string>> {
     // Load from the project's .tenex directory
-    const tenexPath = configService.getProjectPath(projectPath);
-    const mcpConfig = await configService.loadTenexMCP(tenexPath);
+    const tenexPath = config.getProjectPath(projectPath);
+    const mcpConfig = await config.loadTenexMCP(tenexPath);
     const eventIds = new Set<string>();
 
     for (const serverConfig of Object.values(mcpConfig.servers)) {
@@ -112,8 +112,8 @@ export async function removeMCPServerByEventId(
     eventId: string
 ): Promise<void> {
     // Load from the project's .tenex directory
-    const tenexPath = configService.getProjectPath(projectPath);
-    const mcpConfig = await configService.loadTenexMCP(tenexPath);
+    const tenexPath = config.getProjectPath(projectPath);
+    const mcpConfig = await config.loadTenexMCP(tenexPath);
 
     // Find and remove servers with this event ID
     let removed = false;
@@ -127,7 +127,7 @@ export async function removeMCPServerByEventId(
 
     if (removed) {
         // Save updated config
-        await configService.saveProjectMCP(projectPath, mcpConfig);
+        await config.saveProjectMCP(projectPath, mcpConfig);
     } else {
         logger.warn(`No MCP server found with event ID ${eventId}`);
     }

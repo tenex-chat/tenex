@@ -5,7 +5,7 @@
  */
 
 import * as path from "node:path";
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -52,7 +52,7 @@ export class MCPManager {
 
         try {
             this.projectPath = projectPath;
-            const config = await configService.loadConfig(projectPath);
+            const config = await config.loadConfig(projectPath);
 
             if (!config.mcp || !config.mcp.enabled) {
                 logger.info("MCP is disabled");

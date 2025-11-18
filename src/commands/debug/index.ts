@@ -12,7 +12,7 @@ import { LLMLogger } from "@/logging/LLMLogger";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import { ProjectContext } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
@@ -60,8 +60,8 @@ async function loadProjectContext(
     const projectId = `31933:${project.pubkey}:${dTag}`;
 
     // Get projects base directory
-    await configService.loadConfig(); // Load global config
-    const projectsBase = configService.getProjectsBase();
+    await config.loadConfig(); // Load global config
+    const projectsBase = config.getProjectsBase();
     const projectPath = path.join(projectsBase, dTag);
     const metadataPath = path.join(path.dirname(projectsBase), ".tenex", "projects", dTag);
 

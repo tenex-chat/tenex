@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { experimental_createMCPClient } from "@ai-sdk/mcp";
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 import { MCPManager } from "../MCPManager";
 
 // Mock modules
 mock.module("@/services", () => ({
-    configService: {
+    config: {
         loadConfig: mock(),
     },
 }));
@@ -92,7 +92,7 @@ describe("MCPManager", () => {
                 },
             };
 
-            (configService.loadConfig as any).mockResolvedValue(mockConfig);
+            (config.loadConfig as any).mockResolvedValue(mockConfig);
 
             await manager.initialize("/test/project");
 
@@ -118,7 +118,7 @@ describe("MCPManager", () => {
                 },
             };
 
-            (configService.loadConfig as any).mockResolvedValue(mockConfig);
+            (config.loadConfig as any).mockResolvedValue(mockConfig);
 
             await manager.initialize("/test/project");
 
@@ -141,7 +141,7 @@ describe("MCPManager", () => {
                 },
             };
 
-            (configService.loadConfig as any).mockResolvedValue(mockConfig);
+            (config.loadConfig as any).mockResolvedValue(mockConfig);
             await manager.initialize("/test/project");
         });
 
@@ -170,7 +170,7 @@ describe("MCPManager", () => {
                 },
             };
 
-            (configService.loadConfig as any).mockResolvedValue(mockConfig);
+            (config.loadConfig as any).mockResolvedValue(mockConfig);
 
             // Mock multiple tools
             mockClient.tools.mockResolvedValue({
@@ -228,7 +228,7 @@ describe("MCPManager", () => {
                 },
             };
 
-            (configService.loadConfig as any).mockResolvedValue(mockConfig);
+            (config.loadConfig as any).mockResolvedValue(mockConfig);
             await manager.initialize("/test/project");
 
             await manager.shutdown();

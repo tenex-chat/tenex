@@ -23,7 +23,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **Registry & Storage**: `AgentRegistry`, `AgentStorage`, and `constants` describe built-in agent definitions, dynamic injection, and on-disk metadata.
 - **Execution (`execution/*`)**: `AgentExecutor`, `AgentSupervisor`, `BrainstormModerator`, and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/services`, `nostr/AgentPublisher`, and `services/DelegationService`.
 - **Utilities & Types**: Provide normalization, context building, and shared typings for consumers such as `event-handler`.
-- **Guideline**: Agents should never import `commands/*` or directly instantiate `ConfigService`; pass configuration/context through constructors.
+- **Guideline**: Agents should never import `commands/*`. For configuration, import `{ config }` from `@/services` and use `config.getConfigPath(subdir)` for paths or `config.loadConfig()` for configuration data; pass loaded config through constructors when needed.
 
 ### Conversations (`src/conversations`)
 - **Persistence**: `persistence/*` offers file-system backed history storage (`ConversationPersistenceService`, `FileSystemAdapter`, `ToolMessageStorage`).
@@ -62,7 +62,7 @@ Use this section to understand each service’s scope and dependencies:
 | --- | --- | --- |
 | `AgentsRegistryService` | `src/services/AgentsRegistryService.ts` | Maintains `~/.tenex/agents-registry.json`, publishes kind 14199 snapshots with project + agent pubkeys. Depends on `lib/fs`, `nostr/ndkClient`, `ConfigService`. |
 | `BrainstormService` | `src/services/BrainstormService.ts` | Coordinates brainstorm phases between moderators/executors, consumes `agents/execution` and `conversations/services`. |
-| `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | Loads, validates, and caches TENEX, LLM, and MCP config files; initializes providers via `llm/LLMServiceFactory`. Should be the only place touching config JSON. |
+| `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services` - never construct `~/.tenex` paths manually. |
 | `DelegationRegistry` | `src/services/DelegationRegistry.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |
 | `DelegationService` | `src/services/DelegationService.ts` | Publishes delegation/ask events via `nostr/AgentPublisher`, waits for responses, enforces policy (self-delegation rules). Requires `conversationCoordinator`. |
 | `DynamicToolService` | `src/services/DynamicToolService.ts` | Watches `~/.tenex/tools`, compiles TS tool factories, and exposes them to the tool registry. Uses Bun file APIs and `agents/execution` contexts. |
@@ -108,6 +108,7 @@ Use this section to understand each service’s scope and dependencies:
 7. **Documentation cadence**: When reorganizing files or adding modules, update both this inventory and `AGENTS.md` in the same PR. Mention the change under “Mixed Patterns & Action Items” until the follow-up refactor completes.
 
 ## Mixed Patterns & Action Items
+- **Configuration Architecture (COMPLETED 2025-01-18)**: Centralized all config path construction through `ConfigService.getConfigPath(subdir)`. Removed singleton pattern - now exports `config` instance. **Breaking change**: `config.json` and `llms.json` are now global-only (`~/.tenex/`); only `mcp.json` remains at project level. Migration path: Users must manually move project-level configs to global. See `ConfigService.ts` for API.
 - **`lib/` vs `utils/` overlap**: `utils/` currently mixes CLI helpers, Git adapters, and platform-agnostic code. Action: audit imports, migrate pure helpers to `lib/`, and scope `utils/` to TENEX-specific helpers. Track files moved here.
 - **`tools/` vs `services/mcp` coupling**: MCP discovery/install logic spans both tool implementations and services. Action: document ownership each time we touch these areas and aim to consolidate under either `services/mcp` (for orchestration) or `tools/implementations` (for tool wrappers).
 - **Daemon UI dependencies**: UI components import some conversation services directly. Action: move data access into daemon stores/controllers and note progress here.

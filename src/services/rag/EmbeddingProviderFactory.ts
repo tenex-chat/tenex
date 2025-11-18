@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { fileExists, readJsonFile } from "@/lib/fs";
-import { ConfigService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import {
     type EmbeddingProvider,
@@ -90,13 +90,11 @@ export class EmbeddingProviderFactory {
      * Load embedding configuration from ConfigService paths
      */
     private static async loadConfiguration(): Promise<EmbeddingConfig> {
-        const configService = ConfigService.getInstance();
-
         try {
             // Try project config first
             const projectPath = process.cwd();
             const projectConfigPath = path.join(
-                configService.getProjectPath(projectPath),
+                config.getProjectPath(projectPath),
                 EmbeddingProviderFactory.EMBED_CONFIG_FILE
             );
 
@@ -114,7 +112,7 @@ export class EmbeddingProviderFactory {
 
             // Fall back to global config
             const globalConfigPath = path.join(
-                configService.getGlobalPath(),
+                config.getGlobalPath(),
                 EmbeddingProviderFactory.EMBED_CONFIG_FILE
             );
 
@@ -175,22 +173,20 @@ export class EmbeddingProviderFactory {
      * Save embedding configuration
      */
     static async saveConfiguration(
-        config: EmbeddingConfig,
+        embeddingConfig: EmbeddingConfig,
         scope: "global" | "project" = "global"
     ): Promise<void> {
-        const configService = ConfigService.getInstance();
-
         const basePath =
             scope === "global"
-                ? configService.getGlobalPath()
-                : configService.getProjectPath(process.cwd());
+                ? config.getGlobalPath()
+                : config.getProjectPath(process.cwd());
 
         const configPath = path.join(basePath, EmbeddingProviderFactory.EMBED_CONFIG_FILE);
 
         // Don't save API key to file
         const configToSave = {
-            provider: config.provider,
-            model: config.model,
+            provider: embeddingConfig.provider,
+            model: embeddingConfig.model,
         };
 
         const { writeJsonFile, ensureDirectory } = await import("@/lib/fs");
@@ -198,7 +194,7 @@ export class EmbeddingProviderFactory {
         await writeJsonFile(configPath, configToSave);
 
         logger.info(
-            `Embedding configuration saved to ${scope} config: ${config.provider}/${config.model}`
+            `Embedding configuration saved to ${scope} config: ${embeddingConfig.provider}/${embeddingConfig.model}`
         );
     }
 }

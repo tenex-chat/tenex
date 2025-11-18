@@ -12,9 +12,21 @@ All notable changes to this project will be documented in this file.
 - Commit of pending changes for release
 - Updated tool registry and documentation
 
-## [Unreleased] - 2025-01-25
+## [Unreleased]
 
-### Removed
+### Changed - 2025-01-18
+- **BREAKING: Configuration Architecture Refactored**
+  - All configuration now centralized through `ConfigService`
+  - `config.json` and `llms.json` are now **global-only** (stored in `~/.tenex/`)
+  - Only `mcp.json` remains at project level (`{project}/.tenex/mcp.json`)
+  - Removed singleton pattern - ConfigService now exports `config` instance
+  - Added `config.getConfigPath(subdir?)` for centralized path construction
+  - All `~/.tenex` path construction now goes through ConfigService
+  - **Migration Required**: Users must manually move project-level `config.json` and `llms.json` to `~/.tenex/`
+  - Updated 28+ files to use new `config` import pattern
+  - LLM configuration CLI (`tenex llm`) is now global-only (removed `--project` flag)
+
+### Removed - 2025-01-25
 - Removed `write_context_file` tool from the tool registry - this tool was unused and maintained project context that is now handled differently
 - Removed `PROJECT.md` system prompt fragment (30-project-md.ts) - project context is now managed through other mechanisms
 - Cleaned up all references to these deprecated components from the codebase

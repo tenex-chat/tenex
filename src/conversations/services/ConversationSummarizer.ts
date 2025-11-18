@@ -3,7 +3,7 @@ import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { configService } from "@/services";
+import { config } from "@/services";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { z } from "zod";
 
@@ -13,7 +13,7 @@ export class ConversationSummarizer {
     async summarizeAndPublish(conversation: Conversation): Promise<void> {
         try {
             // Get LLM configuration
-            const { llms } = await configService.loadConfig();
+            const { llms } = await config.loadConfig();
             const metadataConfig =
                 llms.configurations.metadata ||
                 (llms.default ? llms.configurations[llms.default] : undefined);

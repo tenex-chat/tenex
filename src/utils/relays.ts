@@ -1,4 +1,4 @@
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 
 /**
  * Default Nostr relay URLs for TENEX
@@ -40,7 +40,7 @@ export function getRelayUrls(): string[] {
 
     // Then check config file
     try {
-        const config = configService.getConfig();
+        const config = config.getConfig();
         if (config.relays && config.relays.length > 0) {
             const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
             if (urls.length > 0) {
