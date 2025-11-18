@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { configService } from "@/services";
-import { experimental_createMCPClient } from "ai";
-import { Experimental_StdioMCPTransport } from "ai/mcp-stdio";
+import { experimental_createMCPClient } from "@ai-sdk/mcp";
+import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 import { MCPManager } from "../MCPManager";
 
 // Mock modules
@@ -11,12 +11,13 @@ mock.module("@/services", () => ({
     },
 }));
 
-mock.module("ai", () => ({
-    experimental_createMCPClient: mock(),
+
+mock.module("@ai-sdk/mcp/mcp-stdio", () => ({
+    Experimental_StdioMCPTransport: mock(),
 }));
 
-mock.module("ai/mcp-stdio", () => ({
-    Experimental_StdioMCPTransport: mock(),
+mock.module("@ai-sdk/mcp", () => ({
+    experimental_createMCPClient: mock(),
 }));
 
 describe("MCPManager", () => {
@@ -53,6 +54,10 @@ describe("MCPManager", () => {
         // Setup mocks
         (Experimental_StdioMCPTransport as any).mockImplementation(() => mockTransport);
         (experimental_createMCPClient as any).mockResolvedValue(mockClient);
+
+        // Clear mock history before each test
+        (Experimental_StdioMCPTransport as any).mockClear();
+        (experimental_createMCPClient as any).mockClear();
 
         manager = MCPManager.getInstance();
     });
