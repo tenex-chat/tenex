@@ -6,6 +6,7 @@ import type { ConversationCoordinator } from "../conversations";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "../services";
 import { formatAnyError } from "../utils/error-formatter";
+import { getCurrentBranch } from "../utils/git/initializeGitRepo";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 
@@ -57,11 +58,17 @@ export const handleNewConversation = async (
         // Use first agent for kind 11 (new conversation)
         const targetAgent = targetAgents[0];
 
+        // Get current branch for new conversation (no branch tag expected for new conversations)
+        const projectPath = context.projectPath;
+        const currentBranch = await getCurrentBranch(projectPath);
+
         // Execute with the appropriate agent
         await context.agentExecutor.execute({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath: context.projectPath,
+            projectPath,
+            workingDirectory: projectPath, // New conversations always use main worktree
+            currentBranch,
             triggeringEvent: event,
             conversationCoordinator: context.conversationCoordinator,
             getConversation: () => context.conversationCoordinator.getConversation(conversation.id),

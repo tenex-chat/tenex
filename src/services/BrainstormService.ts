@@ -15,6 +15,7 @@ import {
 } from "@/nostr/constants";
 import { getNDK } from "@/nostr/ndkClient";
 import type { ProjectContext } from "@/services/ProjectContext";
+import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { safeParseJSON } from "@/utils/json-parser";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -239,10 +240,15 @@ export class BrainstormService {
             name: participant.name,
         });
 
+        const projectPath = this.projectContext.agentRegistry.getBasePath();
+        const currentBranch = await getCurrentBranch(projectPath);
+
         const context: ExecutionContext = {
             agent: participant,
             conversationId: conversation.id,
-            projectPath: this.projectContext.agentRegistry.getBasePath(),
+            projectPath,
+            workingDirectory: projectPath, // Brainstorm always uses main worktree
+            currentBranch,
             triggeringEvent: event,
             conversationCoordinator: coordinator,
             getConversation: () => coordinator.getConversation(conversation.id),
@@ -281,10 +287,15 @@ export class BrainstormService {
 
             // Execute moderator with full context using the real brainstorm root
             const coordinator = await this.getConversationCoordinator();
+            const projectPath = this.projectContext.agentRegistry.getBasePath();
+            const currentBranch = await getCurrentBranch(projectPath);
+
             const context: ExecutionContext = {
                 agent: moderator,
                 conversationId: conversation.id,
-                projectPath: this.projectContext.agentRegistry.getBasePath(),
+                projectPath,
+                workingDirectory: projectPath, // Brainstorm always uses main worktree
+                currentBranch,
                 triggeringEvent: brainstormRoot, // Use the real brainstorm root as triggering event
                 conversationCoordinator: coordinator,
                 getConversation: () => coordinator.getConversation(conversation.id),

@@ -7,10 +7,12 @@ import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/n
 export interface ExecutionContext {
     agent: AgentInstance;
     conversationId: string;
-    projectPath: string;
+    projectPath: string; // Base project path (e.g., ~/tenex/{dTag}/main)
+    workingDirectory: string; // Actual working directory - worktree path (e.g., ~/tenex/{dTag}/feature-branch)
+    currentBranch: string; // Current git branch/worktree name (e.g., "main" or "feature-branch")
     triggeringEvent: NDKEvent;
     conversationCoordinator: ConversationCoordinator;
-    agentPublisher: AgentPublisher; // Required: shared publisher instance for consistent event ordering
+    agentPublisher?: AgentPublisher; // Injected by AgentExecutor - shared publisher instance for consistent event ordering
     isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
     additionalSystemMessage?: string; // System message to add for retries (used by AgentSupervisor)
     debug?: boolean; // True when running in debug mode - enables additional output like event IDs
