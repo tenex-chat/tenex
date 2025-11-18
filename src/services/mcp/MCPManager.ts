@@ -9,15 +9,15 @@ import { configService } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
+import type { CoreTool } from "ai";
 import {
     type experimental_MCPClient,
     type experimental_MCPReadResourceResult,
     type experimental_MCPResource,
     type experimental_MCPResourceTemplate,
     experimental_createMCPClient,
-} from "ai";
-import type { CoreTool } from "ai";
-import { Experimental_StdioMCPTransport } from "ai/mcp-stdio";
+} from "@ai-sdk/mcp";
+import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 
 interface MCPClientEntry {
     client: experimental_MCPClient;
@@ -54,14 +54,17 @@ export class MCPManager {
 
             if (!config.mcp || !config.mcp.enabled) {
                 logger.info("MCP is disabled");
+                this.isInitialized = true;
                 return;
             }
 
             // Enable resources as tools globally
             this.includeResourcesInTools = true;
 
-            await this.startServers(config.mcp);
-            await this.refreshToolCache();
+            if (config.mcp.servers) {
+                await this.startServers(config.mcp);
+                await this.refreshToolCache();
+            }
             this.isInitialized = true;
 
             logger.info("MCP manager initialized with resources as tools enabled");
