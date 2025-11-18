@@ -391,8 +391,11 @@ async function handleReplyLogic(
                 try {
                     currentBranch = await getCurrentBranch(projectPath);
                 } catch (error) {
-                    logger.error("Failed to get current branch, using 'main'", { projectPath, error });
-                    currentBranch = "main";
+                    logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
+                    // Try fallback branch names
+                    currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
+                        .then(() => "main")
+                        .catch(() => "master");
                 }
             }
         } else {
@@ -401,8 +404,11 @@ async function handleReplyLogic(
             try {
                 currentBranch = await getCurrentBranch(projectPath);
             } catch (error) {
-                logger.error("Failed to get current branch, using 'main'", { projectPath, error });
-                currentBranch = "main";
+                logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
+                // Try fallback branch names
+                currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
+                    .then(() => "main")
+                    .catch(() => "master");
             }
         }
 

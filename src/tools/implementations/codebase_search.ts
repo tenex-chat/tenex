@@ -65,7 +65,7 @@ async function executeCodebaseSearch(
     });
 
     const results: SearchResult[] = [];
-    const projectPath = context.projectPath;
+    const projectPath = context.workingDirectory;
 
     try {
         // Search by filename if requested
