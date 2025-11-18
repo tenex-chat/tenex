@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@/utils/logger";
-import { ConfigService } from "@/services";
+import { config } from "@/services";
 
 /**
  * Metadata for a git worktree
@@ -25,8 +25,7 @@ export interface WorktreeMetadata {
 export async function getWorktreeMetadataPath(projectPath: string): Promise<string> {
   // Extract dTag from project path (last segment of path)
   const dTag = path.basename(projectPath);
-  const configService = ConfigService.getInstance();
-  const metadataDir = path.join(configService.getProjectsBase(), dTag);
+  const metadataDir = path.join(config.getProjectsBase(), dTag);
 
   // Ensure the metadata directory exists
   await fs.mkdir(metadataDir, { recursive: true });

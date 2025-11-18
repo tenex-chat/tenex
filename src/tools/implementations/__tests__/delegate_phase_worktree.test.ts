@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { listWorktrees, getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { exec } from "node:child_process";
@@ -8,6 +8,27 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 const execAsync = promisify(exec);
+
+// Mock ConfigService for metadata tests
+const MockConfigService = class {
+    getProjectsBase() {
+        return path.join(os.tmpdir(), "tenex-test-projects");
+    }
+    getConfigPath(subdir?: string) {
+        return path.join(os.tmpdir(), "tenex-test-config", subdir || "");
+    }
+    getGlobalPath() {
+        return path.join(os.tmpdir(), "tenex-test-config");
+    }
+    getConfig() {
+        return {};
+    }
+};
+
+mock.module("@/services/ConfigService", () => ({
+    ConfigService: MockConfigService,
+    config: new MockConfigService()
+}));
 
 describe("delegate_phase worktree creation", () => {
     let testRepoPath: string;
@@ -64,5 +85,31 @@ describe("delegate_phase worktree creation", () => {
 
         const worktrees = await listWorktrees(mockContext.projectPath);
         expect(worktrees.some(wt => wt.branch === branchName)).toBe(true);
+    });
+
+    test("tracks worktree metadata when created", async () => {
+        const branchName = `feature-meta-${Date.now()}`;
+        const { createWorktree } = await import("@/utils/git/initializeGitRepo");
+        const { trackWorktreeCreation, loadWorktreeMetadata } =
+            await import("@/utils/worktree/metadata");
+
+        const worktreePath = await createWorktree(
+            mockContext.projectPath,
+            branchName,
+            mockContext.currentBranch
+        );
+
+        await trackWorktreeCreation(mockContext.projectPath, {
+            path: worktreePath,
+            branch: branchName,
+            createdBy: mockContext.agent.pubkey,
+            conversationId: mockContext.conversationId,
+            parentBranch: mockContext.currentBranch,
+        });
+
+        const metadata = await loadWorktreeMetadata(mockContext.projectPath);
+        expect(metadata[branchName]).toBeDefined();
+        expect(metadata[branchName].createdBy).toBe(mockContext.agent.pubkey);
+        expect(metadata[branchName].conversationId).toBe(mockContext.conversationId);
     });
 });
