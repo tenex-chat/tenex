@@ -41,6 +41,45 @@ async function executeDelegatePhase(
 ): Promise<DelegatePhaseOutput> {
     const { phase, recipients, prompt, title, branch } = input;
 
+    // Handle worktree creation if branch specified
+    let worktreePath: string | undefined;
+
+    if (branch) {
+        const { createWorktree } = await import("@/utils/git/initializeGitRepo");
+        const { trackWorktreeCreation } = await import("@/utils/worktree/metadata");
+
+        // Get current branch as parent
+        const parentBranch = context.currentBranch;
+
+        try {
+            // Create the worktree
+            worktreePath = await createWorktree(context.projectPath, branch, parentBranch);
+
+            // Track metadata
+            await trackWorktreeCreation(context.projectPath, {
+                path: worktreePath,
+                branch,
+                createdBy: context.agent.pubkey,
+                conversationId: context.conversationId,
+                parentBranch,
+            });
+
+            logger.info("Created worktree for delegation", {
+                branch,
+                path: worktreePath,
+                parentBranch,
+                phase,
+            });
+        } catch (error) {
+            logger.error("Failed to create worktree", {
+                branch,
+                parentBranch,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            throw new Error(`Failed to create worktree "${branch}": ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     // Validate that the phase exists in the agent's phases configuration
     if (!context.agent.phases) {
         throw new Error(
@@ -133,6 +172,18 @@ async function executeDelegatePhase(
         responseCount: responses.responses.length,
         mode: "synchronous",
     });
+
+    // Add worktree info to responses if created
+    if (worktreePath && branch) {
+        return {
+            ...responses,
+            worktree: {
+                branch,
+                path: worktreePath,
+                message: `Created worktree "${branch}" at ${worktreePath}`,
+            },
+        };
+    }
 
     return responses;
 }
