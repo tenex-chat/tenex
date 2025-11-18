@@ -21,7 +21,7 @@ export async function initNDK(): Promise<void> {
         }
     }
 
-    const relays = getRelayUrls();
+    const relays = await getRelayUrls();
 
     ndk = new NDK({
         explicitRelayUrls: [...relays],
