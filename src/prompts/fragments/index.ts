@@ -17,6 +17,7 @@ import "./20-voice-mode";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
+import { worktreeContextFragment } from "./30-worktree-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -45,6 +46,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(retrievedLessonsFragment);
     fragmentRegistry.register(ragInstructionsFragment);
     fragmentRegistry.register(mcpResourcesFragment);
+    fragmentRegistry.register(worktreeContextFragment);
 }
 
 // Auto-register all fragments on import

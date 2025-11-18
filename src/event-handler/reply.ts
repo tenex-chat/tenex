@@ -388,12 +388,22 @@ async function handleReplyLogic(
                     expectedPath: worktreePath
                 });
                 workingDirectory = projectPath;
-                currentBranch = await getCurrentBranch(projectPath);
+                try {
+                    currentBranch = await getCurrentBranch(projectPath);
+                } catch (error) {
+                    logger.error("Failed to get current branch, using 'main'", { projectPath, error });
+                    currentBranch = "main";
+                }
             }
         } else {
             // No branch tag - use current worktree
             workingDirectory = projectPath;
-            currentBranch = await getCurrentBranch(projectPath);
+            try {
+                currentBranch = await getCurrentBranch(projectPath);
+            } catch (error) {
+                logger.error("Failed to get current branch, using 'main'", { projectPath, error });
+                currentBranch = "main";
+            }
         }
 
         // Build execution context for this agent
