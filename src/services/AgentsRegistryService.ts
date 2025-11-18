@@ -2,7 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { getNDK } from "@/nostr/ndkClient";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
@@ -17,7 +17,7 @@ export type Registry = Record<string, { pubkey: string }[]>;
  * whitelisted pubkeys as "p" tags and agent pubkeys as "agent" tags.
  */
 export class AgentsRegistryService {
-    private readonly registryPath = path.join(os.homedir(), ".tenex", "agents-registry.json");
+    private readonly registryPath = path.join(config.getConfigPath(), "agents-registry.json");
 
     constructor() {
         // ensure directory exists on construction
@@ -62,7 +62,7 @@ export class AgentsRegistryService {
     private async publishSnapshot(projectTag: string): Promise<void> {
         const reg = await this.load();
         const agents = reg[projectTag] ?? [];
-        const tenexNsec = await configService.ensureBackendPrivateKey();
+        const tenexNsec = await config.ensureBackendPrivateKey();
         const signer = new NDKPrivateKeySigner(tenexNsec);
         const ndk = getNDK();
 
@@ -71,9 +71,9 @@ export class AgentsRegistryService {
         });
 
         // whitelisted pubs from config (no CLI override here)
-        const whitelisted = configService.getWhitelistedPubkeys(
+        const whitelisted = config.getWhitelistedPubkeys(
             undefined,
-            configService.getConfig()
+            config.getConfig()
         );
         for (const pk of whitelisted) {
             ev.tag(["p", pk]);

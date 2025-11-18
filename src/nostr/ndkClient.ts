@@ -1,4 +1,4 @@
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 import { ReplaceableEventService } from "@/services/replaceable-event";
 import { logger } from "@/utils/logger";
 import { getRelayUrls } from "@/utils/relays";
@@ -34,7 +34,7 @@ export async function initNDK(): Promise<void> {
 
     // Initialize TENEX announcement service
     try {
-        const privateKey = await configService.ensureBackendPrivateKey();
+        const privateKey = await config.ensureBackendPrivateKey();
         tenexAnnouncementService = new ReplaceableEventService(ndk, privateKey, 14199);
         await tenexAnnouncementService.initialize();
         logger.debug(

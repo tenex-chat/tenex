@@ -1,4 +1,4 @@
-import { configService } from "@/services";
+import { config } from "@/services";
 import { logger } from "@/utils/logger";
 import { SUMMARIZATION_DEFAULTS } from "../constants";
 import type { Conversation } from "../types";
@@ -18,9 +18,9 @@ export class SummarizationTimerManager {
      * Initialize the timer manager and load configuration
      */
     async initialize(): Promise<void> {
-        const { config } = await configService.loadConfig();
+        const { config: tenexConfig } = await config.loadConfig();
         this.timeoutMs =
-            config.summarization?.inactivityTimeout || SUMMARIZATION_DEFAULTS.INACTIVITY_TIMEOUT_MS;
+            tenexConfig.summarization?.inactivityTimeout || SUMMARIZATION_DEFAULTS.INACTIVITY_TIMEOUT_MS;
         logger.info(`[SummarizationTimerManager] Initialized with ${this.timeoutMs}ms timeout`);
     }
 

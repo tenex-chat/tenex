@@ -195,15 +195,15 @@ describe("mcpInstaller", () => {
             await installMCPServerFromEvent(projectPath, mcpTool2);
 
             // Also manually add a tool without event ID using configService
-            const { configService } = await import("@/services/ConfigService");
-            const tenexPath = configService.getProjectPath(projectPath);
-            const mcpConfig = await configService.loadTenexMCP(tenexPath);
+            const { config } = await import("@/services/ConfigService");
+            const tenexPath = config.getProjectPath(projectPath);
+            const mcpConfig = await config.loadTenexMCP(tenexPath);
             mcpConfig.servers["manual-tool"] = {
                 command: "python",
                 args: ["server2.py"],
                 // No eventId
             };
-            await configService.saveProjectMCP(projectPath, mcpConfig);
+            await config.saveProjectMCP(projectPath, mcpConfig);
 
             const eventIds = await getInstalledMCPEventIds(projectPath);
             expect(eventIds.size).toBe(2);
@@ -253,9 +253,9 @@ describe("mcpInstaller", () => {
             await removeMCPServerByEventId(projectPath, "remove-me");
 
             // Check the result using configService
-            const { configService } = await import("@/services/ConfigService");
-            const tenexPath = configService.getProjectPath(projectPath);
-            const updatedConfig = await configService.loadTenexMCP(tenexPath);
+            const { config } = await import("@/services/ConfigService");
+            const tenexPath = config.getProjectPath(projectPath);
+            const updatedConfig = await config.loadTenexMCP(tenexPath);
 
             expect(updatedConfig.servers["tool-to-remove"]).toBeUndefined();
             expect(updatedConfig.servers["tool-to-keep"]).toBeDefined();

@@ -2,28 +2,28 @@ import path from "node:path";
 import { directoryExists, ensureDirectory } from "./filesystem.js";
 
 /**
- * Get paths for common .tenex files
+ * Get paths for common project-level .tenex directories
+ * Note: config.json and llms.json are now global only (in ~/.tenex)
+ * Only mcp.json remains at the project level
  */
 export function getTenexPaths(projectPath: string): {
     tenexDir: string;
-    configJson: string;
-    llmsJson: string;
     agentsDir: string;
     rulesDir: string;
     conversationsDir: string;
+    mcpJson: string;
 } {
     const tenexDir = path.join(projectPath, ".tenex");
     return {
         tenexDir,
-        configJson: path.join(tenexDir, "config.json"),
-        llmsJson: path.join(tenexDir, "llms.json"),
         agentsDir: path.join(tenexDir, "agents"),
         rulesDir: path.join(tenexDir, "rules"),
         conversationsDir: path.join(tenexDir, "conversations"),
+        mcpJson: path.join(tenexDir, "mcp.json"),
     };
 }
 
-// Configuration operations removed - use ConfigService from @/services instead
+// Use ConfigService from @/services for config.json and llms.json (global only)
 
 /**
  * Check if a project has been initialized (has .tenex directory)

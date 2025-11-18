@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { config } from "@/services/ConfigService";
 import * as os from "node:os";
 import * as path from "node:path";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -28,7 +29,7 @@ export class SchedulerService {
 
     private constructor() {
         // Use global location for scheduled tasks since it's a singleton
-        const tenexDir = path.join(os.homedir(), ".tenex");
+        const tenexDir = config.getConfigPath();
         this.taskFilePath = path.join(tenexDir, "scheduled_tasks.json");
     }
 

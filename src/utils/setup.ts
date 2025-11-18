@@ -1,5 +1,5 @@
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
-import { configService } from "@/services";
+import { config } from "@/services";
 import type { TenexConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";
@@ -10,7 +10,7 @@ export async function runInteractiveSetup(): Promise<TenexConfig> {
     logger.info("Let's configure your daemon to get started.\n");
 
     // Load current configuration to check what's missing
-    const { config: currentConfig, llms: currentLLMs } = await configService.loadConfig();
+    const { config: currentConfig, llms: currentLLMs } = await config.loadConfig();
     const needsPubkeys =
         !currentConfig.whitelistedPubkeys || currentConfig.whitelistedPubkeys.length === 0;
     const needsLLMs =
@@ -23,29 +23,29 @@ export async function runInteractiveSetup(): Promise<TenexConfig> {
         pubkeys = await promptForPubkeys();
     }
 
-    const config: TenexConfig = {
+    const tenexConfig: TenexConfig = {
         whitelistedPubkeys: pubkeys,
     };
 
     // Step 2: Save basic configuration
-    await configService.saveGlobalConfig(config);
+    await config.saveGlobalConfig(tenexConfig);
 
     // Step 3: Set up LLM configurations if needed
     if (needsLLMs) {
         logger.info(chalk.yellow("\nStep 2: LLM Configuration"));
         logger.info("You need at least one LLM configuration to run projects.\n");
 
-        const llmEditor = new LLMConfigEditor("", true); // Global config
+        const llmEditor = new LLMConfigEditor();
         await llmEditor.runOnboardingFlow();
     }
 
     logger.info(chalk.green("\n✅ Setup complete!"));
-    logger.info(chalk.green(`Configuration saved to: ${configService.getGlobalPath()}/`));
+    logger.info(chalk.green(`Configuration saved to: ${config.getGlobalPath()}/`));
     logger.info(
         chalk.gray("\nYou can now run 'tenex daemon' to start the daemon with your configuration.")
     );
 
-    return config;
+    return tenexConfig;
 }
 
 async function promptForPubkeys(): Promise<string[]> {

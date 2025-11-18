@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ConversationCoordinator } from "@/conversations";
@@ -55,7 +56,7 @@ export class ProjectRuntime {
         this.projectPath = path.join(projectsBase, dTag);
 
         // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
-        this.metadataPath = path.join(path.dirname(projectsBase), ".tenex", "projects", dTag);
+        this.metadataPath = path.join(config.getConfigPath("projects"), dTag);
     }
 
     /**
