@@ -247,6 +247,19 @@ export async function createWorktree(
             return worktreePath;
         }
 
+        // Check if path exists on filesystem
+        try {
+            await fs.access(worktreePath);
+            // Path exists but not in worktree list - this is an error state
+            throw new Error(
+                `Directory "${worktreePath}" exists but is not a registered git worktree. ` +
+                `Remove it manually or use a different branch name.`
+            );
+        } catch (err: any) {
+            if (err.code !== 'ENOENT') throw err;
+            // Path doesn't exist - safe to create
+        }
+
         // Create worktree
         await execAsync(
             `git worktree add -b "${branchName}" "${worktreePath}" "${baseBranch}"`,
