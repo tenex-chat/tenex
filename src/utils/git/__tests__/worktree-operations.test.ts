@@ -50,7 +50,7 @@ describe("Git Worktree Operations", () => {
     });
 
     test("createWorktree creates new worktree", async () => {
-        const branchName = "feature-test";
+        const branchName = `feature-test-${Date.now()}`;
         const currentBranch = await getCurrentBranch(testRepoPath);
 
         const worktreePath = await createWorktree(testRepoPath, branchName, currentBranch);
