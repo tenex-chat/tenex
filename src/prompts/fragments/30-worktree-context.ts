@@ -3,7 +3,6 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { listWorktrees } from "@/utils/git/initializeGitRepo";
 import { loadWorktreeMetadata } from "@/utils/worktree/metadata";
-import * as path from "node:path";
 
 /**
  * Worktree context fragment for agents.

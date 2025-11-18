@@ -242,7 +242,7 @@ export async function createWorktree(
 
         // Check if worktree already exists
         const existingWorktrees = await listWorktrees(projectPath);
-        if (existingWorktrees.some(wt => wt.branch === branchName)) {
+        if (existingWorktrees.some((wt) => wt.branch === branchName)) {
             logger.info("Worktree already exists", { branchName, path: worktreePath });
             return worktreePath;
         }
@@ -253,16 +253,16 @@ export async function createWorktree(
             // Path exists but not in worktree list - this is an error state
             throw new Error(
                 `Directory "${worktreePath}" exists but is not a registered git worktree. ` +
-                `Remove it manually or use a different branch name.`
+                "Remove it manually or use a different branch name."
             );
-        } catch (err: any) {
-            if (err.code !== 'ENOENT') throw err;
+        } catch (err: unknown) {
+            if (err instanceof Error && "code" in err && err.code !== "ENOENT") throw err;
             // Path doesn't exist - safe to create
         }
 
         // Create worktree
         await execAsync(
-            `git worktree add -b "${branchName}" "${worktreePath}" "${baseBranch}"`,
+            `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
             { cwd: projectPath }
         );
 
