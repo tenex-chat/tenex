@@ -3,7 +3,7 @@ import { startExecutionTime, stopExecutionTime } from "@/conversations/execution
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { LLMLogger } from "@/logging/LLMLogger";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import type { ModelMessage } from "ai";
@@ -143,4 +143,4 @@ export function createGeminiCliTool(context: ExecutionContext): ReturnType<typeo
             }
         },
     });
-}
+} 

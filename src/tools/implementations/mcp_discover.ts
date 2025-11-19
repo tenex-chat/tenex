@@ -106,7 +106,7 @@ async function executeMcpDiscover(
 }
 
 // AI SDK tool factory
-export function createMcpDiscoverTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createMcpDiscoverTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",
@@ -114,7 +114,7 @@ export function createMcpDiscoverTool(context: ExecutionContext): ReturnType<typ
         execute: async (input: McpDiscoverInput) => {
             return await executeMcpDiscover(input, context);
         },
-    });
+    }) as AISdkTool;
 }
 
 /**

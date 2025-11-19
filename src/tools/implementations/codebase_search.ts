@@ -387,5 +387,5 @@ export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return toolInstance;
+    return toolInstance as AISdkTool;
 }

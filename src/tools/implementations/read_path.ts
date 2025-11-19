@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
 import { resolveAndValidatePath } from "../utils";
@@ -93,5 +93,5 @@ export function createReadPathTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return toolInstance;
+    return toolInstance as AISdkTool;
 }

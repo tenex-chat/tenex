@@ -55,4 +55,4 @@ export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkT
             );
         },
     });
-}
+} 
