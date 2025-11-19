@@ -143,16 +143,23 @@ export async function loadAgentIntoRegistry(
         logger.info(`Updated agent slug to ${customSlug}`);
     }
 
-    // Ensure agent is associated with this project
+    // Ensure agent is associated with this project using storage method
     const projectDTag = registry.getProjectDTag();
-    if (projectDTag && !storedAgent.projects.includes(projectDTag)) {
-        storedAgent.projects.push(projectDTag);
-        await agentStorage.saveAgent(storedAgent);
-        logger.debug(`Associated agent ${storedAgent.slug} with project ${projectDTag}`);
+    const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+    const pubkey = signer.pubkey;
+
+    if (projectDTag) {
+        await agentStorage.addAgentToProject(pubkey, projectDTag);
+    }
+
+    // Reload agent after project association to ensure fresh state
+    const freshAgent = await agentStorage.loadAgent(pubkey);
+    if (!freshAgent) {
+        throw new Error(`Agent ${storedAgent.slug} disappeared after project association`);
     }
 
     // Create instance and add to registry
-    const instance = createAgentInstance(storedAgent, registry);
+    const instance = createAgentInstance(freshAgent, registry);
     registry.addAgent(instance);
 
     logger.info(

@@ -109,7 +109,6 @@ export class ProjectRuntime {
 
             // Create project context directly (don't use global singleton)
             this.context = new ProjectContext(this.project, agentRegistry, llmLogger);
-            await agentRegistry.persistPMStatus();
 
             // Load MCP tools from project event
             await this.initializeMCPTools();

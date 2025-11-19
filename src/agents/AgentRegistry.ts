@@ -229,32 +229,6 @@ export class AgentRegistry {
     }
 
     /**
-     * Persist PM status and tool assignments to unified ~/.tenex/agents/ storage.
-     * PM status is derived from project tags at runtime, but tool assignments are stored.
-     */
-    async persistPMStatus(): Promise<void> {
-        if (!this.pmPubkey) {
-            logger.debug("No PM pubkey set, skipping persist");
-            return;
-        }
-
-        // Save updated tool assignments for all agents in this project
-        for (const agent of this.agents.values()) {
-            try {
-                const storedAgent = await agentStorage.loadAgent(agent.pubkey);
-                if (storedAgent) {
-                    storedAgent.tools = agent.tools;
-                    await agentStorage.saveAgent(storedAgent);
-                }
-            } catch (error) {
-                logger.error(`Failed to persist tools for agent ${agent.slug}`, { error });
-            }
-        }
-
-        logger.debug("Persisted PM status and tool assignments");
-    }
-
-    /**
      * Remove an agent from the current project
      */
     async removeAgentFromProject(slug: string): Promise<boolean> {
@@ -331,59 +305,4 @@ export class AgentRegistry {
     }
 
 
-    /**
-     * Republish kind:0 events for all agents
-     */
-    async republishAllAgentProfiles(ndkProject: NDKProject): Promise<void> {
-        const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
-        const projectEvent = ndkProject;
-
-        // Collect all agent pubkeys in this project
-        const projectAgentPubkeys: string[] = [];
-        for (const agent of this.agents.values()) {
-            projectAgentPubkeys.push(agent.pubkey);
-        }
-
-        // Load whitelisted pubkeys from config
-        const { config: tenexConfig } = await config.loadConfig(this.projectPath);
-        const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
-
-        // Combine project agents and whitelisted pubkeys for contact list
-        const contactList = [...new Set([...projectAgentPubkeys, ...whitelistedPubkeys])];
-
-        // Republish kind:0 and kind:3 for each agent
-        for (const agent of this.agents.values()) {
-            try {
-                // Prepare metadata for agents without NDKAgentDefinition
-                const agentMetadata = !agent.eventId
-                    ? {
-                          description: agent.description,
-                          instructions: agent.instructions,
-                          useCriteria: agent.useCriteria,
-                          phases: agent.phases,
-                      }
-                    : undefined;
-
-                AgentPublisher.publishAgentProfile(
-                    agent.signer,
-                    agent.name,
-                    agent.role,
-                    projectTitle,
-                    projectEvent,
-                    agent.eventId,
-                    agentMetadata,
-                    whitelistedPubkeys
-                );
-
-                // Publish contact list
-                const agentContactList = contactList.filter((pubkey) => pubkey !== agent.pubkey);
-                AgentPublisher.publishContactList(agent.signer, agentContactList);
-            } catch (error) {
-                logger.error(`Failed to republish events for agent: ${agent.slug}`, {
-                    error: formatAnyError(error),
-                    agentName: agent.name,
-                });
-            }
-        }
-    }
 }

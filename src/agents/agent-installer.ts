@@ -1,4 +1,4 @@
-import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
+import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
 import { getDefaultToolsForAgent } from "@/agents/constants";
 import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
@@ -123,12 +123,21 @@ export async function installAgentFromNostr(
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
 
-    // Create StoredAgent with empty projects array (will be set by loader)
-    const storedAgent: StoredAgent = {
-        ...agentData,
+    // Create StoredAgent using factory
+    const storedAgent = createStoredAgent({
         nsec: signer.nsec,
+        slug: agentData.slug,
+        name: agentData.name,
+        role: agentData.role,
+        description: agentData.description,
+        instructions: agentData.instructions,
+        useCriteria: agentData.useCriteria,
+        llmConfig: agentData.llmConfig,
+        tools: agentData.tools,
+        phases: agentData.phases,
+        eventId: agentData.eventId,
         projects: [], // Projects are managed by agent-loader
-    };
+    });
 
     // Save to storage
     await agentStorage.saveAgent(storedAgent);
