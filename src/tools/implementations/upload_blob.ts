@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { config } from "@/services/ConfigService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -41,18 +42,16 @@ interface BlossomConfig {
 }
 
 /**
- * Get Blossom server configuration from config file
+ * Get Blossom server configuration from global config
  */
-async function getBlossomConfig(projectPath: string): Promise<BlossomConfig> {
+async function getBlossomConfig(): Promise<BlossomConfig> {
     try {
-        const configPath = path.join(projectPath, ".tenex", "config.json");
-        const configContent = await fs.readFile(configPath, "utf-8");
-        const config = JSON.parse(configContent);
+        const tenexConfig = await config.loadTenexConfig(config.getGlobalPath());
         return {
-            serverUrl: config.blossomServerUrl || "https://blossom.primal.net",
+            serverUrl: tenexConfig.blossomServerUrl || "https://blossom.primal.net",
         };
     } catch {
-        // Return default configuration if file doesn't exist or has errors
+        // Return default configuration if config doesn't exist or has errors
         return {
             serverUrl: "https://blossom.primal.net",
         };
@@ -291,8 +290,8 @@ async function executeUploadBlob(
     });
 
     // Get Blossom server configuration
-    const config = await getBlossomConfig(context.projectPath);
-    const serverUrl = config.serverUrl;
+    const blossomConfig = await getBlossomConfig();
+    const serverUrl = blossomConfig.serverUrl;
 
     logger.info("[upload_blob] Using Blossom server", { serverUrl });
 

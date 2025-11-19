@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { config } from "@/services/ConfigService";
 import os from "node:os";
 import path from "node:path";
 import type { TenexConfig } from "@/services/config/types";
@@ -68,7 +69,7 @@ function writeToFile(level: string, message: string, args: unknown[]): void {
 
 // Initialize daemon logging
 function initDaemonLogging(config: TenexConfig): void {
-    const defaultLogPath = path.join(os.homedir(), ".tenex", "daemon.log");
+    const defaultLogPath = path.join(config.getConfigPath("daemon"), "daemon.log");
     logFilePath = config.logging?.logFile || defaultLogPath;
 
     // Ensure directory exists

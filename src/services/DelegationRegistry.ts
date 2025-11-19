@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { config } from "@/services/ConfigService";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -141,7 +142,7 @@ export class DelegationRegistry extends EventEmitter {
     private constructor() {
         super();
         // Use global location for delegations since it's a singleton
-        this.persistencePath = path.join(os.homedir(), ".tenex", "delegations.json");
+        this.persistencePath = path.join(config.getConfigPath(), "delegations.json");
     }
 
     /**

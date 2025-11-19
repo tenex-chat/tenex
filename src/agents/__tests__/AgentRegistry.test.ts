@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import * as path from "node:path";
 import type { AgentConfig } from "@/agents/types";
 import * as fs from "@/lib/fs";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { nip19 } from "nostr-tools";
 import { AgentRegistry } from "../AgentRegistry";
 
@@ -35,8 +35,8 @@ describe("AgentRegistry", () => {
         (fs.readFile as any).mockReset();
         (fs.writeJsonFile as any).mockReset();
         (fs.ensureDirectory as any).mockReset();
-        (configService.loadTenexAgents as any).mockReset();
-        (configService.saveProjectAgents as any).mockReset();
+        (config.loadTenexAgents as any).mockReset();
+        (config.saveProjectAgents as any).mockReset();
 
         registry = new AgentRegistry(testProjectPath);
     });
@@ -73,7 +73,7 @@ describe("AgentRegistry", () => {
             };
 
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue(mockRegistry);
+            (config.loadTenexAgents as any).mockResolvedValue(mockRegistry);
             (fs.fileExists as any).mockImplementation(async (path: string) => {
                 return path.includes("developer.json") || path.includes("reviewer.json");
             });
@@ -131,18 +131,18 @@ describe("AgentRegistry", () => {
 
         it("should handle empty registry", async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (config.loadTenexAgents as any).mockResolvedValue({});
 
             await registry.loadFromProject();
 
-            expect(configService.loadTenexAgents).toHaveBeenCalledWith(
+            expect(config.loadTenexAgents).toHaveBeenCalledWith(
                 path.join(testProjectPath, ".tenex")
             );
         });
 
         it("should handle errors when loading registry", async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockRejectedValue(new Error("Failed to load"));
+            (config.loadTenexAgents as any).mockRejectedValue(new Error("Failed to load"));
 
             // Should not throw, but set empty registry
             await registry.loadFromProject();
@@ -155,8 +155,8 @@ describe("AgentRegistry", () => {
     describe("ensureAgent", () => {
         beforeEach(async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
-            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (config.loadTenexAgents as any).mockResolvedValue({});
+            (config.saveProjectAgents as any).mockResolvedValue(undefined);
             (fs.fileExists as any).mockResolvedValue(false);
             (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
@@ -182,7 +182,7 @@ describe("AgentRegistry", () => {
             expect(agent.signer).toBeDefined();
             expect(agent.pubkey).toBeDefined();
             expect(fs.writeJsonFile).toHaveBeenCalled();
-            expect(configService.saveProjectAgents).toHaveBeenCalled();
+            expect(config.saveProjectAgents).toHaveBeenCalled();
         });
 
         it("should generate nsec if not provided", async () => {
@@ -240,13 +240,13 @@ describe("AgentRegistry", () => {
 
             // Clear write mock to check it's not called again
             (fs.writeJsonFile as any).mockClear();
-            (configService.saveProjectAgents as any).mockClear();
+            (config.saveProjectAgents as any).mockClear();
 
             const agent2 = await registry.ensureAgent("tester", config);
 
             expect(agent1).toBe(agent2);
             expect(fs.writeJsonFile).not.toHaveBeenCalled();
-            expect(configService.saveProjectAgents).not.toHaveBeenCalled();
+            expect(config.saveProjectAgents).not.toHaveBeenCalled();
         });
 
         it("should save agent configuration to disk", async () => {
@@ -278,9 +278,9 @@ describe("AgentRegistry", () => {
             expect(content.tools).toContain("delegate");
             expect(content.tools).toContain("lesson_get");
 
-            expect(configService.saveProjectAgents).toHaveBeenCalled();
+            expect(config.saveProjectAgents).toHaveBeenCalled();
             // Check that it was called with the correct path as first argument
-            const saveCall = (configService.saveProjectAgents as any).mock.calls[0];
+            const saveCall = (config.saveProjectAgents as any).mock.calls[0];
             expect(saveCall[0]).toBe(testProjectPath);
             // Check that the registry contains the tester agent
             const savedRegistry = saveCall[1];
@@ -293,8 +293,8 @@ describe("AgentRegistry", () => {
     describe("getAgent", () => {
         beforeEach(async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
-            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (config.loadTenexAgents as any).mockResolvedValue({});
+            (config.saveProjectAgents as any).mockResolvedValue(undefined);
             (fs.fileExists as any).mockResolvedValue(false);
             (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
@@ -329,8 +329,8 @@ describe("AgentRegistry", () => {
     describe("getAllAgents", () => {
         it("should return all registered agents", async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
-            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (config.loadTenexAgents as any).mockResolvedValue({});
+            (config.saveProjectAgents as any).mockResolvedValue(undefined);
             (fs.fileExists as any).mockResolvedValue(false);
             (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
@@ -364,7 +364,7 @@ describe("AgentRegistry", () => {
 
         it("should return empty array when no agents exist", async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
+            (config.loadTenexAgents as any).mockResolvedValue({});
 
             await registry.loadFromProject();
 
@@ -377,8 +377,8 @@ describe("AgentRegistry", () => {
     describe("getAgentByPubkey", () => {
         it("should return agent by pubkey", async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
-            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (config.loadTenexAgents as any).mockResolvedValue({});
+            (config.saveProjectAgents as any).mockResolvedValue(undefined);
             (fs.fileExists as any).mockResolvedValue(false);
             (fs.writeJsonFile as any).mockResolvedValue(undefined);
 
@@ -410,8 +410,8 @@ describe("AgentRegistry", () => {
 
         beforeEach(async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
-            (configService.loadTenexAgents as any).mockResolvedValue({});
-            (configService.saveProjectAgents as any).mockResolvedValue(undefined);
+            (config.loadTenexAgents as any).mockResolvedValue({});
+            (config.saveProjectAgents as any).mockResolvedValue(undefined);
             (fs.fileExists as any).mockResolvedValue(false);
             (fs.writeJsonFile as any).mockResolvedValue(undefined);
             (fs.readFile as any).mockResolvedValue(

@@ -2,7 +2,7 @@
  * Centralized services for TENEX
  */
 
-export { ConfigService, configService } from "./ConfigService";
+export { ConfigService, config } from "./ConfigService";
 export { AgentsRegistryService, agentsRegistryService } from "./AgentsRegistryService";
 export { DelegationRegistry } from "./DelegationRegistry";
 export { DynamicToolService, dynamicToolService } from "./DynamicToolService";

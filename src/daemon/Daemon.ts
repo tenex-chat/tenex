@@ -1,11 +1,10 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance } from "@/agents/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
-import { configService } from "@/services";
+import { config } from "@/services";
 import { Lockfile } from "@/utils/lockfile";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
@@ -19,7 +18,6 @@ import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
 import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
-import { isDropped, isRoutedToProject } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
 
@@ -79,9 +77,17 @@ export class Daemon {
             this.routingLogger.initialize(this.daemonDir);
 
             // 4. Load configuration
-            const { config } = await configService.loadConfig();
-            this.whitelistedPubkeys = config.whitelistedPubkeys || [];
-            this.projectsBase = configService.getProjectsBase();
+            const { config: loadedConfig } = await config.loadConfig();
+            const whitelistedPubkeys = loadedConfig.whitelistedPubkeys;
+            if (!whitelistedPubkeys) {
+                throw new Error("whitelistedPubkeys not configured");
+            }
+            this.whitelistedPubkeys = whitelistedPubkeys;
+            const projectsBase = loadedConfig.projectsBase;
+            if (!projectsBase) {
+                throw new Error("projectsBase not configured");
+            }
+            this.projectsBase = projectsBase;
 
             if (this.whitelistedPubkeys.length === 0) {
                 throw new Error("No whitelisted pubkeys configured. Run 'tenex setup' first.");
@@ -137,7 +143,7 @@ export class Daemon {
      */
     private async initializeDirectories(): Promise<void> {
         // Use global daemon directory instead of project-local .tenex
-        this.daemonDir = path.join(os.homedir(), ".tenex", "daemon");
+        this.daemonDir = config.getConfigPath("daemon");
 
         const dirs = [this.daemonDir, path.join(this.daemonDir, "logs")];
 
@@ -183,6 +189,12 @@ export class Daemon {
                 await this.processIncomingEvent(event, span);
                 endSpanSuccess(span);
             } catch (error) {
+                if (!event.id) {
+                    throw new Error("Event ID not found");
+                }
+                if (!event.id) {
+                    throw new Error("Event ID not found");
+                }
                 logger.error("Error handling incoming event", {
                     error: error instanceof Error ? error.message : String(error),
                     eventId: event.id,
@@ -294,6 +306,18 @@ export class Daemon {
         }
 
         // Log successful routing
+        if (!routingResult.matchedTags) {
+            throw new Error("Routing matchedTags not found");
+        }
+        if (!routingResult.method) {
+            throw new Error("Routing method not found");
+        }
+        if (!routingResult.matchedTags) {
+            throw new Error("Routing matchedTags not found");
+        }
+        if (!routingResult.method) {
+            throw new Error("Routing method not found");
+        }
         await logRouted(
             this.routingLogger,
             event,
@@ -304,6 +328,9 @@ export class Daemon {
 
         // Handle the event with crash isolation
         try {
+            if (!event.id) {
+                throw new Error("Event ID not found");
+            }
             await runtime.handleEvent(event);
         } catch (error) {
             logger.error("Project runtime crashed", { projectId, eventId: event.id });
@@ -339,6 +366,8 @@ export class Daemon {
                 // Collect agent definition event IDs for lesson monitoring
                 if (agent.eventId) {
                     definitionIds.add(agent.eventId);
+                } else {
+                    throw new Error("Agent eventId not found");
                 }
             }
         }
@@ -436,9 +465,15 @@ export class Daemon {
         const agentDefinitionId = lesson.agentDefinitionId;
 
         if (!agentDefinitionId) {
+            if (!event.id) {
+                throw new Error("Event ID not found");
+            }
+            if (!event.pubkey) {
+                throw new Error("Event pubkey not found");
+            }
             logger.warn("Lesson event missing agent definition ID (e-tag)", {
-                eventId: event.id?.substring(0, 8),
-                publisher: event.pubkey?.substring(0, 8),
+                eventId: event.id.substring(0, 8),
+                publisher: event.pubkey.substring(0, 8),
             });
             return;
         }
@@ -482,7 +517,10 @@ export class Daemon {
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
-        const shutdown = async (): Promise<void> => {
+        const shutdown = async (initiator?: string): Promise<void> => {
+            if (initiator) {
+                logger.info(`Shutdown initiated by ${initiator}`);
+            }
             if (!this.isRunning) {
                 process.exit(0);
             }

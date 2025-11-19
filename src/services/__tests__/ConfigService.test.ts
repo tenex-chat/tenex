@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import { ConfigService } from "../ConfigService";
+import { config } from "../ConfigService";
 
 describe("ConfigService", () => {
     let service: ConfigService;
@@ -13,7 +13,7 @@ describe("ConfigService", () => {
     beforeEach(async () => {
         // Clear singleton state
         (ConfigService as any).instance = null;
-        service = ConfigService.getInstance();
+        service = config;
 
         tempDir = await createTempDir("config-service-test-");
         projectDir = path.join(tempDir, "project");

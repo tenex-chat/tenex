@@ -1,4 +1,4 @@
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 
 /**
  * Default Nostr relay URLs for TENEX
@@ -20,37 +20,27 @@ function isValidWebSocketUrl(url: string): boolean {
 }
 
 /**
- * Get relay URLs for NDK connection
- * Priority: environment variable > config file > defaults
+ * Get relay URLs for NDK connection.
+ * Priority: config file > defaults.
+ * If config file is not found, it will be created with default relays.
  * @returns Array of validated WebSocket relay URLs
  */
-export function getRelayUrls(): string[] {
-    // First check environment variable (highest priority)
-    const relaysEnv = process.env.RELAYS;
-    if (relaysEnv?.trim()) {
-        const urls = relaysEnv
-            .split(",")
-            .map((url) => url.trim())
-            .filter((url) => url.length > 0 && isValidWebSocketUrl(url));
-
-        if (urls.length > 0) {
-            return urls;
-        }
-    }
-
-    // Then check config file
+export async function getRelayUrls(): Promise<string[]> {
     try {
-        const config = configService.getConfig();
-        if (config.relays && config.relays.length > 0) {
-            const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
+        const loadedConfig = await config.loadTenexConfig(config.getGlobalPath());
+        if (loadedConfig.relays && loadedConfig.relays.length > 0) {
+            const urls = loadedConfig.relays.filter(isValidWebSocketUrl);
             if (urls.length > 0) {
                 return urls;
             }
         }
-    } catch {
-        // Config not loaded yet, fall through to defaults
+        // If config is loaded but relays are missing/empty, save defaults
+        loadedConfig.relays = DEFAULT_RELAY_URLS;
+        await config.saveGlobalConfig(loadedConfig);
+        return DEFAULT_RELAY_URLS;
+    } catch (error) {
+        // This catch block will handle errors from loadTenexConfig or saveGlobalConfig
+        // Fallback to default relays in case of any error
+        return DEFAULT_RELAY_URLS;
     }
-
-    // Finally fall back to defaults
-    return DEFAULT_RELAY_URLS;
 }

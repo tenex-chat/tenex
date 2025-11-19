@@ -20,30 +20,41 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { z } from "zod";
 
 /**
+ * Subdirectory paths under ~/.tenex
+ */
+export type TenexSubdir =
+    | "agents"
+    | "daemon"
+    | "conversations"
+    | "data"
+    | "projects"
+    | "tool-messages";
+
+/**
  * Centralized configuration service for TENEX
  * Handles loading and saving of all configuration files
- * Pure file operations with validation - no business logic
+ * All configurations are stored in ~/.tenex (no project-level configs except mcp.json)
  */
 export class ConfigService {
-    private static instance: ConfigService;
     private cache = new Map<string, { data: unknown; timestamp: number }>();
     private loadedConfig?: LoadedConfig;
-
-    private constructor() {}
-
-    static getInstance(): ConfigService {
-        if (!ConfigService.instance) {
-            ConfigService.instance = new ConfigService();
-        }
-        return ConfigService.instance;
-    }
 
     // =====================================================================================
     // PATH UTILITIES
     // =====================================================================================
 
+    /**
+     * Get a path under the global ~/.tenex directory
+     * @param subdir Optional subdirectory (e.g., "agents", "daemon")
+     * @returns Full path to the directory or subdirectory
+     */
+    getConfigPath(subdir?: TenexSubdir | string): string {
+        const basePath = path.join(os.homedir(), TENEX_DIR);
+        return subdir ? path.join(basePath, subdir) : basePath;
+    }
+
     getGlobalPath(): string {
-        return path.join(os.homedir(), TENEX_DIR);
+        return this.getConfigPath();
     }
 
     getProjectPath(projectPath: string): string {
@@ -83,40 +94,13 @@ export class ConfigService {
         const globalPath = this.getGlobalPath();
         const projPath = projectPath ? this.getProjectPath(projectPath) : undefined;
 
-        // Load global config
-        const globalConfig = await this.loadTenexConfig(globalPath);
+        // Load global config only (no project-level config.json)
+        const config = await this.loadTenexConfig(globalPath);
 
-        // Load project config if provided
-        let projectConfig: TenexConfig = {};
-        if (projPath) {
-            projectConfig = await this.loadTenexConfig(projPath);
-        }
+        // Load global LLMs only (no project-level llms.json)
+        const llms = await this.loadTenexLLMs(globalPath);
 
-        // Merge configs (project overrides global)
-        const config: TenexConfig = {
-            ...globalConfig,
-            ...projectConfig,
-            // Merge arrays properly
-            whitelistedPubkeys: [
-                ...(globalConfig.whitelistedPubkeys || []),
-                ...(projectConfig.whitelistedPubkeys || []),
-            ],
-        };
-
-        // No longer loading agents from config files
-
-        // Load LLMs (merge global and project)
-        const globalLLMs = await this.loadTenexLLMs(globalPath);
-        const projectLLMs = projPath
-            ? await this.loadTenexLLMs(projPath)
-            : { providers: {}, configurations: {}, default: undefined };
-        const llms: TenexLLMs = {
-            providers: { ...globalLLMs.providers, ...projectLLMs.providers },
-            configurations: { ...globalLLMs.configurations, ...projectLLMs.configurations },
-            default: projectLLMs.default ?? globalLLMs.default,
-        };
-
-        // Load MCP (merge global and project)
+        // Load MCP (merge global and project - only mcp.json is kept at project level)
         const globalMCP = await this.loadTenexMCP(globalPath);
         const projectMCP = projPath
             ? await this.loadTenexMCP(projPath)
@@ -345,22 +329,10 @@ export class ConfigService {
         await this.saveTenexConfig(globalPath, config);
     }
 
-    async saveProjectConfig(projectPath: string, config: TenexConfig): Promise<void> {
-        const projPath = this.getProjectPath(projectPath);
-        await ensureDirectory(projPath);
-        await this.saveTenexConfig(projPath, config);
-    }
-
     async saveGlobalLLMs(llms: TenexLLMs): Promise<void> {
         const globalPath = this.getGlobalPath();
         await ensureDirectory(globalPath);
         await this.saveTenexLLMs(globalPath, llms);
-    }
-
-    async saveProjectLLMs(projectPath: string, llms: TenexLLMs): Promise<void> {
-        const projPath = this.getProjectPath(projectPath);
-        await ensureDirectory(projPath);
-        await this.saveTenexLLMs(projPath, llms);
     }
 
     async saveGlobalMCP(mcp: TenexMCP): Promise<void> {
@@ -484,5 +456,5 @@ export class ConfigService {
     }
 }
 
-// Export singleton instance
-export const configService = ConfigService.getInstance();
+// Export instance
+export const config = new ConfigService();

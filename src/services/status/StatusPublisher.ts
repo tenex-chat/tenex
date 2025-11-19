@@ -6,7 +6,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import {
     type ProjectContext,
-    configService,
+    config,
     getProjectContext,
     isProjectContextInitialized,
 } from "@/services";
@@ -185,7 +185,7 @@ export class StatusPublisher {
 
             // Sign and publish with TENEX backend private key
             try {
-                const backendPrivateKey = await configService.ensureBackendPrivateKey();
+                const backendPrivateKey = await config.ensureBackendPrivateKey();
                 const { NDKPrivateKeySigner } = await import("@nostr-dev-kit/ndk");
                 const backendSigner = new NDKPrivateKeySigner(backendPrivateKey);
 
@@ -204,7 +204,7 @@ export class StatusPublisher {
 
     private async gatherModelInfo(intent: StatusIntent, projectPath: string): Promise<void> {
         try {
-            const { llms } = await configService.loadConfig(projectPath);
+            const { llms } = await config.loadConfig(projectPath);
 
             if (!llms || !llms.configurations) {
                 logger.debug("No LLM configurations found");

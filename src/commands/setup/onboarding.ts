@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
-import { configService } from "@/services/ConfigService";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import NDK, { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { Command } from "commander";
@@ -14,9 +14,9 @@ export const onboardingCommand = new Command("init")
             console.log("\nWelcome to TENEX! Let's get you set up.\n");
 
             // Load existing configuration
-            const globalPath = configService.getGlobalPath();
+            const globalPath = config.getGlobalPath();
             await ensureDirectory(globalPath);
-            const existingConfig = await configService.loadTenexConfig(globalPath);
+            const existingConfig = await config.loadTenexConfig(globalPath);
 
             // Step 1: Manage whitelisted pubkeys
             let whitelistedPubkeys = [...(existingConfig.whitelistedPubkeys || [])];
@@ -267,7 +267,7 @@ export const onboardingCommand = new Command("init")
                 relays,
             };
 
-            await configService.saveGlobalConfig(config);
+            await config.saveGlobalConfig(config);
 
             // Create projects directory
             await ensureDirectory(path.resolve(projectsBase));
