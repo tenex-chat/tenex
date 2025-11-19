@@ -357,6 +357,38 @@ export class AgentStorage {
     }
 
     /**
+     * Update an agent's LLM configuration
+     */
+    async updateAgentLLMConfig(pubkey: string, llmConfig: string): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        agent.llmConfig = llmConfig;
+        await this.saveAgent(agent);
+        logger.info(`Updated LLM config for agent ${agent.name}`);
+        return true;
+    }
+
+    /**
+     * Update an agent's tools
+     */
+    async updateAgentTools(pubkey: string, tools: string[]): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        agent.tools = tools;
+        await this.saveAgent(agent);
+        logger.info(`Updated tools for agent ${agent.name}`);
+        return true;
+    }
+
+    /**
      * Get all agents (for debugging/admin purposes)
      */
     async getAllAgents(): Promise<StoredAgent[]> {

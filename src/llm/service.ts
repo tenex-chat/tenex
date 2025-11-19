@@ -181,9 +181,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 "agent.slug": this.agentSlug || "unknown",
                 "llm.provider": this.provider,
                 "llm.model": this.model,
-                "llm.temperature": this.temperature,
-                "llm.max_tokens": this.maxTokens,
-                "session.id": this.sessionId,
+                "llm.temperature": this.temperature ?? 0,
+                "llm.max_tokens": this.maxTokens ?? 0,
+                "session.id": this.sessionId ?? "unknown",
             },
 
             // FULL DATA - no privacy filters for debugging
