@@ -1,15 +1,14 @@
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
-import type { LanguageModelV2 } from "@ai-sdk/provider";
-import type { Provider } from "ai";
+import type { LanguageModelV2, ProviderV2 } from "@ai-sdk/provider";
 import { MockLanguageModelV2 } from "ai/test";
 
 /**
  * Creates a mock provider that integrates MockLLMService with AI SDK
  * This allows us to use the mock service through the standard LLMServiceFactory
  */
-export function createMockProvider(config?: MockLLMConfig): Provider {
+export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
     const mockService = new MockLLMService(config);
 
     // Create a factory function that returns a language model
@@ -247,16 +246,17 @@ export function createMockProvider(config?: MockLLMConfig): Provider {
     };
 
     // Create a custom provider that can handle any model ID
-    const provider: Provider = {
+    const provider: ProviderV2 = {
         languageModel: (modelId: string) => {
             return createLanguageModel(modelId);
         },
         textEmbeddingModel: () => {
             throw new Error("Mock provider does not support embedding models");
         },
-        // Provider type from 'ai' package may have slightly different interface
-        // Cast as needed
-    } as Provider;
+        imageModel: () => {
+            throw new Error("Mock provider does not support image models");
+        },
+    };
 
     return provider;
 }
