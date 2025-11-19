@@ -1,4 +1,4 @@
-import type { AgentConfigOptionalNsec, AgentInstance } from "@/agents/types";
+import type { AgentInstance } from "@/agents/types";
 import { loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { processAgentTools } from "@/agents/tool-normalization";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
@@ -6,7 +6,6 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "./AgentStorage";
 import { config } from "@/services";
 
@@ -331,42 +330,6 @@ export class AgentRegistry {
         return false;
     }
 
-
-    /**
-     * Publish agent events to Nostr
-     */
-    private async publishAgentEvents(
-        signer: NDKPrivateKeySigner,
-        config: Omit<AgentConfigOptionalNsec, "nsec">,
-        ndkAgentEventId?: string,
-        ndkProject?: NDKProject
-    ): Promise<void> {
-        try {
-            if (!ndkProject) {
-                logger.warn("No NDKProject provided, skipping agent event publishing");
-                return;
-            }
-
-            const projectTitle = ndkProject.tagValue("title") || "Unknown Project";
-            const projectEvent = ndkProject;
-
-            // Load whitelisted pubkeys from config
-            const { config: tenexConfig } = await config.loadConfig(this.projectPath);
-            const whitelistedPubkeys = tenexConfig.whitelistedPubkeys || [];
-
-            await AgentPublisher.publishAgentCreation(
-                signer,
-                config,
-                projectTitle,
-                projectEvent,
-                ndkAgentEventId,
-                whitelistedPubkeys
-            );
-        } catch (error) {
-            logger.error("Failed to publish agent events", { error: formatAnyError(error) });
-            // Don't throw - agent creation should succeed even if publishing fails
-        }
-    }
 
     /**
      * Republish kind:0 events for all agents

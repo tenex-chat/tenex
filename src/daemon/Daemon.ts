@@ -277,6 +277,12 @@ export class Daemon {
         }
 
         const projectId = routingResult.projectId;
+        if (!projectId) {
+            addRoutingEvent(span, "error", { error: "no_project_id" });
+            await logDropped(this.routingLogger, event, "No project ID in routing result");
+            return;
+        }
+
         const project = this.knownProjects.get(projectId);
         if (!project) {
             addRoutingEvent(span, "error", { error: "unknown_project" });

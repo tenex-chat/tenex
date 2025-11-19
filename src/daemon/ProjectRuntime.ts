@@ -135,7 +135,10 @@ export class ProjectRuntime {
             // Start status publisher
             this.statusPublisher = new StatusPublisher();
             await projectContextStore.run(this.context, async () => {
-                await this.statusPublisher?.startPublishing(this.projectPath, this.context);
+                await this.statusPublisher?.startPublishing(
+                    this.projectPath,
+                    this.context ?? undefined
+                );
             });
 
             this.isRunning = true;
