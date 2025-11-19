@@ -259,7 +259,7 @@ export const onboardingCommand = new Command("init")
             }
 
             // Save configuration
-            const config = {
+            const newConfig = {
                 ...existingConfig,
                 whitelistedPubkeys,
                 tenexPrivateKey,
@@ -267,7 +267,7 @@ export const onboardingCommand = new Command("init")
                 relays,
             };
 
-            await config.saveGlobalConfig(config);
+            await config.saveGlobalConfig(newConfig);
 
             // Create projects directory
             await ensureDirectory(path.resolve(projectsBase));

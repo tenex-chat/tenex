@@ -137,5 +137,5 @@ export function createLessonGetTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

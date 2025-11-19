@@ -39,12 +39,15 @@ async function executeLessonLearn(
 ): Promise<LessonLearnOutput> {
     const { title, lesson, detailed, category, hashtags } = input;
 
+    if (!context.agentPublisher) {
+        throw new Error("AgentPublisher not available in execution context");
+    }
+
     logger.info("🎓 Agent recording new lesson", {
         agent: context.agent.name,
         agentPubkey: context.agent.pubkey,
         title,
         lessonLength: lesson.length,
-        phase: context.phase,
         conversationId: context.conversationId,
     });
 

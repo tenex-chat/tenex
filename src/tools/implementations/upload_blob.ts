@@ -242,7 +242,7 @@ async function uploadToBlossomServer(
     if (!response.ok) {
         let errorMessage = `Upload failed with status ${response.status}`;
         try {
-            const errorData = await response.json();
+            const errorData = await response.json() as { message?: string };
             if (errorData.message) {
                 errorMessage = `Upload failed: ${errorData.message}`;
             }
@@ -252,7 +252,7 @@ async function uploadToBlossomServer(
         throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    const result = await response.json() as UploadBlobOutput;
 
     // Add extension to URL if not present and we can determine it
     if (result.url && !path.extname(result.url)) {
@@ -424,7 +424,7 @@ export function createUploadBlobTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }
 
 /**

@@ -40,9 +40,9 @@ export function getRelayUrls(): string[] {
 
     // Then check config file
     try {
-        const config = config.getConfig();
-        if (config.relays && config.relays.length > 0) {
-            const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
+        const tenexConfig = config.getConfig();
+        if (tenexConfig.relays && tenexConfig.relays.length > 0) {
+            const urls = tenexConfig.relays.filter((url) => isValidWebSocketUrl(url));
             if (urls.length > 0) {
                 return urls;
             }

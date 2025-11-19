@@ -58,5 +58,5 @@ export function createCancelScheduledTaskTool(_context: ExecutionContext): AISdk
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

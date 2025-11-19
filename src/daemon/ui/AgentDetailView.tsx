@@ -9,7 +9,7 @@ interface AgentDetailViewProps {
     selectedIndex: number;
 }
 
-export function AgentDetailView({ agent, lessons, selectedIndex }: AgentDetailViewProps): JSX.Element {
+export function AgentDetailView({ agent, lessons, selectedIndex }: AgentDetailViewProps): React.JSX.Element {
     const instructionsLength = agent.instructions?.length || 0;
 
     return (
@@ -27,9 +27,11 @@ export function AgentDetailView({ agent, lessons, selectedIndex }: AgentDetailVi
 
             {/* Selectable Items */}
             <Box flexDirection="column">
-                <Text bold color="cyan" marginBottom={1}>
-                    Details:
-                </Text>
+                <Box marginBottom={1}>
+                    <Text bold color="cyan">
+                        Details:
+                    </Text>
+                </Box>
 
                 {/* System Prompt - First selectable item */}
                 <Text
@@ -42,9 +44,11 @@ export function AgentDetailView({ agent, lessons, selectedIndex }: AgentDetailVi
 
                 {/* Lessons */}
                 {lessons.length === 0 ? (
-                    <Text dimColor marginTop={1}>
-                        No lessons loaded
-                    </Text>
+                    <Box marginTop={1}>
+                        <Text dimColor>
+                            No lessons loaded
+                        </Text>
+                    </Box>
                 ) : (
                     <Box flexDirection="column" marginTop={1}>
                         {lessons.map((lesson, lessonIndex) => {

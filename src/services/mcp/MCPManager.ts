@@ -5,7 +5,6 @@
  */
 
 import * as path from "node:path";
-import { config } from "@/services/ConfigService";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
@@ -34,7 +33,7 @@ export class MCPManager {
     private isInitialized = false;
     private projectPath?: string;
     private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
-    private includeResourcesInTools = false;
+    private _includeResourcesInTools = false;
 
     private constructor() {}
 
@@ -61,7 +60,7 @@ export class MCPManager {
             }
 
             // Enable resources as tools globally
-            this.includeResourcesInTools = true;
+            this._includeResourcesInTools = true;
 
             if (config.mcp.servers) {
                 await this.startServers(config.mcp);
@@ -151,7 +150,6 @@ export class MCPManager {
             const client = await experimental_createMCPClient({
                 transport,
                 name: `tenex-${name}`,
-                version: "1.0.0",
             });
 
             // Perform health check - try to get tools
@@ -191,7 +189,6 @@ export class MCPManager {
         for (const [serverName, entry] of this.clients) {
             try {
                 const serverTools = await entry.client.tools({
-                    includeResources: this.includeResourcesInTools,
                 });
 
                 // Namespace the tools with server name
@@ -237,7 +234,7 @@ export class MCPManager {
      * @param include - Whether to include resources as tools
      */
     setIncludeResourcesInTools(include: boolean): void {
-        this.includeResourcesInTools = include;
+        this._includeResourcesInTools = include;
     }
 
     /**

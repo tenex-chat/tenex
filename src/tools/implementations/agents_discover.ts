@@ -1,5 +1,7 @@
+import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr";
 import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -99,7 +101,7 @@ async function executeAgentsDiscover(input: AgentsDiscoverInput): Promise<Agents
  * Create an AI SDK tool for discovering agents
  * This is the primary implementation
  */
-export function createAgentsDiscoverTool(): ReturnType<typeof tool> {
+export function createAgentsDiscoverTool(_context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Discover agent definition events; these are agent definitions that can be useful to be installed in the project. Use this when trying to discover NEW possible agents to add to the project NOT to see the list of current agents in the project.",
@@ -114,5 +116,5 @@ export function createAgentsDiscoverTool(): ReturnType<typeof tool> {
                 );
             }
         },
-    });
+    }) as AISdkTool;
 }

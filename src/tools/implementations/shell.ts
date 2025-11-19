@@ -47,7 +47,7 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
         const agentPublisher = context.agentPublisher;
         const conversation = context.getConversation();
 
-        if (conversation?.history?.[0]) {
+        if (agentPublisher && conversation?.history?.[0]) {
             await agentPublisher.conversation(
                 { content: `⚡ Executing: ${command}` },
                 {
@@ -111,5 +111,5 @@ export function createShellTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

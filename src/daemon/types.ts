@@ -1,4 +1,4 @@
-import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 
 /**
  * Branded type for Project IDs

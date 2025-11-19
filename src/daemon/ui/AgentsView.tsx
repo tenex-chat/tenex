@@ -7,7 +7,7 @@ interface AgentsViewProps {
     selectedIndex: number;
 }
 
-export function AgentsView({ agents, selectedIndex }: AgentsViewProps): JSX.Element {
+export function AgentsView({ agents, selectedIndex }: AgentsViewProps): React.JSX.Element {
     if (agents.length === 0) {
         return (
             <Box>

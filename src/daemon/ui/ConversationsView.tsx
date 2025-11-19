@@ -11,7 +11,7 @@ interface ConversationsViewProps {
 export function ConversationsView({
     conversations,
     selectedIndex,
-}: ConversationsViewProps): JSX.Element {
+}: ConversationsViewProps): React.JSX.Element {
     if (conversations.length === 0) {
         return (
             <Box>
@@ -35,13 +35,17 @@ export function ConversationsView({
                             {isSelected ? "▶ " : "  "}💬 {conv.title}
                         </Text>
                         {conv.summary && (
-                            <Text dimColor marginLeft={4}>
-                                {conv.summary}
-                            </Text>
+                            <Box marginLeft={4}>
+                                <Text dimColor>
+                                    {conv.summary}
+                                </Text>
+                            </Box>
                         )}
-                        <Text dimColor marginLeft={4}>
-                            Last activity: {timeAgo}
-                        </Text>
+                        <Box marginLeft={4}>
+                            <Text dimColor>
+                                Last activity: {timeAgo}
+                            </Text>
+                        </Box>
                     </Box>
                 );
             })}

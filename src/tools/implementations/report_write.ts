@@ -34,7 +34,6 @@ async function executeReportWrite(
         slug,
         title,
         agent: context.agent.name,
-        phase: context.phase,
     });
 
     const reportManager = new ReportManager();
@@ -61,7 +60,7 @@ async function executeReportWrite(
         // Use shared AgentPublisher instance from context (guaranteed to be present)
         const conversation = context.getConversation();
 
-        if (conversation?.history?.[0]) {
+        if (context.agentPublisher && conversation?.history?.[0]) {
             const nostrReference = `nostr:${articleId}`;
             await context.agentPublisher.conversation(
                 { content: `📄 Writing report: [${title}](${nostrReference})` },

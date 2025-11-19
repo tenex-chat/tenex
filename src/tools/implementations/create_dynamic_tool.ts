@@ -97,7 +97,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
             : ""
     }
     
-    return aiTool;
+    return aiTool as AISdkTool;
 };
 
 // Export the factory function as default
@@ -184,5 +184,5 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

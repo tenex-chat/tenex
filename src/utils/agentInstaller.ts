@@ -32,7 +32,7 @@ export interface AgentInstallResult {
  */
 export async function installAgentFromEvent(
     eventId: string,
-    projectPath: string,
+    _projectPath: string,
     ndkProject?: NDKProject,
     customSlug?: string,
     ndk?: NDK,
@@ -45,8 +45,68 @@ export async function installAgentFromEvent(
         // Clean the event ID
         const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
 
-        // Fetch the full event to get access to tags
-        logger.debug(`Fetching agent event ${cleanEventId} from Nostr relays`);
+        // Require registry to be provided - we can't create one without metadataPath
+        if (!agentRegistry) {
+            return {
+                success: false,
+                error: "AgentRegistry must be provided - cannot create one without metadataPath",
+            };
+        }
+
+        const registry = agentRegistry;
+
+        // Check if agent already exists in storage BEFORE fetching from network
+        const { agentStorage } = await import("@/agents/AgentStorage");
+        const storedAgent = await agentStorage.getAgentByEventId(cleanEventId);
+
+        if (storedAgent) {
+            // Agent exists in storage - use stored data without fetching from network
+            const slug = customSlug || storedAgent.slug;
+
+            // Check if agent already exists in registry
+            const existingAgent = registry.getAgent(slug);
+            if (existingAgent) {
+                if (existingAgent.eventId === cleanEventId) {
+                    return {
+                        success: true,
+                        alreadyExists: true,
+                        message: `Agent "${storedAgent.name}" is already installed in the project`,
+                        agent: existingAgent,
+                        slug,
+                    };
+                }
+                return {
+                    success: false,
+                    error: `An agent with slug "${slug}" already exists but with a different event ID`,
+                };
+            }
+
+            // Agent in storage but not in registry - add to registry using stored data
+            const agent = await registry.ensureAgent(
+                slug,
+                {
+                    name: storedAgent.name,
+                    role: storedAgent.role,
+                    description: storedAgent.description,
+                    instructions: storedAgent.instructions,
+                    useCriteria: storedAgent.useCriteria,
+                    tools: storedAgent.tools,
+                    eventId: storedAgent.eventId,
+                    phases: storedAgent.phases,
+                },
+                ndkProject
+            );
+
+            return {
+                success: true,
+                agent,
+                slug,
+                message: `Successfully installed agent "${storedAgent.name}" from storage`,
+            };
+        }
+
+        // Agent not in storage - fetch from Nostr
+        logger.debug(`Agent ${cleanEventId} not in storage, fetching from Nostr relays`);
         const agentEvent = await ndkInstance.fetchEvent(cleanEventId, { groupable: false });
 
         if (!agentEvent) {
@@ -69,18 +129,7 @@ export async function installAgentFromEvent(
         // Generate slug from name if not provided
         const slug = customSlug || toKebabCase(agentDef.title);
 
-        // Require registry to be provided - we can't create one without metadataPath
-        if (!agentRegistry) {
-            return {
-                success: false,
-                error: "AgentRegistry must be provided - cannot create one without metadataPath",
-            };
-        }
-
-        const registry = agentRegistry;
-        // Note: loadFromProject is called by ProjectManager, not here
-
-        // Check if agent already exists
+        // Check if agent already exists in registry
         const existingAgent = registry.getAgent(slug);
         if (existingAgent) {
             if (existingAgent.eventId === agentDef.id) {

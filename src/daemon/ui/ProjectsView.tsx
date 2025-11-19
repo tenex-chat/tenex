@@ -8,7 +8,7 @@ interface ProjectsViewProps {
     selectedIndex: number;
 }
 
-export function ProjectsView({ projects, selectedIndex }: ProjectsViewProps): JSX.Element {
+export function ProjectsView({ projects, selectedIndex }: ProjectsViewProps): React.JSX.Element {
     if (projects.length === 0) {
         return (
             <Box>

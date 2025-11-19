@@ -15,6 +15,7 @@ export interface TenexConfig {
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
     projectsBase?: string; // Base directory for all projects (default: ~/tenex)
     relays?: string[]; // Nostr relay URLs
+    blossomServerUrl?: string; // Blossom server URL for blob uploads (default: https://blossom.primal.net)
 
     // Logging configuration
     logging?: {
@@ -38,6 +39,7 @@ export const TenexConfigSchema = z.object({
     tenexPrivateKey: z.string().optional(),
     projectsBase: z.string().optional(),
     relays: z.array(z.string()).optional(),
+    blossomServerUrl: z.string().optional(),
     logging: z
         .object({
             logFile: z.string().optional(),

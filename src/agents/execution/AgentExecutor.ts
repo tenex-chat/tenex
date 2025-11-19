@@ -448,6 +448,9 @@ export class AgentExecutor {
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
 
         const agentPublisher = context.agentPublisher;
+        if (!agentPublisher) {
+            throw new Error("AgentPublisher not found in execution context");
+        }
         const eventContext = createEventContext(context, llmService.model);
 
         // Separate buffers for content and reasoning

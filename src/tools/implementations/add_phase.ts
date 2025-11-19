@@ -122,5 +122,5 @@ export function createAddPhaseTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

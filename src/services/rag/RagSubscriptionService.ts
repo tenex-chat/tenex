@@ -1,6 +1,5 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
-import * as os from "node:os";
 import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";

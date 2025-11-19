@@ -29,7 +29,7 @@ export function ProcessManagerUI({
     onKill,
     onRestart,
     onClose,
-}: ProcessManagerUIProps): JSX.Element {
+}: ProcessManagerUIProps): React.JSX.Element {
     const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
     const [projects, setProjects] = useState<ProjectInfo[]>([]);
     const [conversations, setConversations] = useState<ConversationInfo[]>([]);

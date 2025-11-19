@@ -94,11 +94,11 @@ export class OperationsStatusPublisher {
         // Log current state for debugging
         if (operationsByEvent.size > 0 || eventsToCleanup.size > 0) {
             logger.debug("[OperationsStatusPublisher] Current state", {
-                activeEvents: Array.from(currentEventIds).map((id) => id.substring(0, 8)),
-                previouslyPublished: Array.from(this.publishedEvents).map((id) =>
+                activeEvents: Array.from(currentEventIds).map((id: string) => id.substring(0, 8)),
+                previouslyPublished: Array.from(this.publishedEvents).map((id: string) =>
                     id.substring(0, 8)
                 ),
-                toCleanup: Array.from(eventsToCleanup).map((id) => id.substring(0, 8)),
+                toCleanup: Array.from(eventsToCleanup).map((id: string) => id.substring(0, 8)),
             });
         }
 
@@ -146,7 +146,7 @@ export class OperationsStatusPublisher {
             activeEvents: operationsByEvent.size,
             cleanedEvents: eventsToCleanup.size,
             totalOperations: Array.from(operationsByEvent.values()).reduce(
-                (sum, ops) => sum + ops.length,
+                (sum: number, ops: unknown[]) => sum + ops.length,
                 0
             ),
         });

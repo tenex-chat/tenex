@@ -110,7 +110,7 @@ export class DynamicToolService {
             }
         }, 300); // 300ms debounce
 
-        this.watcher = watch(this.dynamicToolsPath, (eventType, filename) => {
+        this.watcher = watch(this.dynamicToolsPath, (_eventType, filename) => {
             if (filename) {
                 handleFileChange(filename);
             }

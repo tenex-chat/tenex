@@ -60,5 +60,5 @@ export function createListScheduledTasksTool(_context: ExecutionContext): AISdkT
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

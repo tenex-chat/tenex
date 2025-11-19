@@ -238,5 +238,5 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
                 })
             ),
         },
-    ];
+    ] as LanguageModelV2FunctionTool[];
 }

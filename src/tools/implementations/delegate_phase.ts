@@ -220,7 +220,7 @@ export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }
 
 /**

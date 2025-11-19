@@ -27,7 +27,6 @@ export class PubkeyNameRepository {
     private userProfileCache: Map<Hexpubkey, CacheEntry> = new Map();
     private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
     private readonly DEFAULT_USER_NAME = "User";
-    private readonly DEFAULT_UNKNOWN_NAME = "Unknown";
 
     private constructor() {}
 

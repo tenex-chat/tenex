@@ -73,8 +73,7 @@ async function executeDelegateFollowup(
         context.conversationId,
         context.conversationCoordinator,
         responseEvent, // This becomes the triggering event for threading
-        context.agentPublisher,
-        context.phase
+        context.agentPublisher!
     );
 
     // Execute as a follow-up delegation
@@ -110,7 +109,7 @@ export function createDelegateFollowupTool(context: ExecutionContext): AISdkTool
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }
 
 /**

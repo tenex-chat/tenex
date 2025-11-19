@@ -142,35 +142,6 @@ export class ThreadService {
         return completeThread;
     }
 
-    /**
-     * Get descendants that are in the path to target
-     */
-    private getDescendantsInPath(
-        parentId: string,
-        parentChain: NDKEvent[],
-        history: NDKEvent[]
-    ): NDKEvent[] {
-        const descendants: NDKEvent[] = [];
-
-        // Find direct children of this parent
-        const children = history
-            .filter((e) => {
-                return e.tagValue("e") === parentId;
-            })
-            .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
-
-        for (const child of children) {
-            descendants.push(child);
-
-            // If this child is in the parent chain, recurse
-            if (parentChain.some((p) => p.id === child.id)) {
-                const grandchildren = this.getDescendantsInPath(child.id, parentChain, history);
-                descendants.push(...grandchildren);
-            }
-        }
-
-        return descendants;
-    }
 
     /**
      * Get all direct child events of a given event

@@ -6,7 +6,7 @@ interface LessonDetailViewProps {
     lesson: NDKAgentLesson;
 }
 
-export function LessonDetailView({ lesson }: LessonDetailViewProps): JSX.Element {
+export function LessonDetailView({ lesson }: LessonDetailViewProps): React.JSX.Element {
     return (
         <Box flexDirection="column">
             <Box marginBottom={1} flexDirection="column">

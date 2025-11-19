@@ -1,7 +1,6 @@
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
-import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { SubscriptionFilterBuilder, type SubscriptionConfig } from "./filters/SubscriptionFilterBuilder";
 
