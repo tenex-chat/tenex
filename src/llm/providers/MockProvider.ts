@@ -4,8 +4,11 @@ import { logger } from "@/utils/logger";
 import type {
     LanguageModelV2,
     LanguageModelV2CallOptions,
+    LanguageModelV2CallWarning,
     LanguageModelV2Content,
+    LanguageModelV2FinishReason,
     LanguageModelV2Message,
+    LanguageModelV2StreamPart,
     ProviderV2,
 } from "@ai-sdk/provider";
 import { MockLanguageModelV2 } from "ai/test";
@@ -25,7 +28,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
             provider: "mock",
             modelId: modelId || "mock-model",
 
-            doGenerate: async (options: LanguageModelV2CallOptions) => {
+            doGenerate: (async (options: LanguageModelV2CallOptions) => {
                 // Extract messages from prompt
                 const messages = options.prompt;
 
@@ -38,9 +41,9 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                     logger.warn("[MockProvider] doGenerate called with no messages");
                     return {
                         content: [{ type: "text" as const, text: "Mock response: no messages provided" }],
-                        finishReason: "stop" as const,
+                        finishReason: "stop" as LanguageModelV2FinishReason,
                         usage: { inputTokens: 0, outputTokens: 0 },
-                        warnings: [],
+                        warnings: [] as LanguageModelV2CallWarning[],
                         response: {
                             id: `mock-${Date.now()}`,
                             timestamp: new Date(),
@@ -98,21 +101,21 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
 
                 return {
                     content,
-                    finishReason: "stop" as const,
+                    finishReason: "stop" as LanguageModelV2FinishReason,
                     usage: {
                         inputTokens: response.usage?.prompt_tokens || 100,
                         outputTokens: response.usage?.completion_tokens || 50,
                     },
-                    warnings: [],
+                    warnings: [] as LanguageModelV2CallWarning[],
                     response: {
                         id: `mock-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
                     },
                 };
-            },
+            }) as unknown as LanguageModelV2['doGenerate'],
 
-            doStream: async (options: LanguageModelV2CallOptions) => {
+            doStream: (async (options: LanguageModelV2CallOptions) => {
                 // Extract messages from prompt
                 const messages = options.prompt;
 
@@ -139,8 +142,8 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                         },
                     });
                     return {
-                        stream,
-                        warnings: [],
+                        stream: stream as ReadableStream<LanguageModelV2StreamPart>,
+                        warnings: [] as LanguageModelV2CallWarning[],
                         response: {
                             id: `mock-stream-${Date.now()}`,
                             timestamp: new Date(),
@@ -247,15 +250,15 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 });
 
                 return {
-                    stream,
-                    warnings: [],
+                    stream: stream as ReadableStream<LanguageModelV2StreamPart>,
+                    warnings: [] as LanguageModelV2CallWarning[],
                     response: {
                         id: `mock-stream-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
                     },
                 };
-            },
+            }) as LanguageModelV2['doStream'],
         });
     };
 
