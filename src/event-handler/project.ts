@@ -9,7 +9,7 @@ import {
     installMCPServerFromEvent,
     removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
-import { installAgentsFromEvents } from "../agents/agent-installer";
+import { installAgentFromNostr } from "../agents/agent-installer";
 import { logger } from "../utils/logger";
 
 /**
@@ -117,19 +117,24 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
             }
         }
 
+        // Process agent and MCP tool changes
+        const ndk = getNDK();
+
         // Fetch and install new agent definitions using shared function
         if (newAgentEventIds.length > 0) {
-            await installAgentsFromEvents(
-                newAgentEventIds,
-                projectPath,
-                ndkProject,
-                getNDK(),
-                currentContext.agentRegistry
-            );
+            for (const eventId of newAgentEventIds) {
+                try {
+                    await installAgentFromNostr(eventId, undefined, ndk);
+                    logger.info("Successfully installed agent", { eventId });
+                } catch (error) {
+                    logger.error("Failed to install agent from event", { eventId, error });
+                }
+            }
+            // Reload the agent registry to pick up new agents
+            await currentContext.agentRegistry.loadAllAgents(ndkProject);
         }
 
         // Process MCP tool changes
-        const ndk = getNDK();
 
         // Get currently installed MCP event IDs (only those with event IDs)
         const installedMCPEventIds = await getInstalledMCPEventIds(projectPath);
