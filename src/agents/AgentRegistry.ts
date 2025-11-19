@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
-import { processAgentTools } from "@/agents/tool-normalization";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";

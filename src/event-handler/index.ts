@@ -3,6 +3,7 @@ import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/utils/error-formatter";
 import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
+import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
@@ -251,12 +252,12 @@ export class EventHandler {
                     from: event.pubkey,
                 });
 
-                // Update the agent's model configuration persistently
-                // Since AgentRegistry is the single source of truth, this will update both
-                // the in-memory instance and persist to disk
-                const updated = await agentRegistry.updateAgentLLMConfig(agentPubkey, newModel);
+                // Update in storage then reload into registry
+                const updated = await agentStorage.updateAgentLLMConfig(agentPubkey, newModel);
 
                 if (updated) {
+                    // Reload agent to pick up changes
+                    await agentRegistry.reloadAgent(agentPubkey);
                     logger.info("Updated and persisted model configuration for agent", {
                         agentName: agent.slug,
                         agentPubkey: agent.pubkey,
@@ -285,12 +286,12 @@ export class EventHandler {
                     eventId: event.id,
                 });
 
-                // Update the agent's tools persistently
-                // Since ProjectContext now uses AgentRegistry directly, this update
-                // will immediately be reflected in all agent accesses
-                const updated = await agentRegistry.updateAgentTools(agentPubkey, newToolNames);
+                // Update in storage then reload into registry
+                const updated = await agentStorage.updateAgentTools(agentPubkey, newToolNames);
 
                 if (updated) {
+                    // Reload agent to pick up changes
+                    await agentRegistry.reloadAgent(agentPubkey);
                     logger.info("Updated tools configuration", {
                         agent: agent.slug,
                         toolCount: newToolNames.length,

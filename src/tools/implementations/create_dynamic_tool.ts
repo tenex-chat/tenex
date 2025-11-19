@@ -132,7 +132,12 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
             try {
                 const projectContext = getProjectContext();
                 const agentRegistry = projectContext.agentRegistry;
-                await agentRegistry.updateAgentTools(context.agent.pubkey, updatedTools);
+                const { agentStorage } = await import("@/agents/AgentStorage");
+
+                // Update in storage then reload into registry
+                await agentStorage.updateAgentTools(context.agent.pubkey, updatedTools);
+                await agentRegistry.reloadAgent(context.agent.pubkey);
+
                 logger.info(
                     `[CreateDynamicTool] Added tool '${name}' to agent '${context.agent.name}'`
                 );
