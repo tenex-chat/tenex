@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { ReportManager } from "@/services/ReportManager";
+import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -85,7 +86,7 @@ async function executeReportWrite(
 }
 
 // AI SDK tool factory
-export function createReportWriteTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createReportWriteTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Write reports and documentation as NDKArticle events. Use for creating persistent documentation like architecture docs, implementation plans, or project summaries. Reports are stored on Nostr network and accessible via slug. Updates existing reports with same slug. Supports markdown format and hashtags for categorization. Reports can be read back with report_read or listed with reports_list.",
@@ -93,5 +94,5 @@ export function createReportWriteTool(context: ExecutionContext): ReturnType<typ
         execute: async (input: ReportWriteInput) => {
             return await executeReportWrite(input, context);
         },
-    });
+    }) as AISdkTool;
 }

@@ -130,7 +130,7 @@ export class DelegationCompletionHandler {
                 toPubkey: event.pubkey,
                 completionEventId: event.id,
                 response: event.content,
-                summary: TagExtractor.getTagValue(event, "summary"),
+                summary: TagExtractor.getTagValue(event, "summary") ?? undefined,
             });
 
             // Check if this batch was already handled synchronously

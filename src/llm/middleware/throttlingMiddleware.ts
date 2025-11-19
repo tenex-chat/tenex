@@ -1,28 +1,18 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@/utils/logger";
-import type { Experimental_LanguageModelV1Middleware, LanguageModelV1StreamPart } from "ai";
+import type { LanguageModelV2StreamPart } from "@ai-sdk/provider";
+import type { LanguageModelMiddleware } from "ai";
 
 // Type guards for stream parts with delta content
-interface TextDeltaChunk {
-    type: "text-delta";
-    delta?: string;
-    text?: string;
-    id?: string;
-}
+type TextDeltaChunk = Extract<LanguageModelV2StreamPart, { type: "text-delta" }>;
+type ReasoningDeltaChunk = Extract<LanguageModelV2StreamPart, { type: "reasoning-delta" }>;
 
-interface ReasoningDeltaChunk {
-    type: "reasoning-delta";
-    delta?: string;
-    text?: string;
-    id?: string;
-}
-
-function isTextDelta(chunk: LanguageModelV1StreamPart): chunk is TextDeltaChunk {
+function isTextDelta(chunk: LanguageModelV2StreamPart): chunk is TextDeltaChunk {
     return chunk.type === "text-delta";
 }
 
-function isReasoningDelta(chunk: LanguageModelV1StreamPart): chunk is ReasoningDeltaChunk {
+function isReasoningDelta(chunk: LanguageModelV2StreamPart): chunk is ReasoningDeltaChunk {
     return chunk.type === "reasoning-delta";
 }
 
@@ -44,7 +34,7 @@ export function throttlingMiddleware(
         flushInterval?: number;
         chunking?: "line" | "none";
     } = {}
-): Experimental_LanguageModelV1Middleware {
+): LanguageModelMiddleware {
     const flushInterval = options.flushInterval ?? 500; // Default 500ms
     const chunking = options.chunking ?? "line"; // Default to line-based chunking
 
@@ -79,8 +69,8 @@ export function throttlingMiddleware(
 
             // Create a TransformStream that wraps our throttling logic
             const transformStream = new TransformStream<
-                LanguageModelV1StreamPart,
-                LanguageModelV1StreamPart
+                LanguageModelV2StreamPart,
+                LanguageModelV2StreamPart
             >({
                 async transform(chunk, controller) {
                     const chunkTimestamp = Date.now();
@@ -162,7 +152,7 @@ export function throttlingMiddleware(
                                     type: "text-delta",
                                     delta: toFlush,
                                     id: textId,
-                                } as LanguageModelV1StreamPart);
+                                } as LanguageModelV2StreamPart);
                             }
                         }
 
@@ -197,7 +187,7 @@ export function throttlingMiddleware(
                                     type: "reasoning-delta",
                                     delta: toFlush,
                                     id: reasoningId,
-                                } as LanguageModelV1StreamPart);
+                                } as LanguageModelV2StreamPart);
                             }
                         }
 
@@ -209,8 +199,8 @@ export function throttlingMiddleware(
 
                     // Handle different chunk types
                     if (isTextDelta(chunk)) {
-                        // Extract delta content (handle both v1 text and v2 delta properties)
-                        const deltaContent = chunk.delta || chunk.text;
+                        // Extract delta content
+                        const deltaContent = chunk.delta;
                         const chunkId = chunk.id || textId || "text-default";
 
                         if (deltaContent) {
@@ -260,8 +250,8 @@ export function throttlingMiddleware(
                             }
                         }
                     } else if (isReasoningDelta(chunk)) {
-                        // Extract delta content (handle both v1 text and v2 delta properties)
-                        const deltaContent = chunk.delta || chunk.text;
+                        // Extract delta content
+                        const deltaContent = chunk.delta;
                         const chunkId = chunk.id || reasoningId || "reasoning-default";
 
                         if (deltaContent) {
@@ -352,7 +342,7 @@ export function throttlingMiddleware(
                                 type: "text-delta",
                                 delta: textBuffer,
                                 id: textId,
-                            } as LanguageModelV1StreamPart);
+                            } as LanguageModelV2StreamPart);
                             textBuffer = "";
                         }
 
@@ -361,7 +351,7 @@ export function throttlingMiddleware(
                                 type: "reasoning-delta",
                                 delta: reasoningBuffer,
                                 id: reasoningId,
-                            } as LanguageModelV1StreamPart);
+                            } as LanguageModelV2StreamPart);
                             reasoningBuffer = "";
                         }
                     }

@@ -1,27 +1,14 @@
 import type { AgentConfigOptionalNsec, AgentInstance } from "@/agents/types";
-import { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
+import { loadAgentIntoRegistry } from "@/agents/agent-loader";
+import { processAgentTools } from "@/agents/tool-normalization";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
-import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { getNDK } from "@/nostr";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { getProjectContext } from "@/services";
-import { config } from "@/services";
-import { mcpService } from "@/services/mcp/MCPManager";
-import { isValidToolName } from "@/tools/registry";
-import type { ToolName } from "@/tools/types";
-import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
-import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { type StoredAgent, agentStorage } from "./AgentStorage";
-import {
-    CORE_AGENT_TOOLS,
-    DELEGATE_TOOLS,
-    PHASE_MANAGEMENT_TOOLS,
-    getDefaultToolsForAgent,
-    getDelegateToolsForAgent,
-} from "./constants";
+import { agentStorage } from "./AgentStorage";
+import { config } from "@/services";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -65,6 +52,13 @@ export class AgentRegistry {
     }
 
     /**
+     * Get the metadata path for this project (~/.tenex/projects/<dTag>/)
+     */
+    getMetadataPath(): string {
+        return this.metadataPath;
+    }
+
+    /**
      * Load agents for a project from unified storage (~/.tenex/agents/) and Nostr.
      * Complete agent loading workflow:
      * 1. Load agents from unified ~/.tenex/agents/ storage by event ID
@@ -95,54 +89,12 @@ export class AgentRegistry {
 
         logger.info(`Loading ${agentEventIds.length} agents for project ${this.projectDTag}`);
 
-        const ndk = getNDK();
         const failedAgents: string[] = [];
-        const projectDTag = this.projectDTag; // Capture for type safety
 
-        // Load or install each agent
+        // Load each agent using the new loader (no redundant checks!)
         for (const eventId of agentEventIds) {
             try {
-                let storedAgent = await agentStorage.getAgentByEventId(eventId);
-
-                // If agent not in storage, fetch from Nostr and install
-                if (!storedAgent) {
-                    logger.debug(`Agent ${eventId} not in storage, installing from Nostr`);
-
-                    const result = await installAgentFromEvent(
-                        eventId,
-                        this.projectPath,
-                        ndkProject,
-                        undefined,
-                        ndk,
-                        this
-                    );
-
-                    if (!result.success) {
-                        logger.error(`Failed to install agent ${eventId}: ${result.error}`);
-                        failedAgents.push(eventId);
-                        continue;
-                    }
-
-                    // Now it should be in storage
-                    storedAgent = await agentStorage.getAgentByEventId(eventId);
-                }
-
-                if (storedAgent) {
-                    // Add project to agent if not already there
-                    if (!storedAgent.projects.includes(projectDTag)) {
-                        storedAgent.projects.push(projectDTag);
-                        await agentStorage.saveAgent(storedAgent);
-                    }
-
-                    // Create agent instance
-                    const instance = await this.createAgentInstance(storedAgent);
-                    this.agents.set(storedAgent.slug, instance);
-                    this.agentsByPubkey.set(instance.pubkey, instance);
-
-                    logger.debug(
-                        `Loaded agent ${storedAgent.slug} for project ${this.projectDTag}`
-                    );
-                }
+                await loadAgentIntoRegistry(eventId, this);
             } catch (error) {
                 logger.error(`Failed to load agent ${eventId}`, { error });
                 failedAgents.push(eventId);
@@ -166,155 +118,7 @@ export class AgentRegistry {
         logger.info(`Loaded ${this.agents.size} agents for project ${this.projectDTag}`);
     }
 
-    /**
-     * Ensure an agent exists in the registry and storage
-     */
-    async ensureAgent(
-        slug: string,
-        config: AgentConfigOptionalNsec,
-        ndkProject?: NDKProject
-    ): Promise<AgentInstance> {
-        // Check if agent already exists in memory
-        const existingAgent = this.agents.get(slug);
-        if (existingAgent) {
-            return existingAgent;
-        }
 
-        // Check storage by slug
-        let storedAgent = await agentStorage.getAgentBySlug(slug);
-
-        if (!storedAgent) {
-            // Check by eventId if provided
-            if (config.eventId) {
-                storedAgent = await agentStorage.getAgentByEventId(config.eventId);
-            }
-
-            if (!storedAgent) {
-                // Create new agent
-                const signer = config.nsec
-                    ? new NDKPrivateKeySigner(config.nsec)
-                    : NDKPrivateKeySigner.generate();
-
-                const initialTools =
-                    config.tools?.filter((tool) => isValidToolName(tool))?.map(
-                        (tool) => tool as ToolName
-                    ) ?? undefined;
-
-                storedAgent = {
-                    eventId: config.eventId,
-                    nsec: signer.nsec,
-                    slug,
-                    name: config.name,
-                    role: config.role,
-                    description: config.description,
-                    instructions: config.instructions,
-                    useCriteria: config.useCriteria,
-                    llmConfig: config.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                    tools: initialTools ?? getDefaultToolsForAgent(config),
-                    phase: config.phase,
-                    phases: config.phases,
-                    projects: this.projectDTag ? [this.projectDTag] : [],
-                };
-
-                await agentStorage.saveAgent(storedAgent);
-                logger.info(`Created new agent "${slug}"`);
-
-                // Publish agent events if we have a project
-                if (ndkProject || this.ndkProject) {
-                    const project = ndkProject || this.ndkProject;
-                    await this.publishAgentEvents(signer, config, config.eventId, project);
-                }
-            }
-        }
-
-        // Ensure agent is associated with this project
-        if (this.projectDTag && !storedAgent.projects.includes(this.projectDTag)) {
-            storedAgent.projects.push(this.projectDTag);
-            await agentStorage.saveAgent(storedAgent);
-        }
-
-        // Create and store agent instance
-        const instance = await this.createAgentInstance(storedAgent);
-        this.agents.set(slug, instance);
-        this.agentsByPubkey.set(instance.pubkey, instance);
-
-        return instance;
-    }
-
-    /**
-     * Create an AgentInstance from stored agent data
-     */
-    private async createAgentInstance(storedAgent: StoredAgent): Promise<AgentInstance> {
-        const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-        const pubkey = signer.pubkey;
-
-        // Normalize tools
-        const toolNames = this.normalizeAgentTools(storedAgent.tools || [], storedAgent);
-
-        // Validate and filter tools
-        const validToolNames: string[] = [];
-        const requestedMcpTools: string[] = [];
-
-        for (const toolName of toolNames) {
-            if (isValidToolName(toolName)) {
-                validToolNames.push(toolName);
-            } else if (toolName.startsWith("mcp__")) {
-                requestedMcpTools.push(toolName);
-            }
-        }
-
-        // Add MCP tools if available
-        if (requestedMcpTools.length > 0) {
-            try {
-                const allMcpTools = mcpService.getCachedTools();
-                for (const toolName of requestedMcpTools) {
-                    if (allMcpTools[toolName]) {
-                        validToolNames.push(toolName);
-                    }
-                }
-            } catch (error) {
-                logger.debug(`Could not load MCP tools for agent "${storedAgent.slug}":`, error);
-            }
-        }
-
-        const agent: AgentInstance = {
-            name: storedAgent.name,
-            pubkey,
-            signer,
-            role: storedAgent.role,
-            description: storedAgent.description,
-            instructions: storedAgent.instructions,
-            useCriteria: storedAgent.useCriteria,
-            llmConfig: storedAgent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-            tools: validToolNames,
-            eventId: storedAgent.eventId,
-            slug: storedAgent.slug,
-            phase: storedAgent.phase,
-            phases: storedAgent.phases,
-            createMetadataStore: (conversationId: string) => {
-                return new AgentMetadataStore(conversationId, storedAgent.slug, this.metadataPath);
-            },
-            createLLMService: (options) => {
-                const projectCtx = getProjectContext();
-                const llmLogger = projectCtx.llmLogger.withAgent(storedAgent.name);
-                return config.createLLMService(
-                    llmLogger,
-                    agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-                    {
-                        tools: options?.tools ?? {},
-                        agentName: storedAgent.name,
-                        sessionId: options?.sessionId,
-                        projectPath: this.getBasePath(),
-                    }
-                );
-            },
-            sign: async (event: NDKEvent) => {
-                await event.sign(signer, { pTags: false });
-            },
-        };
-
-        return agent;
-    }
 
     /**
      * Get an agent by slug
@@ -366,6 +170,34 @@ export class AgentRegistry {
     }
 
     /**
+     * Get an agent by event ID
+     */
+    getAgentByEventId(eventId: string): AgentInstance | undefined {
+        for (const agent of this.agents.values()) {
+            if (agent.eventId === eventId) {
+                return agent;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Get the project dTag for this registry
+     */
+    getProjectDTag(): string | undefined {
+        return this.projectDTag;
+    }
+
+    /**
+     * Add an agent instance to the registry maps.
+     * Simple state management - no validation or loading logic.
+     */
+    addAgent(agent: AgentInstance): void {
+        this.agents.set(agent.slug, agent);
+        this.agentsByPubkey.set(agent.pubkey, agent);
+    }
+
+    /**
      * Get the Project Manager (PM) for this project
      * PM is the first agent in the project's agent tags
      */
@@ -390,24 +222,11 @@ export class AgentRegistry {
      * Set which agent is the Project Manager
      * This method is called by ProjectContext to inform the registry of the PM
      * Note: Delegate tools are assigned per-agent based on their configuration (phases, etc.),
-     * not based on PM status. See getDelegateToolsForAgent() for delegation logic.
+     * not based on PM status. Tool normalization happens during agent creation via processAgentTools().
      */
     setPMPubkey(pubkey: string): void {
         this.pmPubkey = pubkey;
-
-        // Ensure all agents have correct delegate tools based on their configuration
-        for (const agent of this.agents.values()) {
-            const delegateTools = getDelegateToolsForAgent(agent);
-
-            // Add delegate tools if not already present
-            for (const tool of delegateTools) {
-                if (!agent.tools.includes(tool)) {
-                    agent.tools.push(tool);
-                }
-            }
-        }
-
-        logger.debug(`Set PM pubkey: ${pubkey} and ensured delegate tools for all agents`);
+        logger.debug(`Set PM pubkey: ${pubkey}`);
     }
 
     /**
@@ -491,9 +310,11 @@ export class AgentRegistry {
             return false;
         }
 
-        // Normalize tools
-        const normalizedTools = this.normalizeAgentTools(newToolNames, agent);
-        const validToolNames = normalizedTools.filter(isValidToolName) as ToolName[];
+        // Process tools using centralized normalization logic
+        const validToolNames = processAgentTools(newToolNames, {
+            slug: agent.slug,
+            phases: agent.phases,
+        });
 
         // Update in memory
         agent.tools = validToolNames;
@@ -510,32 +331,6 @@ export class AgentRegistry {
         return false;
     }
 
-    /**
-     * Normalize agent tools by applying business rules
-     */
-    private normalizeAgentTools(
-        requestedTools: string[],
-        agent: { phases?: Record<string, string> }
-    ): string[] {
-        // Filter out delegation and phase management tools
-        const toolNames = requestedTools.filter((tool) => {
-            const typedTool = tool as ToolName;
-            return !DELEGATE_TOOLS.includes(typedTool) && !PHASE_MANAGEMENT_TOOLS.includes(typedTool);
-        });
-
-        // Add delegation tools based on phases
-        const delegateTools = getDelegateToolsForAgent(agent);
-        toolNames.push(...delegateTools);
-
-        // Ensure core tools are included
-        for (const coreTool of CORE_AGENT_TOOLS) {
-            if (!toolNames.includes(coreTool)) {
-                toolNames.push(coreTool);
-            }
-        }
-
-        return toolNames;
-    }
 
     /**
      * Publish agent events to Nostr

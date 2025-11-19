@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import { loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
-import { installAgentFromEvent } from "@/utils/agentInstaller";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { filterAndRelaySetFromBech32 } from "@nostr-dev-kit/ndk";
@@ -35,7 +35,7 @@ type AgentsHireOutput = {
  */
 async function executeAgentsHire(
     input: AgentsHireInput,
-    context: ExecutionContext
+    _context: ExecutionContext
 ): Promise<AgentsHireOutput> {
     const { eventId: rawEventId, slug } = input;
 
@@ -72,49 +72,13 @@ async function executeAgentsHire(
 
     // Get project context
     const projectContext = getProjectContext();
-    const projectPath = context.projectPath;
 
-    // Use the shared function to install the agent
-    const result = await installAgentFromEvent(
+    // Load the agent into the registry (handles storage, Nostr fetch, project association)
+    const agent = await loadAgentIntoRegistry(
         eventId,
-        projectPath,
-        projectContext.project,
-        slug,
-        ndk,
-        projectContext.agentRegistry
+        projectContext.agentRegistry,
+        slug || undefined
     );
-
-    if (!result.success) {
-        return {
-            success: false,
-            error: result.error || "Failed to install agent",
-        };
-    }
-
-    if (result.alreadyExists) {
-        return {
-            success: true,
-            message: result.message,
-            agent:
-                result.agent && result.slug
-                    ? {
-                          slug: result.slug,
-                          name: result.agent.name,
-                          pubkey: result.agent.pubkey,
-                      }
-                    : undefined,
-        };
-    }
-
-    const agent = result.agent;
-    const agentSlug = result.slug;
-
-    if (!agent || !agentSlug) {
-        return {
-            success: false,
-            error: "Agent installation succeeded but agent or slug is missing",
-        };
-    }
 
     // Note: We don't update the project event here because:
     // 1. The project event is signed by the user, not the agents
@@ -122,18 +86,15 @@ async function executeAgentsHire(
     // 3. The agent is already installed in ~/.tenex/agents/<pubkey>.json
     // 4. The user can update their project event from the client if needed
 
-    // The agent was already added to the registry by installAgentFromEvent,
-    // so it's now available in the project context
-
     logger.info(`Successfully hired agent "${agent.name}" (${agent.eventId})`);
-    logger.info(`  Slug: ${agentSlug}`);
+    logger.info(`  Slug: ${agent.slug}`);
     logger.info(`  Pubkey: ${agent.pubkey}`);
 
     return {
         success: true,
-        message: result.message,
+        message: `Successfully hired agent "${agent.name}"`,
         agent: {
-            slug: agentSlug,
+            slug: agent.slug,
             name: agent.name,
             role: agent.role,
             pubkey: agent.pubkey,

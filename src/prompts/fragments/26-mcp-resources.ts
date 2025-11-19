@@ -3,8 +3,8 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 // Extract resource types from the MCPClient method return types
-type MCPResource = Awaited<ReturnType<experimental_MCPClient['listResources']>>['resources'][number];
-type MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient['listResourceTemplates']>>['resourceTemplates'][number];
+type MCPResource = Awaited<ReturnType<experimental_MCPClient["listResources"]>>["resources"][number];
+type MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
 
 interface ResourcesPerServer {
     serverName: string;

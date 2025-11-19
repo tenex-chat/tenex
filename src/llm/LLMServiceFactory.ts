@@ -317,7 +317,7 @@ export class LLMServiceFactory {
      * Get the provider registry
      * Useful for direct access to language models
      */
-    getRegistry(): ProviderRegistry {
+    getRegistry(): ReturnType<typeof createProviderRegistry> {
         if (!this.registry) {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }

@@ -60,7 +60,7 @@ async function executeDelegateExternal(
     );
 
     // Normalize optional IDs
-    const cleanProjectId = normalizeNostrIdentifier(projectId);
+    const cleanProjectId = normalizeNostrIdentifier(projectId) ?? undefined;
 
     logger.debug("Processing recipient", { pubkey });
 

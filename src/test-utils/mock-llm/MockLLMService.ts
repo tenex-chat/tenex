@@ -43,7 +43,7 @@ export class MockLLMService implements LLMService {
         if (config.responses) {
             for (const response of config.responses) {
                 // Convert simple response format to MockLLMResponse
-                if ('match' in response) {
+                if ("match" in response) {
                     // Simple format with match pattern
                     this.responses.push({
                         trigger: {

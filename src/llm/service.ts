@@ -5,11 +5,11 @@ import { logger } from "@/utils/logger";
 import type { JSONValue } from "@ai-sdk/provider";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
-    type Experimental_LanguageModelV1Middleware,
     type GenerateTextResult,
     type LanguageModel,
+    type LanguageModelMiddleware,
     type LanguageModelUsage,
-    type ProviderRegistry,
+    type ProviderRegistryProvider,
     type StepResult,
     type TelemetrySettings,
     type TextStreamPart,
@@ -142,7 +142,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
     constructor(
         private readonly llmLogger: LLMLogger,
-        private readonly registry: ProviderRegistry | null,
+        private readonly registry: ProviderRegistryProvider<any, any> | null,
         provider: string,
         model: string,
         temperature?: number,
@@ -238,7 +238,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         }
 
         // Build middleware chain
-        const middlewares: Experimental_LanguageModelV1Middleware[] = [];
+        const middlewares: LanguageModelMiddleware[] = [];
 
         // Add throttling middleware for streaming (when enabled)
         // Check if this provider should use throttling middleware
