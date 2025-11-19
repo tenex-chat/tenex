@@ -20,27 +20,37 @@ function isValidWebSocketUrl(url: string): boolean {
 }
 
 /**
- * Get relay URLs for NDK connection.
- * Priority: config file > defaults.
- * If config file is not found, it will be created with default relays.
+ * Get relay URLs for NDK connection
+ * Priority: environment variable > config file > defaults
  * @returns Array of validated WebSocket relay URLs
  */
-export async function getRelayUrls(): Promise<string[]> {
+export function getRelayUrls(): string[] {
+    // First check environment variable (highest priority)
+    const relaysEnv = process.env.RELAYS;
+    if (relaysEnv?.trim()) {
+        const urls = relaysEnv
+            .split(",")
+            .map((url) => url.trim())
+            .filter((url) => url.length > 0 && isValidWebSocketUrl(url));
+
+        if (urls.length > 0) {
+            return urls;
+        }
+    }
+
+    // Then check config file
     try {
-        const loadedConfig = await config.loadTenexConfig(config.getGlobalPath());
-        if (loadedConfig.relays && loadedConfig.relays.length > 0) {
-            const urls = loadedConfig.relays.filter(isValidWebSocketUrl);
+        const config = config.getConfig();
+        if (config.relays && config.relays.length > 0) {
+            const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
             if (urls.length > 0) {
                 return urls;
             }
         }
-        // If config is loaded but relays are missing/empty, save defaults
-        loadedConfig.relays = DEFAULT_RELAY_URLS;
-        await config.saveGlobalConfig(loadedConfig);
-        return DEFAULT_RELAY_URLS;
-    } catch (error) {
-        // This catch block will handle errors from loadTenexConfig or saveGlobalConfig
-        // Fallback to default relays in case of any error
-        return DEFAULT_RELAY_URLS;
+    } catch {
+        // Config not loaded yet, fall through to defaults
     }
+
+    // Finally fall back to defaults
+    return DEFAULT_RELAY_URLS;
 }
