@@ -1,13 +1,10 @@
 import type { AgentInstance } from "@/agents/types";
-import { loadAgentIntoRegistry } from "@/agents/agent-loader";
+import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { processAgentTools } from "@/agents/tool-normalization";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "./AgentStorage";
-import { config } from "@/services";
 
 /**
  * AgentRegistry manages agent configuration and instances for a project.
@@ -21,7 +18,6 @@ export class AgentRegistry {
     private projectPath: string; // Git repo path
     private metadataPath: string; // TENEX metadata path
     private ndkProject?: NDKProject;
-    private pmPubkey?: string;
 
     /**
      * Creates a new AgentRegistry instance.
@@ -218,17 +214,6 @@ export class AgentRegistry {
     }
 
     /**
-     * Set which agent is the Project Manager
-     * This method is called by ProjectContext to inform the registry of the PM
-     * Note: Delegate tools are assigned per-agent based on their configuration (phases, etc.),
-     * not based on PM status. Tool normalization happens during agent creation via processAgentTools().
-     */
-    setPMPubkey(pubkey: string): void {
-        this.pmPubkey = pubkey;
-        logger.debug(`Set PM pubkey: ${pubkey}`);
-    }
-
-    /**
      * Remove an agent from the current project
      */
     async removeAgentFromProject(slug: string): Promise<boolean> {
@@ -249,59 +234,29 @@ export class AgentRegistry {
     }
 
     /**
-     * Update an agent's LLM configuration
+     * Reload an agent from storage into the registry
+     * Used after storage updates to refresh in-memory state
      */
-    async updateAgentLLMConfig(agentPubkey: string, newLLMConfig: string): Promise<boolean> {
-        const agent = this.agentsByPubkey.get(agentPubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${agentPubkey} not found`);
+    async reloadAgent(pubkey: string): Promise<boolean> {
+        const storedAgent = await agentStorage.loadAgent(pubkey);
+        if (!storedAgent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found in storage`);
             return false;
         }
 
-        // Update in memory
-        agent.llmConfig = newLLMConfig;
-
-        // Update in storage
-        const storedAgent = await agentStorage.loadAgent(agentPubkey);
-        if (storedAgent) {
-            storedAgent.llmConfig = newLLMConfig;
-            await agentStorage.saveAgent(storedAgent);
-            logger.info(`Updated LLM config for agent ${agent.name}`);
-            return true;
+        // Remove old instance
+        const oldAgent = this.agentsByPubkey.get(pubkey);
+        if (oldAgent) {
+            this.agents.delete(oldAgent.slug);
+            this.agentsByPubkey.delete(pubkey);
         }
 
-        return false;
-    }
+        // Create and add new instance
+        const instance = createAgentInstance(storedAgent, this);
+        this.addAgent(instance);
 
-    /**
-     * Update an agent's tools
-     */
-    async updateAgentTools(agentPubkey: string, newToolNames: string[]): Promise<boolean> {
-        const agent = this.agentsByPubkey.get(agentPubkey);
-        if (!agent) {
-            logger.warn(`Agent with pubkey ${agentPubkey} not found`);
-            return false;
-        }
-
-        // Process tools using centralized normalization logic
-        const validToolNames = processAgentTools(newToolNames, {
-            slug: agent.slug,
-            phases: agent.phases,
-        });
-
-        // Update in memory
-        agent.tools = validToolNames;
-
-        // Update in storage (save the original requested tools)
-        const storedAgent = await agentStorage.loadAgent(agentPubkey);
-        if (storedAgent) {
-            storedAgent.tools = newToolNames;
-            await agentStorage.saveAgent(storedAgent);
-            logger.info(`Updated tools for agent ${agent.name}`);
-            return true;
-        }
-
-        return false;
+        logger.debug(`Reloaded agent ${storedAgent.name} (${storedAgent.slug})`);
+        return true;
     }
 
 
