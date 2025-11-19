@@ -1,4 +1,4 @@
-import { agentStorage } from "@/agents/AgentStorage";
+import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
@@ -125,9 +125,8 @@ async function executeAgentsWrite(
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
 
-    // Create StoredAgent
-    const storedAgent = {
-        eventId: undefined, // Locally created agents don't have event IDs
+    // Create StoredAgent using factory
+    const storedAgent = createStoredAgent({
         nsec: signer.nsec,
         slug,
         name,
@@ -138,8 +137,9 @@ async function executeAgentsWrite(
         llmConfig: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
         tools,
         phases,
+        eventId: undefined, // Locally created agents don't have event IDs
         projects: [projectContext.projectDTag],
-    };
+    });
 
     // Save to storage
     await agentStorage.saveAgent(storedAgent);

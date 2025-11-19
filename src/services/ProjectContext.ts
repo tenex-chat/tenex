@@ -268,7 +268,6 @@ export class ProjectContext {
         // Tell AgentRegistry who the PM is after reload
         if (this.projectManager) {
             this.agentRegistry.setPMPubkey(this.projectManager.pubkey);
-            await this.agentRegistry.persistPMStatus();
         }
 
         logger.info("ProjectContext updated with new data", {

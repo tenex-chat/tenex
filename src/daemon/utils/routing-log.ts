@@ -1,5 +1,6 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
+import type { RoutingDecision } from "@/daemon/types";
 import { logger } from "@/utils/logger";
 
 /**
@@ -9,17 +10,17 @@ import { logger } from "@/utils/logger";
 export function logRoutingDecision(
     routingLogger: EventRoutingLogger,
     event: NDKEvent,
-    decision: "routed" | "dropped" | "project_event" | "lesson_hydration",
-    projectId: string | null,
-    reason: string,
-    method: "a_tag" | "p_tag_agent" | "none" = "none",
-    matchedTags: string[] = []
+    routingDecision: RoutingDecision,
+    targetProjectId: string | null,
+    routingMethod: "a_tag" | "p_tag_agent" | "none" = "none",
+    matchedTags: string[] = [],
+    reason?: string
 ) {
     return routingLogger.logRoutingDecision({
         event,
-        routingDecision: decision,
-        targetProjectId: projectId,
-        routingMethod: method,
+        routingDecision,
+        targetProjectId,
+        routingMethod,
         matchedTags,
         reason,
     });
@@ -35,14 +36,18 @@ export function logDropped(
         eventKind: event.kind,
         reason,
     });
-    return logRoutingDecision(routingLogger, event, "dropped", null, reason);
+    const routingDecision: RoutingDecision = {
+        type: "dropped",
+        reason,
+    };
+    return logRoutingDecision(routingLogger, event, routingDecision, null, "none", [], reason);
 }
 
 export function logRouted(
     routingLogger: EventRoutingLogger,
     event: NDKEvent,
     projectId: string,
-    method: "a_tag" | "p_tag_agent" | "none",
+    method: "a_tag" | "p_tag_agent",
     matchedTags: string[]
 ) {
     logger.debug("Routing event to project", {
@@ -50,13 +55,19 @@ export function logRouted(
         projectId: projectId.slice(0, 16),
         method,
     });
+    const routingDecision: RoutingDecision = {
+        type: "route_to_project",
+        projectId: projectId as import("@/daemon/types").ProjectId,
+        method,
+        matchedTags,
+    };
     return logRoutingDecision(
         routingLogger,
         event,
-        "routed",
+        routingDecision,
         projectId,
-        `Routed via ${method}`,
         method,
-        matchedTags
+        matchedTags,
+        `Routed via ${method}`
     );
 }

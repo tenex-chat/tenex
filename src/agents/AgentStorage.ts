@@ -17,6 +17,40 @@ export interface StoredAgent extends StoredAgentData {
 }
 
 /**
+ * Factory function to create a StoredAgent object
+ * Ensures consistent structure and defaults
+ */
+export function createStoredAgent(config: {
+    nsec: string;
+    slug: string;
+    name: string;
+    role: string;
+    description?: string | null;
+    instructions?: string | null;
+    useCriteria?: string | null;
+    llmConfig?: string;
+    tools?: string[] | null;
+    phases?: Record<string, string> | null;
+    eventId?: string;
+    projects?: string[];
+}): StoredAgent {
+    return {
+        eventId: config.eventId,
+        nsec: config.nsec,
+        slug: config.slug,
+        name: config.name,
+        role: config.role,
+        description: config.description ?? undefined,
+        instructions: config.instructions ?? undefined,
+        useCriteria: config.useCriteria ?? undefined,
+        llmConfig: config.llmConfig,
+        tools: config.tools ?? undefined,
+        phases: config.phases ?? undefined,
+        projects: config.projects ?? [],
+    };
+}
+
+/**
  * Index structure for fast lookups
  */
 interface AgentIndex {
