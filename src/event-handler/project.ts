@@ -131,7 +131,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
                 }
             }
             // Reload the agent registry to pick up new agents
-            await currentContext.agentRegistry.loadAllAgents(ndkProject);
+            await currentContext.agentRegistry.loadFromProject(ndkProject);
         }
 
         // Process MCP tool changes
