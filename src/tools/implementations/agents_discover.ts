@@ -62,7 +62,7 @@ async function executeAgentsDiscover(input: AgentsDiscoverInput): Promise<Agents
 
     // Discover agents with specified filters
     const agents = await discovery.discoverAgents({
-        searchText,
+        searchText: searchText ?? undefined,
     });
 
     // Format results with bech32 encoded IDs

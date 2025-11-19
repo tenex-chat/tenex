@@ -16,9 +16,9 @@ import {
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 
 // Extract individual resource types from the MCPClient method return types
-type experimental_MCPResource = Awaited<ReturnType<experimental_MCPClient['listResources']>>['resources'][number];
-type experimental_MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient['listResourceTemplates']>>['resourceTemplates'][number];
-type experimental_MCPReadResourceResult = Awaited<ReturnType<experimental_MCPClient['readResource']>>;
+type experimental_MCPResource = Awaited<ReturnType<experimental_MCPClient["listResources"]>>["resources"][number];
+type experimental_MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
+type experimental_MCPReadResourceResult = Awaited<ReturnType<experimental_MCPClient["readResource"]>>;
 
 interface MCPClientEntry {
     client: experimental_MCPClient;

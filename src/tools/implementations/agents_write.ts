@@ -1,7 +1,10 @@
 import { agentStorage } from "@/agents/AgentStorage";
+import { createAgentInstance } from "@/agents/agent-loader";
 import type { ExecutionContext } from "@/agents/execution/types";
+import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 // Define the input schema
@@ -83,10 +86,10 @@ async function executeAgentsWrite(
         // Update fields
         existingAgent.name = name;
         existingAgent.role = role;
-        if (description !== undefined) existingAgent.description = description;
-        if (instructions !== undefined) existingAgent.instructions = instructions;
-        if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria;
-        if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig;
+        if (description !== undefined) existingAgent.description = description ?? undefined;
+        if (instructions !== undefined) existingAgent.instructions = instructions ?? undefined;
+        if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria ?? undefined;
+        if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig ?? undefined;
         if (tools !== undefined) existingAgent.tools = tools;
         if (phases !== undefined) existingAgent.phases = phases;
 
@@ -119,24 +122,31 @@ async function executeAgentsWrite(
     }
     logger.info(`Creating new agent: ${slug}`);
 
-    // Create agent config
-    const agentConfig = {
+    // Generate a new private key for this agent
+    const signer = NDKPrivateKeySigner.generate();
+
+    // Create StoredAgent
+    const storedAgent = {
+        eventId: undefined, // Locally created agents don't have event IDs
+        nsec: signer.nsec,
+        slug,
         name,
         role,
         description,
         instructions,
         useCriteria,
-        llmConfig,
+        llmConfig: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
         tools,
         phases,
+        projects: [projectContext.projectDTag],
     };
 
-    // Use ensureAgent to create and register the agent
-    const agent = await projectContext.agentRegistry.ensureAgent(
-        slug,
-        agentConfig,
-        projectContext.project
-    );
+    // Save to storage
+    await agentStorage.saveAgent(storedAgent);
+
+    // Create instance and add to registry
+    const agent = createAgentInstance(storedAgent, projectContext.agentRegistry);
+    projectContext.agentRegistry.addAgent(agent);
 
     logger.info(`Successfully created agent "${name}" (${slug})`);
     logger.info(`  Pubkey: ${agent.pubkey}`);

@@ -152,7 +152,8 @@ describe("AgentRegistry", () => {
         });
     });
 
-    describe("ensureAgent", () => {
+    // ensureAgent was removed in refactor - functionality now in loadAgentIntoRegistry
+    describe.skip("ensureAgent", () => {
         beforeEach(async () => {
             (fs.ensureDirectory as any).mockResolvedValue(undefined);
             (config.loadTenexAgents as any).mockResolvedValue({});

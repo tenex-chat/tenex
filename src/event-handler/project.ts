@@ -9,7 +9,7 @@ import {
     installMCPServerFromEvent,
     removeMCPServerByEventId,
 } from "../services/mcp/mcpInstaller";
-import { installAgentsFromEvents } from "../utils/agentInstaller";
+import { installAgentsFromEvents } from "../agents/agent-installer";
 import { logger } from "../utils/logger";
 
 /**

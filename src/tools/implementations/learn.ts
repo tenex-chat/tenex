@@ -55,8 +55,8 @@ async function executeLessonLearn(
     const intent: LessonIntent = {
         title,
         lesson,
-        detailed,
-        category,
+        detailed: detailed ?? undefined,
+        category: category ?? undefined,
         hashtags,
     };
 
