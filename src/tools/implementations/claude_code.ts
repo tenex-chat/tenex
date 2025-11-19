@@ -4,7 +4,7 @@ import { LLMService } from "@/llm/service";
 import { LLMLogger } from "@/logging/LLMLogger";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { createProviderRegistry } from "ai";
@@ -382,4 +382,4 @@ export function createClaudeCodeTool(context: ExecutionContext): ReturnType<type
             }
         },
     });
-}
+} 

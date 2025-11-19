@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { NDKProject } from "@nostr-dev-kit/ndk";
@@ -155,4 +155,4 @@ export function createCreateProjectTool(context: ExecutionContext): ReturnType<t
             }
         },
     });
-}
+} 

@@ -3,7 +3,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { DelegationRegistry } from "@/services/DelegationRegistry";
 import type { DelegationResponses } from "@/services/DelegationService";
 import type { AISdkTool } from "@/tools/types";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier, parseNostrUser } from "@/utils/nostr-entity-parser";
 import { NDKEvent } from "@nostr-dev-kit/ndk";

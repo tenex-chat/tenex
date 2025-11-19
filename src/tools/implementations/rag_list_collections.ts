@@ -56,4 +56,4 @@ export function createRAGListCollectionsTool(context: ExecutionContext): AISdkTo
             );
         },
     });
-}
+} 

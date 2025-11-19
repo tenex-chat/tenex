@@ -271,4 +271,4 @@ export function createNostrProjectsTool(context: ExecutionContext): ReturnType<t
             return await executeNostrProjects(input, context);
         },
     });
-}
+} 

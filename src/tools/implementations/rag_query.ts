@@ -94,4 +94,4 @@ export function createRAGQueryTool(context: ExecutionContext): AISdkTool {
             return executeToolWithErrorHandling("rag_query", input, context, executeQuery);
         },
     });
-}
+} 
