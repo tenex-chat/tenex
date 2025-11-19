@@ -615,15 +615,15 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             case "tool-input-start":
                 // Tool input is starting to stream - we can log but don't need to process
                 logger.debug("[LLMService] Tool input starting", {
-                    toolCallId: chunk.toolCallId,
+                    toolCallId: chunk.id,
                     toolName: chunk.toolName,
                 });
                 break;
             case "tool-input-delta":
                 // Tool input is being incrementally streamed - can be used for real-time display
                 logger.debug("[LLMService] Tool input delta", {
-                    toolCallId: chunk.toolCallId,
-                    text: chunk.text,
+                    toolCallId: chunk.id,
+                    text: chunk.delta,
                 });
                 break;
             case "reasoning-start":
@@ -1061,8 +1061,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      * Uses standard pricing tiers based on provider and model
      */
     private calculateCostUsd(usage: LanguageModelUsage): number {
-        const promptTokens = usage.promptTokens ?? 0;
-        const completionTokens = usage.completionTokens ?? 0;
+        const promptTokens = usage.inputTokens ?? 0;
+        const completionTokens = usage.outputTokens ?? 0;
 
         const costPer1kPrompt = 0.001;
         const costPer1kCompletion = 0.002;
