@@ -10,8 +10,40 @@ import {
 } from "./constants";
 
 /**
- * Pure tool normalization logic extracted from AgentRegistry.
- * All functions are stateless and side-effect free.
+ * tool-normalization - Pure functions for processing agent tool lists
+ *
+ * ## Responsibility
+ * Centralizes all tool assignment logic that was previously scattered across:
+ * - AgentRegistry
+ * - agent-loader
+ * - Agent creation tools
+ *
+ * ## What it does
+ * Takes a raw tool list + agent context → returns final validated tool list:
+ * 1. Filter out delegate/phase management tools (managed separately)
+ * 2. Add appropriate delegate tools based on agent phases
+ * 3. Add core tools (all agents get these)
+ * 4. Validate tool names
+ * 5. Resolve MCP tools (check availability)
+ * 6. Return final deduplicated list
+ *
+ * ## Pure Functions
+ * All functions here are stateless and side-effect free:
+ * - Same input = same output
+ * - No external state
+ * - No mutations
+ * - Easy to test
+ *
+ * ## Usage
+ * Called during AgentInstance creation in agent-loader.ts:
+ * ```typescript
+ * const finalTools = processAgentTools(storedAgent.tools, {
+ *   slug: storedAgent.slug,
+ *   phases: storedAgent.phases
+ * });
+ * ```
+ *
+ * @see agent-loader for usage in instance creation
  */
 
 /**
