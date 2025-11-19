@@ -33,7 +33,7 @@ type ShellOutput = string;
 async function executeShell(input: ShellInput, context: ExecutionContext): Promise<ShellOutput> {
     const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input;
 
-    const workingDir = cwd || context.projectPath;
+    const workingDir = cwd || context.workingDirectory;
 
     logger.info("Executing shell command", {
         command,

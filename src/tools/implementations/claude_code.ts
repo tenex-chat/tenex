@@ -165,7 +165,7 @@ async function executeClaudeCode(
             "claude-code": {
                 languageModel: (modelId: string) => {
                     const options: ClaudeCodeSettings = {
-                        cwd: context.projectPath,
+                        cwd: context.workingDirectory,
                         permissionMode: "bypassPermissions",
                         // Resume existing session if we have one
                         resume: existingSessionId,

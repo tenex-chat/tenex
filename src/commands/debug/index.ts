@@ -20,6 +20,7 @@ import { mcpService } from "@/services/mcp/MCPManager";
 // Tool type removed - using AI SDK tools only
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/utils/formatting";
+import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { logger } from "@/utils/logger";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -399,10 +400,13 @@ export async function runDebugThreadedFormatter(
 
             const { AgentPublisher } = await import("@/nostr/AgentPublisher");
             const mockAgentPublisher = new AgentPublisher(selectedAgent);
+            const currentBranch = await getCurrentBranch(projectPath);
 
             const mockContext: ExecutionContext = {
                 agent: selectedAgent,
                 projectPath,
+                workingDirectory: projectPath, // Debug always uses main worktree
+                currentBranch,
                 conversationId: options.conversationId,
                 conversationCoordinator,
                 triggeringEvent,

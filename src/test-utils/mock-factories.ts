@@ -149,6 +149,8 @@ export function createMockExecutionContext(
         agent,
         conversationId,
         projectPath: "/mock/project",
+        workingDirectory: "/mock/project",
+        currentBranch: "main",
         triggeringEvent: mockEvent,
         conversationCoordinator: mockConversationCoordinator,
         agentPublisher: mockPublisher,

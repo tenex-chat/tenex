@@ -18,7 +18,7 @@ const readPathSchema = z.object({
  */
 async function executeReadPath(path: string, context: ExecutionContext): Promise<string> {
     // Resolve path and ensure it's within project
-    const fullPath = resolveAndValidatePath(path, context.projectPath);
+    const fullPath = resolveAndValidatePath(path, context.workingDirectory);
 
     // Check if path is a directory first
     const stats = await stat(fullPath);
@@ -69,7 +69,7 @@ export function createReadPathTool(context: ExecutionContext): AISdkTool {
                 // If it's an EISDIR error that we somehow missed, provide helpful guidance
                 if (error instanceof Error && "code" in error && error.code === "EISDIR") {
                     try {
-                        const fullPath = resolveAndValidatePath(path, context.projectPath);
+                        const fullPath = resolveAndValidatePath(path, context.workingDirectory);
                         const files = await readdir(fullPath);
                         const fileList = files.map((file) => `  - ${file}`).join("\n");
 

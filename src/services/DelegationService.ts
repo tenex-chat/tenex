@@ -14,6 +14,11 @@ export interface DelegationResponses {
         from: string;
         event?: NDKEvent; // The actual response event for threading
     }>;
+    worktree?: {
+        branch: string;
+        path: string;
+        message: string;
+    };
 }
 
 /**
