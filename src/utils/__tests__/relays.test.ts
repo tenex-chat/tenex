@@ -1,102 +1,63 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { getRelayUrls } from "../relays";
+import { config } from "@/services/ConfigService";
 
-describe("relays", () => {
-    const originalEnv = process.env;
-    const originalWarn = console.warn;
+// Mock the entire ConfigService
+mock.module("@/services/ConfigService", () => ({
+    config: {
+        getConfig: mock(),
+    },
+}));
 
-    beforeEach(() => {
-        // Reset env before each test
-        process.env = { ...originalEnv };
-        console.warn = mock(() => {});
-    });
-
+describe("getRelayUrls", () => {
     afterEach(() => {
-        // Restore original env after each test
-        process.env = originalEnv;
-        console.warn = originalWarn;
+        // Reset mocks after each test
+        (config.getConfig as jest.Mock).mockClear();
     });
 
-    describe("getRelayUrls", () => {
-        it("should return default relay URLs when RELAYS env is not set", () => {
-            process.env.RELAYS = undefined;
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://tenex.chat"]);
+    it("should return relay URLs from the config file", () => {
+        const mockRelays = ["wss://relay.from.config"];
+        (config.getConfig as jest.Mock).mockReturnValue({ relays: mockRelays });
+
+        const urls = getRelayUrls();
+        expect(urls).toEqual(mockRelays);
+        expect(config.getConfig).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return default relay URLs when config has no relays", () => {
+        (config.getConfig as jest.Mock).mockReturnValue({ relays: [] });
+
+        const urls = getRelayUrls();
+        expect(urls).toEqual(["wss://tenex.chat"]);
+    });
+
+    it("should return default relay URLs when config is not available", () => {
+        (config.getConfig as jest.Mock).mockImplementation(() => {
+            throw new Error("Config not loaded");
         });
 
-        it("should parse single relay URL from RELAYS env", () => {
-            process.env.RELAYS = "wss://relay1.example.com";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://relay1.example.com"]);
-        });
+        const urls = getRelayUrls();
+        expect(urls).toEqual(["wss://tenex.chat"]);
+    });
 
-        it("should parse multiple relay URLs from RELAYS env", () => {
-            process.env.RELAYS =
-                "wss://relay1.example.com,wss://relay2.example.com,wss://relay3.example.com";
-            const urls = getRelayUrls();
-            expect(urls).toEqual([
-                "wss://relay1.example.com",
-                "wss://relay2.example.com",
-                "wss://relay3.example.com",
-            ]);
-        });
+    it("should filter out invalid relay URLs from the config", () => {
+        const mockRelays = [
+            "wss://valid.relay",
+            "ws://another.valid.relay",
+            "http://invalid.relay",
+            "not-a-url",
+        ];
+        (config.getConfig as jest.Mock).mockReturnValue({ relays: mockRelays });
 
-        it("should trim whitespace from relay URLs", () => {
-            process.env.RELAYS = "  wss://relay1.example.com  , wss://relay2.example.com  ";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://relay1.example.com", "wss://relay2.example.com"]);
-        });
+        const urls = getRelayUrls();
+        expect(urls).toEqual(["wss://valid.relay", "ws://another.valid.relay"]);
+    });
 
-        it("should handle empty RELAYS env variable", () => {
-            process.env.RELAYS = "";
-            const urls = getRelayUrls();
-            // Empty string should return default relay
-            expect(urls).toEqual(["wss://tenex.chat"]);
-        });
+    it("should return default URLs when all config relays are invalid", () => {
+        const mockRelays = ["http://invalid.relay", "not-a-url"];
+        (config.getConfig as jest.Mock).mockReturnValue({ relays: mockRelays });
 
-        it("should handle RELAYS with trailing comma", () => {
-            process.env.RELAYS = "wss://relay1.example.com,wss://relay2.example.com,";
-            const urls = getRelayUrls();
-            // Should filter out empty strings from trailing comma
-            expect(urls).toEqual(["wss://relay1.example.com", "wss://relay2.example.com"]);
-        });
-
-        it("should handle RELAYS with only commas", () => {
-            process.env.RELAYS = ",,,,";
-            const urls = getRelayUrls();
-            // Should return default when only commas
-            expect(urls).toEqual(["wss://tenex.chat"]);
-        });
-
-        it("should handle RELAYS with mixed valid and empty values", () => {
-            process.env.RELAYS = ",wss://relay1.example.com,,wss://relay2.example.com,";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://relay1.example.com", "wss://relay2.example.com"]);
-        });
-
-        it("should filter out invalid URLs and only keep valid WebSocket URLs", () => {
-            process.env.RELAYS =
-                "invalid-url,wss://valid.com,http://not-websocket.com,ws://also-valid.com";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://valid.com", "ws://also-valid.com"]);
-        });
-
-        it("should accept both ws:// and wss:// protocols", () => {
-            process.env.RELAYS = "ws://relay1.com,wss://relay2.com";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["ws://relay1.com", "wss://relay2.com"]);
-        });
-
-        it("should return defaults and warn when all URLs are invalid", () => {
-            const mockWarn = mock(() => {});
-            console.warn = mockWarn;
-
-            process.env.RELAYS = "http://not-valid.com,https://also-not-valid.com,not-even-a-url";
-            const urls = getRelayUrls();
-            expect(urls).toEqual(["wss://tenex.chat"]);
-            expect(mockWarn).toHaveBeenCalledWith(
-                "No valid WebSocket URLs found in RELAYS environment variable, using defaults"
-            );
-        });
+        const urls = getRelayUrls();
+        expect(urls).toEqual(["wss://tenex.chat"]);
     });
 });

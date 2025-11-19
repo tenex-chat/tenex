@@ -1,9 +1,5 @@
+import { DEFAULT_RELAY_URLS } from "@/constants";
 import { config } from "@/services/ConfigService";
-
-/**
- * Default Nostr relay URLs for TENEX
- */
-const DEFAULT_RELAY_URLS = ["wss://tenex.chat"];
 
 /**
  * Validate WebSocket URL format
@@ -21,28 +17,15 @@ function isValidWebSocketUrl(url: string): boolean {
 
 /**
  * Get relay URLs for NDK connection
- * Priority: environment variable > config file > defaults
+ * Priority: config file > defaults
  * @returns Array of validated WebSocket relay URLs
  */
 export function getRelayUrls(): string[] {
-    // First check environment variable (highest priority)
-    const relaysEnv = process.env.RELAYS;
-    if (relaysEnv?.trim()) {
-        const urls = relaysEnv
-            .split(",")
-            .map((url) => url.trim())
-            .filter((url) => url.length > 0 && isValidWebSocketUrl(url));
-
-        if (urls.length > 0) {
-            return urls;
-        }
-    }
-
-    // Then check config file
+    // First, check config file
     try {
-        const config = config.getConfig();
-        if (config.relays && config.relays.length > 0) {
-            const urls = config.relays.filter((url) => isValidWebSocketUrl(url));
+        const tenexConfig = config.getConfig();
+        if (tenexConfig.relays && tenexConfig.relays.length > 0) {
+            const urls = tenexConfig.relays.filter((url) => isValidWebSocketUrl(url));
             if (urls.length > 0) {
                 return urls;
             }
