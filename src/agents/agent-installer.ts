@@ -10,8 +10,39 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
- * Pure functions for fetching and installing agents from Nostr.
- * No registry interaction - only Nostr fetching and storage operations.
+ * agent-installer - Pure Nostr operations for fetching agent definitions
+ *
+ * ## Responsibility
+ * Fetches agent definition events from Nostr relays and saves them to storage.
+ * - Fetches events by event ID
+ * - Validates event structure
+ * - Parses event into StoredAgent format
+ * - Generates private keys for agents
+ * - Saves to AgentStorage
+ *
+ * ## Architecture
+ * - **agent-installer** (this): Pure Nostr operations only
+ * - **AgentStorage**: Handles persistence (uses this)
+ * - **agent-loader**: Orchestrates the full loading flow (uses this)
+ *
+ * ## Separation of Concerns
+ * This module is ONLY about Nostr:
+ * - No registry logic
+ * - No project logic
+ * - No in-memory state
+ * - Just: fetch → validate → parse → save
+ *
+ * ## Usage
+ * Typically called by agent-loader when an agent is not found in storage.
+ * Can also be used standalone to pre-install agents.
+ *
+ * @example
+ * // Install agent from Nostr
+ * const stored = await installAgentFromNostr('nostr:event123', 'my-agent');
+ * console.log('Installed:', stored.name);
+ *
+ * @see agent-loader for the complete loading orchestration
+ * @see AgentStorage for persistence operations
  */
 
 /**
@@ -87,13 +118,35 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
 
 /**
  * Fetch an agent definition event from Nostr and save it to storage.
- * This is a pure orchestration function - fetches, parses, saves, returns.
  *
- * @param eventId - The Nostr event ID of the agent definition
+ * Pure orchestration: fetch → validate → parse → generate keys → save → return
+ *
+ * ## Flow
+ * 1. Fetch agent definition event from Nostr relays (by eventId)
+ * 2. Validate event structure (has title, content, etc.)
+ * 3. Parse event tags (tools, phases, etc.)
+ * 4. Generate new private key for this agent instance
+ * 5. Save to AgentStorage
+ * 6. Return StoredAgent
+ *
+ * ## Note
+ * This does NOT add the agent to any registry or project. That happens
+ * later in agent-loader.ts. This function is ONLY about Nostr → storage.
+ *
+ * @param eventId - The Nostr event ID of the agent definition (with or without "nostr:" prefix)
  * @param customSlug - Optional custom slug (defaults to kebab-case of agent name)
  * @param ndk - Optional NDK instance (uses default if not provided)
- * @returns The saved StoredAgent
- * @throws Error if event not found or fetch/save fails
+ * @returns The saved StoredAgent (with generated private key)
+ * @throws AgentNotFoundError if event not found on relays
+ * @throws AgentValidationError if event structure is invalid
+ *
+ * @example
+ * // Install agent with default slug
+ * const agent = await installAgentFromNostr('event123');
+ *
+ * @example
+ * // Install with custom slug
+ * const agent = await installAgentFromNostr('event123', 'my-custom-slug');
  */
 export async function installAgentFromNostr(
     eventId: string,

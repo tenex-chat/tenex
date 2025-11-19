@@ -6,9 +6,53 @@ import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "./AgentStorage";
 
 /**
- * AgentRegistry manages agent configuration and instances for a project.
- * All agents are stored in unified ~/.tenex/agents/ storage (not per-project).
- * Project-specific data (conversations, logs, events) stored in ~/.tenex/projects/{dTag}/
+ * AgentRegistry - In-memory runtime instances for a specific project
+ *
+ * ## Responsibility
+ * Manages runtime AgentInstance objects (with methods like sign(), createLLMService())
+ * - Scoped to ONE project - each project runtime has its own registry
+ * - Fast lookups by slug, pubkey, eventId, or phase
+ * - Loads agents from storage and hydrates them into runtime instances
+ * - Can reload agents when storage updates
+ *
+ * ## Architecture
+ * - **AgentStorage**: Handles ALL persistence operations (separate)
+ * - **AgentRegistry** (this): Handles in-memory runtime instances only
+ * - **agent-loader**: Orchestrates loading from storage → registry (separate)
+ *
+ * ## Key Distinction: AgentInstance vs StoredAgent
+ * - **StoredAgent** (storage): Plain data object with no methods
+ * - **AgentInstance** (registry): Runtime object with sign(), createLLMService(), etc.
+ *
+ * ## Lifecycle
+ * 1. Project starts → registry created for that project
+ * 2. Agents loaded → StoredAgent → AgentInstance → added to registry
+ * 3. Project stops → registry discarded (instances are ephemeral)
+ * 4. Next run → fresh registry created, agents reloaded
+ *
+ * ## Multi-Project Isolation
+ * Each project has its own registry instance. One agent in storage can appear
+ * in multiple project registries simultaneously.
+ *
+ * ## Usage Pattern
+ * ```typescript
+ * // Load agents from project
+ * await registry.loadFromProject(ndkProject);
+ *
+ * // Get agent instance
+ * const agent = registry.getAgent('my-agent-slug');
+ *
+ * // Use agent's runtime methods
+ * await agent.sign(event);
+ * const llm = agent.createLLMService();
+ *
+ * // After storage updates, reload
+ * await agentStorage.updateAgentTools(pubkey, newTools);
+ * await registry.reloadAgent(pubkey); // Refresh instance
+ * ```
+ *
+ * @see AgentStorage for persistence operations
+ * @see agent-loader for loading orchestration
  */
 export class AgentRegistry {
     private agents: Map<string, AgentInstance> = new Map();
@@ -233,8 +277,38 @@ export class AgentRegistry {
     }
 
     /**
-     * Reload an agent from storage into the registry
-     * Used after storage updates to refresh in-memory state
+     * Reload an agent from storage into the registry.
+     *
+     * Used after storage updates to refresh the in-memory instance.
+     * This is the second half of the storage update pattern.
+     *
+     * ## When to use
+     * Call this after any AgentStorage update method:
+     * - updateAgentLLMConfig()
+     * - updateAgentTools()
+     * - Or any direct modification to stored agent data
+     *
+     * ## What it does
+     * 1. Load fresh StoredAgent from disk
+     * 2. Remove old AgentInstance from registry
+     * 3. Create new AgentInstance with fresh data
+     * 4. Add new instance to registry
+     *
+     * @param pubkey - Agent's public key (hex string)
+     * @returns true if reloaded successfully, false if agent not found in storage
+     *
+     * @example
+     * // Update pattern
+     * await agentStorage.updateAgentLLMConfig(pubkey, 'anthropic:claude-opus-4');
+     * await registry.reloadAgent(pubkey); // Pick up changes
+     *
+     * @example
+     * // Check if agent exists before using
+     * const reloaded = await registry.reloadAgent(pubkey);
+     * if (reloaded) {
+     *   const agent = registry.getAgentByPubkey(pubkey);
+     *   console.log('Agent reloaded:', agent.name);
+     * }
      */
     async reloadAgent(pubkey: string): Promise<boolean> {
         const storedAgent = await agentStorage.loadAgent(pubkey);

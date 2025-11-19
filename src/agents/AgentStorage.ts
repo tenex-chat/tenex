@@ -17,8 +17,29 @@ export interface StoredAgent extends StoredAgentData {
 }
 
 /**
- * Factory function to create a StoredAgent object
- * Ensures consistent structure and defaults
+ * Factory function to create a StoredAgent object.
+ *
+ * Ensures consistent structure and defaults across the codebase.
+ * Used by both agent-installer (Nostr agents) and agents_write (local agents).
+ *
+ * ## Why this exists
+ * Before: StoredAgent objects were manually constructed in 2 places with slight differences
+ * After: Single factory ensures consistency and makes schema changes easier
+ *
+ * @param config - Agent configuration
+ * @returns StoredAgent ready for saving to disk
+ *
+ * @example
+ * const agent = createStoredAgent({
+ *   nsec: signer.nsec,
+ *   slug: 'my-agent',
+ *   name: 'My Agent',
+ *   role: 'assistant',
+ *   tools: ['read_path', 'shell'],
+ *   eventId: 'nostr_event_id',
+ *   projects: ['project-dtag']
+ * });
+ * await agentStorage.saveAgent(agent);
  */
 export function createStoredAgent(config: {
     nsec: string;
@@ -60,9 +81,49 @@ interface AgentIndex {
 }
 
 /**
- * Manages agent storage in ~/.tenex/agents/
- * Each agent is stored as <pubkey>.json with all data including nsec
- * An index.json file provides fast lookups by slug, eventId, and project
+ * AgentStorage - Persistent storage layer for agent data
+ *
+ * ## Responsibility
+ * Manages agent data persistence in ~/.tenex/agents/
+ * - One JSON file per agent: <pubkey>.json (contains all data including private key)
+ * - Fast lookups via index.json (slug → pubkey, eventId → pubkey, project → pubkeys)
+ * - Project associations (which agents belong to which projects)
+ *
+ * ## Architecture
+ * - **AgentStorage** (this): Handles ALL persistence operations
+ * - **AgentRegistry**: Handles in-memory runtime instances (separate)
+ * - **agent-loader**: Orchestrates loading from storage → registry (separate)
+ *
+ * ## Storage Structure
+ * ```
+ * ~/.tenex/agents/
+ *   ├── index.json              # Fast lookup index
+ *   ├── <pubkey1>.json          # Agent data + private key
+ *   └── <pubkey2>.json          # Agent data + private key
+ * ```
+ *
+ * ## Usage Pattern
+ * 1. **Read operations**: Use load/get methods
+ * 2. **Write operations**: Use save/update methods
+ * 3. **After updates**: Call AgentRegistry.reloadAgent() to refresh in-memory instances
+ *
+ * ## Separation of Concerns
+ * - Storage (this class): Disk persistence only
+ * - Registry (AgentRegistry): Runtime instances only
+ * - Updates: storage.update() → registry.reload()
+ *
+ * @example
+ * // Load agent from disk
+ * const agent = await agentStorage.loadAgent(pubkey);
+ *
+ * // Update configuration
+ * await agentStorage.updateAgentLLMConfig(pubkey, 'anthropic:claude-opus-4');
+ *
+ * // Refresh in-memory instance
+ * await agentRegistry.reloadAgent(pubkey);
+ *
+ * @see AgentRegistry for in-memory runtime management
+ * @see agent-loader for loading orchestration
  */
 export class AgentStorage {
     private agentsDir: string;
@@ -357,7 +418,32 @@ export class AgentStorage {
     }
 
     /**
-     * Update an agent's LLM configuration
+     * Update an agent's LLM configuration in persistent storage.
+     *
+     * Updates ONLY the stored data on disk. To refresh the in-memory instance,
+     * call AgentRegistry.reloadAgent() after this method.
+     *
+     * ## Architecture Note
+     * This is part of the clean separation between storage and runtime:
+     * - Storage (this): Handles persistence
+     * - Registry: Handles runtime instances
+     * - Pattern: storage.update() → registry.reload()
+     *
+     * @param pubkey - Agent's public key (hex string)
+     * @param llmConfig - New LLM configuration string (e.g., "anthropic:claude-sonnet-4")
+     * @returns true if updated successfully, false if agent not found
+     *
+     * @example
+     * // Update config
+     * const success = await agentStorage.updateAgentLLMConfig(
+     *   agentPubkey,
+     *   'anthropic:claude-opus-4'
+     * );
+     *
+     * if (success) {
+     *   // Refresh in-memory instance
+     *   await agentRegistry.reloadAgent(agentPubkey);
+     * }
      */
     async updateAgentLLMConfig(pubkey: string, llmConfig: string): Promise<boolean> {
         const agent = await this.loadAgent(pubkey);
@@ -373,7 +459,28 @@ export class AgentStorage {
     }
 
     /**
-     * Update an agent's tools
+     * Update an agent's tools list in persistent storage.
+     *
+     * Updates ONLY the stored data on disk. To refresh the in-memory instance,
+     * call AgentRegistry.reloadAgent() after this method.
+     *
+     * ## Important
+     * This stores the RAW tool list as-is. Tool normalization (adding core tools,
+     * delegate tools, etc.) happens when creating AgentInstance in agent-loader.
+     *
+     * @param pubkey - Agent's public key (hex string)
+     * @param tools - New tools array (will be normalized during instance creation)
+     * @returns true if updated successfully, false if agent not found
+     *
+     * @example
+     * // Update tools
+     * const newTools = ['read_path', 'shell', 'agents_write'];
+     * const success = await agentStorage.updateAgentTools(agentPubkey, newTools);
+     *
+     * if (success) {
+     *   // Refresh in-memory instance (will apply normalization)
+     *   await agentRegistry.reloadAgent(agentPubkey);
+     * }
      */
     async updateAgentTools(pubkey: string, tools: string[]): Promise<boolean> {
         const agent = await this.loadAgent(pubkey);

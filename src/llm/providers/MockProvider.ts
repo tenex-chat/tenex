@@ -1,7 +1,13 @@
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
-import type { LanguageModelV2, ProviderV2 } from "@ai-sdk/provider";
+import type {
+    LanguageModelV2,
+    LanguageModelV2CallOptions,
+    LanguageModelV2Content,
+    LanguageModelV2Message,
+    ProviderV2,
+} from "@ai-sdk/provider";
 import { MockLanguageModelV2 } from "ai/test";
 
 /**
@@ -19,14 +25,11 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
             provider: "mock",
             modelId: modelId || "mock-model",
 
-            doGenerate: async (options) => {
-                // Extract messages - the prompt can be either an array or an object with messages
-                const messages = Array.isArray(options?.prompt)
-                    ? options.prompt
-                    : options?.prompt?.messages;
+            doGenerate: async (options: LanguageModelV2CallOptions) => {
+                // Extract messages from prompt
+                const messages = options.prompt;
 
                 logger.debug("[MockProvider] doGenerate called", {
-                    hasPrompt: !!options?.prompt,
                     messageCount: messages?.length || 0,
                     toolCount: Object.keys(options?.tools || {}).length,
                 });
@@ -34,12 +37,10 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 if (!messages || messages.length === 0) {
                     logger.warn("[MockProvider] doGenerate called with no messages");
                     return {
+                        content: [{ type: "text" as const, text: "Mock response: no messages provided" }],
                         finishReason: "stop" as const,
                         usage: { inputTokens: 0, outputTokens: 0 },
-                        text: "Mock response: no messages provided",
-                        toolCalls: [],
                         warnings: [],
-                        logprobs: undefined,
                         response: {
                             id: `mock-${Date.now()}`,
                             timestamp: new Date(),
@@ -49,19 +50,23 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 }
 
                 // Convert AI SDK messages to our Message format
-                const convertedMessages = messages.map((msg) => ({
-                    role: msg.role,
-                    content: Array.isArray(msg.content)
-                        ? msg.content
-                              .map((part) => {
-                                  if (part.type === "text") return part.text;
-                                  return "[non-text content]";
-                              })
-                              .join(" ")
-                        : typeof msg.content === "string"
-                          ? msg.content
-                          : "",
-                }));
+                const convertedMessages = messages.map((msg: LanguageModelV2Message) => {
+                    let textContent = "";
+                    if (Array.isArray(msg.content)) {
+                        textContent = msg.content
+                            .map((part) => {
+                                if (part.type === "text") return part.text;
+                                return "[non-text content]";
+                            })
+                            .join(" ");
+                    } else if (typeof msg.content === "string") {
+                        textContent = msg.content;
+                    }
+                    return {
+                        role: msg.role,
+                        content: textContent,
+                    };
+                });
 
                 // Call MockLLMService
                 const response = await mockService.complete({
@@ -71,26 +76,34 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                     },
                 });
 
-                // Convert response to AI SDK v2 format
-                const text = response.content || "";
-                const toolCalls =
-                    response.toolCalls?.map((tc, index) => ({
-                        toolCallType: "function" as const,
-                        toolCallId: `call_${index}`,
-                        toolName: tc.name,
-                        arguments: tc.params || {},
-                    })) || [];
+                // Convert response to AI SDK v2 format with content array
+                const content: LanguageModelV2Content[] = [];
+
+                // Add text content if present
+                if (response.content) {
+                    content.push({ type: "text" as const, text: response.content });
+                }
+
+                // Add tool calls if present
+                if (response.toolCalls) {
+                    response.toolCalls.forEach((tc: any, index: number) => {
+                        content.push({
+                            type: "tool-call" as const,
+                            toolCallId: `call_${index}`,
+                            toolName: tc.name,
+                            input: JSON.stringify(tc.params || {}),
+                        });
+                    });
+                }
 
                 return {
+                    content,
                     finishReason: "stop" as const,
                     usage: {
                         inputTokens: response.usage?.prompt_tokens || 100,
                         outputTokens: response.usage?.completion_tokens || 50,
                     },
-                    text,
-                    toolCalls,
                     warnings: [],
-                    logprobs: undefined,
                     response: {
                         id: `mock-${Date.now()}`,
                         timestamp: new Date(),
@@ -99,14 +112,11 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 };
             },
 
-            doStream: async (options) => {
-                // Extract messages - the prompt can be either an array or an object with messages
-                const messages = Array.isArray(options?.prompt)
-                    ? options.prompt
-                    : options?.prompt?.messages;
+            doStream: async (options: LanguageModelV2CallOptions) => {
+                // Extract messages from prompt
+                const messages = options.prompt;
 
                 logger.debug("[MockProvider] doStream called", {
-                    hasPrompt: !!options?.prompt,
                     messageCount: messages?.length || 0,
                     toolCount: Object.keys(options?.tools || {}).length,
                 });
@@ -140,19 +150,23 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 }
 
                 // Convert messages
-                const convertedMessages = messages.map((msg) => ({
-                    role: msg.role,
-                    content: Array.isArray(msg.content)
-                        ? msg.content
-                              .map((part) => {
-                                  if (part.type === "text") return part.text;
-                                  return "[non-text content]";
-                              })
-                              .join(" ")
-                        : typeof msg.content === "string"
-                          ? msg.content
-                          : "",
-                }));
+                const convertedMessages = messages.map((msg: LanguageModelV2Message) => {
+                    let textContent = "";
+                    if (Array.isArray(msg.content)) {
+                        textContent = msg.content
+                            .map((part) => {
+                                if (part.type === "text") return part.text;
+                                return "[non-text content]";
+                            })
+                            .join(" ");
+                    } else if (typeof msg.content === "string") {
+                        textContent = msg.content;
+                    }
+                    return {
+                        role: msg.role,
+                        content: textContent,
+                    };
+                });
 
                 // Get the mock service's stream
                 const streamEvents = mockService.stream({
