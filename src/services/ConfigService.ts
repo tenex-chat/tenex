@@ -1,6 +1,12 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
+import {
+    CONFIG_FILE,
+    DEFAULT_RELAY_URLS,
+    LLMS_FILE,
+    MCP_CONFIG_FILE,
+    TENEX_DIR,
+} from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import type { LLMService } from "@/llm/service";
@@ -124,11 +130,18 @@ export class ConfigService {
     // =====================================================================================
 
     async loadTenexConfig(basePath: string): Promise<TenexConfig> {
-        return this.loadConfigFile(
+        const config = await this.loadConfigFile(
             this.getConfigFilePath(basePath, CONFIG_FILE),
             TenexConfigSchema,
-            {}
+            { relays: DEFAULT_RELAY_URLS }
         );
+
+        // Ensure relays are set, even for existing configs that don't have them
+        if (!config.relays) {
+            config.relays = DEFAULT_RELAY_URLS;
+        }
+
+        return config;
     }
 
     async loadTenexLLMs(basePath: string): Promise<TenexLLMs> {
