@@ -126,7 +126,7 @@ async function executeDelegateExternal(
         // Use shared AgentPublisher instance from context (guaranteed to be present)
         const conversation = context.getConversation();
 
-        if (conversation?.history?.[0]) {
+        if (context.agentPublisher && conversation?.history?.[0]) {
             await context.agentPublisher.conversation(
                 { content: `🚀 External delegation sent: nostr:${chatEvent.encode()}` },
                 {
@@ -213,5 +213,5 @@ When using this tool, provide context to the recipient, introduce yourself and e
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

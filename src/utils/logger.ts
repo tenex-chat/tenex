@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import { config } from "@/services/ConfigService";
-import os from "node:os";
 import path from "node:path";
-import type { TenexConfig } from "@/services/config/types";
 import chalk from "chalk";
 
 const levels: Record<string, number> = {
@@ -68,9 +66,10 @@ function writeToFile(level: string, message: string, args: unknown[]): void {
 }
 
 // Initialize daemon logging
-function initDaemonLogging(config: TenexConfig): void {
+function initDaemonLogging(): void {
+    const tenexConfig = config.getConfig();
     const defaultLogPath = path.join(config.getConfigPath("daemon"), "daemon.log");
-    logFilePath = config.logging?.logFile || defaultLogPath;
+    logFilePath = tenexConfig.logging?.logFile || defaultLogPath;
 
     // Ensure directory exists
     const logDir = path.dirname(logFilePath);

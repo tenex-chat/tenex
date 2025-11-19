@@ -100,5 +100,5 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }

@@ -1,6 +1,5 @@
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 import { ProjectRuntime } from "./ProjectRuntime";
 
 /**

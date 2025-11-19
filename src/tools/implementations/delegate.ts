@@ -73,8 +73,7 @@ async function executeDelegate(
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher, // Pass the required AgentPublisher
-        context.phase
+        context.agentPublisher! // Pass the required AgentPublisher
     );
 
     return await delegationService.execute({
@@ -116,7 +115,7 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }
 
 /**

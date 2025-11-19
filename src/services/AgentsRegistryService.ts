@@ -1,4 +1,3 @@
-import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { getNDK } from "@/nostr/ndkClient";

@@ -87,6 +87,10 @@ async function executeClaudeCode(
     const { prompt, title, mode } = input;
     const startTime = Date.now();
 
+    if (!context.agentPublisher) {
+        throw new Error("AgentPublisher not available in execution context");
+    }
+
     logger.debug("[claude_code] Starting execution with LLMService", {
         prompt: prompt.substring(0, 100),
         mode,

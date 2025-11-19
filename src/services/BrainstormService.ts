@@ -274,7 +274,7 @@ export class BrainstormService {
      */
     private async runModeration(
         moderator: AgentInstance,
-        originalPrompt: string,
+        _originalPrompt: string,
         responses: BrainstormResponse[],
         brainstormRoot: NDKEvent,
         conversation: Conversation
@@ -363,7 +363,7 @@ export class BrainstormService {
         brainstormRoot: NDKEvent,
         chosenResponse: BrainstormResponse,
         moderator: AgentInstance,
-        conversationId: string,
+        _conversationId: string,
         reason: string
     ): Promise<void> {
         try {
@@ -391,7 +391,7 @@ export class BrainstormService {
         selectedResponse: NDKEvent,
         selectedAgent: AgentInstance,
         moderator: AgentInstance,
-        conversationId: string,
+        _conversationId: string,
         reason?: string
     ): Promise<void> {
         const ndk = getNDK();
@@ -513,7 +513,7 @@ export class BrainstormService {
      * Evaluate if a follow-up adds value
      */
     private async evaluateFollowUpValue(
-        originalPrompt: string,
+        _originalPrompt: string,
         winningResponse: string,
         followUp: string,
         moderator: AgentInstance
@@ -631,32 +631,13 @@ export class BrainstormService {
     }
 
     /**
-     * Build moderation prompt for choosing best response
-     */
-    private buildModerationPrompt(originalPrompt: string, responses: BrainstormResponse[]): string {
-        let prompt = `Original question/prompt:\n${originalPrompt}\n\n`;
-        prompt += `You have ${responses.length} responses to choose from:\n\n`;
-
-        for (const [i, response] of responses.entries()) {
-            prompt += `Option ${i + 1} (from ${response.agent.name}):\n`;
-            prompt += `${response.content}\n\n`;
-        }
-
-        prompt +=
-            "Choose the BEST response based on accuracy, completeness, clarity, and relevance. ";
-        prompt += "Respond with JSON only.";
-
-        return prompt;
-    }
-
-    /**
      * Build moderation prompt for evaluating follow-up
      */
     private buildFollowUpModerationPrompt(
-        originalPrompt: string,
+        _originalPrompt: string,
         winningResponse: string,
         followUp: string
     ): string {
-        return `Original brainstorm prompt:\n${originalPrompt}\n\nWinning response:\n${winningResponse}\n\nFollow-up comment:\n${followUp}\n\nEvaluate if this follow-up adds significant value, provides important corrections, or contributes meaningful insights to the discussion. Be selective - only approve truly valuable additions.`;
+        return `Original brainstorm prompt:\n${_originalPrompt}\n\nWinning response:\n${winningResponse}\n\nFollow-up comment:\n${followUp}\n\nEvaluate if this follow-up adds significant value, provides important corrections, or contributes meaningful insights to the discussion. Be selective - only approve truly valuable additions.`;
     }
 }

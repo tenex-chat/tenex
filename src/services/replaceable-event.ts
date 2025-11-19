@@ -43,11 +43,14 @@ export class ReplaceableEventService {
 
             if (events.size > 0) {
                 // Get the first (and should be only) event
-                const event = Array.from(events)[0];
-                this.tags = event.tags;
-                logger.debug(
-                    `Loaded existing event kind ${this.kind} with ${this.tags.length} tags`
-                );
+                const eventArray = Array.from(events);
+                const event = eventArray[0];
+                if (event && "tags" in event) {
+                    this.tags = event.tags;
+                    logger.debug(
+                        `Loaded existing event kind ${this.kind} with ${this.tags.length} tags`
+                    );
+                }
             } else {
                 logger.debug(`No existing event kind ${this.kind} found, starting fresh`);
             }

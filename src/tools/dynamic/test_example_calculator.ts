@@ -103,7 +103,7 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 };
 
 // Export the factory function as default

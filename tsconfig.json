@@ -3,7 +3,7 @@
         "target": "ES2020",
         "module": "ES2020",
         "lib": ["ES2020"],
-        "moduleResolution": "node",
+        "moduleResolution": "bundler",
         "esModuleInterop": true,
         "allowSyntheticDefaultImports": true,
         "downlevelIteration": true,
@@ -25,7 +25,8 @@
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "resolveJsonModule": true,
-        "isolatedModules": true
+        "isolatedModules": true,
+        "jsx": "react"
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"],
     "exclude": [
@@ -35,7 +36,6 @@
         "**/*.spec.ts",
         "**/*.test.tsx",
         "src/test-utils/**/*",
-        "src/agents/execution/strategies/__tests__/**/*",
-        "src/daemon/**/*.tsx"
+        "src/agents/execution/strategies/__tests__/**/*"
     ]
 }

@@ -27,7 +27,6 @@ export async function initNDK(): Promise<void> {
         explicitRelayUrls: [...relays],
         enableOutboxModel: false,
         autoConnectUserRelays: true,
-        autoFetchUserMutelist: true,
     });
 
     await ndk.connect();

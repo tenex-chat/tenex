@@ -119,7 +119,7 @@ function validateSize(sizeInBytes: number, sourceName: string): void {
  * make debugging easier and provide better user experience.
  */
 function handleFetchError(error: unknown, protocol: string): never {
-    if (error.name === "AbortError") {
+    if (error && typeof error === "object" && "name" in error && error.name === "AbortError") {
         throw new Error(`Request timeout after ${HTTP_TIMEOUT_MS / 1000} seconds`);
     }
 

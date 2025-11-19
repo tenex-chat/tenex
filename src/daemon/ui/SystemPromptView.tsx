@@ -6,7 +6,7 @@ interface SystemPromptViewProps {
     agent: AgentInstance;
 }
 
-export function SystemPromptView({ agent }: SystemPromptViewProps): JSX.Element {
+export function SystemPromptView({ agent }: SystemPromptViewProps): React.JSX.Element {
     return (
         <Box flexDirection="column">
             <Box marginBottom={1}>

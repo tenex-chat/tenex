@@ -1,7 +1,6 @@
 import { EventEmitter } from "node:events";
 import { config } from "@/services/ConfigService";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import { logger } from "@/utils/logger";
@@ -136,7 +135,6 @@ export class DelegationRegistry extends EventEmitter {
     // Persistence
     private persistencePath: string;
     private persistenceTimer?: NodeJS.Timeout;
-    private cleanupTimer?: NodeJS.Timeout;
     private isDirty = false;
 
     private constructor() {

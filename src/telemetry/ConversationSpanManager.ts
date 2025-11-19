@@ -15,11 +15,6 @@ import type { Span } from "@opentelemetry/api";
  */
 export class ConversationSpanManager {
     private conversationMessageCounts = new Map<string, number>();
-    private cleanupInterval: NodeJS.Timeout | null = null;
-
-    // Configuration
-    private readonly MAX_CONVERSATION_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-    private readonly CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
     constructor() {
         this.startCleanupTimer();

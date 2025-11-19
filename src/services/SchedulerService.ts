@@ -1,12 +1,10 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
-import * as os from "node:os";
 import * as path from "node:path";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as cron from "node-cron";
 import { logger } from "../utils/logger";
-import { ConfigService } from "./ConfigService";
 import { getProjectContext } from "./ProjectContext";
 
 interface ScheduledTask {
@@ -15,8 +13,10 @@ interface ScheduledTask {
     prompt: string;
     lastRun?: string;
     nextRun?: string;
+    createdAt?: string; // When the task was created
     fromPubkey: string; // Who scheduled this task (the scheduler)
     toPubkey: string; // Target agent that should execute the task
+    agentPubkey?: string; // Alias for toPubkey for backwards compatibility
 }
 
 export class SchedulerService {
@@ -25,7 +25,6 @@ export class SchedulerService {
     private taskMetadata: Map<string, ScheduledTask> = new Map();
     private taskFilePath: string;
     private ndk: NDK | null = null;
-    private projectPath: string | null = null;
 
     private constructor() {
         // Use global location for scheduled tasks since it's a singleton
@@ -40,9 +39,8 @@ export class SchedulerService {
         return SchedulerService.instance;
     }
 
-    public async initialize(ndk: NDK, projectPath?: string): Promise<void> {
+    public async initialize(ndk: NDK, _projectPath?: string): Promise<void> {
         this.ndk = ndk;
-        this.projectPath = projectPath || process.cwd();
 
         logger.debug("Initializing SchedulerService");
 
@@ -122,7 +120,6 @@ export class SchedulerService {
                 await this.executeTask(task);
             },
             {
-                scheduled: true,
                 timezone: "UTC",
             }
         );
@@ -200,7 +197,7 @@ export class SchedulerService {
                 signer = pmAgent.signer;
             } else {
                 // Fall back to backend key if fromPubkey matches backend
-                const privateKey = await ConfigService.getInstance().ensureBackendPrivateKey();
+                const privateKey = await config.ensureBackendPrivateKey();
                 const backendSigner = new NDKPrivateKeySigner(privateKey);
                 if (backendSigner.pubkey === task.fromPubkey) {
                     signer = backendSigner;

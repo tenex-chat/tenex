@@ -45,8 +45,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher,
-        context.phase
+        context.agentPublisher!
     );
 
     // Execute as an Ask intent (will be encoded specially)
@@ -86,7 +85,7 @@ export function createAskTool(context: ExecutionContext): AISdkTool {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 }
 
 /**

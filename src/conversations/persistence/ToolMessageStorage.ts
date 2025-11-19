@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import { config } from "@/services/ConfigService";
-import * as os from "node:os";
 import * as path from "node:path";
 import { formatAnyError } from "@/utils/error-formatter";
 import { logger } from "@/utils/logger";
