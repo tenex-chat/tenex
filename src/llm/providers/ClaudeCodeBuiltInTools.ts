@@ -4,7 +4,7 @@
  */
 
 import type { LanguageModelV2FunctionTool } from "@ai-sdk/provider";
-import { jsonSchema } from "@ai-sdk/provider-utils";
+import { zodSchema } from "@ai-sdk/provider-utils";
 import { z } from "zod";
 
 /**
@@ -17,7 +17,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Bash",
             description: "Execute bash commands",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     command: z.string().describe("The bash command to execute"),
                     description: z
@@ -33,7 +33,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Read",
             description: "Read file contents",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     file_path: z.string().describe("Absolute path to the file to read"),
                     offset: z.number().optional().describe("Line number to start reading from"),
@@ -46,7 +46,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Write",
             description: "Write content to a file",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     file_path: z.string().describe("Absolute path to the file to write"),
                     content: z.string().describe("Content to write to the file"),
@@ -58,7 +58,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Edit",
             description: "Edit file contents by replacing text",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     file_path: z.string().describe("Absolute path to the file to edit"),
                     old_string: z.string().describe("Text to replace"),
@@ -72,7 +72,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Glob",
             description: "Find files matching a pattern",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     pattern: z.string().describe("Glob pattern to match files"),
                     path: z.string().optional().describe("Directory to search in"),
@@ -84,7 +84,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Grep",
             description: "Search file contents using regex",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     pattern: z.string().describe("Regular expression pattern to search for"),
                     path: z.string().optional().describe("File or directory to search in"),
@@ -104,7 +104,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Task",
             description: "Launch a specialized agent for complex tasks",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     description: z.string().describe("Short description of the task"),
                     prompt: z.string().describe("Detailed task prompt for the agent"),
@@ -117,7 +117,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "WebFetch",
             description: "Fetch content from a URL",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     url: z.string().describe("URL to fetch content from"),
                     prompt: z.string().describe("What to extract from the content"),
@@ -129,7 +129,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "WebSearch",
             description: "Search the web",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     query: z.string().describe("Search query"),
                     allowed_domains: z.array(z.string()).optional(),
@@ -142,7 +142,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "TodoWrite",
             description: "Create and manage a task list",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     todos: z.array(
                         z.object({
@@ -159,7 +159,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "AskUserQuestion",
             description: "Ask the user questions during execution",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     questions: z.array(
                         z.object({
@@ -183,7 +183,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "BashOutput",
             description: "Retrieve output from a background bash shell",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     bash_id: z.string().describe("ID of the background shell"),
                     filter: z.string().optional().describe("Regex to filter output lines"),
@@ -195,7 +195,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "KillShell",
             description: "Kill a running background bash shell",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     shell_id: z.string().describe("ID of the shell to kill"),
                 })
@@ -206,7 +206,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "NotebookEdit",
             description: "Edit a Jupyter notebook cell",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     notebook_path: z.string().describe("Path to the notebook"),
                     new_source: z.string().describe("New source for the cell"),
@@ -221,7 +221,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "Skill",
             description: "Execute a skill within the conversation",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     command: z.string().describe("Skill name to invoke"),
                 })
@@ -232,7 +232,7 @@ export function getClaudeCodeBuiltInTools(): LanguageModelV2FunctionTool[] {
             type: "function" as const,
             name: "SlashCommand",
             description: "Execute a slash command",
-            parameters: jsonSchema(
+            parameters: zodSchema(
                 z.object({
                     command: z.string().describe("Slash command with arguments"),
                 })
