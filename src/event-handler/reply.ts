@@ -1,6 +1,8 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import chalk from "chalk";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { AgentInstance } from "../agents/types";
@@ -13,6 +15,7 @@ import { getProjectContext } from "../services";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { formatAnyError } from "../utils/error-formatter";
+import { getCurrentBranch } from "../utils/git/initializeGitRepo";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 
@@ -356,11 +359,66 @@ async function handleReplyLogic(
 
     // 5. Execute each target agent in parallel
     const executionPromises = targetAgents.map(async (targetAgent) => {
+        // Determine working directory and branch from event or current state
+        const projectPath = projectCtx.agentRegistry.getBasePath();
+        const branchTag = event.tags.find(t => t[0] === "branch")?.[1];
+
+        let workingDirectory: string;
+        let currentBranch: string;
+
+        if (branchTag) {
+            // Branch specified in event - resolve to worktree path
+            const parentDir = path.dirname(projectPath);
+            const worktreePath = path.join(parentDir, branchTag);
+
+            // Verify worktree exists
+            try {
+                await fs.access(worktreePath);
+                workingDirectory = worktreePath;
+                currentBranch = branchTag;
+
+                logger.debug("Using worktree from branch tag", {
+                    branch: branchTag,
+                    path: worktreePath
+                });
+            } catch {
+                // Worktree doesn't exist - fall back to main worktree
+                logger.warn("Branch tag specified but worktree not found, using main", {
+                    branch: branchTag,
+                    expectedPath: worktreePath
+                });
+                workingDirectory = projectPath;
+                try {
+                    currentBranch = await getCurrentBranch(projectPath);
+                } catch (error) {
+                    logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
+                    // Try fallback branch names
+                    currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
+                        .then(() => "main")
+                        .catch(() => "master");
+                }
+            }
+        } else {
+            // No branch tag - use current worktree
+            workingDirectory = projectPath;
+            try {
+                currentBranch = await getCurrentBranch(projectPath);
+            } catch (error) {
+                logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
+                // Try fallback branch names
+                currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
+                    .then(() => "main")
+                    .catch(() => "master");
+            }
+        }
+
         // Build execution context for this agent
         const executionContext: ExecutionContext = {
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath: projectCtx.agentRegistry.getBasePath(),
+            projectPath,
+            workingDirectory,
+            currentBranch,
             triggeringEvent: event,
             conversationCoordinator,
             getConversation: () => conversationCoordinator.getConversation(conversation.id),
