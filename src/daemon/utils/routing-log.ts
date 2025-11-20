@@ -16,9 +16,12 @@ export function logRoutingDecision(
     matchedTags: string[] = [],
     reason?: string
 ) {
+    // Convert complex RoutingDecision to simple string type for logger
+    const loggerDecision = routingDecision.type === "route_to_project" ? "routed" : routingDecision.type;
+
     return routingLogger.logRoutingDecision({
         event,
-        routingDecision,
+        routingDecision: loggerDecision as "routed" | "dropped" | "project_event",
         targetProjectId,
         routingMethod,
         matchedTags,

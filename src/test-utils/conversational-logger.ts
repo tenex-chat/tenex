@@ -289,7 +289,7 @@ export class ConversationalLogger {
         // Log tool calls if present
         if (mockResponse.response.toolCalls && mockResponse.response.toolCalls.length > 0) {
             const toolNames = mockResponse.response.toolCalls.map((tc) => {
-                const toolName = tc.function?.name || tc.name || "unknown";
+                const toolName = tc.function || tc.name || "unknown";
                 return toolName;
             });
             console.log(`   → Tools: [${toolNames.join(", ")}]`);

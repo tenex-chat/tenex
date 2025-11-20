@@ -518,7 +518,8 @@ export class MCPManager {
         }
 
         try {
-            await entry.client.subscribeResource(resourceUri);
+            // Type assertion for experimental MCP feature not yet in AI SDK types
+            await (entry.client as any).subscribeResource(resourceUri);
             logger.debug(`Subscribed to resource '${resourceUri}' from server '${serverName}'`);
         } catch (error) {
             logger.error(
@@ -546,7 +547,8 @@ export class MCPManager {
         }
 
         try {
-            await entry.client.unsubscribeResource(resourceUri);
+            // Type assertion for experimental MCP feature not yet in AI SDK types
+            await (entry.client as any).unsubscribeResource(resourceUri);
             logger.debug(`Unsubscribed from resource '${resourceUri}' from server '${serverName}'`);
         } catch (error) {
             logger.error(
@@ -576,7 +578,8 @@ export class MCPManager {
             throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
         }
 
-        entry.client.onResourceUpdated(handler);
+        // Type assertion for experimental MCP feature not yet in AI SDK types
+        (entry.client as any).onResourceUpdated(handler);
         logger.debug(`Registered resource update handler for server '${serverName}'`);
     }
 }

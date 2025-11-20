@@ -10,8 +10,10 @@ export type {
 // Tool calls are part of the streaming response types
 // Define compatibility types for internal use (legacy mock LLM support)
 export interface ToolCall {
-    name: string;
+    name?: string;
+    function?: string;
     params?: Record<string, unknown>;
+    args?: string | Record<string, unknown>;
 }
 
 export interface Message {

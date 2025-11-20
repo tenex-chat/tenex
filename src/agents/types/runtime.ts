@@ -29,6 +29,7 @@ export interface AgentInstance {
     slug: string;
     phase?: string;
     phases?: Record<string, string>;
+    mcp?: boolean; // Whether this agent has MCP access
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

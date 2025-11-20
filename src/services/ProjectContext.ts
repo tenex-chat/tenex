@@ -135,6 +135,11 @@ export class ProjectContext {
             } else if (agents.size > 0) {
                 // No agent tags in project, but agents exist in registry (e.g., global agents)
                 projectManagerAgent = agents.values().next().value;
+
+                if (!projectManagerAgent) {
+                    throw new Error("Failed to get first agent from registry");
+                }
+
                 logger.info(
                     "No agent tags in project event, using first agent from registry as PM",
                     {
@@ -259,11 +264,6 @@ export class ProjectContext {
                 this.projectManager = agent;
                 break;
             }
-        }
-
-        // Tell AgentRegistry who the PM is after reload
-        if (this.projectManager) {
-            this.agentRegistry.setPMPubkey(this.projectManager.pubkey);
         }
 
         logger.info("ProjectContext updated with new data", {
