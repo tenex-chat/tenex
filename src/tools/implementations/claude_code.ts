@@ -92,6 +92,9 @@ async function executeClaudeCode(
         throw new Error("AgentPublisher not available in execution context");
     }
 
+    // Store agentPublisher in a local variable so TypeScript knows it's defined
+    const agentPublisher = context.agentPublisher;
+
     logger.debug("[claude_code] Starting execution with LLMService", {
         prompt: prompt.substring(0, 100),
         mode,
@@ -118,7 +121,7 @@ async function executeClaudeCode(
         };
 
         // Create task through AgentPublisher
-        const task = await context.agentPublisher.createTask(
+        const task = await agentPublisher.createTask(
             title,
             prompt,
             baseEventContext,
@@ -208,7 +211,7 @@ async function executeClaudeCode(
             messageCount++;
 
             // Publish text update to Nostr
-            await context.agentPublisher.publishTaskUpdate(task, delta, baseEventContext);
+            await agentPublisher.publishTaskUpdate(task, delta, baseEventContext);
         });
 
         llmService.on("tool-did-execute", async ({ toolName, result }) => {
@@ -229,18 +232,18 @@ async function executeClaudeCode(
                     return `${checkbox} ${text}`;
                 });
 
-                await context.agentPublisher.publishTaskUpdate(
+                await agentPublisher.publishTaskUpdate(
                     task,
                     todoLines.join("\n"),
                     baseEventContext
                 );
             } else if (toolName === "ExitPlanMode" && mode === ClaudeCodeMode.PLAN) {
                 // Capture plan result and abort
-                planResult = result?.plan || "Plan completed";
+                planResult = (result as { plan?: string })?.plan || "Plan completed";
                 logger.info("[claude_code] ExitPlanMode detected", {
                     plan: planResult.substring(0, 100),
                 });
-                await context.agentPublisher.publishTaskUpdate(
+                await agentPublisher.publishTaskUpdate(
                     task,
                     "Plan complete",
                     baseEventContext,
@@ -268,7 +271,7 @@ async function executeClaudeCode(
                 usage,
             });
 
-            context.agentPublisher.publishTaskUpdate(
+            agentPublisher.publishTaskUpdate(
                 task,
                 "Task complete",
                 baseEventContext,
@@ -345,7 +348,7 @@ async function executeClaudeCode(
                 errorMessage.includes("aborted") || errorMessage.includes("interrupted");
 
             // Publish error update
-            await context.agentPublisher.publishTaskUpdate(
+            await agentPublisher.publishTaskUpdate(
                 task,
                 `❌ Task ${isAborted ? "interrupted" : "failed"}\n\nError: ${errorMessage}`,
                 baseEventContext

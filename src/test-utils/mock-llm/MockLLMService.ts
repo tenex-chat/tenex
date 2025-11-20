@@ -90,15 +90,16 @@ export class MockLLMService implements LLMService {
 
                   if (typeof tc === "object" && "function" in tc) {
                       // Format with function as string
-                      functionName = tc.function;
+                      functionName = tc.function || "unknown";
                       try {
-                          args = JSON.parse(tc.args || "{}");
+                          const argsStr = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
+                          args = JSON.parse(argsStr || "{}");
                       } catch {
                           args = {};
                       }
                   } else if (typeof tc === "object" && "name" in tc) {
                       // Direct ToolCall format
-                      functionName = tc.name;
+                      functionName = tc.name || "unknown";
                       args = tc.params || {};
                   } else {
                       functionName = "unknown";
@@ -155,11 +156,12 @@ export class MockLLMService implements LLMService {
             for (const toolCall of response.toolCalls) {
                 const toolName = toolCall.function;
                 const toolArgs = toolCall.args || "{}";
+                const argsStr = typeof toolArgs === "string" ? toolArgs : JSON.stringify(toolArgs);
 
                 yield {
                     type: "tool_start",
                     tool: toolName,
-                    args: JSON.parse(toolArgs),
+                    args: JSON.parse(argsStr),
                 };
             }
         }
@@ -174,9 +176,8 @@ export class MockLLMService implements LLMService {
                 usage: {
                     prompt_tokens: 100,
                     completion_tokens: 50,
-                    total_tokens: 150,
                 },
-            } as CompletionResponse,
+            },
         };
     }
 
@@ -308,7 +309,7 @@ export class MockLLMService implements LLMService {
             if (this.config.debug && mockResponse.response) {
                 conversationalLogger.logAgentResponse(agentName, {
                     content: mockResponse.response.content,
-                    toolCalls: mockResponse.response.toolCalls,
+                    toolCalls: mockResponse.response.toolCalls as any,
                     phase,
                     reason: "Mock response matched",
                 });
@@ -321,7 +322,7 @@ export class MockLLMService implements LLMService {
         if (this.config.debug) {
             conversationalLogger.logAgentResponse("unknown", {
                 content: this.config.defaultResponse?.content || "Default mock response",
-                toolCalls: this.config.defaultResponse?.toolCalls,
+                toolCalls: this.config.defaultResponse?.toolCalls as any,
                 reason: "No matching response found, using default",
             });
         }

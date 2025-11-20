@@ -34,6 +34,9 @@ export class TenexToolsAdapter {
             return tool(name, tenexTool.description || `Execute ${name}`, schema, async (args) => {
                 try {
                     // Execute the TENEX tool
+                    if (!tenexTool.execute) {
+                        throw new Error(`Tool ${name} does not have an execute function`);
+                    }
                     const result = await tenexTool.execute(args, {
                         abortSignal: new AbortController().signal,
                     });

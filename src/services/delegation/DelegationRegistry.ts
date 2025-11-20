@@ -135,6 +135,7 @@ export class DelegationRegistry extends EventEmitter {
     // Persistence
     private persistencePath: string;
     private persistenceTimer?: NodeJS.Timeout;
+    private cleanupTimer?: NodeJS.Timeout;
     private isDirty = false;
 
     private constructor() {

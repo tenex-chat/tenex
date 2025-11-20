@@ -162,10 +162,11 @@ export class EmbeddingProviderFactory {
         }
 
         // New format with explicit provider
+        const config = raw as { provider?: "local" | "openai"; model?: string; apiKey?: string };
         return {
-            provider: raw.provider || "local",
-            model: raw.model || EmbeddingProviderFactory.DEFAULT_CONFIG.model,
-            apiKey: raw.apiKey || process.env.OPENAI_API_KEY,
+            provider: config.provider || "local",
+            model: config.model || EmbeddingProviderFactory.DEFAULT_CONFIG.model,
+            apiKey: config.apiKey || process.env.OPENAI_API_KEY,
         };
     }
 

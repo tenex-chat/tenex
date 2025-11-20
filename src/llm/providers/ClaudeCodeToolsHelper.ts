@@ -19,7 +19,11 @@ export interface LanguageModelWithTools extends LanguageModel {
  * Type guard to check if a model has tools attached.
  */
 export function hasTools(model: LanguageModel): model is LanguageModelWithTools {
-    return "tools" in model && typeof model.tools === "object" && model.tools !== null;
+    return (
+        "tools" in (model as object) &&
+        typeof (model as any).tools === "object" &&
+        (model as any).tools !== null
+    );
 }
 
 /**

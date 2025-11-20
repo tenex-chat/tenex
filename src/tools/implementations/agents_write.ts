@@ -139,7 +139,7 @@ async function executeAgentsWrite(
         tools,
         phases,
         eventId: undefined, // Locally created agents don't have event IDs
-        projects: [projectContext.projectDTag],
+        projects: [projectContext.project.tagId()],
     });
 
     // Save to storage

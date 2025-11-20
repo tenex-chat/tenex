@@ -25,10 +25,6 @@ import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
 import { providerSupportsStreaming } from "./provider-configs";
-import {
-    ensureBuiltInTools,
-    hasTools,
-} from "./providers/ClaudeCodeToolsHelper";
 import { isAISdkProvider } from "./type-guards";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import {
@@ -228,8 +224,6 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             }
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
-            // Attach built-in tools to prevent "invalid tool call" errors
-            baseModel = ensureBuiltInTools(baseModel);
         } else if (this.registry) {
             // Standard providers use registry
             baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
@@ -262,15 +256,9 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
 
         // Wrap with all middlewares
         const wrappedModel = wrapLanguageModel({
-            model: baseModel,
+            model: baseModel as any,
             middleware: middlewares,
         });
-
-        // Preserve tools property from baseModel if it exists
-        // wrapLanguageModel doesn't preserve custom properties, so we need to manually copy them
-        if (hasTools(baseModel)) {
-            return Object.assign(wrappedModel, { tools: baseModel.tools }) as LanguageModel;
-        }
 
         return wrappedModel;
     }
@@ -313,7 +301,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             temperature?: number;
             maxTokens?: number;
         }
-    ): Promise<GenerateTextResult<Record<string, AISdkTool>>> {
+    ): Promise<GenerateTextResult<Record<string, AISdkTool>, string>> {
         // Don't use throttling for complete() calls - we want the full response immediately
         const model = this.getLanguageModel(messages, false);
         const startTime = Date.now();
@@ -330,6 +318,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         // Log the request
         this.llmLogger
             .logLLMRequest({
+                configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
                 messages,
@@ -344,7 +333,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
             const result = await generateText({
                 model,
                 messages: processedMessages,
-                tools: hasTools(model) ? { ...model.tools, ...tools } : tools,
+                tools: tools as any,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
 
@@ -439,7 +428,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 .logLLMResponse({
                     response: {
                         content: result.text,
-                        usage: result.usage,
+                        usage: {
+                            prompt_tokens: result.usage?.inputTokens,
+                            completion_tokens: result.usage?.outputTokens,
+                            total_tokens:
+                                (result.usage?.inputTokens ?? 0) +
+                                (result.usage?.outputTokens ?? 0),
+                        },
                     },
                     endTime: Date.now(),
                     startTime,
@@ -505,6 +500,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         // Log the request
         this.llmLogger
             .logLLMRequest({
+                configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
                 messages,
@@ -539,7 +535,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            tools: hasTools(model) ? { ...model.tools, ...tools } : tools,
+            tools: tools as any,
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -755,7 +751,12 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 await this.llmLogger.logLLMResponse({
                     response: {
                         content: e.text,
-                        usage: e.totalUsage,
+                        usage: {
+                            prompt_tokens: e.totalUsage?.inputTokens,
+                            completion_tokens: e.totalUsage?.outputTokens,
+                            total_tokens:
+                                (e.totalUsage?.inputTokens ?? 0) + (e.totalUsage?.outputTokens ?? 0),
+                        },
                     },
                     endTime: Date.now(),
                     startTime,
@@ -774,7 +775,8 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     message: finalMessage,
                     steps: e.steps,
                     usage: {
-                        costUsd: e.providerMetadata?.openrouter?.usage?.cost,
+                        costUsd: (e.providerMetadata?.openrouter as { usage?: { cost?: number } })
+                            ?.usage?.cost,
                         ...(e.totalUsage || {}),
                     },
                     finishReason: e.finishReason,
@@ -963,7 +965,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         await this.llmLogger.logLLMResponse({
             response: {
                 content,
-                usage,
+                usage: {
+                    prompt_tokens: usage?.inputTokens,
+                    completion_tokens: usage?.outputTokens,
+                    total_tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
+                },
             },
             endTime: Date.now(),
             startTime,
@@ -979,18 +985,13 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
         schema: z.ZodSchema<T>,
         tools: Record<string, AISdkTool> | undefined
     ): Promise<{ object: T; usage: LanguageModelUsage }> {
-        // Merge model.tools with provided tools if model has built-in tools
-        const mergedTools = hasTools(languageModel)
-            ? { ...languageModel.tools, ...(tools || {}) }
-            : tools;
-
         return await generateObject({
             model: languageModel,
             messages,
             schema,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
-            ...(mergedTools && Object.keys(mergedTools).length > 0 ? { tools: mergedTools } : {}),
+            ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
 
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getFullTelemetryConfig(),

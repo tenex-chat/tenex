@@ -17,6 +17,7 @@ import { nip19 } from "nostr-tools";
 export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
+    summary?: string;
 }
 
 export interface DelegationIntent {
