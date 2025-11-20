@@ -46,6 +46,18 @@ export interface StreamEvent {
     type: string;
     content?: string;
     delta?: string;
+    error?: string;
+    tool?: string;
+    args?: unknown;
+    response?: {
+        type: string;
+        content?: string;
+        toolCalls?: ToolCall[];
+        usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+        };
+    };
 }
 
 export interface LLMService {
