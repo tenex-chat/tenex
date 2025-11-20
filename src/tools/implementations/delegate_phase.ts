@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
-import { type DelegationResponses, DelegationService } from "@/services/DelegationService";
+import { type DelegationResponses, DelegationService } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -46,7 +46,7 @@ async function executeDelegatePhase(
 
     if (branch) {
         const { createWorktree } = await import("@/utils/git/initializeGitRepo");
-        const { trackWorktreeCreation } = await import("@/utils/worktree/metadata");
+        const { trackWorktreeCreation } = await import("@/utils/git/worktree");
 
         // Get current branch as parent
         const parentBranch = context.currentBranch;

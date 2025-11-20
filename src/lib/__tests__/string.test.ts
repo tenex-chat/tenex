@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { toKebabCase } from "../string";
+import { toKebabCase } from "@/lib/string";
 
 describe("toKebabCase", () => {
     it("should convert camelCase to kebab-case", () => {

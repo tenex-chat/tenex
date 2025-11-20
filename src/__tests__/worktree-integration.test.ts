@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { getCurrentBranch, listWorktrees } from "@/utils/git/initializeGitRepo";
-import { loadWorktreeMetadata, trackWorktreeCreation } from "@/utils/worktree/metadata";
+import { loadWorktreeMetadata, trackWorktreeCreation } from "@/utils/git/worktree";
 
 describe("Worktree Integration", () => {
     test("full worktree workflow", async () => {

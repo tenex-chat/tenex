@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import type { ModelMessage } from "ai";
 

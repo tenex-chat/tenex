@@ -10,7 +10,7 @@ mock.module("@/nostr", () => ({
     })),
 }));
 
-mock.module("@/services", () => ({
+mock.module("@/services/ProjectContext", () => ({
     getProjectContext: mock(() => ({})),
     isProjectContextInitialized: mock(() => true),
 }));
@@ -26,7 +26,7 @@ mock.module("@/utils/logger", () => ({
 
 // Import after mocking
 import { getNDK } from "@/nostr";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 
 describe("PubkeyNameRepository", () => {
     let repository: PubkeyNameRepository;

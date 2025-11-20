@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { ReportManager } from "@/services/ReportManager";
+import type { AISdkTool } from "@/tools/types";
+import { ReportManager } from "@/services/ReportService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -52,7 +53,7 @@ async function executeReportDelete(
 /**
  * Create an AI SDK tool for deleting reports
  */
-export function createReportDeleteTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createReportDeleteTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: "Mark an NDKArticle report as deleted",
 
@@ -61,5 +62,5 @@ export function createReportDeleteTool(context: ExecutionContext): ReturnType<ty
         execute: async (input: ReportDeleteInput) => {
             return await executeReportDelete(input, context);
         },
-    });
+    }) as AISdkTool;
 } 

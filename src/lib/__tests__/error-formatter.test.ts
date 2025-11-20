@@ -1,6 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import type { ToolError } from "@/tools/types";
-import { formatAnyError, formatToolError } from "../error-formatter";
+import { formatAnyError, formatToolError } from "@/lib/error-formatter";
+
+// Local type definition to avoid importing from @/tools (layer violation)
+interface ToolError {
+	kind: "validation" | "execution" | "system";
+	message: string;
+	field?: string;
+	tool?: string;
+}
 
 describe("Error Formatter", () => {
     describe("formatAnyError", () => {

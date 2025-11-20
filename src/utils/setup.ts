@@ -1,5 +1,5 @@
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import type { TenexConfig } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import chalk from "chalk";

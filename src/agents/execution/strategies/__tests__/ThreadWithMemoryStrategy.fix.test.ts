@@ -60,7 +60,7 @@ mock.module("@/prompts/fragments/20-voice-mode", () => ({
     isVoiceMode: () => false,
 }));
 
-mock.module("@/services/PubkeyNameRepository", () => ({
+mock.module("@/services/PubkeyService", () => ({
     getPubkeyNameRepository: () => ({
         getName: async (pubkey: string) => `User ${pubkey.substring(0, 8)}`,
     }),

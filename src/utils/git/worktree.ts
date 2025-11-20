@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@/utils/logger";
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 
 /**
  * Metadata for a git worktree

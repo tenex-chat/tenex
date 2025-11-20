@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { TreeBuilder } from "../utils/TreeBuilder";
 
 // Mock the PubkeyNameRepository to avoid NDK initialization
-mock.module("@/services/PubkeyNameRepository", () => ({
+mock.module("@/services/PubkeyService", () => ({
     getPubkeyNameRepository: () => ({
         getName: mock((pubkey: string) => pubkey), // Just return pubkey as name
     }),

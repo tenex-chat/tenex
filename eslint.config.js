@@ -7,6 +7,20 @@ export default typescript.config(
   {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js', '*.config.ts', 'scripts/**', '**/*.test.*', '**/*.spec.*', '**/__tests__/**']
   },
+  // Architecture enforcement: lib/ must have ZERO TENEX imports
+  {
+    files: ['src/lib/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            group: ['@/services', '@/services/*', '@/utils', '@/utils/*', '@/nostr', '@/nostr/*', '@/agents', '@/agents/*', '@/tools', '@/tools/*', '@/llm', '@/llm/*', '@/conversations', '@/conversations/*', '@/events', '@/events/*', '@/daemon', '@/daemon/*', '@/commands', '@/commands/*', '@/prompts', '@/prompts/*'],
+            message: 'lib/ must not import from TENEX-specific modules. Use only pure utilities from lib/, Node.js builtins, or third-party libraries. See docs/ARCHITECTURE.md for details.'
+          }
+        ]
+      }]
+    }
+  },
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {

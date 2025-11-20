@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 
 // Mock the services module
-mock.module("@/services", () => ({
+mock.module("@/services/ProjectContext", () => ({
     isProjectContextInitialized: mock(() => true),
     getProjectContext: mock(() => ({
         projectManager: {

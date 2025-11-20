@@ -1,1 +1,4 @@
 npm run typecheck
+
+# Run architecture review
+bash scripts/review-commit.sh

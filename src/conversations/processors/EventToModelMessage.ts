@@ -1,8 +1,8 @@
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import { isProjectContextInitialized } from "@/services";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { isProjectContextInitialized } from "@/services/ProjectContext";
+import { DelegationRegistry } from "@/services/delegation";
+import { getPubkeyNameRepository } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";

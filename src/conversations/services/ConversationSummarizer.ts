@@ -3,7 +3,7 @@ import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { z } from "zod";
 

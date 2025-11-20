@@ -119,5 +119,5 @@ export function createRAGSubscriptionGetTool(context: ExecutionContext): AISdkTo
                 executeGetSubscription
             );
         },
-    });
+    }) as AISdkTool;
 } 

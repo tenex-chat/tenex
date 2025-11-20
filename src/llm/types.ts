@@ -2,11 +2,17 @@
 export type {
     ModelMessage,
     Tool as CoreTool,
-    ToolCall as CoreToolCall,
-    ToolResult as CoreToolResult,
     GenerateTextResult,
     StreamTextResult,
 } from "ai";
+
+// AI SDK v5 doesn't export ToolCall/ToolResult as separate types
+// Tool calls are part of the streaming response types
+// Define compatibility types for internal use
+export interface ToolCall {
+    name: string;
+    params?: Record<string, unknown>;
+}
 
 // Export execution context type
 import type { ExecutionContext } from "@/agents/execution/types";

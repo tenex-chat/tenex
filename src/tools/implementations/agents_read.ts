@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -82,7 +83,7 @@ async function executeAgentsRead(
  * Create an AI SDK tool for reading agents
  * This is the primary implementation
  */
-export function createAgentsReadTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createAgentsReadTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: "Read a local agent definition from its JSON file",
         inputSchema: agentsReadSchema,

@@ -4,13 +4,13 @@ import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance } from "@/agents/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import { Lockfile } from "@/utils/lockfile";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
-import { context as otelContext, trace } from "@opentelemetry/api";
+import { context as otelContext, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import type { RoutingDecision } from "./routing/DaemonRouter";
 import type { ProjectRuntime } from "./ProjectRuntime";
@@ -20,8 +20,6 @@ import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
-
-const tracer = trace.getTracer("tenex.daemon");
 
 /**
  * Main daemon that manages all projects in a single process.
@@ -209,7 +207,7 @@ export class Daemon {
      */
     private async processIncomingEvent(
         event: NDKEvent,
-        span: ReturnType<typeof tracer.startSpan>
+        span: Span
     ): Promise<void> {
         // Classify event type
         const eventType = AgentEventDecoder.classifyForDaemon(event);
@@ -269,7 +267,7 @@ export class Daemon {
     private async routeEventToProject(
         event: NDKEvent,
         routingResult: RoutingDecision,
-        span: ReturnType<typeof tracer.startSpan>
+        span: Span
     ): Promise<void> {
         if (!this.runtimeLifecycle) {
             logger.error("RuntimeLifecycle not initialized");
@@ -485,8 +483,6 @@ export class Daemon {
         }
 
         // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
-        let hydratedCount = 0;
-
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         for (const [projectId, runtime] of activeRuntimes) {
             try {
@@ -507,7 +503,6 @@ export class Daemon {
                 // Store the lesson for each matching agent
                 for (const agent of matchingAgents) {
                     context.addLesson(agent.pubkey, lesson);
-                    hydratedCount++;
                 }
             } catch (error) {
                 logger.error("Failed to hydrate lesson into project", {

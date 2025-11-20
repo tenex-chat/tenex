@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Box, Text, render, useApp, useInput } from "ink";
 import type React from "react";

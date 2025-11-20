@@ -68,7 +68,7 @@ async function executeQuery(
     const { collection, query_text, include_metadata = true } = input;
 
     // Validate and parse top_k with constraints
-    const topK = parseNumericInput(input.top_k, 5, { min: 1, max: 100, integer: true });
+    const topK = parseNumericInput(input.top_k ?? undefined, 5, { min: 1, max: 100, integer: true });
 
     const ragService = RAGService.getInstance();
     const results = await ragService.query(collection, query_text, topK);
@@ -78,7 +78,7 @@ async function executeQuery(
         collection: collection,
         query: query_text,
         results_count: results.length,
-        results: formatResults(results, include_metadata),
+        results: formatResults(results, include_metadata ?? true),
     };
 }
 
@@ -93,5 +93,5 @@ export function createRAGQueryTool(context: ExecutionContext): AISdkTool {
         execute: async (input: z.infer<typeof ragQuerySchema>) => {
             return executeToolWithErrorHandling("rag_query", input, context, executeQuery);
         },
-    });
+    }) as AISdkTool;
 } 

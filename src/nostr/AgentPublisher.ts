@@ -2,7 +2,7 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { agentsRegistryService } from "@/services/AgentsRegistryService";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,

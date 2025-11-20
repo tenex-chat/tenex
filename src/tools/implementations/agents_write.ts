@@ -1,6 +1,7 @@
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
@@ -166,7 +167,7 @@ async function executeAgentsWrite(
  * Create an AI SDK tool for writing agents
  * This is the primary implementation
  */
-export function createAgentsWriteTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createAgentsWriteTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",

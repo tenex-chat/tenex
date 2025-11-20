@@ -44,6 +44,7 @@
     "typecheck:verbose": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "lint:architecture": "bun run scripts/lint-architecture.ts",
     "clean": "rm -rf dist node_modules bun.lockb coverage",
     "prepare": "husky"
   },

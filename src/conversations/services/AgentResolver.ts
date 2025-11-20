@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import { getProjectContext } from "@/services";
+import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 
 /**

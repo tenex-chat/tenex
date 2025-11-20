@@ -7,9 +7,9 @@ import { addAllSpecialContexts } from "@/conversations/utils/context-enhancers";
 import { getNDK } from "@/nostr";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 import { NudgeService } from "@/services/NudgeService";
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { getPubkeyNameRepository } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import {
     extractNostrEntities,

@@ -101,5 +101,5 @@ export function createRAGSubscriptionCreateTool(context: ExecutionContext): AISd
                 executeCreateSubscription
             );
         },
-    });
+    }) as AISdkTool;
 } 

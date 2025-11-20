@@ -21,7 +21,7 @@ export class RAGDatabaseError extends Error {
  * Manages LanceDB connection lifecycle and table access
  * Single Responsibility: Database connection and table management only
  */
-export class RAGDatabaseManager {
+export class RAGDatabaseService {
     private connection: Connection | null = null;
     private readonly dataDir: string;
     private tableCache: Map<string, Table> = new Map();
@@ -33,7 +33,7 @@ export class RAGDatabaseManager {
             process.env.LANCEDB_DATA_DIR ||
             path.join(config.getConfigPath("data"), "lancedb");
 
-        logger.debug(`RAGDatabaseManager initialized with data directory: ${this.dataDir}`);
+        logger.debug(`RAGDatabaseService initialized with data directory: ${this.dataDir}`);
     }
 
     /**
@@ -161,7 +161,7 @@ export class RAGDatabaseManager {
     async close(): Promise<void> {
         this.tableCache.clear();
         this.connection = null;
-        logger.debug("RAGDatabaseManager closed");
+        logger.debug("RAGDatabaseService closed");
     }
 
     /**

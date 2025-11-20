@@ -1,4 +1,4 @@
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { fragmentRegistry } from "./FragmentRegistry";
 import type { FragmentConfig, PromptFragment } from "./types";
 

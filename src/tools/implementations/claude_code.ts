@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { LLMService } from "@/llm/service";
 import { LLMLogger } from "@/logging/LLMLogger";
@@ -366,7 +367,7 @@ async function executeClaudeCode(
 /**
  * Create an AI SDK tool for Claude Code execution using LLMService
  */
-export function createClaudeCodeTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createClaudeCodeTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Execute Claude Code to perform planning or to execute changes. Claude Code has full access to read, write, and execute code in the project. This tool maintains session continuity for iterative development. Usage warning: claude_code is a powerful, intelligent tool; don't micromanage its work, don't try to direct how it should implement things unless explicitly asked to do so. Rely on claude_code's intelligence and only provide corrections where necessary.",

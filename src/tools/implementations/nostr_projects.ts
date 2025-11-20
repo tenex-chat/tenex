@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { NDKProjectStatus } from "@/events/NDKProjectStatus";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
@@ -252,7 +253,7 @@ async function executeNostrProjects(
 }
 
 // AI SDK tool factory
-export function createNostrProjectsTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createNostrProjectsTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "Fetch Nostr projects for a pubkey. When you need to see someone's projects or you are asked to communicate with an agent in a different project, use this tool as a Yellow Pages for projects and agents",

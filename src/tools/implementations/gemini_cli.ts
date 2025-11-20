@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { LLMLogger } from "@/logging/LLMLogger";
@@ -128,7 +129,7 @@ async function executeGeminiCli(
     }
 }
 
-export function createGeminiCliTool(context: ExecutionContext): ReturnType<typeof tool> {
+export function createGeminiCliTool(context: ExecutionContext): AISdkTool {
     return tool({
         description: "Execute Gemini CLI to perform tasks.",
         inputSchema: geminiCliSchema,

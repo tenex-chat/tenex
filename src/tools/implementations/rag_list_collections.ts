@@ -55,5 +55,5 @@ export function createRAGListCollectionsTool(context: ExecutionContext): AISdkTo
                 executeListCollections
             );
         },
-    });
+    }) as AISdkTool;
 } 

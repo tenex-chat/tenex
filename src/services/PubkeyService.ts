@@ -1,5 +1,5 @@
 import { getNDK } from "@/nostr";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 

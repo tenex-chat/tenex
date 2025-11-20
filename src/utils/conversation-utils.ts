@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 
 /**

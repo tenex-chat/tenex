@@ -1,5 +1,5 @@
 import { getAgentSlugFromEvent, isEventFromUser } from "@/nostr/utils";
-import { getProjectContext } from "@/services";
+import { getProjectContext } from "@/services/ProjectContext";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { hasReasoningTag, isOnlyThinkingBlocks, stripThinkingBlocks } from "../utils/content-utils";

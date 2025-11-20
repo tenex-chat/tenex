@@ -4,12 +4,12 @@ import { getNDK } from "@/nostr/ndkClient";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { getProjectContextManager } from "./ProjectContextManager";
+import { getProjectContextManager } from "@/daemon/ProjectContextManager";
 
 /**
  * Publishes status events for all active projects in the daemon.
  */
-export class DaemonStatusPublisher {
+export class DaemonStatusService {
     private intervalId: NodeJS.Timeout | null = null;
     private publishIntervalMs = 30000; // 30 seconds
 

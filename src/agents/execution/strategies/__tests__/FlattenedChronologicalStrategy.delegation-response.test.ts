@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import "./test-mocks"; // Import shared mocks

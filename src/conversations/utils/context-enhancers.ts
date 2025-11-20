@@ -7,7 +7,7 @@
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { getPubkeyNameRepository } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";

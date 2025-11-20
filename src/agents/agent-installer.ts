@@ -4,7 +4,7 @@ import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
-import { toKebabCase } from "@/utils/string";
+import { toKebabCase } from "@/lib/string";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";

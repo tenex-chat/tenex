@@ -1,4 +1,4 @@
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { getPubkeyNameRepository } from "@/services/PubkeyService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ThreadNode } from "../ThreadedConversationFormatter";
 

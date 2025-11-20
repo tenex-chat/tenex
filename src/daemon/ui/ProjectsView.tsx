@@ -1,4 +1,4 @@
-import { formatUptime } from "@/utils/time";
+import { formatUptime } from "@/lib/time";
 import { Box, Text } from "ink";
 import React from "react";
 import type { ProjectInfo } from "./types";

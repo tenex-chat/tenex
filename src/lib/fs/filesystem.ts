@@ -2,8 +2,7 @@ import type { Stats } from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { formatAnyError } from "@/utils/error-formatter";
-import { logger } from "@/utils/logger";
+import { formatAnyError } from "@/lib/error-formatter";
 
 /**
  * Unified file system utilities combining patterns from CLI and shared packages
@@ -99,7 +98,8 @@ export async function readJsonFile<T>(filePath: string): Promise<T | null> {
         if (err instanceof Error && "code" in err && err.code === "ENOENT") {
             return null;
         }
-        logger.error(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
+        // Use console.error since lib/ layer should not depend on TENEX logger
+        console.error(`Failed to read JSON file ${filePath}: ${formatAnyError(err)}`);
         throw err;
     }
 }

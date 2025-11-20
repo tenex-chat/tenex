@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { AISdkTool } from "@/tools/types";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";

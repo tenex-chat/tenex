@@ -91,27 +91,80 @@ Use this section to understand each service’s scope and dependencies:
 - **`src/logging`**: Structured log helpers (e.g., `LLMLogger`). Keep logger usage centralized so formatting stays consistent.
 
 ### Utilities & Shared Libraries
-- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`) and shell utilities. These should not import TENEX-specific modules.
-- **`src/utils`**: Higher-level utilities tied to TENEX behavior (agent fetchers, CLI config scope, Git helpers, logger configuration). Refactor toward `lib/` when code becomes framework-agnostic. See action item below.
+- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`), shell utilities, and pure utilities (`string.ts`, `validation.ts`, `formatting.ts`, `error-formatter.ts`, `time.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
+- **`src/utils`**: Higher-level utilities tied to TENEX behavior (agent fetchers, CLI config scope, Git helpers including worktree management, logger configuration). Can import from `lib/` and infrastructure, but not from `services/` or higher layers.
 
 ### Tools for Tests & Scripts
 - **`src/test-utils`**: Mock LLM providers, nostr fixtures, and scenario harnesses shared by unit tests. Any new reusable fixture belongs here to avoid duplicating test helpers.
 - **`scripts/` + `tools/` (root)**: Build scripts, telemetry helpers, and CLI-adjacent automation. Document additions here when they influence runtime organization.
 
 ## Organization Guidelines
-1. **Domain-first placement**: Always prefer enhancing an existing module (agents, conversations, nostr, llm, tools, services, daemon) before creating new top-level directories. New folders require documenting their scope here.
-2. **Clear dependency flow**: CLI → commands → services/agents → conversations/tools/nostr → telemetry/logging. Lower layers must not import higher layers.
-3. **Stateful logic lives in services**: If code needs to persist data, hold onto sockets, or coordinate workflows over time, it belongs under `src/services/<domain>`.
-4. **Pure helpers live near usage**: Stateless helpers that are domain-specific should be co-located (e.g., `conversations/utils`), whereas environment-agnostic helpers belong in `src/lib`.
-5. **Events as contracts**: Any new event type must be added to `src/events`, with producers/consumers listed in this file. Avoid anonymous payloads.
-6. **Telemetry & logging**: Extend `src/telemetry`/`src/logging` when adding spans or log formats. Other modules should request loggers from there, not instantiate ad-hoc log sinks.
-7. **Documentation cadence**: When reorganizing files or adding modules, update both this inventory and `AGENTS.md` in the same PR. Mention the change under “Mixed Patterns & Action Items” until the follow-up refactor completes.
+
+**For detailed architectural guidance, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)**
+
+1. **Strict layered architecture**: Dependencies flow downward only:
+   ```
+   commands/daemon/event-handler
+     ↓
+   services/agents/conversations/tools
+     ↓
+   llm/nostr/prompts/events
+     ↓
+   utils
+     ↓
+   lib (NO TENEX imports!)
+   ```
+
+2. **Domain-first placement**: Always prefer enhancing an existing module (agents, conversations, nostr, llm, tools, services, daemon) before creating new top-level directories. New folders require documenting their scope here.
+
+3. **Pure utilities in lib/**: Framework-agnostic code with zero TENEX dependencies. Use `console.error`, never TENEX logger.
+
+4. **TENEX helpers in utils/**: Domain-specific utilities that can import from `lib/` but not from `services/` or higher.
+
+5. **Stateful logic lives in services**: If code needs to persist data, hold onto sockets, or coordinate workflows over time, it belongs under `src/services/<domain>`. Prefer "Service" suffix for consistency.
+
+6. **Import patterns**: Use `@/` alias. Import services directly from subdirectories: `@/services/rag` not `@/services`.
+
+7. **Events as contracts**: Any new event type must be added to `src/events`, with producers/consumers listed in this file. Avoid anonymous payloads.
+
+8. **Telemetry & logging**: Extend `src/telemetry`/`src/logging` when adding spans or log formats. Other modules should request loggers from there, not instantiate ad-hoc log sinks.
+
+9. **Documentation cadence**: When reorganizing files or adding modules, update both this inventory and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) in the same PR. Mention the change under "Mixed Patterns & Action Items" until the follow-up refactor completes.
+
+10. **Boy Scout Rule**: Leave code better than you found it. Fix obvious issues, improve naming, move misplaced code to correct layers.
 
 ## Mixed Patterns & Action Items
+
+### Completed Improvements
 - **Configuration Architecture (COMPLETED 2025-01-18)**: Centralized all config path construction through `ConfigService.getConfigPath(subdir)`. Removed singleton pattern - now exports `config` instance. **Breaking change**: `config.json` and `llms.json` are now global-only (`~/.tenex/`); only `mcp.json` remains at project level. Migration path: Users must manually move project-level configs to global. See `ConfigService.ts` for API.
-- **`lib/` vs `utils/` overlap**: `utils/` currently mixes CLI helpers, Git adapters, and platform-agnostic code. Action: audit imports, migrate pure helpers to `lib/`, and scope `utils/` to TENEX-specific helpers. Track files moved here.
-- **`tools/` vs `services/mcp` coupling**: MCP discovery/install logic spans both tool implementations and services. Action: document ownership each time we touch these areas and aim to consolidate under either `services/mcp` (for orchestration) or `tools/implementations` (for tool wrappers).
-- **Daemon UI dependencies**: UI components import some conversation services directly. Action: move data access into daemon stores/controllers and note progress here.
-- **Legacy `services/status` vs `daemon/StatusPublisher`**: Determine the single source of truth for runtime status broadcasting; document chosen direction before further work.
+- **Pure Utilities to lib/ (COMPLETED 2025-01-19)**: Moved `string.ts`, `validation.ts`, `formatting.ts`, `error-formatter.ts`, and `time.ts` from `utils/` to `lib/`. These are now pure utilities with zero TENEX dependencies.
+- **Git Utilities Consolidated (COMPLETED 2025-01-19)**: Moved `utils/worktree/` into `utils/git/worktree.ts` for better organization.
+- **Circular Dependency Fixed (COMPLETED 2025-01-19)**: Removed `lib/fs/filesystem.ts` dependency on `utils/logger`. Now uses `console.error` to maintain layer separation.
+- **Service File Naming (COMPLETED 2025-01-19)**: Renamed `ReportManager.ts` → `ReportService.ts` and `PubkeyNameRepository.ts` → `PubkeyService.ts` for consistency. Class names remain unchanged for now (gradual migration).
+
+### Architecture Guidelines Added (2025-01-19)
+- Created [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) with comprehensive architectural principles
+- Created [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) with developer workflow guidelines
+- Added pre-commit hook for AI-powered architecture review
+- Added `lint:architecture` script for static architecture checks
+
+### Ongoing Improvements (Gradual Migration)
+- **Service naming consistency**: Gradually rename remaining services to use "Service" suffix (e.g., `ReportManager` → `ReportService` class, `PubkeyNameRepository` → `PubkeyService` class). Files already renamed; class renames will follow in separate PRs.
+- **Service subdirectory grouping**: Group related services into subdirectories (e.g., `services/delegation/`, `services/reports/`) when 3+ related files exist.
+- **Dependency injection pattern**: Gradually convert singletons to DI pattern with exported convenience instances.
+- **Remove barrel exports**: Phase out `services/index.ts` barrel export in favor of direct imports from service subdirectories.
+
+### Known Issues to Address
+- **`tools/` vs `services/mcp` coupling**: MCP discovery/install logic spans both tool implementations and services. Action: document ownership each time we touch these areas. Currently: `services/mcp/` handles server lifecycle, `tools/implementations/mcp_discover.ts` discovers tools on Nostr (appropriate separation).
+- **Status publisher naming**: Three status publishers exist (`daemon/StatusPublisher.ts` as `DaemonStatusService`, `services/status/StatusPublisher.ts`, `services/OperationsStatusPublisher.ts`). Consider renaming for clarity: `DaemonStatusService`, `ProjectStatusService`, `OperationsStatusService`.
+
+### Target State (Long-Term Vision)
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for detailed target architecture. Key goals:
+1. ✅ Strict layer separation with zero upward dependencies
+2. ✅ Pure utilities isolated in `lib/`
+3. 🔄 Consistent "Service" suffix for all business logic
+4. ⏳ Subdirectory grouping for related services
+5. ⏳ Dependency injection pattern throughout
+6. ⏳ Direct imports, no barrel exports
 
 Log every relocation, ambiguity, or clean-up plan here so the roadmap stays discoverable.
