@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { config } from "@/services/ConfigService";
 import path from "node:path";
 import chalk from "chalk";
 
@@ -66,7 +65,10 @@ function writeToFile(level: string, message: string, args: unknown[]): void {
 }
 
 // Initialize daemon logging
-function initDaemonLogging(): void {
+async function initDaemonLogging(): Promise<void> {
+    // Lazy-load config to avoid circular dependency
+    const { config } = await import("@/services/ConfigService");
+
     const tenexConfig = config.getConfig();
     const defaultLogPath = path.join(config.getConfigPath("daemon"), "daemon.log");
     logFilePath = tenexConfig.logging?.logFile || defaultLogPath;

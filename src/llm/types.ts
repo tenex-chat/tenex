@@ -8,10 +8,49 @@ export type {
 
 // AI SDK v5 doesn't export ToolCall/ToolResult as separate types
 // Tool calls are part of the streaming response types
-// Define compatibility types for internal use
+// Define compatibility types for internal use (legacy mock LLM support)
 export interface ToolCall {
     name: string;
     params?: Record<string, unknown>;
+}
+
+export interface Message {
+    role: string;
+    content: string;
+}
+
+export interface CompletionRequest {
+    messages: Message[];
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    options?: {
+        configName?: string;
+        [key: string]: unknown;
+    };
+}
+
+export interface CompletionResponse {
+    content?: string;
+    toolCalls?: ToolCall[];
+    model?: string;
+    usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+    };
+    experimental_providerMetadata?: Record<string, unknown>;
+}
+
+export interface StreamEvent {
+    type: string;
+    content?: string;
+    delta?: string;
+}
+
+export interface LLMService {
+    complete(request: CompletionRequest): Promise<CompletionResponse>;
+    stream?(request: CompletionRequest): AsyncIterableIterator<StreamEvent>;
 }
 
 // Export execution context type
