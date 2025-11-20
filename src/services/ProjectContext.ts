@@ -159,10 +159,6 @@ export class ProjectContext {
             this.signer = projectManagerAgent.signer;
             this.pubkey = projectManagerAgent.pubkey;
             this.projectManager = projectManagerAgent;
-
-            // Tell AgentRegistry who the PM is so it can assign delegate tools correctly
-            // Note: This is synchronous now, file saving happens later
-            this.agentRegistry.setPMPubkey(projectManagerAgent.pubkey);
         }
 
         this.agentLessons = new Map();

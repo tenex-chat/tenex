@@ -944,11 +944,11 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
      */
     private async logGenerationRequest(messages: ModelMessage[], startTime: number): Promise<void> {
         await this.llmLogger.logLLMRequest({
-            request: {
-                messages,
-                model: `${this.provider}:${this.model}`,
-            },
-            timestamp: startTime,
+            messages,
+            model: this.model,
+            provider: this.provider,
+            configKey: `${this.provider}:${this.model}`,
+            startTime,
         });
     }
 

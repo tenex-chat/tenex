@@ -1,5 +1,3 @@
-import type { MockLLMScenario } from "@/test-utils/mock-llm/types";
-
 /**
  * iOS Testing Scenarios
  *
@@ -8,7 +6,27 @@ import type { MockLLMScenario } from "@/test-utils/mock-llm/types";
  * the iOS app believes it's talking to a real LLM.
  */
 
-export const iosTestingScenarios: MockLLMScenario[] = [
+// Custom type for iOS event-based scenarios (different from MockLLMScenario)
+interface IOSTestScenario {
+    name: string;
+    description: string;
+    triggers?: {
+        contentMatch?: RegExp;
+        phase?: string;
+        [key: string]: unknown;
+    };
+    events?: Array<{
+        type: string;
+        delay?: number;
+        data?: unknown;
+    }>;
+    response?: {
+        content?: string;
+        [key: string]: unknown;
+    };
+}
+
+export const iosTestingScenarios: IOSTestScenario[] = [
     // Scenario 1: Basic greeting and project status
     {
         name: "ios-greeting",

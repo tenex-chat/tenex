@@ -1,7 +1,10 @@
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { type SdkMcpServer, createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
+import { createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
 import { z } from "zod";
+
+// Infer the return type since SdkMcpServer is not exported
+type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
 
 /**
  * Converts TENEX tools to Claude Code SDK MCP tools
