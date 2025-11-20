@@ -1,4 +1,4 @@
-import type { MockScenario } from "../MockProvider";
+import type { MockLLMScenario } from "@/test-utils/mock-llm/types";
 
 /**
  * iOS Testing Scenarios
@@ -8,7 +8,7 @@ import type { MockScenario } from "../MockProvider";
  * the iOS app believes it's talking to a real LLM.
  */
 
-export const iosTestingScenarios: MockScenario[] = [
+export const iosTestingScenarios: MockLLMScenario[] = [
     // Scenario 1: Basic greeting and project status
     {
         name: "ios-greeting",

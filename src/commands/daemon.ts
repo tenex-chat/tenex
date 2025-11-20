@@ -31,7 +31,7 @@ export const daemonCommand = new Command("daemon")
         );
 
         // Initialize daemon logging
-        logger.initDaemonLogging();
+        await logger.initDaemonLogging();
 
         // Get whitelisted pubkeys
         let whitelistedPubkeys = config.getWhitelistedPubkeys(

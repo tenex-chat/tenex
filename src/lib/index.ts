@@ -28,3 +28,9 @@ export * from "./fs";
 
 // Shell utilities
 export * from "./shell";
+
+// End of message utilities
+export * from "./eom-utils";
+
+// Tool result formatting utilities
+export * from "./tool-result-formatter";

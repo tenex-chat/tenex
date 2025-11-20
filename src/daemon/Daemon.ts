@@ -10,7 +10,7 @@ import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
-import { context as otelContext, type Span } from "@opentelemetry/api";
+import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import type { RoutingDecision } from "./routing/DaemonRouter";
 import type { ProjectRuntime } from "./ProjectRuntime";
