@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { ReportManager } from "@/services/ReportManager";
+import { ReportManager } from "@/services/ReportService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";

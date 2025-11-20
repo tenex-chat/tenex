@@ -4,15 +4,15 @@ const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { config } from "@/services/ConfigService";
 import {
     type ProjectContext,
-    config,
     getProjectContext,
     isProjectContextInitialized,
-} from "@/services";
+} from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 

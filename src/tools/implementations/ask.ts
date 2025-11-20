@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { getProjectContext } from "@/services";
-import { type DelegationResponses, DelegationService } from "@/services/DelegationService";
+import { getProjectContext } from "@/services/ProjectContext";
+import { type DelegationResponses, DelegationService } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";

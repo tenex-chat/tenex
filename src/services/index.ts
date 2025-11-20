@@ -4,7 +4,7 @@
 
 export { ConfigService, config } from "./ConfigService";
 export { AgentsRegistryService, agentsRegistryService } from "./AgentsRegistryService";
-export { DelegationRegistry } from "./DelegationRegistry";
+export { DelegationRegistry, DelegationService } from "./delegation";
 export { DynamicToolService, dynamicToolService } from "./DynamicToolService";
 export {
     getProjectContext,
@@ -12,7 +12,6 @@ export {
     ProjectContext,
 } from "./ProjectContext";
 export { projectContextStore } from "./ProjectContextStore";
-export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyNameRepository";
-export { StatusPublisher } from "./status";
-export { OperationsStatusPublisher } from "./OperationsStatusPublisher";
+export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyService";
+export { StatusPublisher, OperationsStatusPublisher } from "./status";
 export { ReplaceableEventService } from "./replaceable-event";

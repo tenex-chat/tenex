@@ -1,9 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { ROOT_CONTEXT, SpanStatusCode, propagation, trace } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanStatusCode, propagation, trace, type Span } from "@opentelemetry/api";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
-
-const tracer = trace.getTracer("tenex.daemon");
 
 /**
  * Create a telemetry span for event processing with all standard attributes
@@ -24,7 +22,7 @@ export function createEventSpan(event: NDKEvent) {
     }
 
     // Create span with standard attributes
-    const span = tracer.startSpan(
+    const span = trace.getTracer("tenex.daemon").startSpan(
         "tenex.event.process",
         {
             attributes: {
@@ -55,7 +53,7 @@ export function createEventSpan(event: NDKEvent) {
 /**
  * End span with success status
  */
-export function endSpanSuccess(span: ReturnType<typeof tracer.startSpan>) {
+export function endSpanSuccess(span: Span) {
     span.setStatus({ code: SpanStatusCode.OK });
     span.end();
 }
@@ -63,7 +61,7 @@ export function endSpanSuccess(span: ReturnType<typeof tracer.startSpan>) {
 /**
  * End span with error status
  */
-export function endSpanError(span: ReturnType<typeof tracer.startSpan>, error: unknown) {
+export function endSpanError(span: Span, error: unknown) {
     span.recordException(error instanceof Error ? error : new Error(String(error)));
     span.setStatus({
         code: SpanStatusCode.ERROR,
@@ -76,7 +74,7 @@ export function endSpanError(span: ReturnType<typeof tracer.startSpan>, error: u
  * Add routing decision event to span
  */
 export function addRoutingEvent(
-    span: ReturnType<typeof tracer.startSpan>,
+    span: Span,
     decision: string,
     details: Record<string, any>
 ) {

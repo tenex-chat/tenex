@@ -1,4 +1,4 @@
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";

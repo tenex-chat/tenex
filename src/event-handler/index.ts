@@ -1,6 +1,6 @@
 import { NDKKind } from "@/nostr/kinds";
 import { TagExtractor } from "@/nostr/TagExtractor";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { agentStorage } from "../agents/AgentStorage";
@@ -9,7 +9,7 @@ import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "../services";
 import { BrainstormService } from "../services/BrainstormService";
-import { DelegationRegistry } from "../services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";

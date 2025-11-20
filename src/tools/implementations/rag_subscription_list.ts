@@ -40,7 +40,7 @@ async function executeListSubscriptions(
                 createdAt: new Date(sub.createdAt).toISOString(),
                 updatedAt: new Date(sub.updatedAt).toISOString(),
                 lastError: sub.lastError,
-            });
+            }) as AISdkTool;
 
             // Update counters in single pass
             acc.total++;
@@ -120,5 +120,5 @@ export function createRAGSubscriptionListTool(context: ExecutionContext): AISdkT
                 executeListSubscriptions
             );
         },
-    });
+    }) as AISdkTool;
 } 

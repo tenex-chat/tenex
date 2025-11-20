@@ -5,6 +5,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { type RAGDocument, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import {
+    type DocumentMetadata,
     type ToolResponse,
     executeToolWithErrorHandling,
     resolveAndValidatePath,
@@ -387,10 +388,10 @@ async function processDocuments(
             validateContent(content, source || "document");
 
             processedDocs.push({
-                id: doc.id,
+                id: doc.id ?? undefined,
                 content,
-                metadata: doc.metadata,
-                source,
+                metadata: (doc.metadata ?? undefined) as DocumentMetadata | undefined,
+                source: source ?? undefined,
                 timestamp: Date.now(),
             });
         } catch (error) {
@@ -466,5 +467,5 @@ export function createRAGAddDocumentsTool(context: ExecutionContext): AISdkTool 
                 executeAddDocuments
             );
         },
-    });
+    }) as AISdkTool;
 } 

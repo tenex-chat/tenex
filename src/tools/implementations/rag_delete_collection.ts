@@ -57,5 +57,5 @@ export function createRAGDeleteCollectionTool(context: ExecutionContext): AISdkT
                 executeDeleteCollection
             );
         },
-    });
+    }) as AISdkTool;
 } 

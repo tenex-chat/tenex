@@ -25,7 +25,7 @@ async function executeCreateCollection(
     const { name, schema } = input;
 
     const ragService = RAGService.getInstance();
-    const collection = await ragService.createCollection(name, schema);
+    const collection = await ragService.createCollection(name, schema ?? undefined);
 
     return {
         success: true,
@@ -54,5 +54,5 @@ export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkT
                 executeCreateCollection
             );
         },
-    });
+    }) as AISdkTool;
 } 

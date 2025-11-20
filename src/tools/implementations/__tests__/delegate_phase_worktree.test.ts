@@ -91,7 +91,7 @@ describe("delegate_phase worktree creation", () => {
         const branchName = `feature-meta-${Date.now()}`;
         const { createWorktree } = await import("@/utils/git/initializeGitRepo");
         const { trackWorktreeCreation, loadWorktreeMetadata } =
-            await import("@/utils/worktree/metadata");
+            await import("@/utils/git/worktree");
 
         const worktreePath = await createWorktree(
             mockContext.projectPath,

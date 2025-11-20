@@ -14,7 +14,7 @@ import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services";
 import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
-import { formatAnyError } from "../utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { getCurrentBranch } from "../utils/git/initializeGitRepo";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";

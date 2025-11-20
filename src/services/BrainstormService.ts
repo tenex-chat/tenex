@@ -16,7 +16,7 @@ import {
 import { getNDK } from "@/nostr/ndkClient";
 import type { ProjectContext } from "@/services/ProjectContext";
 import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
-import { safeParseJSON } from "@/utils/json-parser";
+import { safeParseJSON } from "@/lib/json-parser";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -363,7 +363,7 @@ export class BrainstormService {
         brainstormRoot: NDKEvent,
         chosenResponse: BrainstormResponse,
         moderator: AgentInstance,
-        _conversationId: string,
+        conversationId: string,
         reason: string
     ): Promise<void> {
         try {
@@ -513,7 +513,7 @@ export class BrainstormService {
      * Evaluate if a follow-up adds value
      */
     private async evaluateFollowUpValue(
-        _originalPrompt: string,
+        originalPrompt: string,
         winningResponse: string,
         followUp: string,
         moderator: AgentInstance

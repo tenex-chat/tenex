@@ -6,9 +6,9 @@
 
 import * as path from "node:path";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
-import type { CoreTool } from "ai";
+import type { Tool as CoreTool } from "ai";
 import {
     type experimental_MCPClient,
     experimental_createMCPClient,

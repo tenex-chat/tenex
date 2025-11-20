@@ -1,8 +1,11 @@
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
-import type { ProjectContext } from "@/services/ProjectContext";
-import { formatAnyError } from "@/utils/error-formatter";
+import {
+    getProjectContext,
+    isProjectContextInitialized,
+    type ProjectContext,
+} from "@/services/ProjectContext";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { LLMOperation, LLMOperationsRegistry } from "./LLMOperationsRegistry";

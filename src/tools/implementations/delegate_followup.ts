@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
-import { type DelegationResponses, DelegationService } from "@/services/DelegationService";
+import { DelegationRegistry } from "@/services/delegation";
+import { type DelegationResponses, DelegationService } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";

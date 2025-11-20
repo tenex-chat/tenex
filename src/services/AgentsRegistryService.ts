@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { getNDK } from "@/nostr/ndkClient";
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 

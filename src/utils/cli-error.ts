@@ -1,4 +1,4 @@
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "./logger";
 
 /**

@@ -4,7 +4,7 @@ import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import type { Table, VectorQuery } from "@lancedb/lancedb";
 import type { EmbeddingProvider } from "../EmbeddingProvider";
-import type { RAGDatabaseManager } from "./RAGDatabaseManager";
+import type { RAGDatabaseService } from "./RAGDatabaseService";
 
 /**
  * Document structure for RAG operations
@@ -77,7 +77,7 @@ export class RAGOperations {
     private static readonly BATCH_SIZE = 100;
 
     constructor(
-        private readonly dbManager: RAGDatabaseManager,
+        private readonly dbManager: RAGDatabaseService,
         private readonly embeddingProvider: EmbeddingProvider
     ) {}
 

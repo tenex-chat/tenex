@@ -11,7 +11,7 @@
 
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 import { SignedEventGenerator } from "./generate-signed-events";

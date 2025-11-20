@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { DelegationService } from "@/services/DelegationService";
+import { DelegationService } from "@/services/delegation";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 describe("DelegationService - Self-delegation validation (simplified)", () => {
@@ -81,7 +81,7 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
         );
 
         // Mock DelegationRegistry directly
-        const DelegationRegistry = require("@/services/DelegationRegistry").DelegationRegistry;
+        const DelegationRegistry = require("@/services/delegation").DelegationRegistry;
         const originalGetInstance = DelegationRegistry.getInstance;
         DelegationRegistry.getInstance = () => ({
             waitForBatchCompletion: () =>
@@ -142,7 +142,7 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
         );
 
         // Mock DelegationRegistry directly
-        const DelegationRegistry = require("@/services/DelegationRegistry").DelegationRegistry;
+        const DelegationRegistry = require("@/services/delegation").DelegationRegistry;
         const originalGetInstance = DelegationRegistry.getInstance;
         DelegationRegistry.getInstance = () => ({
             waitForBatchCompletion: () =>

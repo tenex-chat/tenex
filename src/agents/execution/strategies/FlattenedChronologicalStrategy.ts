@@ -8,10 +8,10 @@ import { getNDK } from "@/nostr";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
+import { DelegationRegistry } from "@/services/delegation";
 import { NudgeService } from "@/services/NudgeService";
-import { getPubkeyNameRepository } from "@/services/PubkeyNameRepository";
+import { getPubkeyNameRepository } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import {
     extractNostrEntities,

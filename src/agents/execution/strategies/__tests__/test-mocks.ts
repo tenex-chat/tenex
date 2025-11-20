@@ -1,7 +1,7 @@
 import { mock } from "bun:test";
 
 // Mock the PubkeyNameRepository to avoid NDK initialization issues in tests
-mock.module("@/services/PubkeyNameRepository", () => ({
+mock.module("@/services/PubkeyService", () => ({
     PubkeyNameRepository: {
         getInstance: () => ({
             getName: mock((pubkey: string) => {

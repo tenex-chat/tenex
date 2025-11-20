@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import type { EmbeddingProvider } from "../EmbeddingProvider";
 import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
-import { RAGDatabaseManager } from "./RAGDatabaseManager";
+import { RAGDatabaseService } from "./RAGDatabaseService";
 import { RAGOperations } from "./RAGOperations";
 import type { RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
@@ -11,7 +11,7 @@ import type { RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations
  */
 export class RAGService {
     private static instance: RAGService | null = null;
-    private dbManager: RAGDatabaseManager;
+    private dbManager: RAGDatabaseService;
     private operations: RAGOperations;
     private embeddingProvider: EmbeddingProvider;
     private initializationPromise: Promise<void>;
@@ -46,7 +46,7 @@ export class RAGService {
         try {
             logger.debug("Initializing RAGService components");
 
-            this.dbManager = new RAGDatabaseManager();
+            this.dbManager = new RAGDatabaseService();
             this.embeddingProvider = await EmbeddingProviderFactory.create();
             this.operations = new RAGOperations(this.dbManager, this.embeddingProvider);
 
@@ -149,4 +149,4 @@ export class RAGService {
 // Export the main types for convenience
 export type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
 export { RAGValidationError, RAGOperationError } from "./RAGOperations";
-export { RAGDatabaseError } from "./RAGDatabaseManager";
+export { RAGDatabaseError } from "./RAGDatabaseService";

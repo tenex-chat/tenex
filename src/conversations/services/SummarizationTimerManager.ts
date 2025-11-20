@@ -1,4 +1,4 @@
-import { config } from "@/services";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { SUMMARIZATION_DEFAULTS } from "../constants";
 import type { Conversation } from "../types";

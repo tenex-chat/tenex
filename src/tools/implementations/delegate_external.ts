@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
-import type { DelegationResponses } from "@/services/DelegationService";
+import { DelegationRegistry } from "@/services/delegation";
+import type { DelegationResponses } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";

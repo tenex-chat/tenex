@@ -10,7 +10,7 @@ import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 import { MOCK_AGENTS, MockEventGenerator } from "./mock-event-generator";

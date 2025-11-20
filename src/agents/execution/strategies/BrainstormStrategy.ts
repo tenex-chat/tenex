@@ -3,7 +3,7 @@ import { NostrKind, NostrTag, TagValue, isBrainstormEvent } from "@/nostr/consta
 import { isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services";
+import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 import { NudgeService } from "@/services/NudgeService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

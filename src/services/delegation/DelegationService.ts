@@ -2,7 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { DelegationRegistry } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { colorizeJSON, formatDuration, formatMarkdown } from "../formatting";
+import { colorizeJSON, formatDuration, formatMarkdown } from "@/lib/formatting";
 
 describe("formatDuration", () => {
     test("formats milliseconds correctly", () => {

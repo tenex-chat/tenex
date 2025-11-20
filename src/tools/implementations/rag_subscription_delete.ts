@@ -76,5 +76,5 @@ export function createRAGSubscriptionDeleteTool(context: ExecutionContext): AISd
                 executeDeleteSubscription
             );
         },
-    });
+    }) as AISdkTool;
 } 

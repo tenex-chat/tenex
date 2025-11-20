@@ -1,9 +1,9 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { TagExtractor } from "@/nostr/TagExtractor";
-import { getProjectContext } from "@/services";
-import type { DelegationRecord } from "@/services/DelegationRegistry";
-import { DelegationRegistry } from "@/services/DelegationRegistry";
+import { getProjectContext } from "@/services/ProjectContext";
+import type { DelegationRecord } from "@/services/delegation";
+import { DelegationRegistry } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";

@@ -6,7 +6,7 @@ import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getToolsObject } from "@/tools/registry";
-import { formatAnyError, formatStreamError } from "@/utils/error-formatter";
+import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

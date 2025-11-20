@@ -14,7 +14,7 @@ import type {
     TenexMCP,
 } from "@/services/config/types";
 import { TenexConfigSchema, TenexLLMsSchema, TenexMCPSchema } from "@/services/config/types";
-import { formatAnyError } from "@/utils/error-formatter";
+import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { z } from "zod";
