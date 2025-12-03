@@ -68,10 +68,10 @@ export function createRAGSubscriptionDeleteTool(context: ExecutionContext): AISd
         description:
             "Delete a RAG subscription to stop streaming data from an MCP resource. Previously ingested documents will remain in the RAG collection.",
         inputSchema: ragSubscriptionDeleteSchema,
-        execute: async (input: z.infer<typeof ragSubscriptionDeleteSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_subscription_delete",
-                input,
+                input as z.infer<typeof ragSubscriptionDeleteSchema>,
                 context,
                 executeDeleteSubscription
             );

@@ -1,11 +1,23 @@
 import { watch } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { debounce } from "lodash";
+
+// Simple debounce implementation to avoid lodash type issues
+function debounce<T extends (...args: unknown[]) => unknown>(
+    fn: T,
+    wait: number
+): (...args: Parameters<T>) => void {
+    let timeout: NodeJS.Timeout | null = null;
+    return (...args: Parameters<T>) => {
+        if (timeout) clearTimeout(timeout);
+        timeout = setTimeout(() => fn(...args), wait);
+    };
+}
 
 /**
  * Type for dynamic tool factory functions
@@ -125,9 +137,8 @@ export class DynamicToolService {
     private async loadTool(filePath: string): Promise<void> {
         try {
             // Get file hash for cache busting
-            const file = Bun.file(filePath);
-            const text = await file.text();
-            const hash = Bun.hash(text).toString();
+            const text = await readFile(filePath, "utf-8");
+            const hash = createHash("sha256").update(text).digest("hex");
 
             // Check if we need to reload
             const previousHash = this.fileHashes.get(filePath);

@@ -470,7 +470,7 @@ The application is ready for deployment.`,
 /**
  * Load iOS testing scenarios based on test type
  */
-export function getIOSScenarios(testType?: string): MockScenario[] {
+export function getIOSScenarios(testType?: string): IOSTestScenario[] {
     switch (testType) {
         case "basic":
             return [iosTestingScenarios[0], iosTestingScenarios[6]]; // Greeting and default

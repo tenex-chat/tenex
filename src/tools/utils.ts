@@ -2,7 +2,6 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
-import type { z } from "zod";
 
 /**
  * Resolves and validates a file path to ensure it stays within the project boundaries.
@@ -52,11 +51,11 @@ export class ToolExecutionError extends Error {
  * Standard wrapper for tool execution with error handling
  * Provides consistent error handling and response formatting
  */
-export async function executeToolWithErrorHandling<T extends z.ZodType>(
+export async function executeToolWithErrorHandling<TInput>(
     toolName: string,
-    input: z.infer<T>,
+    input: TInput,
     context: ExecutionContext,
-    executeFn: (input: z.infer<T>, context: ExecutionContext) => Promise<ToolResponse>
+    executeFn: (input: TInput, context: ExecutionContext) => Promise<ToolResponse>
 ): Promise<string> {
     logger.debug(`Executing tool: ${toolName}`, { input });
 
@@ -245,7 +244,7 @@ export function isDocumentMetadata(value: unknown): value is DocumentMetadata {
  * Parse document metadata from JSON string or object with type validation
  */
 export function parseDocumentMetadata(
-    metadata: string | DocumentMetadata | undefined
+    metadata: string | DocumentMetadata | Record<string, unknown> | undefined
 ): DocumentMetadata {
     if (!metadata) return {};
 

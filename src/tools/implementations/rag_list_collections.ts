@@ -47,10 +47,10 @@ export function createRAGListCollectionsTool(context: ExecutionContext): AISdkTo
     return tool({
         description: "List all available RAG collections in the system",
         inputSchema: ragListCollectionsSchema,
-        execute: async (input: z.infer<typeof ragListCollectionsSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_list_collections",
-                input,
+                input as z.infer<typeof ragListCollectionsSchema>,
                 context,
                 executeListCollections
             );

@@ -459,10 +459,10 @@ export function createRAGAddDocumentsTool(context: ExecutionContext): AISdkTool 
         description:
             "Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).",
         inputSchema: ragAddDocumentsSchema,
-        execute: async (input: z.infer<typeof ragAddDocumentsSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_add_documents",
-                input,
+                input as z.infer<typeof ragAddDocumentsSchema>,
                 context,
                 executeAddDocuments
             );
