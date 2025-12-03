@@ -192,23 +192,21 @@ export class DelegationRegistry extends EventEmitter {
 
     /**
      * Register a delegation - Unified interface for single and multi-recipient
+     * Each delegation has its own event ID for proper response matching.
      *
-     * @param delegationEventId - The actual Nostr event ID (kind:11 or kind:1111)
-     * @param recipients - Array of recipients (can be single or multiple)
+     * @param delegations - Array of delegations, each with its own event ID
      * @param delegatingAgent - The agent creating the delegation
      * @param rootConversationId - The root conversation where delegation originated
-     * @param originalRequest - The original request text
      */
     async registerDelegation(params: {
-        delegationEventId: string;
-        recipients: Array<{
+        delegations: Array<{
+            eventId: string;
             pubkey: string;
             request: string;
             phase?: string;
         }>;
         delegatingAgent: AgentInstance;
         rootConversationId: string;
-        originalRequest: string;
     }): Promise<string> {
         const batchId = this.generateBatchId();
 
@@ -219,18 +217,16 @@ export class DelegationRegistry extends EventEmitter {
             delegationKeys: [],
             allCompleted: false,
             createdAt: Date.now(),
-            originalRequest: params.originalRequest,
+            originalRequest: params.delegations.map((d) => d.request).join(" | "),
             rootConversationId: params.rootConversationId,
         };
 
-        // Registration details logged at the end of this method
-
         // Create individual delegation records
-        for (const recipient of params.recipients) {
-            const convKey = `${params.rootConversationId}:${params.delegatingAgent.pubkey}:${recipient.pubkey}`;
+        for (const delegation of params.delegations) {
+            const convKey = `${params.rootConversationId}:${params.delegatingAgent.pubkey}:${delegation.pubkey}`;
 
             const record: DelegationRecord = {
-                delegationEventId: params.delegationEventId,
+                delegationEventId: delegation.eventId,
                 delegationBatchId: batchId,
                 delegatingAgent: {
                     slug: params.delegatingAgent.slug,
@@ -238,11 +234,11 @@ export class DelegationRegistry extends EventEmitter {
                     rootConversationId: params.rootConversationId,
                 },
                 assignedTo: {
-                    pubkey: recipient.pubkey,
+                    pubkey: delegation.pubkey,
                 },
                 content: {
-                    fullRequest: recipient.request,
-                    phase: recipient.phase,
+                    fullRequest: delegation.request,
+                    phase: delegation.phase,
                 },
                 status: "pending",
                 createdAt: Date.now(),
@@ -269,8 +265,7 @@ export class DelegationRegistry extends EventEmitter {
 
         logger.debug("✅ Delegation registered", {
             batchId,
-            delegationEventId: params.delegationEventId.substring(0, 8),
-            recipientCount: params.recipients.length,
+            delegationCount: params.delegations.length,
             delegatingAgent: params.delegatingAgent.slug,
         });
 
@@ -279,11 +274,10 @@ export class DelegationRegistry extends EventEmitter {
         if (activeSpan) {
             activeSpan.addEvent("delegation.registered", {
                 "delegation.batch_id": batchId,
-                "delegation.event_id": params.delegationEventId,
-                "delegation.recipient_count": params.recipients.length,
+                "delegation.count": params.delegations.length,
                 "delegation.delegating_agent": params.delegatingAgent.slug,
-                "delegation.recipients": params.recipients
-                    .map((r) => r.pubkey.substring(0, 8))
+                "delegation.recipients": params.delegations
+                    .map((d) => d.pubkey.substring(0, 8))
                     .join(", "),
             });
         }
