@@ -26,12 +26,11 @@ Unlike traditional AI assistants where you interact with a single entity, TENEX 
 ### 🔄 **Phase-Based Workflow**
 Every interaction follows a structured lifecycle ensuring quality and completeness:
 1. **Chat** → Initial conversation and understanding
-2. **Brainstorm** → Creative exploration and ideation
-3. **Plan** → Structured approach definition
-4. **Execute** → Implementation and tool usage
-5. **Verification** → Quality assurance and testing
-6. **Chores** → Documentation and maintenance
-7. **Reflection** → Learning capture and improvement
+2. **Plan** → Structured approach definition
+3. **Execute** → Implementation and tool usage
+4. **Verification** → Quality assurance and testing
+5. **Chores** → Documentation and maintenance
+6. **Reflection** → Learning capture and improvement
 
 ### 🧠 **Continuous Learning System**
 - Agents capture and apply lessons from every interaction
