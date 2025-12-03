@@ -113,8 +113,10 @@ export class ConfigService {
         const loadedConfig = { config, llms, mcp };
         this.loadedConfig = loadedConfig;
 
-        // Initialize the LLM factory with provider configs
-        await llmServiceFactory.initializeProviders(llms.providers);
+        // Initialize the LLM factory with provider configs and global settings
+        await llmServiceFactory.initializeProviders(llms.providers, {
+            enableTenexTools: config.claudeCode?.enableTenexTools,
+        });
 
         return loadedConfig;
     }
