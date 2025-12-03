@@ -31,7 +31,7 @@ export class TenexToolsAdapter {
             // Convert the Zod schema or use a generic one if not available
             const schema = tenexTool.inputSchema || z.record(z.string(), z.any());
 
-            return tool(name, tenexTool.description || `Execute ${name}`, schema, async (args) => {
+            return tool(name, tenexTool.description || `Execute ${name}`, schema as Record<string, z.ZodTypeAny>, async (args) => {
                 try {
                     // Execute the TENEX tool
                     if (!tenexTool.execute) {
@@ -39,6 +39,8 @@ export class TenexToolsAdapter {
                     }
                     const result = await tenexTool.execute(args, {
                         abortSignal: new AbortController().signal,
+                        toolCallId: "tool-call-" + Date.now(),
+                        messages: [],
                     });
 
                     // Convert result to MCP format

@@ -3,7 +3,7 @@
  * This ensures the AI SDK is aware of built-in tools and doesn't mark them as invalid.
  */
 
-import type { LanguageModelV2FunctionTool } from "@ai-sdk/provider";
+import type { LanguageModelV2, LanguageModelV2FunctionTool } from "@ai-sdk/provider";
 import type { LanguageModel } from "ai";
 import { getClaudeCodeBuiltInTools } from "./ClaudeCodeBuiltInTools";
 
@@ -11,14 +11,14 @@ import { getClaudeCodeBuiltInTools } from "./ClaudeCodeBuiltInTools";
  * Extended LanguageModel interface with built-in tools property.
  * Claude Code's built-in tools are attached to prevent "invalid tool call" errors.
  */
-export interface LanguageModelWithTools extends LanguageModel {
+export interface LanguageModelWithTools extends LanguageModelV2 {
     tools: Record<string, LanguageModelV2FunctionTool>;
 }
 
 /**
  * Type guard to check if a model has tools attached.
  */
-export function hasTools(model: LanguageModel): model is LanguageModelWithTools {
+export function hasTools(model: LanguageModel): model is LanguageModelV2 & { tools: Record<string, LanguageModelV2FunctionTool> } {
     return (
         "tools" in (model as object) &&
         typeof (model as any).tools === "object" &&
