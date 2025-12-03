@@ -247,10 +247,3 @@ export function getProjectContextManager(): ProjectContextManager {
     }
     return managerInstance;
 }
-
-/**
- * Reset the manager (mainly for testing)
- */
-export function resetProjectContextManager(): void {
-    managerInstance = undefined;
-}

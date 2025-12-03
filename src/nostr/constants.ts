@@ -60,21 +60,3 @@ export function isBrainstormEvent(kind: number, tags: string[][]): boolean {
         tags.some((tag) => tag[0] === NostrTag.MODE && tag[1] === TagValue.BRAINSTORM_MODE)
     );
 }
-
-/**
- * Helper to safely get a tag value from an event
- */
-export function getTagValue(tags: string[][], tagName: string): string | undefined {
-    const tag = tags.find((t) => t[0] === tagName);
-    return tag?.[1];
-}
-
-/**
- * Helper to get all values for a specific tag name
- */
-export function getTagValues(tags: string[][], tagName: string): string[] {
-    return tags
-        .filter((tag) => tag[0] === tagName)
-        .map((tag) => tag[1])
-        .filter((value) => value !== undefined);
-}

@@ -10,23 +10,6 @@ import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 export type ProjectId = string & { __brand: "ProjectId" };
 
 /**
- * Helper to create a ProjectId from components
- */
-export function createProjectId(authorPubkey: string, dTag: string): ProjectId {
-    return `31933:${authorPubkey}:${dTag}` as ProjectId;
-}
-
-/**
- * Helper to create a ProjectId from raw string (with validation)
- */
-export function toProjectId(id: string): ProjectId {
-    if (!id.startsWith("31933:")) {
-        throw new Error(`Invalid project ID format: ${id}`);
-    }
-    return id as ProjectId;
-}
-
-/**
  * Event classification for daemon routing decisions
  */
 export type EventClassification =
@@ -165,38 +148,3 @@ export enum LifecycleEvent {
     SubscriptionRestart = "subscription.restart",
 }
 
-/**
- * Type guard to check if a routing decision routes to a project
- */
-export function isRoutedToProject(
-    decision: RoutingDecision
-): decision is Extract<RoutingDecision, { type: "route_to_project" }> {
-    return decision.type === "route_to_project";
-}
-
-/**
- * Type guard to check if a routing decision is dropped
- */
-export function isDropped(
-    decision: RoutingDecision
-): decision is Extract<RoutingDecision, { type: "dropped" }> {
-    return decision.type === "dropped";
-}
-
-/**
- * Type guard to check if a routing decision is lesson hydration
- */
-export function isLessonHydration(
-    decision: RoutingDecision
-): decision is Extract<RoutingDecision, { type: "lesson_hydration" }> {
-    return decision.type === "lesson_hydration";
-}
-
-/**
- * Type guard to check if a routing decision is a project event
- */
-export function isProjectEvent(
-    decision: RoutingDecision
-): decision is Extract<RoutingDecision, { type: "project_event" }> {
-    return decision.type === "project_event";
-}

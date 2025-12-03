@@ -799,17 +799,3 @@ export function getDaemon(): Daemon {
     }
     return daemonInstance;
 }
-
-/**
- * Reset the daemon (mainly for testing)
- */
-export function resetDaemon(): void {
-    if (daemonInstance) {
-        daemonInstance.stop().catch((error) => {
-            logger.error("Error stopping daemon during reset", {
-                error: error instanceof Error ? error.message : String(error),
-            });
-        });
-    }
-    daemonInstance = null;
-}
