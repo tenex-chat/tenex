@@ -2,7 +2,8 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { getCurrentBranchWithFallback, listWorktrees } from "@/utils/git/initializeGitRepo";
+import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
+import { listWorktrees } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
 import type { ExecutionContext } from "./types";
 

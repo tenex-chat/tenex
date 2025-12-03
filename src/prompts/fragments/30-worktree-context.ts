@@ -1,8 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
-import { listWorktrees } from "@/utils/git/initializeGitRepo";
-import { loadWorktreeMetadata } from "@/utils/git/worktree";
+import { listWorktrees, loadWorktreeMetadata } from "@/utils/git/worktree";
 
 /**
  * Worktree context fragment for agents.
