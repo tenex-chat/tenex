@@ -15,6 +15,12 @@ const delegateSchema = z.object({
     fullRequest: z
         .string()
         .describe("The complete request or question to delegate to the recipient agent(s)"),
+    branch: z
+        .string()
+        .optional()
+        .describe(
+            "Optional git branch name for worktree isolation. Creates a new worktree for the delegated work."
+        ),
 });
 
 type DelegateInput = z.infer<typeof delegateSchema>;
@@ -25,7 +31,7 @@ async function executeDelegate(
     input: DelegateInput,
     context: ExecutionContext
 ): Promise<DelegateOutput> {
-    const { recipients, fullRequest } = input;
+    const { recipients, fullRequest, branch } = input;
 
     // Recipients is always an array due to schema validation
     if (!Array.isArray(recipients)) {
@@ -78,11 +84,12 @@ async function executeDelegate(
         context.currentBranch
     );
 
-    // Convert to new delegations[] format - same request for all recipients
+    // Convert to new delegations[] format - same request/branch for all recipients
     return await delegationService.execute({
         delegations: resolvedPubkeys.map((pubkey) => ({
             recipient: pubkey,
             request: fullRequest,
+            branch, // Same branch for all recipients in delegate
         })),
     });
 }

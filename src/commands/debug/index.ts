@@ -5,7 +5,7 @@ import {
     type MessageGenerationStrategy,
     ThreadWithMemoryStrategy,
 } from "@/agents/execution/strategies";
-import type { ExecutionContext } from "@/agents/execution/types";
+import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationCoordinator } from "@/conversations/services/ConversationCoordinator";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { LLMLogger } from "@/logging/LLMLogger";
@@ -20,7 +20,6 @@ import { mcpService } from "@/services/mcp/MCPManager";
 // Tool type removed - using AI SDK tools only
 import { handleCliError } from "@/utils/cli-error";
 import { colorizeJSON, formatMarkdown } from "@/lib/formatting";
-import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { logger } from "@/utils/logger";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -400,22 +399,17 @@ export async function runDebugThreadedFormatter(
 
             const { AgentPublisher } = await import("@/nostr/AgentPublisher");
             const mockAgentPublisher = new AgentPublisher(selectedAgent);
-            const currentBranch = await getCurrentBranch(projectPath);
 
-            const mockContext: ExecutionContext = {
+            const mockContext = await createExecutionContext({
                 agent: selectedAgent,
-                projectPath,
-                workingDirectory: projectPath, // Debug always uses main worktree
-                currentBranch,
                 conversationId: options.conversationId,
-                conversationCoordinator,
+                projectPath,
                 triggeringEvent,
+                conversationCoordinator,
                 agentPublisher: mockAgentPublisher,
-                getConversation: () =>
-                    conversationCoordinator.getConversation(options.conversationId),
                 isDelegationCompletion: false,
                 debug: true,
-            };
+            });
 
             // Build messages using the strategy
             logger.info(chalk.cyan("\n=== Building Messages with Strategy ===\n"));
