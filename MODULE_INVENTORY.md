@@ -21,7 +21,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Agents Runtime (`src/agents`)
 - **Registry & Storage**: `AgentRegistry`, `AgentStorage`, and `constants` describe built-in agent definitions, dynamic injection, and on-disk metadata.
-- **Execution (`execution/*`)**: `AgentExecutor`, `AgentSupervisor`, `BrainstormModerator`, and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/services`, `nostr/AgentPublisher`, and `services/DelegationService`.
+- **Execution (`execution/*`)**: `AgentExecutor`, `AgentSupervisor`, and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/services`, `nostr/AgentPublisher`, and `services/DelegationService`.
 - **Utilities & Types**: Provide normalization, context building, and shared typings for consumers such as `event-handler`.
 - **Guideline**: Agents should never import `commands/*`. For configuration, import `{ config }` from `@/services` and use `config.getConfigPath(subdir)` for paths or `config.loadConfig()` for configuration data; pass loaded config through constructors when needed.
 
@@ -60,7 +60,6 @@ Use this section to understand each service’s scope and dependencies:
 
 | Service | Location | Responsibility & Key Dependencies |
 | --- | --- | --- |
-| `BrainstormService` | `src/services/BrainstormService.ts` | Coordinates brainstorm phases between moderators/executors, consumes `agents/execution` and `conversations/services`. |
 | `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services` - never construct `~/.tenex` paths manually. |
 | `DelegationRegistry` | `src/services/DelegationRegistry.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |
 | `DelegationService` | `src/services/DelegationService.ts` | Publishes delegation/ask events via `nostr/AgentPublisher`, waits for responses, enforces policy (self-delegation rules). Requires `conversationCoordinator`. |

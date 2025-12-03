@@ -110,7 +110,7 @@ Root: User asks for help
 
 **Key learnings:**
 - ALL agents see each other's contributions
-- Enables collaborative brainstorming
+- Enables collaborative multi-agent workflows
 - All replies at depth 2 (root-level siblings)
 
 ### 3. Delegation Chain
