@@ -21,11 +21,13 @@ export interface CompletionIntent {
 }
 
 export interface DelegationIntent {
-    recipients: string[];
-    request: string;
-    phase?: string;
-    phaseInstructions?: string; // Instructions to be passed with phase delegation
-    branch?: string;
+    delegations: Array<{
+        recipient: string;
+        request: string;
+        phase?: string;
+        phaseInstructions?: string;
+        branch?: string;
+    }>;
     type?: "delegation" | "delegation_followup" | "ask";
 }
 
@@ -260,49 +262,51 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Encode a delegation intent into a single kind:1111 conversation event.
-     * Creates a single event with multiple p-tags for all recipients.
+     * Encode a delegation intent into N kind:1111 conversation events.
+     * Creates one event per delegation, each with its own content and tags.
      */
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
-        const event = new NDKEvent(getNDK());
-        event.kind = 1111; // NIP-22 comment/conversation kind
+        return intent.delegations.map((delegation) => {
+            const event = new NDKEvent(getNDK());
+            event.kind = 1111; // NIP-22 comment/conversation kind
 
-        // Prepend recipients to the content
-        event.content = this.prependRecipientsToContent(intent.request, intent.recipients);
+            // Prepend recipient to the content
+            event.content = this.prependRecipientsToContent(delegation.request, [
+                delegation.recipient,
+            ]);
 
-        event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
+            event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
-        this.addConversationTags(event, context);
+            this.addConversationTags(event, context);
 
-        // Add ALL recipients as p-tags in a single event
-        for (const recipientPubkey of intent.recipients) {
-            event.tag(["p", recipientPubkey]);
-        }
+            // Add recipient as p-tag
+            event.tag(["p", delegation.recipient]);
 
-        // Phase metadata if provided
-        if (intent.phase) {
-            event.tag(["phase", intent.phase]);
+            // Phase metadata if provided
+            if (delegation.phase) {
+                event.tag(["phase", delegation.phase]);
 
-            // Add phase instructions as a separate tag
-            if (intent.phaseInstructions) {
-                event.tag(["phase-instructions", intent.phaseInstructions]);
+                // Add phase instructions as a separate tag
+                if (delegation.phaseInstructions) {
+                    event.tag(["phase-instructions", delegation.phaseInstructions]);
+                }
             }
-        }
 
-        // Branch metadata if provided (for worktree support)
-        if (intent.branch) {
-            event.tag(["branch", intent.branch]);
-        }
+            // Branch metadata if provided (for worktree support)
+            if (delegation.branch) {
+                event.tag(["branch", delegation.branch]);
+            }
 
-        // Add standard metadata
-        this.addStandardTags(event, context);
+            // Add standard metadata
+            this.addStandardTags(event, context);
 
-        logger.debug("Encoded delegation request", {
-            phase: intent.phase,
-            recipients: intent.recipients.map((r) => r.substring(0, 8)),
+            logger.debug("Encoded delegation request", {
+                phase: delegation.phase,
+                recipient: delegation.recipient.substring(0, 8),
+            });
+
+            return event;
         });
-
-        return [event];
     }
 
     /**

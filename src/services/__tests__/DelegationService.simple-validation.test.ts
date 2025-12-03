@@ -31,14 +31,20 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             "test-conversation-id",
             mockConversationCoordinator,
             mockTriggeringEvent,
-            mockAgentPublisher
+            mockAgentPublisher,
+            "/test/project/path",
+            "main"
         );
 
         // Test: self-delegation without phase should throw
         const intent = {
-            recipients: ["test-pubkey-123"], // Same as agent's pubkey
-            request: "Do something",
-            // No phase provided
+            delegations: [
+                {
+                    recipient: "test-pubkey-123", // Same as agent's pubkey
+                    request: "Do something",
+                    // No phase provided
+                },
+            ],
         };
 
         try {
@@ -77,7 +83,9 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             "test-conversation-id",
             mockConversationCoordinator,
             mockTriggeringEvent,
-            mockAgentPublisher
+            mockAgentPublisher,
+            "/test/project/path",
+            "main"
         );
 
         // Mock DelegationRegistry directly
@@ -97,9 +105,13 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
         try {
             // Test: self-delegation with phase should succeed
             const intent = {
-                recipients: ["test-pubkey-123"], // Same as agent's pubkey
-                request: "Do something in this phase",
-                phase: "planning", // Phase is provided
+                delegations: [
+                    {
+                        recipient: "test-pubkey-123", // Same as agent's pubkey
+                        request: "Do something in this phase",
+                        phase: "planning", // Phase is provided
+                    },
+                ],
             };
 
             const result = await delegationService.execute(intent);
@@ -138,7 +150,9 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             "test-conversation-id",
             mockConversationCoordinator,
             mockTriggeringEvent,
-            mockAgentPublisher
+            mockAgentPublisher,
+            "/test/project/path",
+            "main"
         );
 
         // Mock DelegationRegistry directly
@@ -158,9 +172,13 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
         try {
             // Test: delegation to others without phase should succeed
             const intent = {
-                recipients: ["other-agent-pubkey"], // Different from agent's pubkey
-                request: "Do something",
-                // No phase needed when delegating to others
+                delegations: [
+                    {
+                        recipient: "other-agent-pubkey", // Different from agent's pubkey
+                        request: "Do something",
+                        // No phase needed when delegating to others
+                    },
+                ],
             };
 
             const result = await delegationService.execute(intent);

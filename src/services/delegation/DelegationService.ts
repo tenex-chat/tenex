@@ -14,11 +14,10 @@ export interface DelegationResponses {
         from: string;
         event?: NDKEvent; // The actual response event for threading
     }>;
-    worktree?: {
+    worktrees?: Array<{
         branch: string;
         path: string;
-        message: string;
-    };
+    }>;
 }
 
 /**
@@ -31,7 +30,9 @@ export class DelegationService {
         private conversationId: string,
         private conversationCoordinator: ConversationCoordinator,
         private triggeringEvent: NDKEvent,
-        private publisher: AgentPublisher
+        private publisher: AgentPublisher,
+        private projectPath: string,
+        private currentBranch: string
     ) {}
 
     /**
@@ -41,13 +42,14 @@ export class DelegationService {
         intent: DelegationIntent & { suggestions?: string[] }
     ): Promise<DelegationResponses> {
         // Check for self-delegation attempts
-        const selfDelegationAttempts = intent.recipients.filter(
-            (pubkey) => pubkey === this.agent.pubkey
+        const selfDelegationAttempts = intent.delegations.filter(
+            (d) => d.recipient === this.agent.pubkey
         );
 
         // Only allow self-delegation when phase is explicitly provided (i.e., delegate_phase tool)
         if (selfDelegationAttempts.length > 0) {
-            if (!intent.phase) {
+            const hasPhase = selfDelegationAttempts.some((d) => d.phase);
+            if (!hasPhase) {
                 throw new Error(
                     `Self-delegation is not permitted. Agent "${this.agent.slug}" cannot delegate to itself. Self-delegation is only allowed when using the delegate_phase tool for phase transitions.`
                 );
@@ -56,9 +58,50 @@ export class DelegationService {
             logger.info("[DelegationService] 🔄 Agent delegating to itself via phase transition", {
                 fromAgent: this.agent.slug,
                 agentPubkey: this.agent.pubkey,
-                phase: intent.phase,
-                request: intent.request,
+                phases: selfDelegationAttempts.map((d) => d.phase),
             });
+        }
+
+        // Create worktrees for delegations that specify a branch
+        const worktrees: Array<{ branch: string; path: string }> = [];
+
+        for (const delegation of intent.delegations) {
+            if (delegation.branch) {
+                const { createWorktree } = await import("@/utils/git/initializeGitRepo");
+                const { trackWorktreeCreation } = await import("@/utils/git/worktree");
+
+                try {
+                    const worktreePath = await createWorktree(
+                        this.projectPath,
+                        delegation.branch,
+                        this.currentBranch
+                    );
+
+                    await trackWorktreeCreation(this.projectPath, {
+                        path: worktreePath,
+                        branch: delegation.branch,
+                        createdBy: this.agent.pubkey,
+                        conversationId: this.conversationId,
+                        parentBranch: this.currentBranch,
+                    });
+
+                    worktrees.push({ branch: delegation.branch, path: worktreePath });
+
+                    logger.info("Created worktree for delegation", {
+                        branch: delegation.branch,
+                        path: worktreePath,
+                        recipient: delegation.recipient.substring(0, 8),
+                    });
+                } catch (error) {
+                    logger.error("Failed to create worktree", {
+                        branch: delegation.branch,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                    throw new Error(
+                        `Failed to create worktree "${delegation.branch}": ${error instanceof Error ? error.message : String(error)}`
+                    );
+                }
+            }
         }
 
         // Build event context
@@ -73,10 +116,10 @@ export class DelegationService {
         let result: { batchId: string };
 
         if (intent.type === "ask") {
-            // Handle ask intent
+            // Handle ask intent - convert to single delegation format for ask
             const askResult = await this.publisher.ask(
                 {
-                    content: intent.request,
+                    content: intent.delegations[0]?.request ?? "",
                     suggestions: intent.suggestions,
                 },
                 eventContext
@@ -94,7 +137,10 @@ export class DelegationService {
         // Wait for all responses - no timeout as delegations are long-running
         const completions = await registry.waitForBatchCompletion(result.batchId);
 
-        console.log("delegation response", completions);
+        logger.debug("Delegation responses received", {
+            count: completions.length,
+            batchId: result.batchId,
+        });
 
         // Return formatted responses with event details
         return {
@@ -105,6 +151,7 @@ export class DelegationService {
                 from: c.assignedTo,
                 event: c.event,
             })),
+            worktrees: worktrees.length > 0 ? worktrees : undefined,
         };
     }
 }
