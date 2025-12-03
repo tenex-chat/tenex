@@ -19,7 +19,6 @@ import { LLMService } from "./service";
 export class LLMServiceFactory {
     private providers: Map<string, ProviderV2> = new Map();
     private registry: ReturnType<typeof createProviderRegistry> | null = null;
-    private geminiCliEnabled = false;
     private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
     private initialized = false;
 
@@ -31,7 +30,6 @@ export class LLMServiceFactory {
         options?: { enableTenexTools?: boolean }
     ): Promise<void> {
         this.providers.clear();
-        this.geminiCliEnabled = false;
         this.enableTenexTools = options?.enableTenexTools !== false; // Default to true
 
         // Check if mock mode is enabled
@@ -122,8 +120,13 @@ export class LLMServiceFactory {
                             name,
                             createGeminiProvider({ authType: "oauth-personal" }) as ProviderV2
                         );
-                        this.geminiCliEnabled = true;
                         logger.debug("[LLMServiceFactory] Initialized Gemini CLI provider");
+                        break;
+                    }
+
+                    case "claudeCode": {
+                        // Claude Code is always available, no initialization needed
+                        logger.debug("[LLMServiceFactory] Claude Code provider is always available");
                         break;
                     }
 
@@ -282,11 +285,11 @@ export class LLMServiceFactory {
      * Check if a provider is available
      */
     hasProvider(providerName: string): boolean {
-        // Check standard providers, Claude Code (always available), or Gemini CLI
+        // Check standard providers, Claude Code (always available), or Gemini CLI (always available)
         return (
             this.providers.has(providerName) ||
             providerName === "claudeCode" ||
-            (providerName === "gemini-cli" && this.geminiCliEnabled)
+            providerName === "gemini-cli"
         );
     }
 
