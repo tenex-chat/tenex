@@ -109,16 +109,15 @@ async function executeDelegateExternal(
     chatEvent.publish();
 
     const batchId = await registry.registerDelegation({
-        delegationEventId: chatEvent.id,
-        recipients: [
+        delegations: [
             {
+                eventId: chatEvent.id,
                 pubkey: pubkey,
                 request: content,
             },
         ],
         delegatingAgent: context.agent,
         rootConversationId: context.conversationId,
-        originalRequest: content,
     });
 
     // Publish conversation status event

@@ -73,7 +73,9 @@ async function executeDelegate(
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher!
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
     // Convert to new delegations[] format - same request for all recipients

@@ -45,14 +45,20 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher!
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
     // Execute as an Ask intent (will be encoded specially)
     const responses = await delegationService.execute({
         type: "ask",
-        recipients: [ownerPubkey],
-        request: content,
+        delegations: [
+            {
+                recipient: ownerPubkey,
+                request: content,
+            },
+        ],
         suggestions,
     });
 

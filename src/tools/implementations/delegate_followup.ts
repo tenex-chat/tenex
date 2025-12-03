@@ -73,7 +73,9 @@ async function executeDelegateFollowup(
         context.conversationId,
         context.conversationCoordinator,
         responseEvent, // This becomes the triggering event for threading
-        context.agentPublisher!
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
     // Execute as a follow-up delegation

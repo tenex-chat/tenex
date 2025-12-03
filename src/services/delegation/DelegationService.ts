@@ -30,7 +30,9 @@ export class DelegationService {
         private conversationId: string,
         private conversationCoordinator: ConversationCoordinator,
         private triggeringEvent: NDKEvent,
-        private publisher: AgentPublisher
+        private publisher: AgentPublisher,
+        private projectPath: string,
+        private currentBranch: string
     ) {}
 
     /**
@@ -67,25 +69,20 @@ export class DelegationService {
             if (delegation.branch) {
                 const { createWorktree } = await import("@/utils/git/initializeGitRepo");
                 const { trackWorktreeCreation } = await import("@/utils/git/worktree");
-                const { getProjectContext } = await import("@/services/ProjectContext");
-
-                const projectContext = getProjectContext();
-                const projectPath = projectContext.projectPath;
-                const currentBranch = projectContext.currentBranch ?? "main";
 
                 try {
                     const worktreePath = await createWorktree(
-                        projectPath,
+                        this.projectPath,
                         delegation.branch,
-                        currentBranch
+                        this.currentBranch
                     );
 
-                    await trackWorktreeCreation(projectPath, {
+                    await trackWorktreeCreation(this.projectPath, {
                         path: worktreePath,
                         branch: delegation.branch,
                         createdBy: this.agent.pubkey,
                         conversationId: this.conversationId,
-                        parentBranch: currentBranch,
+                        parentBranch: this.currentBranch,
                     });
 
                     worktrees.push({ branch: delegation.branch, path: worktreePath });

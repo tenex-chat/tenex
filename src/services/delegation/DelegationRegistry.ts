@@ -55,7 +55,7 @@ export interface DelegationRecord {
 interface DelegationBatch {
     batchId: string;
     delegatingAgent: string;
-    delegationKeys: string[]; // Conversation keys for each delegation
+    delegationEventIds: string[]; // Delegation event IDs for each delegation in the batch
     allCompleted: boolean;
     createdAt: number;
     originalRequest: string;
@@ -97,7 +97,8 @@ const DelegationRecordSchema = z.object({
 const DelegationBatchSchema = z.object({
     batchId: z.string(),
     delegatingAgent: z.string(),
-    delegationKeys: z.array(z.string()),
+    delegationEventIds: z.array(z.string()).optional(), // New format
+    delegationKeys: z.array(z.string()).optional(), // Old format (backward compat)
     allCompleted: z.boolean(),
     createdAt: z.number(),
     originalRequest: z.string(),
@@ -109,6 +110,7 @@ const PersistedDataSchema = z.object({
     batches: z.array(z.tuple([z.string(), DelegationBatchSchema])),
     agentTasks: z.array(z.tuple([z.string(), z.array(z.string())])),
     conversationTasks: z.array(z.tuple([z.string(), z.array(z.string())])),
+    conversationIndex: z.array(z.tuple([z.string(), z.array(z.string())])).optional(), // Optional for backward compatibility
     version: z.literal(1),
 });
 
@@ -116,9 +118,13 @@ export class DelegationRegistry extends EventEmitter {
     private static instance: DelegationRegistry;
     private static isInitialized = false;
 
-    // Primary storage: conversation key -> full record
-    // Key format: "${rootConversationId}:${fromPubkey}:${toPubkey}"
+    // Primary storage: delegationEventId -> full record (unique and authoritative)
     private delegations: Map<string, DelegationRecord> = new Map();
+
+    // Secondary index: conversation key -> Set of delegationEventIds
+    // Supports multiple delegations to same agent in same conversation
+    // Key format: "${rootConversationId}:${fromPubkey}:${toPubkey}"
+    private conversationIndex: Map<string, Set<string>> = new Map();
 
     // Index: batch ID -> batch info
     private batches: Map<string, DelegationBatch> = new Map();
@@ -214,7 +220,7 @@ export class DelegationRegistry extends EventEmitter {
         const batch: DelegationBatch = {
             batchId,
             delegatingAgent: params.delegatingAgent.pubkey,
-            delegationKeys: [],
+            delegationEventIds: [],
             allCompleted: false,
             createdAt: Date.now(),
             originalRequest: params.delegations.map((d) => d.request).join(" | "),
@@ -246,18 +252,26 @@ export class DelegationRegistry extends EventEmitter {
                 siblingDelegationIds: [],
             };
 
-            this.delegations.set(convKey, record);
-            batch.delegationKeys.push(convKey);
+            // Store by delegationEventId (primary key)
+            this.delegations.set(delegation.eventId, record);
+            batch.delegationEventIds.push(delegation.eventId);
+
+            // Update conversation index (secondary index)
+            if (!this.conversationIndex.has(convKey)) {
+                this.conversationIndex.set(convKey, new Set());
+            }
+            this.conversationIndex.get(convKey)!.add(delegation.eventId);
+
             this.indexDelegation(record);
         }
 
         // Update sibling IDs
-        for (const convKey of batch.delegationKeys) {
-            const record = this.delegations.get(convKey);
+        for (const eventId of batch.delegationEventIds) {
+            const record = this.delegations.get(eventId);
             if (!record) {
-                throw new Error(`No delegation record found for ${convKey}`);
+                throw new Error(`No delegation record found for event ID ${eventId}`);
             }
-            record.siblingDelegationIds = batch.delegationKeys.filter((k) => k !== convKey);
+            record.siblingDelegationIds = batch.delegationEventIds.filter((id) => id !== eventId);
         }
 
         this.batches.set(batchId, batch);
@@ -366,6 +380,7 @@ export class DelegationRegistry extends EventEmitter {
                 }
 
                 await this.recordDelegationCompletion({
+                    delegationEventId: delegation.delegationEventId,
                     conversationId: delegation.delegatingAgent.rootConversationId,
                     fromPubkey: delegation.delegatingAgent.pubkey,
                     toPubkey: event.pubkey,
@@ -384,10 +399,11 @@ export class DelegationRegistry extends EventEmitter {
      * Called when a delegation completion event (kind:1111 reply) is received
      */
     async recordDelegationCompletion(params: {
-        conversationId: string; // The root conversation ID
-        fromPubkey: string;
-        toPubkey: string;
-        completionEventId: string;
+        delegationEventId: string; // The delegation event ID (primary key)
+        conversationId: string; // The root conversation ID (for backward compat logging)
+        fromPubkey: string; // Delegator pubkey (for backward compat logging)
+        toPubkey: string; // Recipient pubkey (for backward compat logging)
+        completionEventId: string; // The completion event ID
         response: string;
         summary?: string;
         completionEvent?: NDKEvent; // The actual completion event
@@ -399,23 +415,22 @@ export class DelegationRegistry extends EventEmitter {
         remainingDelegations: number;
         conversationId: string;
     }> {
-        const convKey = `${params.conversationId}:${params.fromPubkey}:${params.toPubkey}`;
-        const record = this.delegations.get(convKey);
+        // Look up by delegationEventId (primary key)
+        const record = this.delegations.get(params.delegationEventId);
         if (!record) {
-            throw new Error(`No delegation record for ${convKey}`);
+            throw new Error(`No delegation record for event ID ${params.delegationEventId}`);
         }
 
         // Prevent duplicate completions
         if (record.status === "completed") {
             throw new Error(
-                `Delegation already completed for ${convKey}. Original completion: ${record.completion?.event?.id}`
+                `Delegation already completed for event ID ${params.delegationEventId}. Original completion: ${record.completion?.event?.id}`
             );
         }
 
         // Log which event is being used to mark delegation as complete
         logger.info("📝 Marking delegation as complete", {
-            convKey,
-            delegationEventId: record.delegationEventId,
+            delegationEventId: params.delegationEventId,
             completionEventId: params.completionEventId,
             completingAgent: params.toPubkey,
             batchId: record.delegationBatchId,
@@ -441,8 +456,8 @@ export class DelegationRegistry extends EventEmitter {
             throw new Error(`No batch found for ${record.delegationBatchId}`);
         }
 
-        const batchDelegations = batch.delegationKeys.map((convKey) =>
-            this.delegations.get(convKey)
+        const batchDelegations = batch.delegationEventIds.map((eventId) =>
+            this.delegations.get(eventId)
         );
         const allComplete = batchDelegations.every((d) => d?.status === "completed");
         const remainingDelegations = batchDelegations.filter((d) => d?.status === "pending").length;
@@ -455,7 +470,7 @@ export class DelegationRegistry extends EventEmitter {
 
             logger.info("🎯 Delegation batch completed - emitting completion event", {
                 batchId: batch.batchId,
-                delegationCount: batch.delegationKeys.length,
+                delegationCount: batch.delegationEventIds.length,
                 rootConversationId: record.delegatingAgent.rootConversationId.substring(0, 8),
                 hasListeners: hasListener,
                 mode: hasListener ? "synchronous" : "async-fallback",
@@ -506,12 +521,13 @@ export class DelegationRegistry extends EventEmitter {
 
     /**
      * Get delegation context by conversation key lookup
-     * This is the primary way to find a delegation record
+     * With support for multiple delegations to same agent, this returns the first pending delegation,
+     * or the most recent delegation if none are pending.
      *
      * @param rootConversationId - The root conversation where delegation originated
      * @param fromPubkey - The delegating agent's pubkey
      * @param toPubkey - The recipient agent's pubkey
-     * @returns The delegation record if found
+     * @returns The delegation record if found (first pending, or most recent)
      */
     getDelegationByConversationKey(
         rootConversationId: string,
@@ -525,25 +541,50 @@ export class DelegationRegistry extends EventEmitter {
             rootConversationId: rootConversationId.substring(0, 8),
             fromPubkey: fromPubkey.substring(0, 16),
             toPubkey: toPubkey.substring(0, 16),
-            exists: this.delegations.has(convKey),
         });
 
-        const record = this.delegations.get(convKey);
-
-        if (record) {
-            logger.debug("✅ Found delegation by conversation key", {
-                delegationEventId: record.delegationEventId.substring(0, 8),
-                status: record.status,
-                batchId: record.delegationBatchId,
-            });
-        } else {
-            logger.debug("❌ No delegation found for conversation key", {
+        // Get all delegation event IDs for this conversation key
+        const eventIds = this.conversationIndex.get(convKey);
+        if (!eventIds || eventIds.size === 0) {
+            logger.debug("❌ No delegations found for conversation key", {
                 convKey,
-                availableKeys: Array.from(this.delegations.keys()).slice(0, 5), // Log first 5 for debugging
+            });
+            return undefined;
+        }
+
+        // Get all delegation records
+        const records = Array.from(eventIds)
+            .map((id) => this.delegations.get(id))
+            .filter((r): r is DelegationRecord => r !== undefined);
+
+        if (records.length === 0) {
+            logger.debug("❌ No delegation records found (index stale?)", { convKey });
+            return undefined;
+        }
+
+        // If multiple delegations, prefer pending ones
+        const pendingRecords = records.filter((r) => r.status === "pending");
+        const selectedRecord = pendingRecords.length > 0
+            ? pendingRecords[0]
+            : records.sort((a, b) => b.createdAt - a.createdAt)[0]; // Most recent if none pending
+
+        if (records.length > 1) {
+            logger.warn("⚠️ Multiple delegations found for conversation key, returning first pending or most recent", {
+                convKey,
+                totalCount: records.length,
+                pendingCount: pendingRecords.length,
+                selectedEventId: selectedRecord.delegationEventId.substring(0, 8),
+                selectedStatus: selectedRecord.status,
             });
         }
 
-        return record;
+        logger.debug("✅ Found delegation by conversation key", {
+            delegationEventId: selectedRecord.delegationEventId.substring(0, 8),
+            status: selectedRecord.status,
+            batchId: selectedRecord.delegationBatchId,
+        });
+
+        return selectedRecord;
     }
 
     /**
@@ -567,8 +608,8 @@ export class DelegationRegistry extends EventEmitter {
         const batch = this.batches.get(batchId);
         if (!batch) return [];
 
-        return batch.delegationKeys
-            .map((convKey) => this.delegations.get(convKey))
+        return batch.delegationEventIds
+            .map((eventId) => this.delegations.get(eventId))
             .filter(
                 (
                     record
@@ -721,6 +762,10 @@ export class DelegationRegistry extends EventEmitter {
                 k,
                 Array.from(v),
             ]),
+            conversationIndex: Array.from(this.conversationIndex.entries()).map(([k, v]) => [
+                k,
+                Array.from(v),
+            ]),
             version: 1,
         };
 
@@ -790,14 +835,68 @@ export class DelegationRegistry extends EventEmitter {
                 return [key, record] as [string, DelegationRecord];
             });
 
-            this.delegations = new Map(deserializedDelegations);
-            this.batches = new Map(validatedData.batches);
+            // Detect and migrate old data format (conversation key -> event ID)
+            const firstKey = deserializedDelegations[0]?.[0];
+            const isOldFormat = firstKey && firstKey.includes(":"); // Old format has colons in key
+
+            if (isOldFormat) {
+                logger.info("Migrating delegation registry from old format (conversation key) to new format (event ID)");
+                // Migrate: re-key delegations by event ID instead of conversation key
+                this.delegations = new Map();
+                for (const [_convKey, record] of deserializedDelegations) {
+                    this.delegations.set(record.delegationEventId, record);
+                }
+            } else {
+                this.delegations = new Map(deserializedDelegations);
+            }
+
+            // Migrate batches: convert delegationKeys to delegationEventIds
+            const migratedBatches: Array<[string, DelegationBatch]> = validatedData.batches.map(([batchId, batch]) => {
+                if (batch.delegationEventIds) {
+                    // Already in new format
+                    return [batchId, batch as DelegationBatch];
+                } else if (batch.delegationKeys) {
+                    // Old format: convert conversation keys to event IDs
+                    const eventIds = batch.delegationKeys
+                        .map((convKey) => {
+                            // Find delegation record by old conversation key
+                            const record = deserializedDelegations.find(([key]) => key === convKey)?.[1];
+                            return record?.delegationEventId;
+                        })
+                        .filter((id): id is string => id !== undefined);
+
+                    return [batchId, { ...batch, delegationEventIds: eventIds, delegationKeys: undefined } as DelegationBatch];
+                } else {
+                    // No delegation IDs at all (shouldn't happen)
+                    return [batchId, { ...batch, delegationEventIds: [] } as DelegationBatch];
+                }
+            });
+
+            this.batches = new Map(migratedBatches);
             this.agentDelegations = new Map(
                 validatedData.agentTasks.map(([k, v]) => [k, new Set(v)])
             );
             this.conversationDelegations = new Map(
                 validatedData.conversationTasks.map(([k, v]) => [k, new Set(v)])
             );
+
+            // Restore or rebuild conversation index
+            if (validatedData.conversationIndex) {
+                this.conversationIndex = new Map(
+                    validatedData.conversationIndex.map(([k, v]) => [k, new Set(v)])
+                );
+            } else {
+                // Rebuild conversation index from delegations (backward compatibility)
+                logger.info("Rebuilding conversation index from existing delegations");
+                this.conversationIndex = new Map();
+                for (const [eventId, record] of this.delegations.entries()) {
+                    const convKey = `${record.delegatingAgent.rootConversationId}:${record.delegatingAgent.pubkey}:${record.assignedTo.pubkey}`;
+                    if (!this.conversationIndex.has(convKey)) {
+                        this.conversationIndex.set(convKey, new Set());
+                    }
+                    this.conversationIndex.get(convKey)!.add(eventId);
+                }
+            }
 
             // Clean up old completed delegations (older than 24 hours)
             this.cleanupOldDelegations();
@@ -823,16 +922,28 @@ export class DelegationRegistry extends EventEmitter {
         const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
         let cleaned = 0;
 
-        for (const [delegationKey, record] of this.delegations.entries()) {
+        for (const [delegationEventId, record] of this.delegations.entries()) {
             if (record.status === "completed" && record.updatedAt < oneDayAgo) {
-                this.delegations.delete(delegationKey);
+                // Delete from primary storage
+                this.delegations.delete(delegationEventId);
 
-                // Clean up from indexes
+                // Clean up from conversation index
+                const convKey = `${record.delegatingAgent.rootConversationId}:${record.delegatingAgent.pubkey}:${record.assignedTo.pubkey}`;
+                const convIndex = this.conversationIndex.get(convKey);
+                if (convIndex) {
+                    convIndex.delete(delegationEventId);
+                    if (convIndex.size === 0) {
+                        this.conversationIndex.delete(convKey);
+                    }
+                }
+
+                // Clean up from agent index
                 const agentDelegations = this.agentDelegations.get(record.delegatingAgent.pubkey);
                 if (agentDelegations) {
                     agentDelegations.delete(record.delegationEventId);
                 }
 
+                // Clean up from conversation delegations index
                 const convDelegations = this.conversationDelegations.get(
                     record.delegatingAgent.rootConversationId
                 );
@@ -862,6 +973,7 @@ export class DelegationRegistry extends EventEmitter {
      */
     async clear(): Promise<void> {
         this.delegations.clear();
+        this.conversationIndex.clear();
         this.batches.clear();
         this.syncHandledBatches.clear();
         this.agentDelegations.clear();
@@ -887,23 +999,28 @@ export class DelegationRegistry extends EventEmitter {
             responderPubkey: responderPubkey.substring(0, 16),
         });
 
-        // Search through all delegations
-        for (const [convKey, record] of this.delegations.entries()) {
-            if (
-                record.delegationEventId === eventId &&
-                record.assignedTo.pubkey === responderPubkey
-            ) {
-                logger.debug("✅ Found delegation match", {
-                    conversationKey: convKey,
-                    status: record.status,
-                    delegatingAgent: record.delegatingAgent.slug,
-                });
+        // Direct O(1) lookup by delegationEventId (primary key)
+        const record = this.delegations.get(eventId);
 
-                return record;
-            }
+        if (!record) {
+            logger.debug("❌ No delegation found for event ID");
+            return undefined;
         }
 
-        logger.debug("❌ No delegation found for event+responder combination");
-        return undefined;
+        // Verify responder matches
+        if (record.assignedTo.pubkey !== responderPubkey) {
+            logger.debug("❌ Event ID found but responder doesn't match", {
+                expectedResponder: record.assignedTo.pubkey.substring(0, 16),
+                actualResponder: responderPubkey.substring(0, 16),
+            });
+            return undefined;
+        }
+
+        logger.debug("✅ Found delegation match", {
+            status: record.status,
+            delegatingAgent: record.delegatingAgent.slug,
+        });
+
+        return record;
     }
 }

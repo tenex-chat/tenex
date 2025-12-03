@@ -120,7 +120,9 @@ async function executeDelegatePhase(
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher
+        context.agentPublisher,
+        context.projectPath,
+        context.currentBranch
     );
 
     // Convert to new delegations[] format - same phase/branch for all recipients
