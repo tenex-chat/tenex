@@ -226,8 +226,7 @@ export function ProcessManagerUI({
         }
 
         if (input === "q" && viewState.viewMode === "projects") {
-            onClose();
-            return;
+            process.exit(0);
         }
 
         if (key.upArrow) {
