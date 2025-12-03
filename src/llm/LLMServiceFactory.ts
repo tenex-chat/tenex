@@ -21,15 +21,20 @@ export class LLMServiceFactory {
     private registry: ReturnType<typeof createProviderRegistry> | null = null;
     private claudeCodeApiKey: string | null = null; // Store Claude Code API key for runtime use
     private geminiCliEnabled = false;
+    private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
     private initialized = false;
 
     /**
      * Initialize providers from configuration
      */
-    async initializeProviders(providerConfigs: Record<string, { apiKey: string }>): Promise<void> {
+    async initializeProviders(
+        providerConfigs: Record<string, { apiKey: string }>,
+        options?: { enableTenexTools?: boolean }
+    ): Promise<void> {
         this.providers.clear();
         this.claudeCodeApiKey = null;
         this.geminiCliEnabled = false;
+        this.enableTenexTools = options?.enableTenexTools !== false; // Default to true
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
@@ -210,11 +215,12 @@ export class LLMServiceFactory {
                 hasSessionId: !!context?.sessionId,
                 regularTools,
                 toolCount: regularTools.length,
+                enableTenexTools: this.enableTenexTools,
             });
 
-            // Create SDK MCP server for local TENEX tools if any exist
+            // Create SDK MCP server for local TENEX tools if enabled and tools exist
             const tenexSdkServer =
-                regularTools.length > 0 && context?.tools
+                this.enableTenexTools && regularTools.length > 0 && context?.tools
                     ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
                     : undefined;
 
