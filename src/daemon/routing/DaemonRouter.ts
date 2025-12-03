@@ -35,6 +35,18 @@ export class DaemonRouter {
         agentPubkeyToProjects: Map<Hexpubkey, Set<string>>,
         activeRuntimes: Map<string, ProjectRuntime>
     ): RoutingDecision {
+        // Skip routing for global identity kinds (NIP-01, NIP-02)
+        // kind:0 (profile metadata) and kind:3 (contact list) are global user/agent identity
+        // and should never be routed to specific projects
+        if (event.kind === 0 || event.kind === 3) {
+            return {
+                projectId: null,
+                method: "none",
+                matchedTags: [],
+                reason: `Global identity kind (${event.kind}) - not project-specific`,
+            };
+        }
+
         // Check for explicit project A-tags first (highest priority)
         const routingByATag = this.routeByATag(event, knownProjects);
         if (routingByATag) {
