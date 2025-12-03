@@ -181,7 +181,10 @@ export class ProjectContext {
         return this.agentRegistry.getAgentByPubkey(pubkey);
     }
 
-    getProjectManager(): AgentInstance | undefined {
+    getProjectManager(): AgentInstance {
+        if (!this.projectManager) {
+            throw new Error("Project manager not initialized");
+        }
         return this.projectManager;
     }
 

@@ -1,7 +1,16 @@
 import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
-import type { CompleteEvent } from "@/llm/service";
+import type {
+    ChunkTypeChangeEvent,
+    CompleteEvent,
+    ContentEvent,
+    ReasoningEvent,
+    SessionCapturedEvent,
+    StreamErrorEvent,
+    ToolDidExecuteEvent,
+    ToolWillExecuteEvent,
+} from "@/llm/service";
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -480,7 +489,7 @@ export class AgentExecutor {
         };
 
         // Wire up event handlers
-        llmService.on("content", async (event) => {
+        llmService.on("content", async (event: ContentEvent) => {
             logger.debug("[AgentExecutor] RECEIVED CONTENT EVENT!!!", {
                 deltaLength: event.delta?.length,
                 supportsStreaming,
@@ -502,7 +511,7 @@ export class AgentExecutor {
             }
         });
 
-        llmService.on("reasoning", async (event) => {
+        llmService.on("reasoning", async (event: ReasoningEvent) => {
             // Stream reasoning to console in gray
             process.stdout.write(chalk.gray(event.delta));
 
@@ -528,7 +537,7 @@ export class AgentExecutor {
             }
         });
 
-        llmService.on("chunk-type-change", async (event) => {
+        llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
             logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
                 agentName: context.agent.slug,
                 hasReasoningBuffer: reasoningBuffer.length > 0,
@@ -542,7 +551,7 @@ export class AgentExecutor {
             }
         });
 
-        llmService.on("complete", (event) => {
+        llmService.on("complete", (event: CompleteEvent) => {
             // Store the completion event
             completionEvent = event;
 
@@ -555,7 +564,7 @@ export class AgentExecutor {
             });
         });
 
-        llmService.on("stream-error", async (event) => {
+        llmService.on("stream-error", async (event: StreamErrorEvent) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
 
             // Reset streaming sequence on error
@@ -585,13 +594,13 @@ export class AgentExecutor {
         });
 
         // Handle session capture - store any session ID from the provider
-        llmService.on("session-captured", ({ sessionId: capturedSessionId }) => {
+        llmService.on("session-captured", ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
             sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
         });
 
         // Tool tracker is always provided from executeWithSupervisor
 
-        llmService.on("tool-will-execute", async (event) => {
+        llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
             // Display tool execution in console
             const argsPreview = JSON.stringify(event.args).substring(0, 50);
             console.log(
@@ -610,7 +619,7 @@ export class AgentExecutor {
             });
         });
 
-        llmService.on("tool-did-execute", async (event) => {
+        llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
