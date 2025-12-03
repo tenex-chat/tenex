@@ -6,6 +6,7 @@ import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
 import { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
@@ -162,6 +163,35 @@ export async function loadAgentIntoRegistry(
     // Create instance and add to registry
     const instance = createAgentInstance(freshAgent, registry);
     registry.addAgent(instance);
+
+    // Publish kind:0 profile for this agent now that it's associated with the project
+    const ndkProject = registry.getNDKProject();
+    if (ndkProject) {
+        try {
+            const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
+            const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+
+            await AgentPublisher.publishAgentProfile(
+                signer,
+                freshAgent.name,
+                freshAgent.role,
+                projectTitle,
+                ndkProject,
+                freshAgent.eventId,
+                {
+                    description: freshAgent.description,
+                    instructions: freshAgent.instructions,
+                    useCriteria: freshAgent.useCriteria,
+                    phases: freshAgent.phases,
+                },
+                whitelistedPubkeys
+            );
+
+            logger.debug(`Published kind:0 profile for agent ${freshAgent.name} on project ${projectDTag}`);
+        } catch (error) {
+            logger.warn(`Failed to publish kind:0 profile for agent ${freshAgent.name}`, { error });
+        }
+    }
 
     logger.info(
         `Loaded agent "${instance.name}" (${instance.slug}) into registry for project ${projectDTag}`
