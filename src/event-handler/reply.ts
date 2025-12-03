@@ -12,7 +12,6 @@ import { ConversationResolver } from "../conversations/services/ConversationReso
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services";
-import { BrainstormService } from "../services/BrainstormService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { formatAnyError } from "@/lib/error-formatter";
 import { getCurrentBranch } from "../utils/git/initializeGitRepo";
@@ -24,15 +23,6 @@ const tracer = trace.getTracer("tenex.event-handler");
 interface EventHandlerContext {
     conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
-}
-
-/**
- * Check if an event is a brainstorm event
- */
-function isBrainstormEvent(event: NDKEvent): boolean {
-    if (event.kind !== 11) return false;
-
-    return TagExtractor.hasMode(event, "brainstorm");
 }
 
 /**
@@ -162,54 +152,7 @@ async function handleReplyLogic(
         throw new Error("Project Manager agent not found - required for conversation coordination");
     }
 
-    // 1. Check if this is a brainstorm follow-up BEFORE creating orphaned conversations
-    // Check if the event references a kind:11 event
-    const referencedKind = AgentEventDecoder.getReferencedKind(event);
-    const conversationRoot = AgentEventDecoder.getConversationRoot(event);
-
-    if (referencedKind === "11" && conversationRoot) {
-        // Try to find the root event to check if it's a brainstorm
-        const existingConversation =
-            conversationCoordinator.getConversationByEvent(conversationRoot);
-
-        if (existingConversation) {
-            const rootEvent = existingConversation.history[0];
-            if (rootEvent && isBrainstormEvent(rootEvent)) {
-                logger.info("Detected brainstorm follow-up, delegating to BrainstormService", {
-                    eventId: event.id?.substring(0, 8),
-                    rootId: rootEvent.id?.substring(0, 8),
-                });
-
-                const brainstormService = new BrainstormService(projectCtx);
-                await brainstormService.handleFollowUp(event);
-                return;
-            }
-        } else {
-            // The root event doesn't exist in our conversation history yet
-            // This might be a reply to a brainstorm that we haven't seen the root for
-            // Check if it has brainstorm participant tags
-            const hasParticipantTags = event.tags.some((tag) => tag[0] === "participant");
-            const hasBrainstormModeTags = event.tags.some(
-                (tag) => tag[0] === "mode" && tag[1] === "brainstorm"
-            );
-
-            if (hasParticipantTags || hasBrainstormModeTags) {
-                logger.info(
-                    "Detected orphaned brainstorm follow-up, delegating to BrainstormService",
-                    {
-                        eventId: event.id?.substring(0, 8),
-                        conversationRoot,
-                    }
-                );
-                // Process through BrainstormService even without existing conversation
-                const brainstormService = new BrainstormService(projectCtx);
-                await brainstormService.handleFollowUp(event);
-                return;
-            }
-        }
-    }
-
-    // 2. Continue with normal resolution if not a brainstorm follow-up
+    // Resolve conversation for this event
     const conversationResolver = new ConversationResolver(conversationCoordinator);
     const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(event);
 
@@ -367,25 +310,24 @@ async function handleReplyLogic(
         let currentBranch: string;
 
         if (branchTag) {
-            // Branch specified in event - resolve to worktree path
-            const parentDir = path.dirname(projectPath);
-            const worktreePath = path.join(parentDir, branchTag);
+            // Branch specified in event - find worktree by querying git
+            const { listWorktrees } = await import("@/utils/git/initializeGitRepo");
+            const worktrees = await listWorktrees(projectPath);
+            const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
 
-            // Verify worktree exists
-            try {
-                await fs.access(worktreePath);
-                workingDirectory = worktreePath;
+            if (matchingWorktree) {
+                workingDirectory = matchingWorktree.path;
                 currentBranch = branchTag;
 
-                logger.debug("Using worktree from branch tag", {
+                logger.info("Using worktree from branch tag", {
                     branch: branchTag,
-                    path: worktreePath
+                    path: matchingWorktree.path
                 });
-            } catch {
+            } else {
                 // Worktree doesn't exist - fall back to main worktree
                 logger.warn("Branch tag specified but worktree not found, using main", {
                     branch: branchTag,
-                    expectedPath: worktreePath
+                    availableWorktrees: worktrees.map(wt => wt.branch)
                 });
                 workingDirectory = projectPath;
                 try {

@@ -8,7 +8,6 @@ import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "../services";
-import { BrainstormService } from "../services/BrainstormService";
 import { DelegationRegistry } from "@/services/delegation";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
@@ -146,16 +145,11 @@ export class EventHandler {
                 break;
 
             case NDKKind.Thread: // kind 11
-                // Check if this is a brainstorm event before regular handling
-                if (this.isBrainstormEvent(event)) {
-                    await this.handleBrainstormEvent(event);
-                } else {
-                    await handleNewConversation(event, {
-                        conversationCoordinator: this.conversationCoordinator,
-                        agentExecutor: this.agentExecutor,
-                        projectPath: this.projectPath,
-                    });
-                }
+                await handleNewConversation(event, {
+                    conversationCoordinator: this.conversationCoordinator,
+                    agentExecutor: this.agentExecutor,
+                    projectPath: this.projectPath,
+                });
                 break;
 
             case NDKProject.kind: // kind 31933
@@ -431,33 +425,4 @@ export class EventHandler {
         logger.info("EventHandler cleanup completed");
     }
 
-    /**
-     * Check if an event is a brainstorm event
-     */
-    private isBrainstormEvent(event: NDKEvent): boolean {
-        if (event.kind !== NDKKind.Thread) return false;
-
-        return TagExtractor.hasMode(event, "brainstorm");
-    }
-
-    /**
-     * Handle a brainstorm event
-     */
-    private async handleBrainstormEvent(event: NDKEvent): Promise<void> {
-        try {
-            logger.info("Handling brainstorm event", {
-                eventId: event.id?.substring(0, 8),
-                content: event.content?.substring(0, 50),
-            });
-
-            const projectCtx = getProjectContext();
-            const brainstormService = new BrainstormService(projectCtx);
-            await brainstormService.start(event);
-        } catch (error) {
-            logger.error("Failed to handle brainstorm event", {
-                eventId: event.id,
-                error: formatAnyError(error),
-            });
-        }
-    }
 }
