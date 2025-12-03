@@ -18,6 +18,7 @@ export type ToolName =
     | "agents_write"
     | "discover_capabilities"
     | "delegate"
+    | "delegate_multi"
     | "delegate_phase"
     | "delegate_followup"
     | "ask"

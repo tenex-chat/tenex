@@ -79,8 +79,12 @@ async function executeDelegateFollowup(
     // Execute as a follow-up delegation
     const responses = await delegationService.execute({
         type: "delegation_followup",
-        recipients: [recipientPubkey],
-        request: message,
+        delegations: [
+            {
+                recipient: recipientPubkey,
+                request: message,
+            },
+        ],
     });
 
     logger.info("[delegate_followup] ✅ Follow-up complete", {

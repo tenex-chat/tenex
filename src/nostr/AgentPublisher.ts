@@ -82,7 +82,7 @@ export class AgentPublisher {
 
     /**
      * Publish delegation request events.
-     * Creates and publishes a single kind:1111 conversation event with multiple p-tags.
+     * Creates and publishes N kind:1111 conversation events, one per delegation.
      */
     async delegate(
         intent: DelegationIntent,
@@ -93,14 +93,14 @@ export class AgentPublisher {
     }> {
         const events = this.encoder.encodeDelegation(intent, context);
 
-        // CRITICAL: Inject trace context into delegation event for distributed tracing
-        // This allows the delegated agent to link their execution back to this delegation
+        // CRITICAL: Inject trace context into delegation events for distributed tracing
+        // This allows the delegated agents to link their execution back to this delegation
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
             const carrier: Record<string, string> = {};
             propagation.inject(otelContext.active(), carrier);
 
-            // Add trace context as a tag on the Nostr event
+            // Add trace context as a tag on each Nostr event
             for (const event of events) {
                 if (carrier.traceparent) {
                     event.tags.push(["trace_context", carrier.traceparent]);
@@ -112,30 +112,26 @@ export class AgentPublisher {
             }
         }
 
-        // Sign the event (should be single event now)
+        // Sign all events first (to get IDs)
         for (const event of events) {
             await this.agent.sign(event);
         }
 
-        // Register delegation using the new clean interface
+        // Register delegation with per-delegation event IDs
         const registry = DelegationRegistry.getInstance();
-        const mainEvent = events[0]; // Should only be one event now
-
-        // Removed redundant logging - registration is logged in DelegationRegistry
 
         const batchId = await registry.registerDelegation({
-            delegationEventId: mainEvent.id,
-            recipients: intent.recipients.map((recipientPubkey) => ({
-                pubkey: recipientPubkey,
-                request: intent.request,
-                phase: intent.phase,
+            delegations: intent.delegations.map((delegation, i) => ({
+                eventId: events[i].id,
+                pubkey: delegation.recipient,
+                request: delegation.request,
+                phase: delegation.phase,
             })),
             delegatingAgent: this.agent,
             rootConversationId: context.rootEvent.id,
-            originalRequest: intent.request,
         });
 
-        // Publish the single event
+        // Publish all events
         for (const [index, event] of events.entries()) {
             await this.safePublish(event, "delegation request");
             logger.debug("Published delegation request", {
@@ -151,10 +147,10 @@ export class AgentPublisher {
         if (activeSpan) {
             activeSpan.addEvent("delegation_published", {
                 "delegation.batch_id": batchId,
-                "delegation.recipient_count": intent.recipients.length,
-                "delegation.recipients": intent.recipients.map((p) => p.substring(0, 8)).join(", "),
-                "delegation.request_preview": intent.request.substring(0, 100),
-                "delegation.phase": intent.phase || "none",
+                "delegation.count": intent.delegations.length,
+                "delegation.recipients": intent.delegations
+                    .map((d) => d.recipient.substring(0, 8))
+                    .join(", "),
             });
         }
 
@@ -179,16 +175,16 @@ export class AgentPublisher {
     }> {
         // For follow-ups, triggeringEvent should be the response event we're replying to
         const responseEvent = context.triggeringEvent;
-        const recipientPubkey = intent.recipients[0]; // Follow-ups are always to single recipient
+        const delegation = intent.delegations[0]; // Follow-ups are always to single recipient
 
         logger.debug("[AgentPublisher] Creating follow-up event", {
             agent: this.agent.slug,
-            recipientPubkey: recipientPubkey.substring(0, 8),
+            recipientPubkey: delegation.recipient.substring(0, 8),
             responseEventId: responseEvent.id?.substring(0, 8),
         });
 
         // Use encoder to create the follow-up event
-        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, intent.request);
+        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, delegation.request);
 
         // Sign the event
         await this.agent.sign(followUpEvent);
@@ -196,17 +192,16 @@ export class AgentPublisher {
         // Register with DelegationRegistry for tracking
         const registry = DelegationRegistry.getInstance();
         const batchId = await registry.registerDelegation({
-            delegationEventId: followUpEvent.id,
-            recipients: [
+            delegations: [
                 {
-                    pubkey: recipientPubkey,
-                    request: intent.request,
-                    phase: intent.phase,
+                    eventId: followUpEvent.id,
+                    pubkey: delegation.recipient,
+                    request: delegation.request,
+                    phase: delegation.phase,
                 },
             ],
             delegatingAgent: this.agent,
             rootConversationId: context.rootEvent.id,
-            originalRequest: intent.request,
         });
 
         // Publish the follow-up event
