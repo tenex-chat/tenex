@@ -19,7 +19,6 @@ import { LLMService } from "./service";
 export class LLMServiceFactory {
     private providers: Map<string, ProviderV2> = new Map();
     private registry: ReturnType<typeof createProviderRegistry> | null = null;
-    private claudeCodeApiKey: string | null = null; // Store Claude Code API key for runtime use
     private geminiCliEnabled = false;
     private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
     private initialized = false;
@@ -32,7 +31,6 @@ export class LLMServiceFactory {
         options?: { enableTenexTools?: boolean }
     ): Promise<void> {
         this.providers.clear();
-        this.claudeCodeApiKey = null;
         this.geminiCliEnabled = false;
         this.enableTenexTools = options?.enableTenexTools !== false; // Default to true
 
@@ -119,15 +117,6 @@ export class LLMServiceFactory {
                         break;
                     }
 
-                    case "claudeCode": {
-                        // Store API key for runtime Claude Code creation
-                        this.claudeCodeApiKey = config.apiKey;
-                        logger.debug(
-                            "[LLMServiceFactory] Stored Claude Code API key for runtime use"
-                        );
-                        break;
-                    }
-
                     case "gemini-cli": {
                         this.providers.set(
                             name,
@@ -200,10 +189,6 @@ export class LLMServiceFactory {
 
         // Handle Claude Code provider specially
         if (actualProvider === "claudeCode") {
-            if (!this.claudeCodeApiKey) {
-                throw new Error("Claude Code API key not configured");
-            }
-
             // Extract tool names from the provided tools
             const toolNames = context?.tools ? Object.keys(context.tools) : [];
             const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
@@ -297,26 +282,12 @@ export class LLMServiceFactory {
      * Check if a provider is available
      */
     hasProvider(providerName: string): boolean {
-        // Check standard providers or Claude Code
+        // Check standard providers, Claude Code (always available), or Gemini CLI
         return (
             this.providers.has(providerName) ||
-            (providerName === "claudeCode" && !!this.claudeCodeApiKey) ||
+            providerName === "claudeCode" ||
             (providerName === "gemini-cli" && this.geminiCliEnabled)
         );
-    }
-
-    /**
-     * Get list of available providers
-     */
-    getAvailableProviders(): string[] {
-        const providers = Array.from(this.providers.keys());
-        if (this.claudeCodeApiKey) {
-            providers.push("claudeCode");
-        }
-        if (this.geminiCliEnabled) {
-            providers.push("gemini-cli");
-        }
-        return providers;
     }
 
     /**
