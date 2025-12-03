@@ -1,12 +1,12 @@
 import type { AgentConfig, AgentInstance } from "@/agents/types";
+import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { agentsRegistryService } from "@/services/AgentsRegistryService";
 import { DelegationRegistry } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,
-    type NDKPrivateKeySigner,
+    NDKPrivateKeySigner,
     type NDKProject,
     type NDKTask,
 } from "@nostr-dev-kit/ndk";
@@ -509,6 +509,45 @@ export class AgentPublisher {
     // ===== Agent Creation Events (from src/agents/AgentPublisher.ts) =====
 
     /**
+     * Publishes a kind:14199 snapshot event for a project, listing all associated agents.
+     * Reads agent associations from AgentStorage instead of maintaining a separate registry.
+     */
+    private static async publishProjectAgentSnapshot(projectTag: string): Promise<void> {
+        const config = await import("@/services/ConfigService").then((m) => m.config);
+
+        // Get all agents for this project from AgentStorage
+        const agents = await agentStorage.getProjectAgents(projectTag);
+        const tenexNsec = await config.ensureBackendPrivateKey();
+        const signer = new NDKPrivateKeySigner(tenexNsec);
+        const ndk = getNDK();
+
+        const ev = new NDKEvent(ndk, {
+            kind: 14199,
+        });
+
+        // Add whitelisted pubkeys
+        const whitelisted = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        for (const pk of whitelisted) {
+            ev.tag(["p", pk]);
+        }
+
+        // Add agent pubkeys
+        for (const agent of agents) {
+            const agentSigner = new NDKPrivateKeySigner(agent.nsec);
+            ev.tag(["p", agentSigner.pubkey]);
+        }
+
+        await ev.sign(signer);
+        ev.publish();
+
+        logger.debug("Published project agent snapshot (kind:14199)", {
+            projectTag,
+            agentCount: agents.length,
+            whitelistedCount: whitelisted.length,
+        });
+    }
+
+    /**
      * Publishes a kind:0 profile event for an agent
      */
     static async publishAgentProfile(
@@ -562,7 +601,7 @@ export class AgentPublisher {
             profileEvent.tag(projectEvent.tagReference());
 
             // Add "a" tags for all projects this agent belongs to
-            const projectTags = await agentsRegistryService.getProjectsForAgent(signer.pubkey);
+            const projectTags = await agentStorage.getAgentProjects(signer.pubkey);
             for (const tag of projectTags) {
                 profileEvent.tag(["a", tag]);
             }
@@ -620,10 +659,10 @@ export class AgentPublisher {
                 });
             }
 
-            // Update agent registry after successful profile publish
+            // Publish kind:14199 snapshot for this project after successful profile publish
             const projectTag = projectEvent.tagId();
             if (projectTag) {
-                await agentsRegistryService.addAgent(projectTag, signer.pubkey);
+                await AgentPublisher.publishProjectAgentSnapshot(projectTag);
             }
         } catch (error) {
             logger.error("Failed to create agent profile", {
@@ -702,48 +741,6 @@ export class AgentPublisher {
             });
             throw error;
         }
-    }
-
-    /**
-     * Publishes all agent-related events when creating a new agent
-     */
-    static async publishAgentCreation(
-        signer: NDKPrivateKeySigner,
-        agentConfig: Omit<AgentConfig, "nsec">,
-        projectTitle: string,
-        projectEvent: NDKProject,
-        ndkAgentEventId?: string,
-        whitelistedPubkeys?: string[]
-    ): Promise<void> {
-        // Prepare metadata for agents without NDKAgentDefinition
-        const agentMetadata = !ndkAgentEventId
-            ? {
-                  description: agentConfig.description,
-                  instructions: agentConfig.instructions,
-                  useCriteria: agentConfig.useCriteria,
-                  phases: agentConfig.phases,
-              }
-            : undefined;
-
-        // Publish profile event
-        await AgentPublisher.publishAgentProfile(
-            signer,
-            agentConfig.name,
-            agentConfig.role,
-            projectTitle,
-            projectEvent,
-            ndkAgentEventId,
-            agentMetadata,
-            whitelistedPubkeys
-        );
-
-        // Publish request event
-        await AgentPublisher.publishAgentRequest(
-            signer,
-            agentConfig,
-            projectEvent,
-            ndkAgentEventId
-        );
     }
 
     /**
