@@ -534,6 +534,8 @@ export class AgentSupervisor {
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
+                workingDirectory: this.context.workingDirectory,
+                currentBranch: this.context.currentBranch,
             });
 
             // Combine all system messages into one

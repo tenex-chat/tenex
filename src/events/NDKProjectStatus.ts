@@ -257,7 +257,7 @@ export class NDKProjectStatus extends NDKEvent {
      * Returns an array of branch names, with the first being the default branch
      */
     get worktrees(): string[] {
-        const worktreeTags = this.tags.filter((tag) => tag[0] === "worktree" && tag[1]);
+        const worktreeTags = this.tags.filter((tag) => tag[0] === "branch" && tag[1]);
         return worktreeTags.map((tag) => tag[1]);
     }
 
@@ -266,7 +266,7 @@ export class NDKProjectStatus extends NDKEvent {
      * @param branchName The branch name
      */
     addWorktree(branchName: string): void {
-        this.tags.push(["worktree", branchName]);
+        this.tags.push(["branch", branchName]);
     }
 
     /**

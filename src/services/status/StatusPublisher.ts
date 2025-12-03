@@ -120,7 +120,7 @@ export class StatusPublisher {
         // Add worktree tags (default branch first)
         if (intent.worktrees && intent.worktrees.length > 0) {
             for (const branchName of intent.worktrees) {
-                event.tag(["worktree", branchName]);
+                event.tag(["branch", branchName]);
             }
         }
 

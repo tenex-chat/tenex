@@ -204,6 +204,16 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                 // Check if this agent is the project manager
                 const isProjectManager = agent.pubkey === projectCtx.getProjectManager().pubkey;
 
+                // Get current branch for worktree context
+                const { getCurrentBranch } = await import("@/utils/git/initializeGitRepo");
+                let currentBranch: string | undefined;
+                try {
+                    currentBranch = await getCurrentBranch(projectPath);
+                } catch {
+                    // If we can't get the branch, just skip worktree context
+                    currentBranch = undefined;
+                }
+
                 const systemMessages = await buildSystemPromptMessages({
                     agent,
                     project: projectCtx.project,
@@ -212,6 +222,8 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                     conversation: undefined, // No conversation in debug mode
                     agentLessons: agentLessonsMap,
                     isProjectManager,
+                    workingDirectory: projectPath,
+                    currentBranch,
                 });
 
                 // Display each system message separately with metadata

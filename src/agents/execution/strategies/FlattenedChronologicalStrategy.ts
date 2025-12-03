@@ -768,6 +768,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
+                workingDirectory: context.workingDirectory,
+                currentBranch: context.currentBranch,
             });
 
             for (const systemMsg of systemMessages) {
