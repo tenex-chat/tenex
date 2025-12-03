@@ -188,6 +188,12 @@ async function executeClaudeCode(
 
                     return claudeCode(modelId, options);
                 },
+                textEmbeddingModel: () => {
+                    throw new Error("Claude Code does not support embedding models");
+                },
+                imageModel: () => {
+                    throw new Error("Claude Code does not support image models");
+                },
             },
         });
 
@@ -205,7 +211,7 @@ async function executeClaudeCode(
         );
 
         // Set up event handlers for Nostr publishing
-        llmService.on("content", async ({ delta }) => {
+        llmService.on("content", async ({ delta }: { delta: string }) => {
             logger.info("[claude_code] content", { delta });
             lastAssistantMessage += delta;
             messageCount++;
@@ -214,7 +220,7 @@ async function executeClaudeCode(
             await agentPublisher.publishTaskUpdate(task, delta, baseEventContext);
         });
 
-        llmService.on("tool-did-execute", async ({ toolName, result }) => {
+        llmService.on("tool-did-execute", async ({ toolName, result }: { toolName: string; result: unknown }) => {
             logger.info("[claude_code] Tool executed", { toolName, result });
 
             if (toolName === "TodoWrite" && isTodoWriteResult(result)) {
@@ -255,7 +261,7 @@ async function executeClaudeCode(
             }
         });
 
-        llmService.on("complete", ({ message, steps, usage }) => {
+        llmService.on("complete", ({ message, steps, usage }: { message: string; steps: any[]; usage: unknown }) => {
             // Try to extract session ID from the last step's provider metadata
             const lastStep = steps[steps.length - 1];
 
@@ -385,5 +391,5 @@ export function createClaudeCodeTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
-} 
+    }) as AISdkTool;
+}
