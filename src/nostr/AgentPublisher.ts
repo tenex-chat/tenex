@@ -250,16 +250,15 @@ export class AgentPublisher {
         // Register with DelegationRegistry for tracking (ask uses delegation infrastructure)
         const registry = DelegationRegistry.getInstance();
         const batchId = await registry.registerDelegation({
-            delegationEventId: event.id,
-            recipients: [
+            delegations: [
                 {
+                    eventId: event.id,
                     pubkey: ownerPubkey,
                     request: intent.content,
                 },
             ],
             delegatingAgent: this.agent,
             rootConversationId: context.rootEvent.id,
-            originalRequest: intent.content,
         });
 
         // Publish the event

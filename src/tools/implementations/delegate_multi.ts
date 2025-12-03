@@ -94,7 +94,9 @@ async function executeDelegateMulti(
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher!
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
     const responses = await delegationService.execute({
