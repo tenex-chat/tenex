@@ -35,14 +35,14 @@ import {
 /**
  * Content delta event
  */
-interface ContentEvent {
+export interface ContentEvent {
     delta: string;
 }
 
 /**
  * Chunk type change event
  */
-interface ChunkTypeChangeEvent {
+export interface ChunkTypeChangeEvent {
     from: string | undefined;
     to: string;
 }
@@ -50,7 +50,7 @@ interface ChunkTypeChangeEvent {
 /**
  * Tool will execute event
  */
-interface ToolWillExecuteEvent {
+export interface ToolWillExecuteEvent {
     toolName: string;
     toolCallId: string;
     args: unknown;
@@ -59,7 +59,7 @@ interface ToolWillExecuteEvent {
 /**
  * Tool did execute event
  */
-interface ToolDidExecuteEvent {
+export interface ToolDidExecuteEvent {
     toolName: string;
     toolCallId: string;
     result: unknown;
@@ -80,21 +80,21 @@ export interface CompleteEvent {
 /**
  * Stream error event
  */
-interface StreamErrorEvent {
+export interface StreamErrorEvent {
     error: unknown;
 }
 
 /**
  * Session captured event
  */
-interface SessionCapturedEvent {
+export interface SessionCapturedEvent {
     sessionId: string;
 }
 
 /**
  * Reasoning delta event
  */
-interface ReasoningEvent {
+export interface ReasoningEvent {
     delta: string;
 }
 
