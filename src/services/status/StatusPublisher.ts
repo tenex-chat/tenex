@@ -318,7 +318,7 @@ export class StatusPublisher {
                     }
                     // Skip delegate tools and core tools - they're not included in TenexProjectStatus events
                     // These are handled automatically by the system
-                    if (DELEGATE_TOOLS.includes(toolName) || CORE_AGENT_TOOLS.includes(toolName)) {
+                    if (DELEGATE_TOOLS.includes(toolName as any) || CORE_AGENT_TOOLS.includes(toolName as any)) {
                         continue;
                     }
                     const toolAgents = toolAgentMap.get(toolName);

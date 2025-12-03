@@ -646,9 +646,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private createFinishHandler(startTime: number) {
         return async (
             e: StepResult<Record<string, AISdkTool>> & {
-                steps: StepResult<Record<string, AISdkTool>>[];
-                totalUsage: LanguageModelUsage;
-                providerMetadata: ProviderMetadata;
+                readonly steps: StepResult<Record<string, AISdkTool>>[];
+                readonly totalUsage: LanguageModelUsage;
+                providerMetadata?: ProviderMetadata;
             }
         ): Promise<void> => {
             try {

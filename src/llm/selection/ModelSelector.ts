@@ -59,9 +59,7 @@ export class ModelSelector {
     }
 
     async fetchAndSelectModel(
-        provider: LLMProvider,
-        existingApiKey?: string,
-        ollamaUrl?: string
+        provider: LLMProvider
     ): Promise<ModelSelectionResult | null> {
         try {
             const models = await getModelsForProvider(provider);

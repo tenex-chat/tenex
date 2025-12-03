@@ -12,7 +12,7 @@ const reportWriteSchema = z.object({
     content: z.string().describe("The full content of the report in markdown format"),
     hashtags: z
         .array(z.string())
-        .nullable()
+        .optional()
         .describe("Array of hashtags to add to the article (without the # prefix)"),
 });
 

@@ -97,5 +97,5 @@ export function createAgentsReadTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
+    }) as AISdkTool;
 } 

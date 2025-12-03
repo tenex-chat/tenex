@@ -11,17 +11,17 @@ const lessonLearnSchema = z.object({
     lesson: z.string().describe("The key insight or lesson learned - be concise and actionable"),
     detailed: z
         .string()
-        .nullable()
+        .optional()
         .describe("Detailed version with richer explanation when deeper context is needed"),
     category: z
         .string()
-        .nullable()
+        .optional()
         .describe(
             "Single category for filing this lesson (e.g., 'architecture', 'debugging', 'user-preferences')"
         ),
     hashtags: z
         .array(z.string())
-        .nullable()
+        .optional()
         .describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 
@@ -56,8 +56,8 @@ async function executeLessonLearn(
     const intent: LessonIntent = {
         title,
         lesson,
-        detailed: detailed ?? undefined,
-        category: category ?? undefined,
+        detailed,
+        category,
         hashtags,
     };
 
@@ -155,5 +155,5 @@ export function createLessonLearnTool(context: ExecutionContext): AISdkTool {
         execute: async (input: LessonLearnInput) => {
             return await executeLessonLearn(input, context);
         },
-    });
+    }) as AISdkTool;
 } 

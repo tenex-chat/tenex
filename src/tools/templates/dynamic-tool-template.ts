@@ -112,7 +112,7 @@ const createDynamicTool = (context: ExecutionContext): AISdkTool => {
         configurable: true,
     });
 
-    return aiTool;
+    return aiTool as AISdkTool;
 };
 
 // IMPORTANT: The default export MUST be the factory function

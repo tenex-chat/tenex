@@ -150,6 +150,10 @@ async function executeDelegatePhase(
 
     // Use DelegationService to execute the delegation
     // Phase instructions are now passed through the delegation intent via event tags
+    if (!context.agentPublisher) {
+        throw new Error("AgentPublisher not available in execution context");
+    }
+
     const delegationService = new DelegationService(
         context.agent,
         context.conversationId,

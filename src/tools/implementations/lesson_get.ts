@@ -60,7 +60,11 @@ async function executeLessonGet(
                 lesson: bestMatch.document.content,
                 detailed: metadata.hasDetailed ? bestMatch.document.content : undefined,
                 category: metadata.category,
-                hashtags: metadata.hashtags,
+                hashtags:
+                    Array.isArray(metadata.hashtags) &&
+                    metadata.hashtags.every((item) => typeof item === "string")
+                        ? (metadata.hashtags as string[])
+                        : undefined,
                 hasDetailed: !!metadata.hasDetailed,
             };
         }

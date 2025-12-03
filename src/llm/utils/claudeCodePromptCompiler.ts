@@ -16,7 +16,11 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
     // Find first system message for customSystemPrompt
     const firstSystemIndex = messages.findIndex((m) => m.role === "system");
     const customSystemPrompt =
-        firstSystemIndex !== -1 ? messages[firstSystemIndex].content : undefined;
+        firstSystemIndex !== -1
+            ? typeof messages[firstSystemIndex].content === "string"
+                ? messages[firstSystemIndex].content
+                : undefined
+            : undefined;
 
     // Compile ALL remaining messages (after first system) preserving order
     const appendParts: string[] = [];
@@ -77,9 +81,11 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
 
         // Convert subsequent system messages to user messages with clear marker
         if (msg.role === "system") {
+            const content =
+                typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
             return {
-                role: "user",
-                content: `[System Context]: ${msg.content}`,
+                role: "user" as const,
+                content: `[System Context]: ${content}`,
             };
         }
 
@@ -87,5 +93,5 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
         return msg;
     });
 
-    return convertedMessages;
+    return convertedMessages as ModelMessage[];
 }
