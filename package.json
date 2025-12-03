@@ -83,7 +83,6 @@
     "node-cron": "^4.2.1",
     "nostr-tools": "^2.15.0",
     "ollama-ai-provider-v2": "^1.5.5",
-    "repomix": "^1.9.0",
     "tseep": "^1.3.1",
     "zod": "^4.1.12"
   },
