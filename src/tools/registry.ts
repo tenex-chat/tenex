@@ -23,7 +23,6 @@ import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateExternalTool } from "./implementations/delegate_external";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createDelegatePhaseTool } from "./implementations/delegate_phase";
-import { createGeminiCliTool } from "./implementations/gemini_cli";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
@@ -62,9 +61,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Ask tool
     ask: createAskTool,
-
-    // Gemini CLI
-    gemini_cli: createGeminiCliTool,
 
     // Codebase search
     codebase_search: createCodebaseSearchTool,

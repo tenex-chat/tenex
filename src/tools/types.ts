@@ -22,7 +22,6 @@ export type ToolName =
     | "delegate_followup"
     | "ask"
     | "nostr_projects"
-    | "gemini_cli"
     | "create_project"
     | "delegate_external"
     | "report_write"
