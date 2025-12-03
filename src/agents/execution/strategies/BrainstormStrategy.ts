@@ -328,7 +328,7 @@ export class BrainstormStrategy implements MessageGenerationStrategy {
         const phaseInstructionsTag = event.tagValue(NostrTag.PHASE_INSTRUCTIONS);
 
         if (phaseTag) {
-            const phaseContent = PromptBuilder.buildFragment("phase-transition", {
+            const phaseContent = await PromptBuilder.buildFragment("phase-transition", {
                 phase: phaseTag,
                 phaseInstructions: phaseInstructionsTag,
             });

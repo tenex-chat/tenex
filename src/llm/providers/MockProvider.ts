@@ -199,6 +199,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                                         break;
 
                                     case "tool_start": {
+                                        if (!event.tool) break;
                                         const toolCallId = `call_${toolCalls.length}`;
                                         const toolCall = {
                                             toolCallId,

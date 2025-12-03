@@ -386,6 +386,14 @@ export class AgentStorage {
     }
 
     /**
+     * Get all projects for an agent (reverse lookup by pubkey)
+     */
+    async getAgentProjects(pubkey: string): Promise<string[]> {
+        const agent = await this.loadAgent(pubkey);
+        return agent?.projects || [];
+    }
+
+    /**
      * Add an agent to a project
      */
     async addAgentToProject(pubkey: string, projectDTag: string): Promise<void> {

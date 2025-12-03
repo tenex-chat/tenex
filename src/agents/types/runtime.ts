@@ -22,6 +22,7 @@ export interface AgentInstance {
     role: string;
     description?: string;
     instructions?: string;
+    customInstructions?: string; // Custom system prompt instructions
     useCriteria?: string;
     llmConfig: string;
     tools: string[];
@@ -29,6 +30,9 @@ export interface AgentInstance {
     slug: string;
     phase?: string;
     phases?: Record<string, string>;
+    mcp?: boolean; // Whether this agent has MCP access
+    useAISDKAgent?: boolean; // Feature flag: use AI SDK Agent class instead of traditional AgentExecutor
+    maxAgentSteps?: number; // Maximum steps for AI SDK Agent agentic loop (default: 10)
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

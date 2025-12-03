@@ -51,9 +51,12 @@ async function executeCodebaseSearch(
         query,
         searchType = "both",
         fileType,
-        maxResults = 50,
-        includeSnippets = false,
+        maxResults: inputMaxResults = 50,
+        includeSnippets: inputIncludeSnippets = false,
     } = input;
+
+    const maxResults = inputMaxResults ?? 50;
+    const includeSnippets = inputIncludeSnippets ?? false;
 
     logger.info("Executing codebase search", {
         query,

@@ -322,13 +322,15 @@ export class Daemon {
         if (!routingResult.method) {
             throw new Error("Routing method not found");
         }
-        await logRouted(
-            this.routingLogger,
-            event,
-            projectId,
-            routingResult.method,
-            routingResult.matchedTags
-        );
+        if (routingResult.method !== "none") {
+            await logRouted(
+                this.routingLogger,
+                event,
+                projectId,
+                routingResult.method,
+                routingResult.matchedTags
+            );
+        }
 
         // Handle the event with crash isolation
         try {

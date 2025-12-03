@@ -64,7 +64,7 @@ export class ModelSelector {
         ollamaUrl?: string
     ): Promise<ModelSelectionResult | null> {
         try {
-            const models = await getModelsForProvider(provider, existingApiKey, ollamaUrl);
+            const models = await getModelsForProvider(provider);
             if (!models || models.length === 0) {
                 return null;
             }

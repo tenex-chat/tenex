@@ -11,9 +11,9 @@ import type { RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations
  */
 export class RAGService {
     private static instance: RAGService | null = null;
-    private dbManager: RAGDatabaseService;
-    private operations: RAGOperations;
-    private embeddingProvider: EmbeddingProvider;
+    private dbManager!: RAGDatabaseService;
+    private operations!: RAGOperations;
+    private embeddingProvider!: EmbeddingProvider;
     private initializationPromise: Promise<void>;
 
     private constructor() {
@@ -66,7 +66,7 @@ export class RAGService {
         schema?: Record<string, unknown>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
-        return this.operations.createCollection(name, schema);
+        return this.operations.createCollection(name, schema as any);
     }
 
     /**

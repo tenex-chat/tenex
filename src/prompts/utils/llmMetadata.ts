@@ -23,11 +23,14 @@ export async function buildLLMMetadata(
     }
 
     // Convert CompletionResponse to ResponseWithUsage format
+    const promptTokens = response.usage.prompt_tokens ?? 0;
+    const completionTokens = response.usage.completion_tokens ?? 0;
+
     const responseWithUsage: ResponseWithUsage = {
         usage: {
-            promptTokens: response.usage.prompt_tokens,
-            completionTokens: response.usage.completion_tokens,
-            totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
         },
         model: response.model,
         experimental_providerMetadata:
@@ -45,9 +48,9 @@ export async function buildLLMMetadata(
     return {
         model,
         cost,
-        promptTokens: response.usage.prompt_tokens,
-        completionTokens: response.usage.completion_tokens,
-        totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
         systemPrompt,
         userPrompt,
         rawResponse: response.content,

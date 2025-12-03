@@ -60,7 +60,6 @@ Use this section to understand each service’s scope and dependencies:
 
 | Service | Location | Responsibility & Key Dependencies |
 | --- | --- | --- |
-| `AgentsRegistryService` | `src/services/AgentsRegistryService.ts` | Maintains `~/.tenex/agents-registry.json`, publishes kind 14199 snapshots with project + agent pubkeys. Depends on `lib/fs`, `nostr/ndkClient`, `ConfigService`. |
 | `BrainstormService` | `src/services/BrainstormService.ts` | Coordinates brainstorm phases between moderators/executors, consumes `agents/execution` and `conversations/services`. |
 | `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services` - never construct `~/.tenex` paths manually. |
 | `DelegationRegistry` | `src/services/DelegationRegistry.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |

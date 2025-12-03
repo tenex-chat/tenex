@@ -413,7 +413,7 @@ export class AgentEventDecoder {
      * @returns True if this is a config update event
      */
     static isConfigUpdate(event: NDKEvent): boolean {
-        return event.kind === NDKKind.ConfigUpdate;
+        return event.kind === NDKKind.TenexAgentConfigUpdate;
     }
 
     /**
@@ -431,6 +431,6 @@ export class AgentEventDecoder {
      * @returns True if this is a stop command event
      */
     static isStopCommand(event: NDKEvent): boolean {
-        return event.kind === NDKKind.TenexStop;
+        return event.kind === NDKKind.TenexStopCommand;
     }
 }
