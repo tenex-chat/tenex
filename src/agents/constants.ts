@@ -36,7 +36,6 @@ export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
         "read_path",
         "lesson_learn",
         "codebase_search",
-        "claude_code",
         "shell",
         "discover_capabilities",
         "agents_hire",
