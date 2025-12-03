@@ -23,11 +23,6 @@ import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/ap
 import type { Tool as CoreTool, ModelMessage } from "ai";
 import chalk from "chalk";
 import { AgentSupervisor } from "./AgentSupervisor";
-import {
-    BrainstormModerator,
-    type BrainstormResponse,
-    type ModerationResult,
-} from "./BrainstormModerator";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { FlattenedChronologicalStrategy } from "./strategies/FlattenedChronologicalStrategy";
@@ -739,17 +734,4 @@ export class AgentExecutor {
         return completionEvent;
     }
 
-    /**
-     * Execute brainstorm moderation to select the best response(s)
-     * @param context - Execution context with moderator agent
-     * @param responses - Array of brainstorm responses to choose from
-     * @returns The selected agents' pubkeys and optional reasoning
-     */
-    async executeBrainstormModeration(
-        context: ExecutionContext,
-        responses: BrainstormResponse[]
-    ): Promise<ModerationResult | null> {
-        const moderator = new BrainstormModerator(this.messageStrategy);
-        return moderator.moderate(context, responses);
-    }
 }

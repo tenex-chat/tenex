@@ -2,7 +2,6 @@ import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services/ProjectContext";
 import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
-import { TagExtractor } from "./TagExtractor";
 
 /**
  * AgentEventDecoder - Utilities for decoding and analyzing Nostr events
@@ -218,25 +217,11 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Get moderator pubkey from a kind:11 brainstorm event
-     * The moderator is specified in the first p-tag
-     */
-    static getModerator(event: NDKEvent): string | null {
-        if (event.kind !== 11) return null;
-
-        // The moderator is the first p-tag
-        const pTag = event.tagValue("p");
-        return pTag || null;
-    }
-
-    /**
-     * Get participant pubkeys from a brainstorm event
+     * Get participant pubkeys from an event
      * Participants are specified in "participant" tags
-     * Works for both kind:11 (initial) and kind:1111 (follow-up) events
      */
     static getParticipants(event: NDKEvent): string[] {
-        // Get all participant tags regardless of event kind
-        // This supports both initial brainstorm (kind 11) and follow-ups (kind 1111)
+        // Get all participant tags
         const participantTags = event.tags.filter((tag) => tag[0] === "participant");
         return participantTags.map((tag) => tag[1]).filter((pubkey) => !!pubkey);
     }
@@ -368,16 +353,6 @@ export class AgentEventDecoder {
             return "conversation";
         }
         return "unknown";
-    }
-
-    /**
-     * Check if an event is a brainstorm event
-     * @param event - The event to check
-     * @returns True if this is a brainstorm event (kind 11 with mode=brainstorm)
-     */
-    static isBrainstormEvent(event: NDKEvent): boolean {
-        if (event.kind !== 11) return false;
-        return TagExtractor.hasMode(event, "brainstorm");
     }
 
     /**
