@@ -44,16 +44,3 @@ export class AgentValidationError extends AgentError {
         this.name = "AgentValidationError";
     }
 }
-
-export class AgentStorageError extends AgentError {
-    constructor(
-        message: string,
-        public readonly cause?: Error
-    ) {
-        super(message);
-        this.name = "AgentStorageError";
-        if (cause) {
-            this.cause = cause;
-        }
-    }
-}
