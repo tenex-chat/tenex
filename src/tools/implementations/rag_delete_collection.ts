@@ -49,10 +49,10 @@ export function createRAGDeleteCollectionTool(context: ExecutionContext): AISdkT
         description:
             "Delete a RAG collection and all its documents. This action is permanent and requires confirmation.",
         inputSchema: ragDeleteCollectionSchema,
-        execute: async (input: z.infer<typeof ragDeleteCollectionSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_delete_collection",
-                input,
+                input as z.infer<typeof ragDeleteCollectionSchema>,
                 context,
                 executeDeleteCollection
             );

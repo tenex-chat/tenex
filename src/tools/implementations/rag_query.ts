@@ -90,8 +90,8 @@ export function createRAGQueryTool(context: ExecutionContext): AISdkTool {
         description:
             "Perform semantic search on a RAG collection. Returns the most relevant documents based on vector similarity to the query.",
         inputSchema: ragQuerySchema,
-        execute: async (input: z.infer<typeof ragQuerySchema>) => {
-            return executeToolWithErrorHandling("rag_query", input, context, executeQuery);
+        execute: async (input: unknown) => {
+            return executeToolWithErrorHandling("rag_query", input as z.infer<typeof ragQuerySchema>, context, executeQuery);
         },
     }) as AISdkTool;
 } 

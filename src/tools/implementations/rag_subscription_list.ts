@@ -3,6 +3,7 @@ import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
+import { z } from "zod";
 
 /**
  * Core implementation of listing RAG subscriptions
@@ -40,7 +41,7 @@ async function executeListSubscriptions(
                 createdAt: new Date(sub.createdAt).toISOString(),
                 updatedAt: new Date(sub.updatedAt).toISOString(),
                 lastError: sub.lastError,
-            }) as AISdkTool;
+            });
 
             // Update counters in single pass
             acc.total++;
@@ -108,14 +109,17 @@ async function executeListSubscriptions(
  *
  * Also provides aggregate statistics about all subscriptions.
  */
+const ragSubscriptionListSchema = z.object({});
+
 export function createRAGSubscriptionListTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
             "List all active RAG subscriptions for the current agent, showing their status, configuration, and statistics.",
-        execute: async () => {
+        inputSchema: ragSubscriptionListSchema,
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_subscription_list",
-                {},
+                input,
                 context,
                 executeListSubscriptions
             );

@@ -46,10 +46,10 @@ export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkT
         description:
             "Create a new RAG collection (vector database) for storing documents with semantic search capabilities",
         inputSchema: ragCreateCollectionSchema,
-        execute: async (input: z.infer<typeof ragCreateCollectionSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_create_collection",
-                input,
+                input as z.infer<typeof ragCreateCollectionSchema>,
                 context,
                 executeCreateCollection
             );

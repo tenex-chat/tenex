@@ -1,8 +1,10 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { normalizePhase } from "@/conversations/utils/phaseUtils";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "./AgentStorage";
 
 /**
@@ -153,33 +155,88 @@ export class AgentRegistry {
             );
         }
 
-        // Load locally-created agents (without event IDs) from storage
+        // Load locally-associated agents from storage
         const localAgents = await agentStorage.getProjectAgents(this.projectDTag);
-        logger.info(`Found ${localAgents.length} locally-created agents in storage for project ${this.projectDTag}`);
+        logger.info(`Found ${localAgents.length} locally-associated agents in storage for project ${this.projectDTag}`);
 
         for (const storedAgent of localAgents) {
-            // Skip if agent doesn't have event ID (local agent) and is already in registry
-            if (!storedAgent.eventId) {
-                const existingAgent = this.agents.get(storedAgent.slug);
-                if (existingAgent) {
-                    logger.debug(`Local agent ${storedAgent.slug} already in registry, skipping`);
-                    continue;
-                }
+            // Skip if already loaded (by eventId or slug)
+            const existingBySlug = this.agents.get(storedAgent.slug);
+            const existingByEventId = storedAgent.eventId
+                ? this.getAgentByEventId(storedAgent.eventId)
+                : undefined;
 
-                // Create and add local agent instance
-                try {
-                    const agentInstance = createAgentInstance(storedAgent, this);
-                    this.addAgent(agentInstance);
-                    logger.info(`Loaded local agent ${storedAgent.slug} into registry`);
-                } catch (error) {
-                    logger.error(`Failed to load local agent ${storedAgent.slug}`, { error });
-                }
+            if (existingBySlug || existingByEventId) {
+                logger.debug(`Agent ${storedAgent.slug} already in registry, skipping`);
+                continue;
+            }
+
+            // Load this locally-associated agent
+            try {
+                const agentInstance = createAgentInstance(storedAgent, this);
+                this.addAgent(agentInstance);
+                logger.info(`Loaded locally-associated agent ${storedAgent.slug} into registry`);
+            } catch (error) {
+                logger.error(`Failed to load agent ${storedAgent.slug}`, { error });
             }
         }
 
         logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
+
+        // Republish kind:0 profiles for all agents now that the project has booted
+        if (ndkProject) {
+            await this.republishAgentProfiles(ndkProject);
+        }
     }
 
+    /**
+     * Republish kind:0 profiles for all agents in this project.
+     * Called during project boot to ensure all agent profiles are up to date.
+     */
+    private async republishAgentProfiles(ndkProject: NDKProject): Promise<void> {
+        const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
+        const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        const publishedCount = { success: 0, failed: 0 };
+
+        for (const agent of this.agents.values()) {
+            try {
+                const storedAgent = await agentStorage.loadAgent(agent.pubkey);
+                if (!storedAgent) {
+                    logger.warn(`Could not load stored agent for profile republishing: ${agent.slug}`);
+                    publishedCount.failed++;
+                    continue;
+                }
+
+                const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+
+                await AgentPublisher.publishAgentProfile(
+                    signer,
+                    agent.name,
+                    agent.role,
+                    projectTitle,
+                    ndkProject,
+                    agent.eventId,
+                    {
+                        description: agent.description,
+                        instructions: agent.instructions,
+                        useCriteria: agent.useCriteria,
+                        phases: agent.phases,
+                    },
+                    whitelistedPubkeys
+                );
+
+                publishedCount.success++;
+                logger.debug(`Republished kind:0 profile for agent ${agent.name}`);
+            } catch (error) {
+                publishedCount.failed++;
+                logger.warn(`Failed to republish kind:0 profile for agent ${agent.name}`, { error });
+            }
+        }
+
+        logger.info(
+            `Republished kind:0 profiles for project ${this.projectDTag}: ${publishedCount.success} succeeded, ${publishedCount.failed} failed`
+        );
+    }
 
 
     /**
@@ -248,6 +305,13 @@ export class AgentRegistry {
      */
     getProjectDTag(): string | undefined {
         return this.projectDTag;
+    }
+
+    /**
+     * Get the NDKProject for this registry
+     */
+    getNDKProject(): NDKProject | undefined {
+        return this.ndkProject;
     }
 
     /**

@@ -93,10 +93,10 @@ export function createRAGSubscriptionCreateTool(context: ExecutionContext): AISd
         description:
             "Create a persistent subscription to stream data from an MCP resource into a RAG collection. The subscription will automatically pipe all updates from the specified resource to the RAG collection and persist across restarts.",
         inputSchema: ragSubscriptionCreateSchema,
-        execute: async (input: z.infer<typeof ragSubscriptionCreateSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_subscription_create",
-                input,
+                input as z.infer<typeof ragSubscriptionCreateSchema>,
                 context,
                 executeCreateSubscription
             );

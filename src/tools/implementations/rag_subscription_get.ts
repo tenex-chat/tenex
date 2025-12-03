@@ -111,10 +111,10 @@ export function createRAGSubscriptionGetTool(context: ExecutionContext): AISdkTo
         description:
             "Get detailed status and metrics for a specific RAG subscription, including processing statistics and the last ingested document snippet.",
         inputSchema: ragSubscriptionGetSchema,
-        execute: async (input: z.infer<typeof ragSubscriptionGetSchema>) => {
+        execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
                 "rag_subscription_get",
-                input,
+                input as z.infer<typeof ragSubscriptionGetSchema>,
                 context,
                 executeGetSubscription
             );
