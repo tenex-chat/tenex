@@ -99,20 +99,6 @@ interface ReasoningEvent {
 }
 
 /**
- * Event map for LLMService with proper typing
- */
-interface LLMServiceEvents {
-    content: (data: ContentEvent) => void;
-    "chunk-type-change": (data: ChunkTypeChangeEvent) => void;
-    "tool-will-execute": (data: ToolWillExecuteEvent) => void;
-    "tool-did-execute": (data: ToolDidExecuteEvent) => void;
-    complete: (data: CompleteEvent) => void;
-    "stream-error": (data: StreamErrorEvent) => void;
-    "session-captured": (data: SessionCapturedEvent) => void;
-    reasoning?: (data: ReasoningEvent) => void;
-}
-
-/**
  * Provider metadata structure from AI SDK
  */
 type ProviderMetadata = Record<string, Record<string, JSONValue>>;
@@ -121,7 +107,7 @@ type ProviderMetadata = Record<string, Record<string, JSONValue>>;
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management
  */
-export class LLMService extends EventEmitter<LLMServiceEvents> {
+export class LLMService extends EventEmitter<Record<string, any>> {
     public readonly provider: string;
     public readonly model: string;
     private readonly temperature?: number;
@@ -404,7 +390,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                 this.provider === "claudeCode" &&
                 result.providerMetadata?.["claude-code"]?.sessionId
             ) {
-                const capturedSessionId = result.providerMetadata["claude-code"].sessionId;
+                const capturedSessionId = result.providerMetadata["claude-code"].sessionId as string;
                 logger.debug("[LLMService] Captured Claude Code session ID from complete", {
                     sessionId: capturedSessionId,
                     provider: this.provider,
@@ -766,7 +752,7 @@ export class LLMService extends EventEmitter<LLMServiceEvents> {
                     this.provider === "claudeCode" &&
                     e.providerMetadata?.["claude-code"]?.sessionId
                 ) {
-                    const capturedSessionId = e.providerMetadata["claude-code"].sessionId;
+                    const capturedSessionId = e.providerMetadata["claude-code"].sessionId as string;
                     // Emit session ID for storage by the executor
                     this.emit("session-captured", { sessionId: capturedSessionId });
                 }

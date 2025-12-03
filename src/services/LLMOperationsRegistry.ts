@@ -13,7 +13,7 @@ export interface LLMOperation {
     registeredAt: number; // Timestamp
 }
 
-class LLMOperationsRegistry {
+export class LLMOperationsRegistry {
     private static instance: LLMOperationsRegistry;
     private operations = new Map<string, LLMOperation>();
     private byEvent = new Map<string, Set<string>>();

@@ -29,46 +29,48 @@ export class PromptBuilder {
         return this;
     }
 
-    build(): string {
-        const fragmentsWithPriority = this.fragments
-            .filter((config) => !config.condition || config.condition(config.args))
-            .map((config) => {
-                const fragment = fragmentRegistry.get(config.fragmentId);
-                if (!fragment) {
-                    throw new Error(`Fragment ${config.fragmentId} not found`);
-                }
+    async build(): Promise<string> {
+        const fragmentsWithPriority = await Promise.all(
+            this.fragments
+                .filter((config) => !config.condition || config.condition(config.args))
+                .map(async (config) => {
+                    const fragment = fragmentRegistry.get(config.fragmentId);
+                    if (!fragment) {
+                        throw new Error(`Fragment ${config.fragmentId} not found`);
+                    }
 
-                // Validate arguments if validator is provided
-                if (fragment.validateArgs && !fragment.validateArgs(config.args)) {
-                    const receivedArgs = JSON.stringify(config.args, null, 2);
-                    const expectedDesc =
-                        fragment.expectedArgs || "Check fragment definition for expected arguments";
-                    throw new Error(
-                        `Fragment "${config.fragmentId}" received invalid arguments.\n` +
-                            `Expected: ${expectedDesc}\n` +
-                            `Received: ${receivedArgs}`
-                    );
-                }
+                    // Validate arguments if validator is provided
+                    if (fragment.validateArgs && !fragment.validateArgs(config.args)) {
+                        const receivedArgs = JSON.stringify(config.args, null, 2);
+                        const expectedDesc =
+                            fragment.expectedArgs || "Check fragment definition for expected arguments";
+                        throw new Error(
+                            `Fragment "${config.fragmentId}" received invalid arguments.\n` +
+                                `Expected: ${expectedDesc}\n` +
+                                `Received: ${receivedArgs}`
+                        );
+                    }
 
-                try {
-                    return {
-                        priority: fragment.priority || 50,
-                        content: fragment.template(config.args),
-                    };
-                } catch (error) {
-                    const errorMessage = formatAnyError(error);
-                    const receivedArgs = JSON.stringify(config.args, null, 2);
-                    throw new Error(
-                        `Error executing fragment "${config.fragmentId}":\n` +
-                            `${errorMessage}\n` +
-                            `Arguments provided: ${receivedArgs}\n` +
-                            `Expected: ${fragment.expectedArgs || "Check fragment definition"}`
-                    );
-                }
-            })
-            .sort((a, b) => a.priority - b.priority);
+                    try {
+                        return {
+                            priority: fragment.priority || 50,
+                            content: await fragment.template(config.args),
+                        };
+                    } catch (error) {
+                        const errorMessage = formatAnyError(error);
+                        const receivedArgs = JSON.stringify(config.args, null, 2);
+                        throw new Error(
+                            `Error executing fragment "${config.fragmentId}":\n` +
+                                `${errorMessage}\n` +
+                                `Arguments provided: ${receivedArgs}\n` +
+                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`
+                        );
+                    }
+                })
+        );
 
         return fragmentsWithPriority
+            .sort((a, b) => a.priority - b.priority)
             .map((f) => f.content)
             .filter((content) => content.trim().length > 0)
             .join("\n\n");
@@ -89,7 +91,7 @@ export class PromptBuilder {
      * @param args The arguments to pass to the fragment
      * @returns The built fragment content as a string
      */
-    static buildFragment<T>(fragmentId: string, args: T): string {
-        return new PromptBuilder().add(fragmentId, args).build();
+    static async buildFragment<T>(fragmentId: string, args: T): Promise<string> {
+        return await new PromptBuilder().add(fragmentId, args).build();
     }
 }

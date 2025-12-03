@@ -40,10 +40,10 @@ export class EventToModelMessage {
             if (isTargetedAgent) {
                 // Show full phase transition with instructions for targeted agent
                 phaseContent =
-                    PromptBuilder.buildFragment("phase-transition", {
+                    (await PromptBuilder.buildFragment("phase-transition", {
                         phase: phaseTag,
                         phaseInstructions: phaseInstructionsTag,
-                    }) || "";
+                    })) || "";
             } else {
                 // Only show phase name for non-targeted agents
                 phaseContent = `=== PHASE TRANSITION: ${phaseTag.toUpperCase()} ===`;

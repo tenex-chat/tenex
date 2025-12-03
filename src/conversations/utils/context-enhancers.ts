@@ -19,16 +19,16 @@ import type { ModelMessage } from "ai";
  * @param agentName - Name of the agent for logging
  * @returns True if voice mode was added
  */
-export function addVoiceModeContext(
+export async function addVoiceModeContext(
     messages: ModelMessage[],
     triggeringEvent: NDKEvent,
     agentName?: string
-): boolean {
+): Promise<boolean> {
     if (isVoiceMode(triggeringEvent)) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("voice-mode", { isVoiceMode: true });
 
-        const voiceInstructions = contextBuilder.build();
+        const voiceInstructions = await contextBuilder.build();
         if (voiceInstructions) {
             messages.push({ role: "system", content: voiceInstructions });
         }
@@ -49,16 +49,16 @@ export function addVoiceModeContext(
  * @param agentName - Name of the agent for logging
  * @returns True if debug mode was added
  */
-export function addDebugModeContext(
+export async function addDebugModeContext(
     messages: ModelMessage[],
     triggeringEvent: NDKEvent,
     agentName?: string
-): boolean {
+): Promise<boolean> {
     if (isDebugMode(triggeringEvent)) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("debug-mode", { enabled: true });
 
-        const debugInstructions = contextBuilder.build();
+        const debugInstructions = await contextBuilder.build();
         if (debugInstructions) {
             messages.push({ role: "system", content: debugInstructions });
         }
@@ -79,18 +79,18 @@ export function addDebugModeContext(
  * @param agentName - Name of the agent for logging
  * @returns True if delegation context was added
  */
-export function addDelegationCompletionContext(
+export async function addDelegationCompletionContext(
     messages: ModelMessage[],
     isDelegationCompletion: boolean,
     agentName?: string
-): boolean {
+): Promise<boolean> {
     if (isDelegationCompletion) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("delegation-completion", {
             isDelegationCompletion: true,
         });
 
-        const delegationInstructions = contextBuilder.build();
+        const delegationInstructions = await contextBuilder.build();
         if (delegationInstructions) {
             messages.push({ role: "system", content: delegationInstructions });
         }
@@ -148,9 +148,9 @@ export async function addAllSpecialContexts(
     agentName?: string
 ): Promise<{ voiceMode: boolean; debugMode: boolean; delegationMode: boolean }> {
     const result = {
-        voiceMode: addVoiceModeContext(messages, triggeringEvent, agentName),
-        debugMode: addDebugModeContext(messages, triggeringEvent, agentName),
-        delegationMode: addDelegationCompletionContext(messages, isDelegationCompletion, agentName),
+        voiceMode: await addVoiceModeContext(messages, triggeringEvent, agentName),
+        debugMode: await addDebugModeContext(messages, triggeringEvent, agentName),
+        delegationMode: await addDelegationCompletionContext(messages, isDelegationCompletion, agentName),
     };
 
     // Add context about who the agent is responding to

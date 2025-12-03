@@ -8,7 +8,7 @@ import {
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { LLMOperation, LLMOperationsRegistry } from "./LLMOperationsRegistry";
+import type { LLMOperation, LLMOperationsRegistry } from "@/services/LLMOperationsRegistry";
 
 /**
  * OperationsStatusPublisher handles publishing of LLM operation status events to Nostr.
@@ -97,11 +97,11 @@ export class OperationsStatusPublisher {
         // Log current state for debugging
         if (operationsByEvent.size > 0 || eventsToCleanup.size > 0) {
             logger.debug("[OperationsStatusPublisher] Current state", {
-                activeEvents: Array.from(currentEventIds).map((id: string) => id.substring(0, 8)),
-                previouslyPublished: Array.from(this.publishedEvents).map((id: string) =>
+                activeEvents: (Array.from(currentEventIds) as string[]).map((id) => id.substring(0, 8)),
+                previouslyPublished: (Array.from(this.publishedEvents) as string[]).map((id) =>
                     id.substring(0, 8)
                 ),
-                toCleanup: Array.from(eventsToCleanup).map((id: string) => id.substring(0, 8)),
+                toCleanup: (Array.from(eventsToCleanup) as string[]).map((id) => id.substring(0, 8)),
             });
         }
 
@@ -117,7 +117,7 @@ export class OperationsStatusPublisher {
                     this.publishedEvents.add(eventId);
                     this.lastPublishedState.set(
                         eventId,
-                        new Set(operations.map((op) => op.agentPubkey))
+                        new Set(operations.map((op: LLMOperation) => op.agentPubkey))
                     );
                 }
             } catch (err) {
@@ -148,8 +148,8 @@ export class OperationsStatusPublisher {
         logger.debug("[OperationsStatusPublisher] Published status", {
             activeEvents: operationsByEvent.size,
             cleanedEvents: eventsToCleanup.size,
-            totalOperations: Array.from(operationsByEvent.values()).reduce(
-                (sum: number, ops: unknown[]) => sum + ops.length,
+            totalOperations: (Array.from(operationsByEvent.values()) as LLMOperation[][]).reduce(
+                (sum, ops) => sum + ops.length,
                 0
             ),
         });

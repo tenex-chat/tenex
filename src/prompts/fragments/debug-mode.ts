@@ -5,10 +5,10 @@ import type { PromptFragment } from "../core/types";
  * Fragment for debug mode meta-cognitive analysis
  * Applied when the user includes #debug in their message
  */
-export const debugModeFragment: PromptFragment = {
+export const debugModeFragment: PromptFragment<{ enabled: boolean }> = {
     id: "debug-mode",
     priority: 100, // High priority to ensure it appears after system prompt
-    template: (data: { enabled: boolean }) => {
+    template: (data) => {
         if (!data.enabled) return "";
 
         return `

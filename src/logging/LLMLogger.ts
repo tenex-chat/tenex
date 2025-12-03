@@ -166,7 +166,7 @@ export class LLMLogger {
             request: {
                 messages: params.messages.map((msg) => ({
                     role: msg.role,
-                    content: msg.content,
+                    content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
                 })),
                 tools: params.tools?.map((t) => t.name),
             },
@@ -218,8 +218,8 @@ export class LLMLogger {
             responseEntry.response = {
                 content: params.response.content,
                 toolCalls: params.response.toolCalls?.map((tc) => ({
-                    name: tc.name,
-                    params: tc.params,
+                    name: tc.name || "unknown",
+                    params: tc.params || {},
                 })),
                 usage: params.response.usage
                     ? {
@@ -275,7 +275,7 @@ export class LLMLogger {
     }): Promise<void> {
         // First log the request
         await this.logLLMRequest({
-            agent: params.agent || this.agent,
+            agent: params.agent || this.agent || undefined,
             rootEvent: params.rootEvent,
             triggeringEvent: params.triggeringEvent,
             conversationId: params.conversationId,
@@ -283,7 +283,7 @@ export class LLMLogger {
             configKey: params.configKey,
             provider: params.provider,
             model: params.model,
-            messages: params.messages,
+            messages: params.messages as any,
             tools: params.tools,
             startTime: params.startTime,
         });
@@ -291,7 +291,7 @@ export class LLMLogger {
         // Then log the response if we have one
         if (params.response || params.error) {
             await this.logLLMResponse({
-                agent: params.agent || this.agent,
+                agent: params.agent || this.agent || undefined,
                 response: params.response,
                 error: params.error,
                 endTime: params.endTime,

@@ -91,8 +91,8 @@ async function executeAgentsWrite(
         if (instructions !== undefined) existingAgent.instructions = instructions ?? undefined;
         if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria ?? undefined;
         if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig ?? undefined;
-        if (tools !== undefined) existingAgent.tools = tools;
-        if (phases !== undefined) existingAgent.phases = phases;
+        if (tools !== undefined) existingAgent.tools = tools ?? undefined;
+        if (phases !== undefined) existingAgent.phases = phases ?? undefined;
 
         // Save to storage
         await agentStorage.saveAgent(existingAgent);
@@ -182,5 +182,5 @@ export function createAgentsWriteTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
+    }) as AISdkTool;
 } 
