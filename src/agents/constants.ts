@@ -55,6 +55,7 @@ export const DELEGATE_TOOLS: ToolName[] = [
     "delegate_phase",
     "delegate_external",
     "delegate_followup",
+    "delegate_multi",
 ] as const;
 
 /**
@@ -85,9 +86,10 @@ export function getDelegateToolsForAgent(agent: AgentPhaseInfo): ToolName[] {
         tools.push("delegate");
     }
 
-    // All agents get delegate_external and delegate_followup
+    // All agents get delegate_external, delegate_followup, and delegate_multi
     tools.push("delegate_external");
     tools.push("delegate_followup");
+    tools.push("delegate_multi");
 
     return tools;
 }

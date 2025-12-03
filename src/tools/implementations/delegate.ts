@@ -73,12 +73,17 @@ async function executeDelegate(
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher! // Pass the required AgentPublisher
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
+    // Convert to new delegations[] format - same request for all recipients
     return await delegationService.execute({
-        recipients: resolvedPubkeys,
-        request: fullRequest,
+        delegations: resolvedPubkeys.map((pubkey) => ({
+            recipient: pubkey,
+            request: fullRequest,
+        })),
     });
 }
 

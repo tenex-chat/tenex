@@ -73,14 +73,20 @@ async function executeDelegateFollowup(
         context.conversationId,
         context.conversationCoordinator,
         responseEvent, // This becomes the triggering event for threading
-        context.agentPublisher!
+        context.agentPublisher!,
+        context.projectPath,
+        context.currentBranch
     );
 
     // Execute as a follow-up delegation
     const responses = await delegationService.execute({
         type: "delegation_followup",
-        recipients: [recipientPubkey],
-        request: message,
+        delegations: [
+            {
+                recipient: recipientPubkey,
+                request: message,
+            },
+        ],
     });
 
     logger.info("[delegate_followup] ✅ Follow-up complete", {
