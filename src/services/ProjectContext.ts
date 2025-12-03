@@ -181,7 +181,7 @@ export class ProjectContext {
         return this.agentRegistry.getAgentByPubkey(pubkey);
     }
 
-    getProjectManager(): AgentInstance {
+    getProjectManager(): AgentInstance | undefined {
         return this.projectManager;
     }
 

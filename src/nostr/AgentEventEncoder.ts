@@ -384,7 +384,14 @@ export class AgentEventEncoder {
 
         // LLM metadata
         if (context.model) {
-            event.tag(["llm-model", context.model]);
+            // Handle both string and object formats (some providers return {model: "..."})
+            const modelString =
+                typeof context.model === "string"
+                    ? context.model
+                    : (context.model as { model?: string }).model;
+            if (modelString) {
+                event.tag(["llm-model", modelString]);
+            }
         }
         // Add cost metadata if available
         if (context.cost !== undefined) {

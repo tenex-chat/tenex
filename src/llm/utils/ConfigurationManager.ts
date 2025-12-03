@@ -210,6 +210,7 @@ export class ConfigurationManager {
             openai: "gpt-4",
             ollama: "llama3.1:8b",
             claudeCode: "claude-3-5-sonnet-20241022", // Default model for Claude Code
+            "gemini-cli": "gemini-2.0-flash-exp",
         };
         return defaults[provider] || "";
     }

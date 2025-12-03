@@ -254,22 +254,27 @@ async function executeNostrProjects(
 
 // AI SDK tool factory
 export function createNostrProjectsTool(context: ExecutionContext): AISdkTool {
-    return tool({
+    const coreTool = tool({
         description:
             "Fetch Nostr projects for a pubkey. When you need to see someone's projects or you are asked to communicate with an agent in a different project, use this tool as a Yellow Pages for projects and agents",
         inputSchema: nostrProjectsSchema,
-        getHumanReadableContent: (input: NostrProjectsInput) => {
-            if (!input.pubkey) {
-                return "Getting your projects";
-            }
-
-            const targetPubkey = parseNostrUser(input.pubkey);
-            const user = new NDKUser({ pubkey: targetPubkey });
-
-            return `Getting ${user.npub}'s projects`;
-        },
         execute: async (input: NostrProjectsInput) => {
             return await executeNostrProjects(input, context);
         },
-    });
+    }) as AISdkTool;
+
+    // Add custom TENEX property
+    coreTool.getHumanReadableContent = (input: unknown) => {
+        const typedInput = input as NostrProjectsInput;
+        if (!typedInput.pubkey) {
+            return "Getting your projects";
+        }
+
+        const targetPubkey = parseNostrUser(typedInput.pubkey);
+        const user = new NDKUser({ pubkey: targetPubkey ?? undefined });
+
+        return `Getting ${user.npub}'s projects`;
+    };
+
+    return coreTool;
 } 

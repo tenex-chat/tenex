@@ -4,10 +4,10 @@ import type { PromptFragment } from "../core/types";
  * Fragment for delegation completion instructions
  * Applied when an agent is reactivated after a delegated task completes
  */
-export const delegationCompletionFragment: PromptFragment = {
+export const delegationCompletionFragment: PromptFragment<{ isDelegationCompletion?: boolean }> = {
     id: "delegation-completion",
     priority: 95, // High priority to ensure agent sees this instruction
-    template: (data: { isDelegationCompletion?: boolean }) => {
+    template: (data) => {
         if (!data.isDelegationCompletion) return "";
 
         return `

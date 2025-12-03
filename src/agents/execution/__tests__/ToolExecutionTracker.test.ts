@@ -62,7 +62,7 @@ describe("ToolExecutionTracker", () => {
             triggeringEvent: { id: "trigger-123" } as NDKEvent,
             rootEvent: { id: "root-123" } as NDKEvent,
             conversationId: "conv-123",
-            model: { provider: "test", model: "test-model" },
+            model: "test:test-model",
         };
 
         // Create mock tools object

@@ -159,7 +159,7 @@ export class RAGOperations {
                 const batch = documents.slice(i, i + RAGOperations.BATCH_SIZE);
 
                 const processedDocs = await this.processBatch(batch);
-                await table.add(processedDocs);
+                await table.add(processedDocs as any);
 
                 logger.debug(
                     `Added batch of ${processedDocs.length} documents to '${collectionName}'`
@@ -257,7 +257,7 @@ export class RAGOperations {
         topK: number
     ): VectorQuery {
         logger.debug(`Creating vector search with topK=${topK}, vector_dims=${queryVector.length}`);
-        return table.search(Array.from(queryVector)).limit(topK);
+        return table.search(Array.from(queryVector)).limit(topK) as VectorQuery;
     }
 
     /**
@@ -290,9 +290,9 @@ export class RAGOperations {
      * Try executing query using execute() method
      */
     private async tryExecuteQuery(searchQuery: VectorQuery): Promise<LanceDBResult[] | null> {
-        if (typeof searchQuery.execute !== "function") return null;
+        if (typeof (searchQuery as any).execute !== "function") return null;
 
-        const queryResults = await searchQuery.execute();
+        const queryResults = await (searchQuery as any).execute();
         logger.debug("Query executed with execute()");
 
         if (Array.isArray(queryResults)) {
@@ -302,7 +302,7 @@ export class RAGOperations {
         if (queryResults) {
             const results: LanceDBResult[] = [];
             for await (const item of queryResults) {
-                results.push(item);
+                results.push(item as any);
             }
             return results;
         }
@@ -318,7 +318,7 @@ export class RAGOperations {
         const results: LanceDBResult[] = [];
 
         for await (const item of searchQuery) {
-            results.push(item);
+            results.push(item as any);
         }
 
         return results;
