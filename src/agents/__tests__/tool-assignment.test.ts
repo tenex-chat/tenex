@@ -13,7 +13,6 @@ describe("Tool assignment", () => {
             // All agents get the same default tool set (delegate tools are added separately)
             expect(tools).toContain("read_path");
             expect(tools).toContain("lesson_learn");
-            expect(tools).toContain("claude_code");
             expect(tools).toContain("shell");
             // Delegate tools are NOT in defaults, they're added by getDelegateToolsForAgent
             expect(tools).not.toContain("delegate");
@@ -37,7 +36,6 @@ describe("Tool assignment", () => {
             [tools1, tools2, tools3].forEach((tools) => {
                 expect(tools).toContain("read_path");
                 expect(tools).toContain("lesson_learn");
-                expect(tools).toContain("claude_code");
                 // Delegate tools are NOT in defaults
                 expect(tools).not.toContain("delegate");
             });

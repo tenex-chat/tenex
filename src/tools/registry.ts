@@ -16,7 +16,6 @@ import { createAgentsListTool } from "./implementations/agents_list";
 import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
-import { createClaudeCodeTool } from "./implementations/claude_code";
 import { createCodebaseSearchTool } from "./implementations/codebase_search";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
@@ -64,8 +63,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Ask tool
     ask: createAskTool,
 
-    // Claude code
-    claude_code: createClaudeCodeTool,
+    // Gemini CLI
     gemini_cli: createGeminiCliTool,
 
     // Codebase search
