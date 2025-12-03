@@ -8,8 +8,11 @@ import { createExecutionContext } from "../ExecutionContextFactory";
 const mockListWorktrees = mock(() => Promise.resolve([]));
 const mockGetCurrentBranchWithFallback = mock(() => Promise.resolve("main"));
 
-mock.module("@/utils/git/initializeGitRepo", () => ({
+mock.module("@/utils/git/worktree", () => ({
     listWorktrees: mockListWorktrees,
+}));
+
+mock.module("@/utils/git/initializeGitRepo", () => ({
     getCurrentBranchWithFallback: mockGetCurrentBranchWithFallback,
 }));
 

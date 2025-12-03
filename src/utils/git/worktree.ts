@@ -1,7 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { promisify } from "node:util";
+import { exec } from "node:child_process";
 import { logger } from "@/utils/logger";
 import { config } from "@/services/ConfigService";
+
+const execAsync = promisify(exec);
 
 /**
  * Metadata for a git worktree
@@ -16,6 +20,109 @@ export interface WorktreeMetadata {
   mergedAt?: number;
   deletedAt?: number;
 }
+
+// ============================================================================
+// Core Worktree Operations
+// ============================================================================
+
+/**
+ * List all git worktrees
+ */
+export async function listWorktrees(projectPath: string): Promise<Array<{ branch: string; path: string }>> {
+    try {
+        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: projectPath });
+
+        const worktrees: Array<{ branch: string; path: string }> = [];
+        const lines = stdout.trim().split("\n");
+
+        let currentWorktree: { path?: string; branch?: string } = {};
+
+        for (const line of lines) {
+            if (line.startsWith("worktree ")) {
+                currentWorktree.path = line.substring(9);
+            } else if (line.startsWith("branch ")) {
+                currentWorktree.branch = line.substring(7).replace("refs/heads/", "");
+            } else if (line === "") {
+                // Empty line marks end of worktree entry
+                if (currentWorktree.path && currentWorktree.branch) {
+                    worktrees.push({
+                        path: currentWorktree.path,
+                        branch: currentWorktree.branch,
+                    });
+                }
+                currentWorktree = {};
+            }
+        }
+
+        // Handle last entry if no trailing newline
+        if (currentWorktree.path && currentWorktree.branch) {
+            worktrees.push({
+                path: currentWorktree.path,
+                branch: currentWorktree.branch,
+            });
+        }
+
+        return worktrees;
+    } catch (error) {
+        logger.error("Failed to list worktrees", { projectPath, error });
+        return [];
+    }
+}
+
+/**
+ * Create a new git worktree
+ * @param projectPath - Base project path (main worktree)
+ * @param branchName - Name for the new branch
+ * @param baseBranch - Branch to create from (typically current branch)
+ * @returns Path to the new worktree
+ */
+export async function createWorktree(
+    projectPath: string,
+    branchName: string,
+    baseBranch: string
+): Promise<string> {
+    try {
+        // Worktree path is sibling to main worktree
+        const parentDir = path.dirname(projectPath);
+        const worktreePath = path.join(parentDir, branchName);
+
+        // Check if worktree already exists
+        const existingWorktrees = await listWorktrees(projectPath);
+        if (existingWorktrees.some((wt) => wt.branch === branchName)) {
+            logger.info("Worktree already exists", { branchName, path: worktreePath });
+            return worktreePath;
+        }
+
+        // Check if path exists on filesystem
+        try {
+            await fs.access(worktreePath);
+            // Path exists but not in worktree list - this is an error state
+            throw new Error(
+                `Directory "${worktreePath}" exists but is not a registered git worktree. ` +
+                "Remove it manually or use a different branch name."
+            );
+        } catch (err: unknown) {
+            if (err instanceof Error && "code" in err && err.code !== "ENOENT") throw err;
+            // Path doesn't exist - safe to create
+        }
+
+        // Create worktree
+        await execAsync(
+            `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
+            { cwd: projectPath }
+        );
+
+        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch });
+        return worktreePath;
+    } catch (error) {
+        logger.error("Failed to create worktree", { projectPath, branchName, baseBranch, error });
+        throw error;
+    }
+}
+
+// ============================================================================
+// Worktree Metadata Management
+// ============================================================================
 
 /**
  * Get the path to the worktree metadata file for a project

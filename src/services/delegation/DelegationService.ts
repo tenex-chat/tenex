@@ -67,8 +67,7 @@ export class DelegationService {
 
         for (const delegation of intent.delegations) {
             if (delegation.branch) {
-                const { createWorktree } = await import("@/utils/git/initializeGitRepo");
-                const { trackWorktreeCreation } = await import("@/utils/git/worktree");
+                const { createWorktree, trackWorktreeCreation } = await import("@/utils/git/worktree");
 
                 try {
                     const worktreePath = await createWorktree(

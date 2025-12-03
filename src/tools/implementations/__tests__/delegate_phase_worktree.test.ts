@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
-import { listWorktrees, getCurrentBranch } from "@/utils/git/initializeGitRepo";
+import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
+import { listWorktrees } from "@/utils/git/worktree";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs/promises";
@@ -73,7 +74,7 @@ describe("delegate_phase worktree creation", () => {
 
         // This test verifies worktree creation logic without full delegation
         // We're testing the worktree creation part, not the full delegation flow
-        const { createWorktree } = await import("@/utils/git/initializeGitRepo");
+        const { createWorktree } = await import("@/utils/git/worktree");
 
         const worktreePath = await createWorktree(
             mockContext.projectPath,
@@ -89,7 +90,7 @@ describe("delegate_phase worktree creation", () => {
 
     test("tracks worktree metadata when created", async () => {
         const branchName = `feature-meta-${Date.now()}`;
-        const { createWorktree } = await import("@/utils/git/initializeGitRepo");
+        const { createWorktree } = await import("@/utils/git/worktree");
         const { trackWorktreeCreation, loadWorktreeMetadata } =
             await import("@/utils/git/worktree");
 
