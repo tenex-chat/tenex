@@ -1,5 +1,4 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Phase } from "@/conversations/phases";
 import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { formatLessonsForAgent } from "@/utils/lessonFormatter";
@@ -10,7 +9,7 @@ import type { PromptFragment } from "../core/types";
 // Retrieved lessons fragment - formats lessons from ProjectContext
 interface RetrievedLessonsArgs {
     agent: AgentInstance;
-    phase: Phase;
+    phase: string;
     conversation: Conversation;
     agentLessons: Map<string, NDKAgentLesson[]>;
 }

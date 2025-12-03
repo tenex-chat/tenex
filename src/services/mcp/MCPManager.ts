@@ -8,6 +8,7 @@ import * as path from "node:path";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
+import { config as configService } from "@/services/ConfigService";
 import type { Tool as CoreTool } from "ai";
 import {
     type experimental_MCPClient,
@@ -33,7 +34,6 @@ export class MCPManager {
     private isInitialized = false;
     private projectPath?: string;
     private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
-    private _includeResourcesInTools = false;
 
     private constructor() {}
 
@@ -51,19 +51,16 @@ export class MCPManager {
 
         try {
             this.projectPath = projectPath;
-            const config = await config.loadConfig(projectPath);
+            const loadedConfig = await configService.loadConfig(projectPath);
 
-            if (!config.mcp || !config.mcp.enabled) {
+            if (!loadedConfig.mcp || !loadedConfig.mcp.enabled) {
                 logger.info("MCP is disabled");
                 this.isInitialized = true;
                 return;
             }
 
-            // Enable resources as tools globally
-            this._includeResourcesInTools = true;
-
-            if (config.mcp.servers) {
-                await this.startServers(config.mcp);
+            if (loadedConfig.mcp.servers) {
+                await this.startServers(loadedConfig.mcp);
                 await this.refreshToolCache();
             }
             this.isInitialized = true;
@@ -199,8 +196,8 @@ export class MCPManager {
                     // We just need to ensure they have the correct structure
                     // CoreTool should have: description, parameters (as zod schema), and execute function
 
-                    // Store the tool directly - it's already a proper CoreTool
-                    tools[namespacedName] = tool;
+                    // Store the tool with type assertion for MCP client compatibility
+                    tools[namespacedName] = tool as CoreTool<unknown, unknown>;
 
                     // Log the tool structure for debugging
                     logger.debug(`MCP tool '${namespacedName}' registered`, {
@@ -230,15 +227,7 @@ export class MCPManager {
     }
 
     /**
-     * Set whether to include MCP resources as tools
-     * @param include - Whether to include resources as tools
-     */
-    setIncludeResourcesInTools(include: boolean): void {
-        this._includeResourcesInTools = include;
-    }
-
-    /**
-     * Refresh the tool cache with current includeResources setting
+     * Refresh the tool cache
      */
     async refreshTools(): Promise<void> {
         await this.refreshToolCache();
@@ -460,7 +449,7 @@ export class MCPManager {
         }
 
         try {
-            return await entry.client.readResource(uri);
+            return await entry.client.readResource({ uri });
         } catch (error) {
             logger.error(
                 `Failed to read resource '${uri}' from '${serverName}':`,
@@ -518,7 +507,8 @@ export class MCPManager {
         }
 
         try {
-            await entry.client.subscribeResource(resourceUri);
+            // Type assertion for experimental MCP feature not yet in AI SDK types
+            await (entry.client as any).subscribeResource(resourceUri);
             logger.debug(`Subscribed to resource '${resourceUri}' from server '${serverName}'`);
         } catch (error) {
             logger.error(
@@ -546,7 +536,8 @@ export class MCPManager {
         }
 
         try {
-            await entry.client.unsubscribeResource(resourceUri);
+            // Type assertion for experimental MCP feature not yet in AI SDK types
+            await (entry.client as any).unsubscribeResource(resourceUri);
             logger.debug(`Unsubscribed from resource '${resourceUri}' from server '${serverName}'`);
         } catch (error) {
             logger.error(
@@ -576,7 +567,8 @@ export class MCPManager {
             throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
         }
 
-        entry.client.onResourceUpdated(handler);
+        // Type assertion for experimental MCP feature not yet in AI SDK types
+        (entry.client as any).onResourceUpdated(handler);
         logger.debug(`Registered resource update handler for server '${serverName}'`);
     }
 }

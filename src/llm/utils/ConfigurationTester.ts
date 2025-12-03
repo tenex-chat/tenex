@@ -64,11 +64,11 @@ export class ConfigurationTester {
             // Show usage stats if available
             if ("usage" in result && result.usage) {
                 const usage = result.usage;
-                const promptTokens = usage.promptTokens ?? "?";
-                const completionTokens = usage.completionTokens ?? "?";
-                const totalTokens = usage.totalTokens ?? "?";
+                const inputTokens = "inputTokens" in usage ? usage.inputTokens : "?";
+                const outputTokens = "outputTokens" in usage ? usage.outputTokens : "?";
+                const totalTokens = "totalTokens" in usage ? usage.totalTokens : "?";
                 console.log(
-                    chalk.gray(`\nTokens: ${promptTokens} + ${completionTokens} = ${totalTokens}`)
+                    chalk.gray(`\nTokens: ${inputTokens} + ${outputTokens} = ${totalTokens}`)
                 );
             }
 

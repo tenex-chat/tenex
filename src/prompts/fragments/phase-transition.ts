@@ -4,10 +4,10 @@ import type { PromptFragment } from "@/prompts/core/types";
  * Fragment for phase transition instructions
  * Applied when a phase transition is detected in the conversation history
  */
-export const phaseTransitionFragment: PromptFragment = {
+export const phaseTransitionFragment: PromptFragment<{ phase?: string; phaseInstructions?: string }> = {
     id: "phase-transition",
     priority: 90, // High priority to ensure it appears at the right point
-    template: (data: { phase?: string; phaseInstructions?: string }) => {
+    template: (data) => {
         if (!data.phase) return "";
 
         let content = `=== PHASE TRANSITION: ${data.phase.toUpperCase()} ===`;

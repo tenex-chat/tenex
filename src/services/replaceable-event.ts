@@ -1,5 +1,5 @@
 import { logger } from "@/utils/logger";
-import type { NDK } from "@nostr-dev-kit/ndk";
+import type NDK from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**

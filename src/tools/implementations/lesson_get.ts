@@ -48,17 +48,17 @@ async function executeLessonGet(
             logger.info("✅ Found lesson via RAG semantic search", {
                 agent: context.agent.name,
                 agentPubkey: context.agent.pubkey,
-                title: bestMatch.metadata?.title || title,
-                similarity: bestMatch.similarity,
+                title: bestMatch.document.metadata?.title || title,
+                similarity: bestMatch.score,
                 conversationId: context.conversationId,
             });
 
             // Extract lesson data from metadata
-            const metadata = bestMatch.metadata || {};
+            const metadata = bestMatch.document.metadata || {};
             return {
                 title: metadata.title || title,
-                lesson: bestMatch.content,
-                detailed: metadata.hasDetailed ? bestMatch.content : undefined,
+                lesson: bestMatch.document.content,
+                detailed: metadata.hasDetailed ? bestMatch.document.content : undefined,
                 category: metadata.category,
                 hashtags: metadata.hashtags,
                 hasDetailed: !!metadata.hasDetailed,

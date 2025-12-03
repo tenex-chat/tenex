@@ -35,7 +35,7 @@ export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
             throw new Error(`Failed to fetch models: ${response.statusText}`);
         }
 
-        const data: OpenRouterModelsResponse = await response.json();
+        const data = (await response.json()) as OpenRouterModelsResponse;
 
         // Sort models by popularity/relevance (you can customize this)
         return data.data.sort((a, b) => {

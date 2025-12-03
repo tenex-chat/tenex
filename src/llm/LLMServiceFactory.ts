@@ -219,7 +219,7 @@ export class LLMServiceFactory {
                     : undefined;
 
             // Build mcpServers configuration
-            const mcpServersConfig: Record<string, unknown> = {};
+            const mcpServersConfig: Record<string, any> = {};
             if (tenexSdkServer) {
                 mcpServersConfig.tenex = tenexSdkServer;
             }
@@ -234,7 +234,7 @@ export class LLMServiceFactory {
                 permissionMode: "bypassPermissions",
                 cwd: context?.projectPath,
                 allowedTools,
-                mcpServers: mcpServersConfig,
+                mcpServers: mcpServersConfig as any,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),

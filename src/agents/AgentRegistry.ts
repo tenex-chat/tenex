@@ -153,7 +153,31 @@ export class AgentRegistry {
             );
         }
 
-        logger.info(`Loaded ${this.agents.size} agents for project ${this.projectDTag}`);
+        // Load locally-created agents (without event IDs) from storage
+        const localAgents = await agentStorage.getProjectAgents(this.projectDTag);
+        logger.info(`Found ${localAgents.length} locally-created agents in storage for project ${this.projectDTag}`);
+
+        for (const storedAgent of localAgents) {
+            // Skip if agent doesn't have event ID (local agent) and is already in registry
+            if (!storedAgent.eventId) {
+                const existingAgent = this.agents.get(storedAgent.slug);
+                if (existingAgent) {
+                    logger.debug(`Local agent ${storedAgent.slug} already in registry, skipping`);
+                    continue;
+                }
+
+                // Create and add local agent instance
+                try {
+                    const agentInstance = createAgentInstance(storedAgent, this);
+                    this.addAgent(agentInstance);
+                    logger.info(`Loaded local agent ${storedAgent.slug} into registry`);
+                } catch (error) {
+                    logger.error(`Failed to load local agent ${storedAgent.slug}`, { error });
+                }
+            }
+        }
+
+        logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
     }
 
 
