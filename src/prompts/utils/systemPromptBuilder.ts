@@ -20,6 +20,8 @@ export interface BuildSystemPromptOptions {
     agentLessons?: Map<string, NDKAgentLesson[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
+    workingDirectory?: string; // Actual working directory - worktree path
+    currentBranch?: string; // Current git branch/worktree name
 }
 
 export interface BuildStandalonePromptOptions {
@@ -149,6 +151,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         availableAgents = [],
         conversation,
         agentLessons,
+        workingDirectory,
+        currentBranch,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
@@ -163,6 +167,18 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
+
+    // Add worktree context if we have the necessary information
+    if (workingDirectory && currentBranch && projectPath) {
+        systemPromptBuilder.add("worktree-context", {
+            context: {
+                workingDirectory,
+                currentBranch,
+                projectPath,
+                agent,
+            },
+        });
+    }
 
     // Add core agent fragments using shared composition
     await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons);

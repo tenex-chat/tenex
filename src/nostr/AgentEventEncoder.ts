@@ -116,6 +116,21 @@ export class AgentEventEncoder {
     }
 
     /**
+     * Forward branch tag from triggering event to reply event.
+     * Ensures agents carry forward the branch context from the message they're replying to.
+     */
+    private forwardBranchTag(event: NDKEvent, triggeringEvent: NDKEvent): void {
+        const branchTag = triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
+        if (branchTag) {
+            event.tag(["branch", branchTag[1]]);
+            logger.debug("Forwarding branch tag", {
+                branch: branchTag[1],
+                fromEvent: triggeringEvent.id?.substring(0, 8),
+            });
+        }
+    }
+
+    /**
      * Tags the root of the conversation
      */
     tagConversation(event: NDKEvent, rootEvent: NDKEvent): void {
@@ -214,6 +229,9 @@ export class AgentEventEncoder {
         // Add standard metadata (without usage, which is now handled above)
         this.addStandardTags(event, context);
 
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
+
         logger.debug("Encoded completion event", {
             eventId: event.id,
             completingTo: context.triggeringEvent.id?.substring(0, 8),
@@ -301,6 +319,11 @@ export class AgentEventEncoder {
             // Add standard metadata
             this.addStandardTags(event, context);
 
+            // Forward branch tag from triggering event if not explicitly set
+            if (!delegation.branch) {
+                this.forwardBranchTag(event, context.triggeringEvent);
+            }
+
             logger.debug("Encoded delegation request", {
                 phase: delegation.phase,
                 recipient: delegation.recipient.substring(0, 8),
@@ -343,6 +366,9 @@ export class AgentEventEncoder {
         // Add standard metadata
         this.addStandardTags(event, context);
 
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
+
         logger.debug("Encoded ask event", {
             content: intent.content,
             suggestions: intent.suggestions,
@@ -371,6 +397,9 @@ export class AgentEventEncoder {
 
         // Add standard metadata
         this.addStandardTags(event, context);
+
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
 
         return event;
     }
@@ -427,6 +456,9 @@ export class AgentEventEncoder {
         // Add standard metadata
         this.addStandardTags(event, context);
 
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
+
         return event;
     }
 
@@ -456,6 +488,9 @@ export class AgentEventEncoder {
         // Add standard metadata tags (includes project tag)
         this.addStandardTags(event, context);
 
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
+
         return event;
     }
 
@@ -481,6 +516,9 @@ export class AgentEventEncoder {
 
         // Add standard metadata tags
         this.addStandardTags(event, context);
+
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
 
         return event;
     }
@@ -657,6 +695,9 @@ export class AgentEventEncoder {
 
         // Add standard metadata
         this.addStandardTags(event, context);
+
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context.triggeringEvent);
 
         return event;
     }
