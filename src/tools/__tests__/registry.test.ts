@@ -1,87 +1,82 @@
 import { describe, expect, it } from "bun:test";
-import { readPathTool } from "../implementations/read_path";
-import { shellTool } from "../implementations/shell";
+import { createMockExecutionContext } from "@/test-utils";
 import type { ToolName } from "../types";
 import { getAllTools, getTool, getTools } from "../registry";
 
 describe("Tool Registry", () => {
+    const mockContext = createMockExecutionContext();
+
     describe("getTool", () => {
         it("should return tool when exists", () => {
-            const tool = getTool("read_path");
+            const tool = getTool("read_path", mockContext);
             expect(tool).toBeDefined();
-            expect(tool).toBe(readPathTool);
+            expect(tool?.description).toContain("Read a file or directory");
         });
 
         it("should return undefined for non-existent tool", () => {
             // @ts-expect-error Testing invalid tool name
-            const tool = getTool("non_existent_tool" as ToolName);
+            const tool = getTool("non_existent_tool" as ToolName, mockContext);
             expect(tool).toBeUndefined();
         });
 
         it("should handle empty string", () => {
             // @ts-expect-error Testing invalid tool name
-            const tool = getTool("" as ToolName);
+            const tool = getTool("" as ToolName, mockContext);
             expect(tool).toBeUndefined();
         });
     });
 
     describe("getTools", () => {
         it("should return array of existing tools", () => {
-            const tools = getTools(["read_path", "shell"]);
+            const tools = getTools(["read_path", "shell"], mockContext);
             expect(tools).toHaveLength(2);
-            expect(tools[0]).toBe(readPathTool);
-            expect(tools[1]).toBe(shellTool);
         });
 
         it("should filter out non-existent tools", () => {
             // @ts-expect-error Testing with invalid tool name
-            const tools = getTools(["read_path", "non_existent" as ToolName, "shell"]);
+            const tools = getTools(["read_path", "non_existent" as ToolName, "shell"], mockContext);
             expect(tools).toHaveLength(2);
-            expect(tools[0]).toBe(readPathTool);
-            expect(tools[1]).toBe(shellTool);
         });
 
         it("should return empty array for all non-existent tools", () => {
             // @ts-expect-error Testing with invalid tool names
-            const tools = getTools(["non_existent1" as ToolName, "non_existent2" as ToolName]);
+            const tools = getTools(["non_existent1" as ToolName, "non_existent2" as ToolName], mockContext);
             expect(tools).toHaveLength(0);
         });
 
         it("should handle empty array input", () => {
-            const tools = getTools([]);
+            const tools = getTools([], mockContext);
             expect(tools).toHaveLength(0);
         });
     });
 
     describe("getAllTools", () => {
         it("should return array of all tools", () => {
-            const tools = getAllTools();
+            const tools = getAllTools(mockContext);
             expect(tools).toBeDefined();
             expect(Array.isArray(tools)).toBe(true);
             expect(tools.length).toBeGreaterThan(0);
         });
 
         it("should include known tools", () => {
-            const tools = getAllTools();
-            const toolNames = tools.map((t) => t.name);
+            const tools = getAllTools(mockContext);
+            const toolDescriptions = tools.map((t) => t.description);
 
-            expect(toolNames).toContain("read_path");
-            expect(toolNames).toContain("shell");
-            expect(toolNames).toContain("analyze");
-            expect(toolNames).toContain("delegate");
+            expect(toolDescriptions.some(d => d.includes("Read a file or directory"))).toBe(true);
+            expect(toolDescriptions.some(d => d.includes("shell") || d.includes("command"))).toBe(true);
+            expect(toolDescriptions.some(d => d.includes("delegate"))).toBe(true);
         });
 
-        it("should return tools with required properties", () => {
-            const tools = getAllTools();
+        it("should return tools with required AI SDK properties", () => {
+            const tools = getAllTools(mockContext);
 
             for (const tool of tools) {
-                expect(tool).toHaveProperty("name");
                 expect(tool).toHaveProperty("description");
-                expect(tool).toHaveProperty("parameters");
                 expect(tool).toHaveProperty("execute");
-                expect(typeof tool.name).toBe("string");
                 expect(typeof tool.description).toBe("string");
                 expect(typeof tool.execute).toBe("function");
+                // AI SDK tools have parameters in their schema
+                expect(tool.parameters || tool.inputSchema).toBeDefined();
             }
         });
     });
