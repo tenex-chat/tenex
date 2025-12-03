@@ -69,6 +69,7 @@ export interface StatusIntent {
     agents: Array<{ pubkey: string; slug: string }>;
     models: Array<{ slug: string; agents: string[] }>;
     tools: Array<{ name: string; agents: string[] }>;
+    worktrees?: string[]; // Array of branch names, first is default
 }
 
 export interface ToolUseIntent {

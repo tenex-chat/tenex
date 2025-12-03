@@ -117,6 +117,13 @@ export class StatusPublisher {
             event.tag(["tool", tool.name, ...tool.agents]);
         }
 
+        // Add worktree tags (default branch first)
+        if (intent.worktrees && intent.worktrees.length > 0) {
+            for (const branchName of intent.worktrees) {
+                event.tag(["worktree", branchName]);
+            }
+        }
+
         return event;
     }
 
@@ -176,6 +183,9 @@ export class StatusPublisher {
 
             // Gather tool info
             await this.gatherToolInfo(intent);
+
+            // Gather worktree info
+            await this.gatherWorktreeInfo(intent, projectPath);
 
             // Gather queue info
             // Queue functionality removed
@@ -371,6 +381,51 @@ export class StatusPublisher {
             }
         } catch (err) {
             logger.warn(`Could not add tool tags to status event: ${formatAnyError(err)}`);
+        }
+    }
+
+    private async gatherWorktreeInfo(intent: StatusIntent, projectPath: string): Promise<void> {
+        try {
+            const { listWorktrees } = await import("@/utils/git/worktree");
+            const { getDefaultBranchName } = await import("@/utils/git/initializeGitRepo");
+
+            // Get all worktrees
+            const worktrees = await listWorktrees(projectPath);
+
+            if (worktrees.length === 0) {
+                logger.debug("No worktrees found for project", { projectPath });
+                return;
+            }
+
+            // Get the default branch name (current branch of main worktree)
+            const defaultBranch = await getDefaultBranchName(projectPath);
+
+            // Build worktree list with default branch first
+            const worktreeList: string[] = [];
+
+            // Find and add default branch first
+            const defaultWorktree = worktrees.find((wt) => wt.branch === defaultBranch);
+            if (defaultWorktree) {
+                worktreeList.push(defaultWorktree.branch);
+            }
+
+            // Add remaining worktrees sorted alphabetically
+            const remainingWorktrees = worktrees
+                .filter((wt) => wt.branch !== defaultBranch)
+                .map((wt) => wt.branch)
+                .sort();
+
+            worktreeList.push(...remainingWorktrees);
+
+            logger.debug("Gathered worktrees for status", {
+                total: worktreeList.length,
+                default: defaultBranch,
+                worktrees: worktreeList,
+            });
+
+            intent.worktrees = worktreeList;
+        } catch (err) {
+            logger.warn(`Could not gather worktree information: ${formatAnyError(err)}`);
         }
     }
 }

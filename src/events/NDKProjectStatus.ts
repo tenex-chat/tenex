@@ -251,4 +251,28 @@ export class NDKProjectStatus extends NDKEvent {
             .filter((tool) => tool.agents.includes(agentSlug))
             .map((tool) => tool.toolName);
     }
+
+    /**
+     * Get all worktrees from this status event
+     * Returns an array of branch names, with the first being the default branch
+     */
+    get worktrees(): string[] {
+        const worktreeTags = this.tags.filter((tag) => tag[0] === "worktree" && tag[1]);
+        return worktreeTags.map((tag) => tag[1]);
+    }
+
+    /**
+     * Add a worktree to the status
+     * @param branchName The branch name
+     */
+    addWorktree(branchName: string): void {
+        this.tags.push(["worktree", branchName]);
+    }
+
+    /**
+     * Get the default worktree (first worktree in the list)
+     */
+    get defaultWorktree(): string | undefined {
+        return this.worktrees[0];
+    }
 }
