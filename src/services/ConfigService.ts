@@ -262,7 +262,7 @@ export class ConfigService {
         }
     ): LLMService {
         const config = this.getLLMConfig(configName);
-        return llmServiceFactory.createService(llmLogger, config, context);
+        return llmServiceFactory.createService(llmLogger, config, context as Parameters<typeof llmServiceFactory.createService>[2]);
     }
 
     // =====================================================================================

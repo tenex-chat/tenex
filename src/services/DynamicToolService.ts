@@ -8,12 +8,12 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 
 // Simple debounce implementation to avoid lodash type issues
-function debounce<T extends (...args: unknown[]) => unknown>(
-    fn: T,
+function debounce<TArgs extends unknown[]>(
+    fn: (...args: TArgs) => unknown,
     wait: number
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
     let timeout: NodeJS.Timeout | null = null;
-    return (...args: Parameters<T>) => {
+    return (...args: TArgs) => {
         if (timeout) clearTimeout(timeout);
         timeout = setTimeout(() => fn(...args), wait);
     };

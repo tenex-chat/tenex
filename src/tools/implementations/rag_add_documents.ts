@@ -380,7 +380,7 @@ async function processDocuments(
     for (const doc of documents) {
         try {
             const { content, source } = await extractDocumentContentFromSource(
-                doc,
+                doc as DocumentInput,
                 workingDirectory
             );
 

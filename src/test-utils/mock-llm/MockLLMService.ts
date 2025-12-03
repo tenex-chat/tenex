@@ -125,7 +125,7 @@ export class MockLLMService implements LLMService {
         } as CompletionResponse;
     }
 
-    async *stream(request: CompletionRequest): AsyncIterable<StreamEvent> {
+    async *stream(request: CompletionRequest): AsyncIterableIterator<StreamEvent> {
         const messages = request.messages;
         const model = request.options?.configName || "mock-model";
 

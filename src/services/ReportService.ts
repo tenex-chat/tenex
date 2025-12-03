@@ -3,7 +3,7 @@ import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKArticle } from "@nostr-dev-kit/ndk";
+import { type NDKFilter, NDKArticle } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
 
 export interface ReportData {
@@ -172,7 +172,7 @@ export class ReportManager {
         }
 
         // Fetch the articles
-        const events = await this.ndk.fetchEvents(filter);
+        const events = await this.ndk.fetchEvents(filter as unknown as NDKFilter);
 
         // Process the articles
         const reports: ReportSummary[] = [];

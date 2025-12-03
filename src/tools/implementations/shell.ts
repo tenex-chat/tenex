@@ -63,7 +63,7 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
 
     const { stdout, stderr } = await execAsync(command, {
         cwd: workingDir,
-        timeout,
+        timeout: timeout ?? undefined,
         env: {
             ...process.env,
             PATH: process.env.PATH,
