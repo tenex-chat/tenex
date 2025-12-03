@@ -42,8 +42,21 @@ export async function buildLLMMetadata(
     const model = responseWithUsage.model || "unknown";
     const cost = await calculateCost(responseWithUsage, model);
 
-    const systemPrompt = messages.find((m) => m.role === "system")?.content;
-    const userPrompt = messages.find((m) => m.role === "user")?.content;
+    const systemPromptContent = messages.find((m) => m.role === "system")?.content;
+    const userPromptContent = messages.find((m) => m.role === "user")?.content;
+
+    const systemPrompt =
+        systemPromptContent !== undefined
+            ? typeof systemPromptContent === "string"
+                ? systemPromptContent
+                : undefined
+            : undefined;
+    const userPrompt =
+        userPromptContent !== undefined
+            ? typeof userPromptContent === "string"
+                ? userPromptContent
+                : undefined
+            : undefined;
 
     return {
         model,

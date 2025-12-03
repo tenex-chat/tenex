@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * Generic service for managing replaceable Nostr events.
@@ -131,7 +131,7 @@ export class ReplaceableEventService {
      */
     async publish(): Promise<void> {
         try {
-            const event = this.ndk.createEvent({
+            const event = new NDKEvent(this.ndk, {
                 kind: this.kind,
                 content: "",
                 tags: this.tags,

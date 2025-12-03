@@ -155,5 +155,5 @@ export function createCreateProjectTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
+    }) as AISdkTool;
 } 

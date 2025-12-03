@@ -135,7 +135,6 @@ export class DelegationRegistry extends EventEmitter {
     // Persistence
     private persistencePath: string;
     private persistenceTimer?: NodeJS.Timeout;
-    private cleanupTimer?: NodeJS.Timeout;
     private isDirty = false;
 
     private constructor() {
@@ -162,7 +161,7 @@ export class DelegationRegistry extends EventEmitter {
         await DelegationRegistry.instance.restore();
 
         // Set up periodic cleanup (every hour)
-        DelegationRegistry.instance.cleanupTimer = setInterval(
+        setInterval(
             () => {
                 DelegationRegistry.instance.cleanupOldDelegations();
                 if (DelegationRegistry.instance.isDirty) {
@@ -710,7 +709,7 @@ export class DelegationRegistry extends EventEmitter {
                 if (record.completion?.event) {
                     serializedRecord.completion = {
                         ...record.completion,
-                        event: record.completion.event.serialize(),
+                        event: record.completion.event.serialize() as unknown as NDKEvent,
                     };
                 }
                 return [key, serializedRecord];
@@ -785,10 +784,12 @@ export class DelegationRegistry extends EventEmitter {
             // Deserialize NDKEvent objects when loading delegations
             const deserializedDelegations = validatedData.delegations.map(([key, record]) => {
                 if (record.completion?.event && typeof record.completion.event === "string") {
-                    const deserializedRecord = { ...record };
-                    deserializedRecord.completion = {
-                        ...record.completion,
-                        event: NDKEvent.deserialize(undefined, record.completion.event),
+                    const deserializedRecord: DelegationRecord = {
+                        ...record,
+                        completion: {
+                            ...record.completion,
+                            event: NDKEvent.deserialize(undefined, record.completion.event),
+                        },
                     };
                     return [key, deserializedRecord] as [string, DelegationRecord];
                 }

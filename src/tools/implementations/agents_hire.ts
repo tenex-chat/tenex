@@ -123,5 +123,5 @@ export function createAgentsHireTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
+    }) as AISdkTool;
 }
