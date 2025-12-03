@@ -298,47 +298,14 @@ async function handleReplyLogic(
 
     targetAgents = finalTargetAgents;
 
-    // Extract worktree tag if present
-    const worktreeTag = event.tags.find((tag) => tag[0] === "worktree" && tag[1]);
-    const targetWorktree = worktreeTag?.[1];
-
-    if (targetWorktree) {
-        logger.debug("Message specifies target worktree", {
-            eventId: event.id?.substring(0, 8),
-            worktree: targetWorktree,
-        });
-    }
-
     // 5. Execute each target agent in parallel
     const executionPromises = targetAgents.map(async (targetAgent) => {
-        // Determine working directory based on worktree selection
-        let workingDirectory = projectCtx.agentRegistry.getBasePath();
-
-        if (targetWorktree) {
-            // User specified a worktree - find its path
-            const { listWorktrees } = await import("../utils/git/worktree");
-            const worktrees = await listWorktrees(projectCtx.agentRegistry.getBasePath());
-            const selectedWorktree = worktrees.find((wt: { branch: string; path: string }) => wt.branch === targetWorktree);
-
-            if (selectedWorktree) {
-                workingDirectory = selectedWorktree.path;
-                logger.info("Using worktree for execution", {
-                    branch: targetWorktree,
-                    path: workingDirectory,
-                });
-            } else {
-                logger.warn("Specified worktree not found, using default", {
-                    requested: targetWorktree,
-                    available: worktrees.map((wt: { branch: string; path: string }) => wt.branch),
-                });
-            }
-        }
-
         // Create execution context with environment resolution from event
+        // The factory extracts branch tags and resolves worktrees internally
         const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath: workingDirectory,
+            projectPath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: event,
             conversationCoordinator,
         });
