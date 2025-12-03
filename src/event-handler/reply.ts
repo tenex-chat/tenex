@@ -1,9 +1,8 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import chalk from "chalk";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
+import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
 import type { ExecutionContext } from "../agents/execution/types";
 import type { AgentInstance } from "../agents/types";
 import type { Conversation, ConversationCoordinator } from "../conversations";
@@ -14,7 +13,6 @@ import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { formatAnyError } from "@/lib/error-formatter";
-import { getCurrentBranch } from "../utils/git/initializeGitRepo";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 
@@ -302,69 +300,14 @@ async function handleReplyLogic(
 
     // 5. Execute each target agent in parallel
     const executionPromises = targetAgents.map(async (targetAgent) => {
-        // Determine working directory and branch from event or current state
-        const projectPath = projectCtx.agentRegistry.getBasePath();
-        const branchTag = event.tags.find(t => t[0] === "branch")?.[1];
-
-        let workingDirectory: string;
-        let currentBranch: string;
-
-        if (branchTag) {
-            // Branch specified in event - find worktree by querying git
-            const { listWorktrees } = await import("@/utils/git/initializeGitRepo");
-            const worktrees = await listWorktrees(projectPath);
-            const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
-
-            if (matchingWorktree) {
-                workingDirectory = matchingWorktree.path;
-                currentBranch = branchTag;
-
-                logger.info("Using worktree from branch tag", {
-                    branch: branchTag,
-                    path: matchingWorktree.path
-                });
-            } else {
-                // Worktree doesn't exist - fall back to main worktree
-                logger.warn("Branch tag specified but worktree not found, using main", {
-                    branch: branchTag,
-                    availableWorktrees: worktrees.map(wt => wt.branch)
-                });
-                workingDirectory = projectPath;
-                try {
-                    currentBranch = await getCurrentBranch(projectPath);
-                } catch (error) {
-                    logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
-                    // Try fallback branch names
-                    currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
-                        .then(() => "main")
-                        .catch(() => "master");
-                }
-            }
-        } else {
-            // No branch tag - use current worktree
-            workingDirectory = projectPath;
-            try {
-                currentBranch = await getCurrentBranch(projectPath);
-            } catch (error) {
-                logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
-                // Try fallback branch names
-                currentBranch = await fs.access(path.join(projectPath, ".git/refs/heads/main"))
-                    .then(() => "main")
-                    .catch(() => "master");
-            }
-        }
-
-        // Build execution context for this agent
-        const executionContext: ExecutionContext = {
+        // Create execution context with environment resolution from event
+        const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath,
-            workingDirectory,
-            currentBranch,
+            projectPath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: event,
             conversationCoordinator,
-            getConversation: () => conversationCoordinator.getConversation(conversation.id),
-        };
+        });
 
         // Execute agent
         await executeAgent(executionContext, agentExecutor, conversation, projectManager, event);

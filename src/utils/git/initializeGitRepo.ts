@@ -180,6 +180,25 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 }
 
 /**
+ * Get current branch with fallback to main/master if detection fails
+ */
+export async function getCurrentBranchWithFallback(projectPath: string): Promise<string> {
+    try {
+        return await getCurrentBranch(projectPath);
+    } catch (error) {
+        logger.error("Failed to get current branch, trying fallbacks", { projectPath, error });
+
+        // Try fallback branch names
+        try {
+            await fs.access(path.join(projectPath, ".git/refs/heads/main"));
+            return "main";
+        } catch {
+            return "master";
+        }
+    }
+}
+
+/**
  * List all git worktrees
  */
 export async function listWorktrees(projectPath: string): Promise<Array<{ branch: string; path: string }>> {

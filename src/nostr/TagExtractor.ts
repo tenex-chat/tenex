@@ -117,7 +117,7 @@ export class TagExtractor {
     }
 
     /**
-     * Extract mode tags from an event (used for brainstorm events)
+     * Extract mode tags from an event
      * @param event - The event to extract mode tags from
      * @returns Array of mode tag values
      */

@@ -49,7 +49,7 @@ export class AgentExecutor {
     /**
      * Prepare an LLM request without executing it.
      * This method builds the messages and determines the tools/configuration
-     * but doesn't actually call the LLM. Used by BrainstormService.
+     * but doesn't actually call the LLM.
      */
     async prepareLLMRequest(
         agent: AgentInstance,
@@ -74,7 +74,6 @@ export class AgentExecutor {
         } else {
             // Build messages using the strategy if no history provided
             // Note: This requires a full ExecutionContext with conversationCoordinator
-            // For brainstorming, we'll build messages manually
             messages = [
                 {
                     role: "user",
