@@ -55,13 +55,13 @@ async function executeGeminiCli(
             model: "gemini-2.5-pro",
         });
 
-        llmService.on("content", async ({ delta }) => {
+        llmService.on("content", async ({ delta }: { delta: string }) => {
             logger.info("[gemini_cli] content", { delta });
             lastAssistantMessage += delta;
             messageCount++;
         });
 
-        llmService.on("complete", ({ steps }) => {
+        llmService.on("complete", ({ steps }: { steps: any[] }) => {
             logger.info("[gemini_cli] 🏁 STREAM COMPLETE EVENT:", {
                 stepCount: steps?.length || 0,
                 hasSteps: !!steps,
@@ -143,5 +143,5 @@ export function createGeminiCliTool(context: ExecutionContext): AISdkTool {
                 );
             }
         },
-    });
-} 
+    }) as AISdkTool;
+}
