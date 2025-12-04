@@ -87,8 +87,37 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
  */
 export function createShellTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
-        description:
-            "Execute shell commands in the project directory. Use for system operations like git, npm, build tools, etc. NEVER use for file operations - use read_path/write_path instead. NEVER use for code modifications - edit files directly. Restricted to project-manager agent only. Commands run with timeout (default 2 minutes). Always prefer specialized tools over shell commands when available.",
+        description: `Execute shell commands in the project directory.
+
+IMPORTANT ESCAPING & STRING HANDLING:
+- For complex/multi-line strings (git commits, PR bodies, JSON, etc.), ALWAYS use HEREDOC pattern:
+  command -m "\$(cat <<'EOF'
+  Your multi-line content here
+  With "quotes" and $variables that don't need escaping!
+  EOF
+  )"
+- Always quote file paths with spaces: cd "/path with spaces/file.txt"
+- NEVER use nested quotes without HEREDOC - they will fail
+- DO NOT use newlines to separate commands (newlines OK in quoted strings)
+
+COMMAND CHAINING:
+- For independent commands: Use multiple shell() calls in parallel
+- For dependent sequential commands: Use && to chain (e.g., "cmd1 && cmd2 && cmd3")
+- Use ; only when you don't care if earlier commands fail
+- Prefer absolute paths over cd: "pytest /foo/bar/tests" NOT "cd /foo/bar && pytest tests"
+
+WHEN NOT TO USE SHELL:
+- File operations: Use read_path/write_path (NOT cat/echo/sed/awk)
+- Code modifications: Use edit tools directly (NOT sed/awk)
+- File search: Use glob patterns (NOT find/ls)
+- Content search: Use grep tools (NOT grep/rg commands)
+
+OTHER RESTRICTIONS:
+- NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
+- Commands run with timeout (default 2 minutes, max 10 minutes)
+- Restricted to project-manager agent only
+
+Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.`,
 
         inputSchema: shellSchema,
 
