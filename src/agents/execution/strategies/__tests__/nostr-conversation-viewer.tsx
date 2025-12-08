@@ -4,7 +4,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
 import { DelegationRegistry } from "@/services/delegation";
-import { PubkeyNameRepository } from "@/services/PubkeyService";
+import { PubkeyService } from "@/services/PubkeyService";
 import NDK, { type NDKEvent, type NDKFilter } from "@nostr-dev-kit/ndk";
 import { Box, Text, render, useApp, useInput } from "ink";
 import type React from "react";
@@ -67,9 +67,9 @@ async function getParticipantName(pubkey: string): Promise<string> {
 
     // Try pubkey name repository for user profiles
     try {
-        const name = await PubkeyNameRepository.getInstance().getName(pubkey);
+        const name = await PubkeyService.getInstance().getName(pubkey);
         if (name !== "User") {
-            // PubkeyNameRepository returns "User" as default
+            // PubkeyService returns "User" as default
             return name;
         }
     } catch {

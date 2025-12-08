@@ -2,7 +2,7 @@ import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isProjectContextInitialized } from "@/services/ProjectContext";
 import { DelegationRegistry } from "@/services/delegation";
-import { getPubkeyNameRepository } from "@/services/PubkeyService";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -124,7 +124,7 @@ export class EventToModelMessage {
 
             if (delegationContext && delegationContext.status === "pending") {
                 // This is a response to an external delegation
-                const nameRepo = getPubkeyNameRepository();
+                const nameRepo = getPubkeyService();
                 const responderName = await nameRepo.getName(event.pubkey);
                 const targetAgentName = await nameRepo.getName(targetAgentPubkey);
 
@@ -159,7 +159,7 @@ export class EventToModelMessage {
         processedContent: string,
         targetAgentPubkey: string
     ): Promise<ModelMessage> {
-        const nameRepo = getPubkeyNameRepository();
+        const nameRepo = getPubkeyService();
 
         // User message - check if it's targeted to specific agents
         if (isEventFromUser(event)) {

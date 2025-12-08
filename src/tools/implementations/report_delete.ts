@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
-import { ReportManager } from "@/services/ReportService";
+import { ReportService } from "@/services/ReportService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -32,9 +32,9 @@ async function executeReportDelete(
         agent: context.agent.name,
     });
 
-    const reportManager = new ReportManager();
+    const reportService = new ReportService();
 
-    const articleId = await reportManager.deleteReport(slug, context.agent);
+    const articleId = await reportService.deleteReport(slug, context.agent);
 
     logger.info("✅ Report deleted successfully", {
         slug,

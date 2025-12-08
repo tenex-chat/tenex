@@ -7,7 +7,7 @@
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
-import { getPubkeyNameRepository } from "@/services/PubkeyService";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -117,7 +117,7 @@ export async function addRespondingToContext(
     triggeringEvent: NDKEvent,
     agentName?: string
 ): Promise<void> {
-    const nameRepo = getPubkeyNameRepository();
+    const nameRepo = getPubkeyService();
     const triggeringUserName = await nameRepo.getName(triggeringEvent.pubkey);
 
     messages.push({
