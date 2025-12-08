@@ -591,67 +591,74 @@ describe("E2E: Executor-Verification Cycle", () => {
 
 ---
 
-## Rebuilding Guidelines
+## Rebuilding the E2E Test Infrastructure
 
-### 1. **Start with MockLLMService**
-This is the foundation. It must:
-- Accept trigger conditions (systemPrompt, agentName, iterationCount, etc.)
-- Match incoming requests against triggers (priority-sorted)
-- Return appropriate responses (content + toolCalls)
-- Track conversation context (iterations, last agent, etc.)
+If this testing infrastructure ever needs to be rebuilt, follow these guidelines to ensure the core principles are maintained.
 
-### 2. **Build the Test Harness**
-Create the environment setup:
-- Temp directory creation
-- Real ConversationCoordinator (with file persistence)
-- Real AgentRegistry (but agents can be mocked/loaded from test data)
-- Mock external dependencies (Nostr relays, file system where appropriate)
+### 1. **Build the `MockLLMService` First**
+This is the cornerstone of the entire system. It must be able to:
+- **Accept a scenario** of trigger-response pairs.
+- **Match triggers** based on a variety of context attributes (agent name, iteration, message content, etc.).
+- **Prioritize matches** to handle overlapping triggers.
+- **Return scripted responses**, including both text content and tool calls.
+- **Track conversation state** internally to support context-aware triggers.
 
-### 3. **Implement executeConversationFlow()**
-The orchestration loop:
-- Execute orchestrator first each iteration
-- Parse routing decision
-- Execute target agents
-- Record everything in ExecutionTrace
-- Handle END conditions
-- Detect phase transitions
+### 2. **Develop the Test Harness (`setupE2ETest`)**
+This harness must create an isolated environment for each test, including:
+- A temporary directory for file system operations.
+- An instance of the real `ConversationCoordinator` to manage state.
+- A real `AgentRegistry` populated with the agents under test.
+- The `MockLLMService` to intercept LLM calls.
+- Mocks for any external I/O, such as Nostr relays or network requests.
 
-### 4. **Add Assertion Helpers**
-High-level, readable assertions:
-- Agent execution order
-- Phase transitions
-- Tool calls by agent
-- Feedback propagation
+### 3. **Implement the Orchestration Loop (`executeConversationFlow`)**
+This function drives the multi-agent conversation, and its responsibilities include:
+- Executing the orchestrator agent at the start of each iteration.
+- Parsing the orchestrator's routing decisions.
+- Executing the designated agents in the correct order.
+- Recording every action (agent executions, tool calls, routing decisions) in an `ExecutionTrace`.
+- Handling termination conditions, such as a maximum number of iterations or an `END` signal.
 
-### 5. **Create Predefined Scenarios**
-Common workflows as reusable scenarios:
-- Simple: user → agent → response
-- Complex: multi-agent with feedback loops
-- Edge cases: errors, timeouts, state recovery
+### 4. **Create High-Level Assertion Helpers**
+To keep tests readable and maintainable, create a suite of assertion functions that operate on the `ExecutionTrace`, such as:
+- `assertAgentSequence`: Verifies that agents executed in the expected order.
+- `assertPhaseTransitions`: Checks that the workflow moved through the correct phases.
+- `assertToolCalls`: Ensures that specific tools were called with the correct parameters.
+- `assertFeedbackPropagated`: Confirms that feedback from one agent was received by another.
 
----
-
-## Key Principles
-
-1. **Determinism First** - Same input = same output, always
-2. **Context-Aware** - Mock responses based on full conversation context
-3. **Traceability** - Record everything for debugging
-4. **Readability** - Tests should read like documentation
-5. **Isolation** - Each test is completely independent
-6. **Real Components** - Use real ConversationCoordinator, real AgentRegistry where possible
-7. **Mock Boundaries** - Only mock LLM API and external I/O (Nostr, network)
+### 5. **Package Reusable Scenarios**
+Define common agent workflows as reusable scenarios that can be imported and used across multiple tests. Good candidates for scenarios include:
+- Error handling and recovery.
+- Multi-round feedback loops.
+- State persistence and resumption.
 
 ---
 
-## What Makes This Powerful
+## Key Architectural Principles
 
-1. **Fast** - No real LLM API calls = tests run in seconds
-2. **Deterministic** - No flaky tests due to LLM variance
-3. **Complex Workflows** - Can test multi-agent, multi-turn interactions
-4. **Edge Cases** - Easy to test error conditions, timeouts, etc.
-5. **Debuggable** - Full execution trace shows exactly what happened
-6. **Maintainable** - Scenarios are reusable, assertions are high-level
-7. **Documentation** - Tests serve as executable documentation of workflows
+This testing architecture is built on a foundation of seven key principles:
+
+1. **Determinism First**: Every test run must produce the exact same result. All sources of non-determinism, especially the LLM, are replaced with predictable mocks.
+2. **Context-Aware Mocking**: The mock LLM's responses are not static; they are dynamically chosen based on the full context of the conversation, including which agent is speaking, what has been said before, and how many times the agent has been called.
+3. **Comprehensive Traceability**: Every significant event in the workflow is recorded in an `ExecutionTrace`. This provides a complete audit trail that is used for both assertions and debugging.
+4. **High-Level, Readable Assertions**: Tests should be easy to read and understand, even for those unfamiliar with the implementation details. Assertions are expressed in terms of the workflow itself (e.g., "the executor was called after the planner").
+5. **Strict Test Isolation**: Each test runs in a completely isolated environment, with its own temporary file system, conversation state, and mock LLM scenario. This prevents tests from interfering with one another.
+6. **Use Real Components Where Possible**: The system under test should be as close to the production version as possible. We use the real `ConversationCoordinator` and `AgentRegistry`, only mocking the boundaries of the system (the LLM and external I/O).
+7. **Clear Mock Boundaries**: Mocks are used sparingly and strategically. We only mock the LLM API and external network requests (e.g., Nostr relays), ensuring that the core logic of the agent coordination system is tested thoroughly.
+
+---
+
+## What Makes This Architecture Powerful
+
+The combination of these principles results in a testing system that is:
+
+- **Fast**: With no real LLM API calls, the entire test suite can run in seconds, enabling rapid feedback during development.
+- **Deterministic**: Tests are 100% repeatable, eliminating the frustration of flaky tests that pass or fail unpredictably.
+- **Capable of Testing Complex Workflows**: The context-aware mocking allows for the scripting of sophisticated multi-agent, multi-turn interactions that would be impossible to test reliably with a real LLM.
+- **Excellent for Edge Cases**: It is easy to simulate error conditions, timeouts, and other unusual situations, ensuring the system is resilient.
+- **Highly Debuggable**: When a test fails, the `ExecutionTrace` provides a detailed, step-by-step account of what happened, making it easy to pinpoint the root cause.
+- **Maintainable**: Scenarios are reusable, and the high-level assertions make it easy to update tests when the underlying workflow changes.
+- **Executable Documentation**: The tests themselves serve as clear, executable documentation of the system's expected behavior.
 
 ---
 

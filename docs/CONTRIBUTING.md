@@ -192,16 +192,16 @@ test: add tests for RAG service
 ```
 
 ### Pre-Commit Hook
-Our pre-commit hook runs architecture checks using Claude Code:
-- Checks for circular dependencies
-- Verifies layer boundaries
-- Validates naming conventions
-- Suggests improvements
+Our pre-commit hook automatically runs `bun run lint:architecture` to enforce architectural consistency. This check validates:
+- **No Circular Dependencies**: Ensures that our layered architecture is respected.
+- **Layer Boundaries**: Verifies that lower layers do not import from higher layers (e.g., `lib/` cannot import from `services/`).
+- **Naming Conventions**: Checks for consistent service and file naming.
 
-**If blocked:**
-1. Read the error message carefully
-2. Fix the architectural violation
-3. Or ask in PR if you believe it's a false positive
+**If your commit is blocked:**
+1. **Read the error message carefully.** The architecture linter provides specific feedback on which files and imports are causing the violation.
+2. **Fix the architectural issue.** This usually involves moving code to the correct layer or refactoring to avoid improper dependencies.
+3. **Consult [ARCHITECTURE.md](./ARCHITECTURE.md)** if you are unsure where a piece of code belongs.
+4. If you believe the hook is incorrect, ask for a second opinion in your pull request.
 
 ---
 
@@ -326,18 +326,18 @@ export const my_tool = tool({
 
 ---
 
-## Boy Scout Rule
+## The Boy Scout Rule
 
-**Always leave code better than you found it.**
+**Always leave the code better than you found it.**
 
-When working in a file:
-- Fix obvious issues nearby
-- Improve naming if unclear
-- Add comments if confusing
-- Move misplaced code to correct layer
-- Update imports to use @/ alias
+When working in a file, take the opportunity to make small improvements:
+- Fix typos or unclear comments.
+- Improve variable names for clarity.
+- Move misplaced functions to their correct architectural layer.
+- Update imports to use the `@/` alias.
+- Resolve any nearby TODOs if they are trivial.
 
-**Small improvements compound over time.**
+These small, incremental improvements are crucial for maintaining the long-term health and quality of the codebase. Every contribution, no matter how small, is an opportunity to improve our collective environment.
 
 ---
 
@@ -385,10 +385,12 @@ When refactoring legacy code:
 5. Group into subdirectories when beneficial
 
 ### Breaking Changes
-**This is unreleased software** - no backwards compatibility required.
-- Break things to make them better
-- Clean, modern code over legacy support
-- No deprecated patterns
+As this project is in active development and pre-release, we do not guarantee backward compatibility. We prioritize code quality, architectural integrity, and innovation over maintaining legacy interfaces.
+
+**Guidelines for making breaking changes:**
+- **Do not hesitate to refactor** if it improves the codebase.
+- **Update all relevant documentation** in the same pull request.
+- **Communicate significant changes** to the team to ensure everyone is aligned.
 
 ---
 

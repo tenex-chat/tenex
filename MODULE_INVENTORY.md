@@ -129,7 +129,7 @@ Use this section to understand each service’s scope and dependencies:
 
 9. **Documentation cadence**: When reorganizing files or adding modules, update both this inventory and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) in the same PR. Mention the change under "Mixed Patterns & Action Items" until the follow-up refactor completes.
 
-10. **Boy Scout Rule**: Leave code better than you found it. Fix obvious issues, improve naming, move misplaced code to correct layers.
+10. **Boy Scout Rule**: Always leave the code better than you found it. When you touch a file, take a moment to fix obvious issues, improve naming, move misplaced code to its correct layer, or clarify comments. Small, incremental improvements are key to our long-term success.
 
 ## Mixed Patterns & Action Items
 
@@ -157,12 +157,20 @@ Use this section to understand each service’s scope and dependencies:
 - **Status publisher naming**: Three status publishers exist (`daemon/StatusPublisher.ts` as `DaemonStatusService`, `services/status/StatusPublisher.ts`, `services/OperationsStatusPublisher.ts`). Consider renaming for clarity: `DaemonStatusService`, `ProjectStatusService`, `OperationsStatusService`.
 
 ### Target State (Long-Term Vision)
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for detailed target architecture. Key goals:
-1. ✅ Strict layer separation with zero upward dependencies
-2. ✅ Pure utilities isolated in `lib/`
-3. 🔄 Consistent "Service" suffix for all business logic
-4. ⏳ Subdirectory grouping for related services
-5. ⏳ Dependency injection pattern throughout
-6. ⏳ Direct imports, no barrel exports
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for our detailed architectural roadmap. The key pillars of our target state are:
 
-Log every relocation, ambiguity, or clean-up plan here so the roadmap stays discoverable.
+- **Strict Layering**: A clean, unidirectional dependency flow with zero upward dependencies.
+- **Service-Oriented**: All stateful business logic encapsulated in services with consistent naming and clear boundaries.
+- **Explicitness**: No barrel exports and a preference for direct imports to make dependencies clear.
+- **Testability**: A comprehensive suite of unit and integration tests, facilitated by dependency injection.
+- **Discoverability**: Well-organized modules and up-to-date documentation that make the codebase easy to navigate.
+
+**Completed Goals:**
+- ✅ Strict layer separation with zero upward dependencies.
+- ✅ Pure utilities are fully isolated in `lib/`.
+- ✅ All services now use the "Service" suffix.
+
+**Ongoing Goals:**
+- ⏳ **Subdirectory Grouping**: Continue to group related services into subdirectories as domains grow.
+- ⏳ **Dependency Injection**: Consistently apply the dependency injection pattern across all services.
+- ⏳ **No Barrel Exports**: Continue to phase out any remaining barrel exports.
