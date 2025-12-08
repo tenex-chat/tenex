@@ -1,4 +1,4 @@
-import { type Pipeline, pipeline } from "@xenova/transformers";
+import { type FeatureExtractionPipeline, type Tensor, pipeline } from "@huggingface/transformers";
 
 export interface EmbeddingProvider {
     /**
@@ -23,10 +23,10 @@ export interface EmbeddingProvider {
 }
 
 /**
- * Local transformer-based embedding provider using Xenova/transformers
+ * Local transformer-based embedding provider using @huggingface/transformers
  */
 export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
-    private pipeline: Pipeline | null = null;
+    private extractorPipeline: FeatureExtractionPipeline | null = null;
     private modelId: string;
     private dimensions: number | null = null;
     private initializationPromise: Promise<void> | null = null;
@@ -44,10 +44,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
         try {
             const pipe = await this.ensurePipeline();
             const output = await pipe("test", { pooling: "mean", normalize: true });
-
-            const embedding =
-                output.data instanceof Float32Array ? output.data : new Float32Array(output.data);
-
+            const embedding = this.tensorToFloat32Array(output);
             this.dimensions = embedding.length;
         } catch (error) {
             throw new Error(
@@ -58,11 +55,17 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
         }
     }
 
-    private async ensurePipeline(): Promise<Pipeline> {
-        if (!this.pipeline) {
-            this.pipeline = (await pipeline("feature-extraction", this.modelId)) as Pipeline;
+    private tensorToFloat32Array(tensor: Tensor): Float32Array {
+        return tensor.data instanceof Float32Array
+            ? tensor.data
+            : new Float32Array(tensor.data as ArrayLike<number>);
+    }
+
+    private async ensurePipeline(): Promise<FeatureExtractionPipeline> {
+        if (!this.extractorPipeline) {
+            this.extractorPipeline = await pipeline("feature-extraction", this.modelId);
         }
-        return this.pipeline;
+        return this.extractorPipeline;
     }
 
     public async embed(text: string): Promise<Float32Array> {
@@ -77,12 +80,7 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
 
         for (const text of texts) {
             const output = await pipe(text, { pooling: "mean", normalize: true });
-
-            if (output.data instanceof Float32Array) {
-                results.push(output.data);
-            } else {
-                results.push(new Float32Array(output.data));
-            }
+            results.push(this.tensorToFloat32Array(output));
         }
 
         return results;
