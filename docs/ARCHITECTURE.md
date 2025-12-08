@@ -186,10 +186,7 @@ RAGService
 SchedulerService
 DelegationService
 
-// ⚠️ Legacy (acceptable but rename when convenient)
-ReportManager
-PubkeyNameRepository
-DelegationRegistry
+// ✅ All services now use the "Service" suffix.
 ```
 
 **Goal:** Consistent "Service" suffix for all business logic classes.
@@ -424,15 +421,20 @@ export const somethingService = new SomethingService(
 
 ## Evolution Strategy
 
-### Current State → Target State
+### Completed Improvements
+
+- **Pure Utilities in `lib/`**: All pure, framework-agnostic utilities are now isolated in the `lib/` directory with zero TENEX dependencies.
+- **No Circular Dependencies**: All circular dependencies between layers have been resolved.
+- **Consistent Service Naming**: All services have been refactored to use the `Service` suffix, removing legacy names like `ReportManager` and `PubkeyNameRepository`.
+- **Git Utilities Consolidated**: All Git-related helpers, including worktree management, are now centralized in `utils/git/`.
+- **Configuration Architecture**: A centralized `ConfigService` now manages all configuration, ensuring consistent and predictable settings management.
+
+### Target State
 
 **We are incrementally moving toward:**
-1. ✅ Pure utilities in `lib/` (DONE)
-2. ✅ No circular dependencies (DONE)
-3. 🔄 Consistent "Service" suffix (in progress)
-4. ⏳ Subdirectory grouping for related services (gradual)
-5. ⏳ Dependency injection pattern (gradual)
-6. ⏳ Remove main services barrel export (gradual)
+1. ⏳ **Subdirectory Grouping for Services**: Gradually group related services into subdirectories for better organization.
+2. ⏳ **Dependency Injection Pattern**: Continue to adopt dependency injection for all services to improve testability and clarity.
+3. ⏳ **Removal of Barrel Exports**: Phase out all remaining barrel exports in favor of direct imports.
 
 **Philosophy:** Make incremental improvements. Leave code better than you found it (Boy Scout Rule).
 
