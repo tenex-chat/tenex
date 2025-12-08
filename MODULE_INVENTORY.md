@@ -66,13 +66,13 @@ Use this section to understand each service’s scope and dependencies:
 | `DynamicToolService` | `src/services/DynamicToolService.ts` | Watches `~/.tenex/tools`, compiles TS tool factories, and exposes them to the tool registry. Uses Bun file APIs and `agents/execution` contexts. |
 | `EmbeddingProvider` | `src/services/EmbeddingProvider.ts` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |
 | `LLMOperationsRegistry` | `src/services/LLMOperationsRegistry.ts` | Tracks active LLM requests per project for throttling and telemetry; referenced by scheduler/status publishers. |
-| `NDKAgentDiscovery` | `src/services/NDKAgentDiscovery.ts` | Subscribes to relays to discover external agents, caches metadata via `PubkeyNameRepository`. |
+| `NDKAgentDiscovery` | `src/services/NDKAgentDiscovery.ts` | Subscribes to relays to discover external agents, caches metadata via `PubkeyService`. |
 | `NudgeService` | `src/services/NudgeService.ts` | Emits reminders/prompts to stalled agents or phases; depends on scheduler + conversations. |
 | `OperationsStatusPublisher` & `status/` | `src/services/OperationsStatusPublisher.ts`, `src/services/status/*` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
 | `ProjectContext` + `ProjectContextStore` | `src/services/ProjectContext*.ts` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
-| `PubkeyNameRepository` | `src/services/PubkeyNameRepository.ts` | Provides caching and lookup for pubkey display names from Nostr. |
+| `PubkeyService` | `src/services/PubkeyService.ts` | Provides caching and lookup for pubkey display names from Nostr. |
 | `RAG*` services | `src/services/rag/*.ts` | Manage LanceDB collections, document ingestion, query APIs, and subscription services. Tools in `src/tools/implementations/rag_*` should call these. |
-| `ReportManager` | `src/services/ReportManager.ts` | Creates, lists, updates task reports; used by reporting tools. |
+| `ReportService` | `src/services/ReportService.ts` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/SchedulerService.ts` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
 | `MCP` services | `src/services/mcp/*` | Install/manage MCP servers, expose them to dynamic tools and CLI setup flows. |
 | `EmbeddingProviderFactory` & `RagSubscriptionService` | `src/services/rag` | Glue for RAG ingestion/subscription workflows, bridging `EmbeddingProvider` and `tools`. |
@@ -138,7 +138,7 @@ Use this section to understand each service’s scope and dependencies:
 - **Pure Utilities to lib/ (COMPLETED 2025-01-19)**: Moved `string.ts`, `validation.ts`, `formatting.ts`, `error-formatter.ts`, and `time.ts` from `utils/` to `lib/`. These are now pure utilities with zero TENEX dependencies.
 - **Git Utilities Consolidated (COMPLETED 2025-01-19)**: Moved `utils/worktree/` into `utils/git/worktree.ts` for better organization.
 - **Circular Dependency Fixed (COMPLETED 2025-01-19)**: Removed `lib/fs/filesystem.ts` dependency on `utils/logger`. Now uses `console.error` to maintain layer separation.
-- **Service File Naming (COMPLETED 2025-01-19)**: Renamed `ReportManager.ts` → `ReportService.ts` and `PubkeyNameRepository.ts` → `PubkeyService.ts` for consistency. Class names remain unchanged for now (gradual migration).
+- **Service Naming (COMPLETED 2025-01-19)**: Renamed `ReportManager.ts` → `ReportService.ts` and `PubkeyNameRepository.ts` → `PubkeyService.ts` for consistency. Also renamed the classes `ReportManager` → `ReportService` and `PubkeyNameRepository` → `PubkeyService`.
 
 ### Architecture Guidelines Added (2025-01-19)
 - Created [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) with comprehensive architectural principles
@@ -147,7 +147,7 @@ Use this section to understand each service’s scope and dependencies:
 - Added `lint:architecture` script for static architecture checks
 
 ### Ongoing Improvements (Gradual Migration)
-- **Service naming consistency**: Gradually rename remaining services to use "Service" suffix (e.g., `ReportManager` → `ReportService` class, `PubkeyNameRepository` → `PubkeyService` class). Files already renamed; class renames will follow in separate PRs.
+- **Service naming consistency**: Gradually rename remaining services to use "Service" suffix.
 - **Service subdirectory grouping**: Group related services into subdirectories (e.g., `services/delegation/`, `services/reports/`) when 3+ related files exist.
 - **Dependency injection pattern**: Gradually convert singletons to DI pattern with exported convenience instances.
 - **Remove barrel exports**: Phase out `services/index.ts` barrel export in favor of direct imports from service subdirectories.

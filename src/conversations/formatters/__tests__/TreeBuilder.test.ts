@@ -2,9 +2,9 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { describe, expect, it, mock } from "bun:test";
 import { TreeBuilder } from "../utils/TreeBuilder";
 
-// Mock the PubkeyNameRepository to avoid NDK initialization
+// Mock the PubkeyService to avoid NDK initialization
 mock.module("@/services/PubkeyService", () => ({
-    getPubkeyNameRepository: () => ({
+    getPubkeyService: () => ({
         getName: mock((pubkey: string) => pubkey), // Just return pubkey as name
     }),
 }));

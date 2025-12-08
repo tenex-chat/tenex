@@ -21,8 +21,8 @@ interface CacheEntry {
  * Central repository for mapping pubkeys to human-readable names.
  * Handles both agent pubkeys (mapped to slugs) and user pubkeys (fetched from kind:0 events).
  */
-export class PubkeyNameRepository {
-    private static instance: PubkeyNameRepository;
+export class PubkeyService {
+    private static instance: PubkeyService;
 
     private userProfileCache: Map<Hexpubkey, CacheEntry> = new Map();
     private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -33,11 +33,11 @@ export class PubkeyNameRepository {
     /**
      * Get singleton instance
      */
-    static getInstance(): PubkeyNameRepository {
-        if (!PubkeyNameRepository.instance) {
-            PubkeyNameRepository.instance = new PubkeyNameRepository();
+    static getInstance(): PubkeyService {
+        if (!PubkeyService.instance) {
+            PubkeyService.instance = new PubkeyService();
         }
-        return PubkeyNameRepository.instance;
+        return PubkeyService.instance;
     }
 
     /**
@@ -219,5 +219,5 @@ export class PubkeyNameRepository {
 }
 
 // Export singleton instance getter for convenience
-export const getPubkeyNameRepository = (): PubkeyNameRepository =>
-    PubkeyNameRepository.getInstance();
+export const getPubkeyService = (): PubkeyService =>
+    PubkeyService.getInstance();

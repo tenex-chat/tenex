@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
-import { ReportManager } from "@/services/ReportService";
+import { ReportService } from "@/services/ReportService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -49,7 +49,7 @@ async function executeReportsList(
         agent: context.agent.name,
     });
 
-    const reportManager = new ReportManager();
+    const reportService = new ReportService();
 
     // Determine which agent pubkeys to use
     let agentPubkeys: string[] | undefined;
@@ -59,11 +59,11 @@ async function executeReportsList(
         agentPubkeys = [context.agent.pubkey];
     } else {
         // Get all project agent pubkeys
-        agentPubkeys = reportManager.getAllProjectAgentPubkeys();
+        agentPubkeys = reportService.getAllProjectAgentPubkeys();
     }
 
     // Fetch the reports
-    const reports = await reportManager.listReports(agentPubkeys);
+    const reports = await reportService.listReports(agentPubkeys);
 
     // Calculate summary statistics
     const byAgent: Record<string, number> = {};
