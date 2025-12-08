@@ -24,10 +24,11 @@ export async function runInteractiveSetup(): Promise<TenexConfig> {
     }
 
     const tenexConfig: TenexConfig = {
+        ...currentConfig,
         whitelistedPubkeys: pubkeys,
     };
 
-    // Step 2: Save basic configuration
+    // Step 2: Save basic configuration (preserving existing settings)
     await config.saveGlobalConfig(tenexConfig);
 
     // Step 3: Set up LLM configurations if needed
