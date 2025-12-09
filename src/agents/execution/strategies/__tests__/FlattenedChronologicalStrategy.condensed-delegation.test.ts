@@ -130,9 +130,9 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         };
 
         await delegationRegistry.registerDelegation({
-            delegationEventId: delegationEvent.id,
-            recipients: [
+            delegations: [
                 {
+                    eventId: delegationEvent.id,
                     pubkey: NOSTR_EXPERT_PUBKEY,
                     request: "Tell me one fact about Nostr, just 2 sentences max",
                     phase: "chat",
@@ -140,7 +140,6 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
             ],
             delegatingAgent: pmAgent,
             rootConversationId: CONVERSATION_ID,
-            originalRequest: "Tell me one fact about Nostr, just 2 sentences max",
         });
 
         // Update the delegation record to include the slug (normally done by DelegationService)
