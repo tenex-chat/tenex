@@ -62,8 +62,8 @@ export function normalizeAgentTools(
         return !DELEGATE_TOOLS.includes(typedTool) && !PHASE_MANAGEMENT_TOOLS.includes(typedTool);
     });
 
-    // Add delegation tools based on phases
-    const delegateTools = getDelegateToolsForAgent(agent);
+    // Add delegation tools based on phases (pass requestedTools to allow phase tool bootstrapping)
+    const delegateTools = getDelegateToolsForAgent(agent, requestedTools);
     toolNames.push(...delegateTools);
 
     // Ensure core tools are included

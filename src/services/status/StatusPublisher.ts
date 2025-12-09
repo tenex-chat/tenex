@@ -337,34 +337,32 @@ export class StatusPublisher {
                     }
                 }
 
-                // If agent has MCP access, add all MCP tools
-                if (agent.mcp) {
-                    try {
-                        const mcpTools = mcpService.getCachedTools();
-                        for (const [toolNameKey] of Object.entries(mcpTools)) {
-                            // Tool name is the key
+                // Add all MCP tools for this agent
+                try {
+                    const mcpTools = mcpService.getCachedTools();
+                    for (const [toolNameKey] of Object.entries(mcpTools)) {
+                        // Tool name is the key
 
-                            // Skip if somehow there's no tool name (shouldn't happen with object keys)
-                            if (!toolNameKey) {
-                                continue;
-                            }
-
-                            const toolName = toolNameKey;
-
-                            if (!toolAgentMap.has(toolName)) {
-                                toolAgentMap.set(toolName, new Set());
-                            }
-                            const toolAgents = toolAgentMap.get(toolName);
-                            if (toolAgents) {
-                                toolAgents.add(agentSlug);
-                            }
+                        // Skip if somehow there's no tool name (shouldn't happen with object keys)
+                        if (!toolNameKey) {
+                            continue;
                         }
-                    } catch (err) {
-                        // MCP tools might not be available yet, that's okay
-                        logger.warn(
-                            `Could not get MCP tools for status event: ${formatAnyError(err)}`
-                        );
+
+                        const toolName = toolNameKey;
+
+                        if (!toolAgentMap.has(toolName)) {
+                            toolAgentMap.set(toolName, new Set());
+                        }
+                        const toolAgents = toolAgentMap.get(toolName);
+                        if (toolAgents) {
+                            toolAgents.add(agentSlug);
+                        }
                     }
+                } catch (err) {
+                    // MCP tools might not be available yet, that's okay
+                    logger.warn(
+                        `Could not get MCP tools for status event: ${formatAnyError(err)}`
+                    );
                 }
             }
 

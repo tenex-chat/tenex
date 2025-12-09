@@ -67,7 +67,10 @@ export const PHASE_MANAGEMENT_TOOLS: ToolName[] = ["phase_add", "phase_remove"];
  * Get the correct delegate tools for an agent based on whether they have phases defined
  * This is the SINGLE source of truth for delegate tool assignment
  */
-export function getDelegateToolsForAgent(agent: AgentPhaseInfo): ToolName[] {
+export function getDelegateToolsForAgent(
+    agent: AgentPhaseInfo,
+    requestedTools?: string[]
+): ToolName[] {
     const tools: ToolName[] = [];
 
     // All agents get ask tool
@@ -76,10 +79,14 @@ export function getDelegateToolsForAgent(agent: AgentPhaseInfo): ToolName[] {
     // Check if agent has phases defined
     const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
 
-    if (hasPhases) {
-        // Agents with phases get delegate_phase
+    // Check if phase tools were explicitly requested (allows bootstrapping phases)
+    const phaseToolsRequested =
+        requestedTools?.includes("phase_add") || requestedTools?.includes("phase_remove");
+
+    if (hasPhases || phaseToolsRequested) {
+        // Agents with phases (or explicitly requesting phase tools) get delegate_phase
         tools.push("delegate_phase");
-        // Also add phase management tools by default for agents with phases
+        // Also add phase management tools
         tools.push("phase_add", "phase_remove");
     } else {
         // Agents without phases get delegate

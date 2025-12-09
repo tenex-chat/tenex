@@ -48,6 +48,7 @@ import { createCancelScheduledTaskTool } from "./implementations/schedule_task_c
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
+import { createWriteFileTool } from "./implementations/write_file";
 
 /**
  * Registry of tool factories
@@ -88,6 +89,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     phase_remove: createRemovePhaseTool,
 
     read_path: createReadPathTool,
+    write_file: createWriteFileTool,
 
     // Report tools
     report_delete: createReportDeleteTool,
@@ -184,14 +186,14 @@ export function getToolsObject(
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
-    // Separate MCP tools, dynamic tools, and regular tools
+    // Separate dynamic tools and regular tools (MCP tools are added automatically)
     const regularTools: ToolName[] = [];
-    const mcpToolNames: string[] = [];
     const dynamicToolNames: string[] = [];
 
     for (const name of names) {
         if (name.startsWith("mcp__")) {
-            mcpToolNames.push(name);
+            // Skip MCP tool names - we'll add all available MCP tools automatically
+            continue;
         } else if (name in toolFactories) {
             regularTools.push(name as ToolName);
         } else if (dynamicToolService.isDynamicTool(name)) {
@@ -220,27 +222,16 @@ export function getToolsObject(
         }
     }
 
-    // Add MCP tools if any requested
-    if (mcpToolNames.length > 0) {
-        try {
-            // Get MCP tools from service
-            const allMcpTools = mcpService.getCachedTools();
+    // Add all available MCP tools
+    try {
+        // Get all MCP tools from service
+        const allMcpTools = mcpService.getCachedTools();
 
-            for (const mcpToolName of mcpToolNames) {
-                // getCachedTools returns an object keyed by tool name
-                const mcpTool = allMcpTools[mcpToolName];
-                if (mcpTool) {
-                    // MCP tools from AI SDK already have the correct structure
-                    // They are CoreTool instances with description, parameters, and execute
-                    tools[mcpToolName] = mcpTool;
-                } else {
-                    console.debug(`MCP tool '${mcpToolName}' not found in cached tools`);
-                }
-            }
-        } catch (error) {
-            // MCP not available, continue without MCP tools
-            console.debug("Could not load MCP tools:", error);
-        }
+        // Add all MCP tools to the tools object
+        Object.assign(tools, allMcpTools);
+    } catch (error) {
+        // MCP not available, continue without MCP tools
+        console.debug("Could not load MCP tools:", error);
     }
 
     return tools;

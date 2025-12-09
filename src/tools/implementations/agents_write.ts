@@ -126,6 +126,15 @@ async function executeAgentsWrite(
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
 
+    // Get project d-tag for consistent storage keys
+    // AgentRegistry uses dTag to lookup agents, so we must use the same key format
+    const projectDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
+    if (!projectDTag) {
+        throw new Error(
+            "Project is missing d-tag. Cannot associate agent with project without a valid d-tag identifier."
+        );
+    }
+
     // Create StoredAgent using factory
     const storedAgent = createStoredAgent({
         nsec: signer.nsec,
@@ -139,7 +148,7 @@ async function executeAgentsWrite(
         tools,
         phases,
         eventId: undefined, // Locally created agents don't have event IDs
-        projects: [projectContext.project.tagId()],
+        projects: [projectDTag], // Use d-tag for consistent storage/retrieval
     });
 
     // Save to storage

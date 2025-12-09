@@ -202,18 +202,6 @@ export class AgentSupervisor {
                 });
             }
 
-            // Check if we're stuck in a loop with the same issue
-            if (this.lastInvalidReason === reason) {
-                logger.warn(
-                    "[AgentSupervisor] ⚠️ Agent stuck with no completion events, forcing completion",
-                    {
-                        agent: this.agent.slug,
-                        attempts: this.continuationAttempts,
-                    }
-                );
-                return true;
-            }
-
             this.invalidReason = reason;
             this.lastInvalidReason = reason;
             this.continuationAttempts++;
@@ -238,18 +226,6 @@ export class AgentSupervisor {
                     "validation.attempts": this.continuationAttempts,
                     "validation.has_reasoning": !!completionEvent.reasoning,
                 });
-            }
-
-            // Check if we're stuck in a loop with the same issue
-            if (this.lastInvalidReason === reason) {
-                logger.warn(
-                    "[AgentSupervisor] ⚠️ Agent stuck responding with empty content, forcing completion",
-                    {
-                        agent: this.agent.slug,
-                        attempts: this.continuationAttempts,
-                    }
-                );
-                return true;
             }
 
             this.invalidReason = reason;
@@ -287,19 +263,6 @@ export class AgentSupervisor {
                 const shouldContinue = await this.validatePhaseSkipping(completionEvent.message);
 
                 if (shouldContinue) {
-                    // Check if we're stuck in a loop asking to execute phases
-                    if (this.lastInvalidReason === shouldContinue) {
-                        logger.warn(
-                            "[AgentSupervisor] ⚠️ Agent stuck ignoring phase execution request, forcing completion",
-                            {
-                                agent: this.agent.slug,
-                                attempts: this.continuationAttempts,
-                                unusedPhases: phaseCheck.unusedPhases,
-                            }
-                        );
-                        return true;
-                    }
-
                     logger.info("[AgentSupervisor] ❌ INVALID: Phases need to be executed", {
                         agent: this.agent.slug,
                         unusedPhases: phaseCheck.unusedPhases,
@@ -338,19 +301,6 @@ export class AgentSupervisor {
             );
 
             if (cleanupPrompt) {
-                // Check if we're stuck in a loop asking about worktree cleanup
-                if (this.lastInvalidReason === cleanupPrompt) {
-                    logger.warn(
-                        "[AgentSupervisor] ⚠️ Agent stuck ignoring worktree cleanup request, forcing completion",
-                        {
-                            agent: this.agent.slug,
-                            attempts: this.continuationAttempts,
-                            worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
-                        }
-                    );
-                    return true;
-                }
-
                 logger.info("[AgentSupervisor] ❌ INVALID: Worktrees need cleanup decision", {
                     agent: this.agent.slug,
                     worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),

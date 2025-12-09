@@ -16,6 +16,7 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
+    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -23,7 +24,6 @@ import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
 import type { z } from "zod";
-import { throttlingMiddleware } from "./middleware/throttlingMiddleware";
 import { providerSupportsStreaming } from "./provider-configs";
 import { isAISdkProvider } from "./type-guards";
 import type { LanguageModelUsageWithCostUsd } from "./types";
@@ -175,18 +175,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     }
 
     /**
-     * Determine if throttling middleware should be used for this provider
-     * claudeCode handles its own streaming optimization, so it doesn't need throttling
-     */
-    private shouldUseThrottlingMiddleware(): boolean {
-        return this.provider !== "claudeCode";
-    }
-
-    /**
      * Get a language model instance.
      * For Claude Code: Creates model with system prompt from messages.
      * For standard providers: Gets model from registry.
-     * Wraps all models with throttling middleware and extract-reasoning-middleware.
+     * Wraps all models with extract-reasoning-middleware.
      */
     private getLanguageModel(messages?: ModelMessage[], enableThrottling = true): LanguageModel {
         let baseModel: LanguageModel;
@@ -220,18 +212,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Build middleware chain
         const middlewares: LanguageModelMiddleware[] = [];
 
-        // Add throttling middleware for streaming (when enabled)
-        // Check if this provider should use throttling middleware
-        if (enableThrottling && this.shouldUseThrottlingMiddleware()) {
-            middlewares.push(
-                throttlingMiddleware({
-                    flushInterval: 500, // Flush every 500ms after first chunk
-                    chunking: "line", // Use line-based chunking for clean breaks
-                })
-            );
-        }
-
-        // Add extract-reasoning-middleware to handle thinking tags
+        // Extract reasoning from thinking tags
         middlewares.push(
             extractReasoningMiddleware({
                 tagName: "thinking",
@@ -240,7 +221,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             })
         );
 
-        // Wrap with all middlewares
+        // Wrap with middlewares
         const wrappedModel = wrapLanguageModel({
             model: baseModel as any,
             middleware: middlewares,
@@ -532,7 +513,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            tools: tools as any,
+            // Don't pass tools for claudeCode - it has its own built-in tools that conflict
+            ...(this.provider !== "claudeCode" && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -541,6 +523,12 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getFullTelemetryConfig(),
+
+            // Smooth streaming with 15ms delay and line-based chunking
+            // experimental_transform: smoothStream({
+            //     delayInMs: 15,
+            //     chunking: 'word'
+            // }),
 
             providerOptions: {
                 openrouter: {
@@ -846,6 +834,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     }
 
     private handleReasoningDelta(text: string): void {
+        // Skip useless "[REDACTED]" reasoning events
+        if (text.trim() === "[REDACTED]") {
+            return;
+        }
         this.emit("reasoning", { delta: text });
     }
 
