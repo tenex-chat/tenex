@@ -39,6 +39,7 @@ describe("PairModeRegistry", () => {
             expect(state).toBeDefined();
             expect(state!.batchId).toBe(batchId);
             expect(state!.delegatorPubkey).toBe(delegatorPubkey);
+            expect(state!.delegatedAgentPubkeys).toEqual([]);
             expect(state!.mode).toBe("pair");
             expect(state!.status).toBe("running");
             expect(state!.config.stepThreshold).toBe(10);
@@ -56,6 +57,13 @@ describe("PairModeRegistry", () => {
             const state = registry.getState(batchId);
             expect(state!.config.stepThreshold).toBe(5);
             expect(state!.config.checkInTimeoutMs).toBe(30000);
+        });
+
+        it("should register with delegated agent pubkeys", () => {
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-1", "agent-2"]);
+
+            const state = registry.getState(batchId);
+            expect(state!.delegatedAgentPubkeys).toEqual(["agent-1", "agent-2"]);
         });
     });
 
@@ -380,28 +388,56 @@ describe("PairModeRegistry", () => {
             expect(state).toBeUndefined();
         });
 
-        it("should return running delegation", () => {
-            registry.registerPairDelegation(batchId, delegatorPubkey);
+        it("should return delegation when agent is in delegatedAgentPubkeys", () => {
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-x", "agent-y"]);
 
-            const state = registry.findDelegationByAgent("any-agent");
+            const state = registry.findDelegationByAgent("agent-x");
             expect(state).toBeDefined();
             expect(state!.batchId).toBe(batchId);
         });
 
+        it("should return undefined when agent is NOT in delegatedAgentPubkeys", () => {
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-x"]);
+
+            const state = registry.findDelegationByAgent("agent-z");
+            expect(state).toBeUndefined();
+        });
+
         it("should not return completed delegation", () => {
-            registry.registerPairDelegation(batchId, delegatorPubkey);
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-x"]);
             registry.completeDelegation(batchId);
 
-            const state = registry.findDelegationByAgent("any-agent");
+            const state = registry.findDelegationByAgent("agent-x");
             expect(state).toBeUndefined();
         });
 
         it("should not return aborted delegation", () => {
-            registry.registerPairDelegation(batchId, delegatorPubkey);
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-x"]);
             registry.abortDelegation(batchId);
 
-            const state = registry.findDelegationByAgent("any-agent");
+            const state = registry.findDelegationByAgent("agent-x");
             expect(state).toBeUndefined();
+        });
+
+        it("should find correct delegation among multiple concurrent delegations", () => {
+            const batchId2 = `${batchId}-2`;
+            registry.registerPairDelegation(batchId, delegatorPubkey, {}, ["agent-a"]);
+            registry.registerPairDelegation(batchId2, delegatorPubkey, {}, ["agent-b"]);
+
+            const stateA = registry.findDelegationByAgent("agent-a");
+            expect(stateA).toBeDefined();
+            expect(stateA!.batchId).toBe(batchId);
+
+            const stateB = registry.findDelegationByAgent("agent-b");
+            expect(stateB).toBeDefined();
+            expect(stateB!.batchId).toBe(batchId2);
+
+            // Unknown agent should return undefined
+            const stateC = registry.findDelegationByAgent("agent-c");
+            expect(stateC).toBeUndefined();
+
+            // Cleanup second batch
+            registry.cleanup(batchId2);
         });
     });
 

@@ -79,7 +79,8 @@ export class PairModeRegistry extends EventEmitter {
     registerPairDelegation(
         batchId: string,
         delegatorPubkey: string,
-        config?: Partial<PairModeConfig>
+        config?: Partial<PairModeConfig>,
+        delegatedAgentPubkeys: string[] = []
     ): void {
         const fullConfig: Required<PairModeConfig> = {
             stepThreshold: config?.stepThreshold ?? 10,
@@ -95,6 +96,7 @@ export class PairModeRegistry extends EventEmitter {
             correctionMessages: [],
             status: "running",
             delegatorPubkey,
+            delegatedAgentPubkeys,
         };
 
         this.activeDelegations.set(batchId, state);
@@ -103,6 +105,7 @@ export class PairModeRegistry extends EventEmitter {
         logger.info("[PairModeRegistry] Registered pair mode delegation", {
             batchId,
             delegatorPubkey: delegatorPubkey.substring(0, 8),
+            delegatedAgents: delegatedAgentPubkeys.length,
             stepThreshold: fullConfig.stepThreshold,
             timeoutMs: fullConfig.checkInTimeoutMs,
         });
@@ -365,11 +368,12 @@ export class PairModeRegistry extends EventEmitter {
      * Find an active pair delegation by delegated agent pubkey.
      * Used by AgentExecutor to detect if current execution is in pair mode.
      */
-    findDelegationByAgent(_agentPubkey: string): PairDelegationState | undefined {
+    findDelegationByAgent(agentPubkey: string): PairDelegationState | undefined {
         for (const state of this.activeDelegations.values()) {
-            // The delegatedAgentPubkey is set when check-in is requested
-            // We match by checking if this agent has pending check-ins
-            if (state.status === "running" || state.status === "paused") {
+            if (
+                (state.status === "running" || state.status === "paused") &&
+                state.delegatedAgentPubkeys.includes(agentPubkey)
+            ) {
                 return state;
             }
         }

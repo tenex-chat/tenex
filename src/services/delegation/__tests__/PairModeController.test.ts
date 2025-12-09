@@ -23,7 +23,7 @@ describe("PairModeController", () => {
         // Get fresh registry instance and clear state
         registry = PairModeRegistry.getInstance();
         // Register the delegation so the controller can find it
-        registry.registerPairDelegation(batchId, "delegator-pubkey", config);
+        registry.registerPairDelegation(batchId, "delegator-pubkey", config, [agentPubkey]);
 
         controller = new PairModeController(batchId, agentPubkey, agentSlug, config);
     });

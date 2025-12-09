@@ -162,7 +162,8 @@ export class DelegationService {
 
         // Handle pair mode vs blocking mode
         if (mode === "pair") {
-            return this.executePairMode(result.batchId, options?.pairConfig, worktrees);
+            const delegatedAgentPubkeys = intent.delegations.map((d) => d.recipient);
+            return this.executePairMode(result.batchId, options?.pairConfig, worktrees, delegatedAgentPubkeys);
         }
 
         // Default blocking mode - wait for all responses with no timeout
@@ -193,7 +194,8 @@ export class DelegationService {
     private async executePairMode(
         batchId: string,
         pairConfig?: Partial<PairModeConfig>,
-        worktrees?: Array<{ branch: string; path: string }>
+        worktrees?: Array<{ branch: string; path: string }>,
+        delegatedAgentPubkeys: string[] = []
     ): Promise<DelegationResponses> {
         const config: Required<PairModeConfig> = {
             stepThreshold: pairConfig?.stepThreshold ?? DEFAULT_PAIR_MODE_CONFIG.stepThreshold,
@@ -210,7 +212,7 @@ export class DelegationService {
         const delegationRegistry = DelegationRegistry.getInstance();
 
         // Register this delegation for pair mode monitoring
-        pairRegistry.registerPairDelegation(batchId, this.agent.pubkey, config);
+        pairRegistry.registerPairDelegation(batchId, this.agent.pubkey, config, delegatedAgentPubkeys);
 
         // Set up check-in handler
         return new Promise<DelegationResponses>((resolve) => {
