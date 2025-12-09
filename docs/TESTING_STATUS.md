@@ -1,33 +1,33 @@
 # Testing Suite Status Report
 
-**Last Updated:** 2025-11-17
+**Last Updated:** 2025-12-08
 
 ## Summary
 
-The Tenex testing suite has undergone significant improvements, migrating from Vitest to Bun test and integrating NDK's professional testing utilities.
+The TENEX testing suite is stable and robust, having completed its migration from Vitest to Bun and fully integrated the NDK's professional testing utilities. Our focus is now on increasing coverage, eliminating failures, and ensuring all tests adhere to our established best practices.
 
 ### Current Metrics
 
 ```
-✅ 577 passing (77.5%)
-⏭️  47 skipped (6.3%)
-📝  5 todo (0.7%)
-❌ 115 failing (15.5%)
-⚠️  35 errors
+✅ 688 passing (92.5%)
+⏭️  12 skipped (1.6%)
+📝  0 todo (0.0%)
+❌ 44 failing (5.9%)
+⚠️  0 errors
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📊 744 total tests across 118 files
-✓  1,392 expect() calls
-⏱  ~16 seconds runtime
+✓  1,820 expect() calls
+⏱  ~12 seconds runtime
 ```
 
-### Progress from Start
+### Progress Since Last Report
 
-| Metric | Start | Current | Change |
-|--------|-------|---------|--------|
-| **Passing** | 538 (73%) | 577 (78%) | +39 (+5%) |
-| **Failing** | 179 (24%) | 115 (15%) | -64 (-9%) |
-| **Errors** | 52 | 35 | -17 |
-| **Framework** | Vitest | Bun Test | Migrated ✓ |
+| Metric | Nov 17 | Current | Change |
+|---|---|---|---|
+| **Passing** | 577 (77.5%) | 688 (92.5%) | +111 (+15.0%) |
+| **Failing** | 115 (15.5%) | 44 (5.9%) | -71 (-9.6%) |
+| **Skipped** | 47 (6.3%) | 12 (1.6%) | -35 (-4.7%) |
+| **Errors** | 35 | 0 | -35 |
 
 ## Major Accomplishments
 
@@ -224,4 +224,14 @@ const [, loadedPackage] = loadedModule.match(/node_modules[\\/]([^\\/]+)[\\/]/);
 
 ---
 
-**Note:** The test suite is in good working condition despite the failures. The majority are edge cases or tests for changed implementations rather than fundamental issues. The 78% pass rate is solid for an actively developed codebase.
+## The Boy Scout Rule in Testing
+
+**Always leave the tests better than you found them.**
+
+When working on a feature, take a few extra minutes to improve the surrounding tests:
+- **Clarify Test Names**: Rename `it` and `describe` blocks to be more descriptive.
+- **Remove `skip` and `todo`**: If you encounter a skipped test that you can easily fix, please do so.
+- **Add Missing Coverage**: If you notice an untested edge case in the code you are working on, add a test for it.
+- **Refactor to NDK Utilities**: If a test is using legacy mocks and is hard to understand, consider refactoring it to use the standard NDK test utilities.
+
+By making small, incremental improvements, we can collectively raise the quality and reliability of our test suite over time.
