@@ -16,7 +16,6 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
-    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -180,7 +179,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      * For standard providers: Gets model from registry.
      * Wraps all models with extract-reasoning-middleware.
      */
-    private getLanguageModel(messages?: ModelMessage[], enableThrottling = true): LanguageModel {
+    private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
         let baseModel: LanguageModel;
 
         if (this.claudeCodeProviderFunction) {
@@ -269,8 +268,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             maxTokens?: number;
         }
     ): Promise<GenerateTextResult<Record<string, AISdkTool>, string>> {
-        // Don't use throttling for complete() calls - we want the full response immediately
-        const model = this.getLanguageModel(messages, false);
+        const model = this.getLanguageModel(messages);
         const startTime = Date.now();
 
         // Convert system messages for Claude Code resume sessions
@@ -482,8 +480,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         const startTime = Date.now();
 
-        // Don't use throttling for the review model used by ProgressMonitor
-        const reviewModel = this.getLanguageModel(undefined, false);
+        const reviewModel = this.getLanguageModel();
         const progressMonitor = new ProgressMonitor(reviewModel);
 
         const stopWhen = async ({
@@ -925,9 +922,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     /**
      * Get the language model for use with AI SDK's generateObject and other functions
      */
-    getModel(enableThrottling = false): LanguageModel {
-        // Default to no throttling for direct model access
-        return this.getLanguageModel(undefined, enableThrottling);
+    getModel(): LanguageModel {
+        return this.getLanguageModel();
     }
 
     /**
