@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
 import { type DelegationResponses, DelegationService } from "@/services/delegation";
-import type { DelegationMode, PairModeConfig } from "@/services/delegation/types";
+import type { DelegationMode } from "@/services/delegation/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -36,15 +36,6 @@ const delegatePhaseSchema = z.object({
         .describe(
             "Execution mode: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins to validate, continue, stop, or correct the delegated agent"
         ),
-    pairConfig: z
-        .object({
-            stepThreshold: z
-                .number()
-                .default(10)
-                .describe("Number of AI SDK steps between check-ins (default: 10)"),
-        })
-        .optional()
-        .describe("Configuration for pair mode (only used when mode is 'pair')"),
 });
 
 type DelegatePhaseInput = z.infer<typeof delegatePhaseSchema>;
@@ -55,7 +46,7 @@ async function executeDelegatePhase(
     input: DelegatePhaseInput,
     context: ExecutionContext
 ): Promise<DelegatePhaseOutput> {
-    const { phase, recipients, prompt, title, branch, mode, pairConfig } = input;
+    const { phase, recipients, prompt, title, branch, mode } = input;
 
     // Validate that the phase exists in the agent's phases configuration
     if (!context.agent.phases) {
@@ -154,7 +145,6 @@ async function executeDelegatePhase(
         },
         {
             mode: mode as DelegationMode,
-            pairConfig: pairConfig as Partial<PairModeConfig> | undefined,
         }
     );
 
