@@ -2,6 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { getNDK } from "@/nostr/ndkClient";
 import { type DelegationResponses, DelegationService } from "@/services/delegation";
+import type { DelegationMode, PairModeConfig } from "@/services/delegation/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -29,6 +30,21 @@ const delegatePhaseSchema = z.object({
         .describe(
             "Optional git branch name for worktree isolation. Creates a new worktree for the delegated work."
         ),
+    mode: z
+        .enum(["blocking", "pair"])
+        .default("blocking")
+        .describe(
+            "Execution mode: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins to validate, continue, stop, or correct the delegated agent"
+        ),
+    pairConfig: z
+        .object({
+            stepThreshold: z
+                .number()
+                .default(10)
+                .describe("Number of AI SDK steps between check-ins (default: 10)"),
+        })
+        .optional()
+        .describe("Configuration for pair mode (only used when mode is 'pair')"),
 });
 
 type DelegatePhaseInput = z.infer<typeof delegatePhaseSchema>;
@@ -39,7 +55,7 @@ async function executeDelegatePhase(
     input: DelegatePhaseInput,
     context: ExecutionContext
 ): Promise<DelegatePhaseOutput> {
-    const { phase, recipients, prompt, title, branch } = input;
+    const { phase, recipients, prompt, title, branch, mode, pairConfig } = input;
 
     // Validate that the phase exists in the agent's phases configuration
     if (!context.agent.phases) {
@@ -126,15 +142,21 @@ async function executeDelegatePhase(
     );
 
     // Convert to new delegations[] format - same phase/branch for all recipients
-    const responses = await delegationService.execute({
-        delegations: resolvedPubkeys.map((pubkey) => ({
-            recipient: pubkey,
-            request: prompt,
-            phase: actualPhaseName,
-            phaseInstructions: phase_instructions,
-            branch, // Same branch for all recipients in delegate_phase
-        })),
-    });
+    const responses = await delegationService.execute(
+        {
+            delegations: resolvedPubkeys.map((pubkey) => ({
+                recipient: pubkey,
+                request: prompt,
+                phase: actualPhaseName,
+                phaseInstructions: phase_instructions,
+                branch, // Same branch for all recipients in delegate_phase
+            })),
+        },
+        {
+            mode: mode as DelegationMode,
+            pairConfig: pairConfig as Partial<PairModeConfig> | undefined,
+        }
+    );
 
     logger.info("[delegate_phase() tool] ✅ SYNCHRONOUS COMPLETE: Received responses", {
         phase: actualPhaseName,
@@ -150,7 +172,7 @@ async function executeDelegatePhase(
 export function createDelegatePhaseTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Switch conversation phase and delegate a question or task to one or more agents. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
+            "Switch conversation phase and delegate a question or task to one or more agents. Supports two modes: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent. Delegated agents will have full context of the history of the conversation, so no summarization is needed, just directly ask what's required from them.",
         inputSchema: delegatePhaseSchema,
         execute: async (input: DelegatePhaseInput) => {
             return await executeDelegatePhase(input, context);
