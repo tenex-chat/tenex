@@ -29,6 +29,13 @@ export interface DelegationIntent {
         branch?: string;
     }>;
     type?: "delegation" | "delegation_followup" | "ask";
+    /** Execution mode: 'blocking' (default) or 'pair' for periodic check-ins */
+    mode?: "blocking" | "pair";
+    /** Configuration for pair mode */
+    pairConfig?: {
+        stepThreshold?: number;
+        checkInTimeoutMs?: number;
+    };
 }
 
 export interface AskIntent {

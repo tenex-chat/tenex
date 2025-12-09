@@ -33,7 +33,7 @@ export interface DelegationRecord {
     };
 
     // Status tracking
-    status: "pending" | "in_progress" | "completed" | "failed";
+    status: "pending" | "in_progress" | "completed" | "failed" | "aborted";
 
     // Completion details (when status !== 'pending')
     completion?: {
@@ -79,7 +79,7 @@ const DelegationRecordSchema = z.object({
         fullRequest: z.string(),
         phase: z.string().optional(),
     }),
-    status: z.enum(["pending", "in_progress", "completed", "failed"]),
+    status: z.enum(["pending", "in_progress", "completed", "failed", "aborted"]),
     completion: z
         .object({
             response: z.string(),

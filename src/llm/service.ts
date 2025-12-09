@@ -470,6 +470,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                       messages?: ModelMessage[];
                   }
                 | undefined;
+            /** Custom stopWhen callback that wraps the default progress monitor check */
+            onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
         }
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
@@ -506,6 +508,15 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const stopWhen = async ({
             steps,
         }: { steps: StepResult<Record<string, AISdkTool>>[] }): Promise<boolean> => {
+            // First check custom stop condition (e.g., pair mode check-in)
+            if (options?.onStopCheck) {
+                const shouldStop = await options.onStopCheck(steps);
+                if (shouldStop) {
+                    return true;
+                }
+            }
+
+            // Then check default progress monitor
             const toolNames: string[] = [];
             for (const step of steps) {
                 if (step.toolCalls) {
