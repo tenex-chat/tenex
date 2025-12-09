@@ -54,7 +54,7 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
         } catch (error: any) {
             expect(error.message).toContain("Self-delegation is not permitted");
             expect(error.message).toContain("test-agent");
-            expect(error.message).toContain("delegate_phase");
+            expect(error.message).toContain("specifying a phase");
         }
     });
 

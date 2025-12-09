@@ -22,8 +22,6 @@ import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateExternalTool } from "./implementations/delegate_external";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
-import { createDelegateMultiTool } from "./implementations/delegate_multi";
-import { createDelegatePhaseTool } from "./implementations/delegate_phase";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
@@ -74,8 +72,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Delegation tools
     delegate_external: createDelegateExternalTool,
     delegate_followup: createDelegateFollowupTool,
-    delegate_multi: createDelegateMultiTool,
-    delegate_phase: createDelegatePhaseTool,
     delegate: createDelegateTool,
 
     discover_capabilities: createMcpDiscoverTool,

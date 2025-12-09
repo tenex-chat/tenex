@@ -65,7 +65,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
 
       if (context.agent.phases) {
         parts.push("### Delegation with Worktrees:");
-        parts.push("When using `delegate_phase`, you can specify `branch=\"<name>\"` to create and work in an isolated worktree.");
+        parts.push("When using `delegate`, you can specify `branch: \"<name>\"` to create and work in an isolated worktree.");
         parts.push("The worktree will be created from your current branch, and the delegated agent will work in that isolation.");
         parts.push("You are responsible for merging or cleaning up worktrees you create.");
         parts.push("");

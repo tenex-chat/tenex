@@ -20,6 +20,6 @@ describe("delegationCompletionFragment", () => {
         expect(result).toContain("Do NOT use ANY tools");
         expect(result).toContain("Do NOT delegate again");
         expect(result).toContain("THE TASK IS COMPLETE. DO NOT REPEAT IT");
-        expect(result).toContain("DO NOT use delegate(), delegate_phase(), or any other tool");
+        expect(result).toContain("DO NOT use delegate() or any other tool");
     });
 });

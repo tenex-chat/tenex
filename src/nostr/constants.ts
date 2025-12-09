@@ -40,7 +40,7 @@ export enum NostrTag {
  */
 export enum TagValue {
     REACTION_POSITIVE = "+",
-    DELEGATE_PHASE = "delegate_phase",
+    DELEGATE = "delegate",
 }
 
 /**

@@ -90,7 +90,7 @@ describe("Delegation Event Filtering Bug", () => {
 
     it("delegation event from Execution Coordinator to claude-code DOES trigger claude-code execution", async () => {
         // This test reproduces the bug where:
-        // 1. Execution Coordinator delegates to claude-code via delegate_phase
+        // 1. Execution Coordinator delegates to claude-code via delegate
         // 2. The delegation event has pubkey=exec-coord and p-tag=claude-code
         // 3. The event is FROM an agent (isFromAgent=true)
         // 4. The event IS directed to system (isDirectedToSystem=true because claude-code is a system agent)

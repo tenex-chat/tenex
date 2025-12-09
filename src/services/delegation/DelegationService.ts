@@ -73,12 +73,12 @@ export class DelegationService {
             (d) => d.recipient === this.agent.pubkey
         );
 
-        // Only allow self-delegation when phase is explicitly provided (i.e., delegate_phase tool)
+        // Only allow self-delegation when phase is explicitly provided
         if (selfDelegationAttempts.length > 0) {
             const hasPhase = selfDelegationAttempts.some((d) => d.phase);
             if (!hasPhase) {
                 throw new Error(
-                    `Self-delegation is not permitted. Agent "${this.agent.slug}" cannot delegate to itself. Self-delegation is only allowed when using the delegate_phase tool for phase transitions.`
+                    `Self-delegation is not permitted. Agent "${this.agent.slug}" cannot delegate to itself. Self-delegation is only allowed when specifying a phase for phase transitions.`
                 );
             }
 
