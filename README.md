@@ -96,56 +96,54 @@ TENEX: [System routes to Planner]
 
 ## 📚 Documentation
 
-### Architecture Guides
-- [Workflow Management](./documentation/workflow-management-architecture.md) - High-level system overview
-- [Agent Execution](./documentation/agent-execution-architecture.md) - How agents operate
-- [Phase Management](./documentation/phase-management-architecture.md) - Workflow control system
-- [Tool System](./documentation/tool-system-architecture.md) - Capability implementation
-- [Learning System](./documentation/learning-system-internals.md) - Continuous improvement mechanics
-
-### Developer Documentation
-For detailed technical documentation, see the [documentation](./documentation/) directory.
+- **[Architecture](./docs/ARCHITECTURE.md)**: Core principles, layered architecture, and module organization.
+- **[Contributing](./docs/CONTRIBUTING.md)**: Development workflow, coding guidelines, and testing.
+- **[Testing Status](./docs/TESTING_STATUS.md)**: Current state of the test suite and future improvements.
+- **[NDK Testing](./docs/testing-with-ndk.md)**: How to use Nostr Development Kit utilities for testing.
+- **[Worktrees](./docs/worktrees.md)**: Guide to using Git worktrees for parallel development.
 
 ## 🏗️ Project Structure
 
 ```
 src/
-├── agents/         # Agent system and execution
-├── commands/       # CLI commands
-├── conversations/  # Conversation management
-├── daemon/         # Background processes
-├── events/         # Nostr event definitions
-├── llm/           # LLM provider integration
-├── nostr/         # Nostr protocol layer
-├── prompts/       # Prompt composition system
-├── tools/         # Tool implementations
-└── utils/         # Utility functions
+├── agents/         # Agent definitions and execution runtime
+├── commands/       # User-facing CLI commands
+├── conversations/  # Conversation history and state management
+├── daemon/         # Long-running background processes and UI
+├── events/         # Core event schemas and constants
+├── lib/            # Pure, framework-agnostic utilities (zero TENEX dependencies)
+├── llm/            # LLM provider abstractions and factories
+├── nostr/          # Nostr protocol integration and clients
+├── prompts/        # System prompt composition and management
+├── services/       # Stateful business logic and orchestration
+├── tools/          # Agent tool implementations and registry
+└── utils/          # TENEX-specific helper functions
 ```
 
 ## 🤝 Contributing
 
-We welcome contributions! Please open issues and pull requests on GitHub.
+We welcome contributions! Please read our [**Contributing Guide**](./docs/CONTRIBUTING.md) for a detailed overview of our development workflow, coding guidelines, and architectural principles.
 
 ### Development Setup
 
 ```bash
+# Install dependencies
+bun install
+
 # Run tests
 bun test
 
-# Run tests with coverage
-bun test --coverage
+# Run tests in watch mode
+bun test --watch
 
-# Type checking
+# Run type checking
 bun run typecheck
 
-# Linting
-bun run lint
+# Run architecture linting
+bun run lint:architecture
 
 # Build for production
 bun run build
-
-# Watch mode for development
-bun test --watch
 ```
 
 ## 🔮 What Makes TENEX Different?
