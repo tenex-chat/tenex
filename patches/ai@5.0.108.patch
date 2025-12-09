@@ -1,5 +1,8 @@
+diff --git a/node_modules/ai/.bun-tag-c3942bd5a6858cb6 b/.bun-tag-c3942bd5a6858cb6
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/index.js b/dist/index.js
-index d60e9c5bf87f512a6647e1147a39d15de158cb41..acc2d8e9c87717abc61c1947f9f0e32c1889ccd8 100644
+index d60e9c5bf87f512a6647e1147a39d15de158cb41..e46490adf7b6ba2aea2b85e1a8e930c1d6a05709 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -1925,6 +1925,19 @@ async function parseToolCall({
@@ -22,8 +25,30 @@ index d60e9c5bf87f512a6647e1147a39d15de158cb41..acc2d8e9c87717abc61c1947f9f0e32c
    try {
      if (tools == null) {
        throw new NoSuchToolError({ toolName: toolCall.toolName });
+@@ -2431,6 +2444,10 @@ async function generateText({
+             if (toolCall.invalid) {
+               continue;
+             }
++            // Skip tool lookup for provider-executed tools
++            if (toolCall.providerExecuted === true) {
++              continue;
++            }
+             const tool2 = tools[toolCall.toolName];
+             if ((tool2 == null ? void 0 : tool2.onInputAvailable) != null) {
+               await tool2.onInputAvailable({
+@@ -4334,6 +4351,10 @@ function runToolsTransformation({
+               });
+               break;
+             }
++            // Skip tool lookup and execution for provider-executed tools
++            if (toolCall.providerExecuted === true) {
++              break;
++            }
+             const tool2 = tools[toolCall.toolName];
+             toolInputs.set(toolCall.toolCallId, toolCall.input);
+             if (tool2.onInputAvailable != null) {
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 47dbb3e5554edc7818a0743ddb057b78a5bff06e..5d6a524cde7a5c4bec43ff4e74b4757613ac81d9 100644
+index 47dbb3e5554edc7818a0743ddb057b78a5bff06e..b29bf1747493df0ac5cbe5961fa7b35228e64738 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -1845,6 +1845,19 @@ async function parseToolCall({
@@ -46,3 +71,25 @@ index 47dbb3e5554edc7818a0743ddb057b78a5bff06e..5d6a524cde7a5c4bec43ff4e74b47576
    try {
      if (tools == null) {
        throw new NoSuchToolError({ toolName: toolCall.toolName });
+@@ -2353,6 +2366,10 @@ async function generateText({
+             if (toolCall.invalid) {
+               continue;
+             }
++            // Skip tool lookup for provider-executed tools
++            if (toolCall.providerExecuted === true) {
++              continue;
++            }
+             const tool2 = tools[toolCall.toolName];
+             if ((tool2 == null ? void 0 : tool2.onInputAvailable) != null) {
+               await tool2.onInputAvailable({
+@@ -4268,6 +4285,10 @@ function runToolsTransformation({
+               });
+               break;
+             }
++            // Skip tool lookup and execution for provider-executed tools
++            if (toolCall.providerExecuted === true) {
++              break;
++            }
+             const tool2 = tools[toolCall.toolName];
+             toolInputs.set(toolCall.toolCallId, toolCall.input);
+             if (tool2.onInputAvailable != null) {
