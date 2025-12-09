@@ -1,4 +1,4 @@
-import { getPubkeyNameRepository } from "@/services/PubkeyService";
+import { getPubkeyService } from "@/services/PubkeyService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ThreadNode } from "../ThreadedConversationFormatter";
 
@@ -81,8 +81,8 @@ export class TreeBuilder {
     }
 
     private async extractAgentName(event: NDKEvent): Promise<string | undefined> {
-        // Use the PubkeyNameRepository to resolve the actual name
-        const nameRepo = getPubkeyNameRepository();
+        // Use the PubkeyService to resolve the actual name
+        const nameRepo = getPubkeyService();
         const name = await nameRepo.getName(event.pubkey);
         return name;
     }

@@ -61,7 +61,7 @@ mock.module("@/prompts/fragments/20-voice-mode", () => ({
 }));
 
 mock.module("@/services/PubkeyService", () => ({
-    getPubkeyNameRepository: () => ({
+    getPubkeyService: () => ({
         getName: async (pubkey: string) => `User ${pubkey.substring(0, 8)}`,
     }),
 }));

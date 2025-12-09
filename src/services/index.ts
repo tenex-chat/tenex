@@ -11,6 +11,6 @@ export {
     ProjectContext,
 } from "./ProjectContext";
 export { projectContextStore } from "./ProjectContextStore";
-export { PubkeyNameRepository, getPubkeyNameRepository } from "./PubkeyService";
+export { PubkeyService, getPubkeyService } from "./PubkeyService";
 export { StatusPublisher, OperationsStatusPublisher } from "./status";
 export { ReplaceableEventService } from "./replaceable-event";

@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { ReportManager } from "@/services/ReportService";
+import { ReportService } from "@/services/ReportService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -37,9 +37,9 @@ async function executeReportWrite(
         agent: context.agent.name,
     });
 
-    const reportManager = new ReportManager();
+    const reportService = new ReportService();
 
-    const articleId = await reportManager.writeReport(
+    const articleId = await reportService.writeReport(
         {
             slug,
             title,
