@@ -7,6 +7,7 @@ import type { Tool as CoreTool } from "ai";
  */
 export type ToolName =
     | "read_path"
+    | "write_file"
     | "codebase_search"
     | "lesson_learn"
     | "lesson_get"

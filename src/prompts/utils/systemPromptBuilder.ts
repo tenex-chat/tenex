@@ -63,11 +63,10 @@ async function addCoreAgentFragments(
         agentLessons: agentLessons || new Map(),
     });
 
-    // Add MCP resources if agent has MCP access and RAG subscription tools
-    const hasMcpAccess = agent.mcp !== false;
+    // Add MCP resources if agent has RAG subscription tools
     const hasRagSubscriptionTools = agent.tools.includes("rag_subscription_create");
 
-    if (hasMcpAccess && hasRagSubscriptionTools) {
+    if (hasRagSubscriptionTools) {
         // Lazy-load MCPManager to avoid circular dependency
         const { mcpManager } = await import("@/services/mcp/MCPManager");
         const runningServers = mcpManager.getRunningServers();

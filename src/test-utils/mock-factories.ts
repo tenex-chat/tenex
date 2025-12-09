@@ -80,7 +80,6 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
         useCriteria: "Mock use criteria",
         llmConfig: "default",
         tools: [],
-        mcp: false,
         eventId: "mock-event-id",
         slug: "mock-agent",
         createMetadataStore: () => ({

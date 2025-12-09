@@ -107,7 +107,7 @@ export class EventHandler {
         }
 
         logger.info(
-            `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.encode()})`
+            `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.id})`
         );
 
         // Check if this is a delegation response BEFORE routing

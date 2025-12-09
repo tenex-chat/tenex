@@ -240,41 +240,6 @@ export class MCPManager {
         return this.cachedTools;
     }
 
-    /**
-     * Get tools for a specific agent based on their configuration
-     * @param requestedTools - Array of tool names the agent wants
-     * @param mcpEnabled - Whether the agent has MCP access
-     */
-    async getToolsForAgent(
-        requestedTools: string[],
-        mcpEnabled = true
-    ): Promise<Record<string, CoreTool<unknown, unknown>>> {
-        const tools: Record<string, CoreTool<unknown, unknown>> = {};
-
-        if (!mcpEnabled) {
-            return tools;
-        }
-
-        // Filter requested MCP tools
-        const requestedMcpTools = requestedTools.filter((name) => name.startsWith("mcp__"));
-
-        if (requestedMcpTools.length > 0) {
-            // Return only requested MCP tools
-            for (const toolName of requestedMcpTools) {
-                if (this.cachedTools[toolName]) {
-                    tools[toolName] = this.cachedTools[toolName];
-                } else {
-                    logger.debug(`Requested MCP tool '${toolName}' not found`);
-                }
-            }
-        } else if (mcpEnabled) {
-            // Return all MCP tools if none specifically requested but MCP is enabled
-            Object.assign(tools, this.cachedTools);
-        }
-
-        return tools;
-    }
-
     async shutdown(): Promise<void> {
         const shutdownPromises: Promise<void>[] = [];
 

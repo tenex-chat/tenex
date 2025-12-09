@@ -218,10 +218,19 @@ export class LLMServiceFactory {
                 mcpServersConfig.tenex = tenexSdkServer;
             }
 
+            // Build allowed tools list - prefix with mcp__tenex__ for MCP protocol
+            const allowedTools = tenexSdkServer
+                ? regularTools.map((name) => `mcp__tenex__${name}`)
+                : [];
+
             // Create Claude Code provider with runtime configuration
+            // IMPORTANT: Always pass mcpServers and allowedTools explicitly (even if empty)
+            // to override any old session state that might have TENEX tools registered
             const defaultSettings: ClaudeCodeSettings = {
                 permissionMode: "bypassPermissions",
+                verbose: true,
                 cwd: context?.projectPath,
+                allowedTools: ["Bash(echo:*)", "Bash(date)", "Bash(pwd)"],
                 // allowedTools,
                 // mcpServers: mcpServersConfig as any,
                 logger: {
