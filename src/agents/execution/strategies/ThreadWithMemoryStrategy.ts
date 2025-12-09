@@ -9,7 +9,7 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 import { NudgeService } from "@/services/NudgeService";
-import { getPubkeyNameRepository } from "@/services/PubkeyService";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import {
     extractNostrEntities,
@@ -293,7 +293,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             const entities = extractNostrEntities(event.content || "");
             if (entities.length > 0) {
                 try {
-                    const nameRepo = getPubkeyNameRepository();
+                    const nameRepo = getPubkeyService();
                     const ndk = getNDK();
                     const entitySystemMessages = await resolveNostrEntitiesToSystemMessages(
                         event.content || "",

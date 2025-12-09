@@ -41,7 +41,7 @@ export interface ReportSummary {
  * Centralized service for managing NDKArticle reports
  * Handles creation, reading, listing, and deletion of reports
  */
-export class ReportManager {
+export class ReportService {
     private ndk: NDK;
 
     constructor(ndk?: NDK) {

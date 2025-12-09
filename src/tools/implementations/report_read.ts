@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { ReportManager } from "@/services/ReportService";
+import { ReportService } from "@/services/ReportService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -115,13 +115,13 @@ async function executeReportRead(
         agent: context.agent.name,
     });
 
-    const reportManager = new ReportManager();
+    const reportService = new ReportService();
 
     // Remove nostr: prefix if present
     const cleanIdentifier = identifier.startsWith("nostr:") ? identifier.slice(6) : identifier;
 
     // Use agent pubkey for slug lookups
-    const report = await reportManager.readReport(cleanIdentifier, context.agent.pubkey);
+    const report = await reportService.readReport(cleanIdentifier, context.agent.pubkey);
 
     if (!report) {
         logger.info("📭 No report found", {

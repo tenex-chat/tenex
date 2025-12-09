@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { PubkeyNameRepository } from "../PubkeyNameRepository";
+import { PubkeyService } from "../PubkeyService";
 
 // Mock the modules
 mock.module("@/nostr", () => ({
@@ -28,15 +28,15 @@ mock.module("@/utils/logger", () => ({
 import { getNDK } from "@/nostr";
 import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
 
-describe("PubkeyNameRepository", () => {
-    let repository: PubkeyNameRepository;
+describe("PubkeyService", () => {
+    let service: PubkeyService;
     let mockNDK: any;
     let mockProjectContext: any;
 
     beforeEach(() => {
         // Reset singleton
-        (PubkeyNameRepository as any).instance = undefined;
-        repository = PubkeyNameRepository.getInstance();
+        (PubkeyService as any).instance = undefined;
+        service = PubkeyService.getInstance();
 
         // Setup mock NDK
         mockNDK = {
@@ -79,24 +79,24 @@ describe("PubkeyNameRepository", () => {
         (isProjectContextInitialized as any).mockReturnValue(true);
 
         // Clear any cached data
-        repository.clearCache();
+        service.clearCache();
     });
 
     describe("Agent name resolution", () => {
         it("should return agent slug for agent pubkey", async () => {
-            const name = await repository.getName("agent1-pubkey");
+            const name = await service.getName("agent1-pubkey");
             expect(name).toBe("code-writer");
         });
 
         it("should return agent slug synchronously", () => {
-            const name = repository.getNameSync("agent2-pubkey");
+            const name = service.getNameSync("agent2-pubkey");
             expect(name).toBe("tester");
         });
 
         it("should handle project context not initialized", async () => {
             (isProjectContextInitialized as any).mockReturnValue(false);
 
-            const name = await repository.getName("agent1-pubkey");
+            const name = await service.getName("agent1-pubkey");
             expect(name).toBe("User"); // Falls back to default
         });
     });
@@ -115,11 +115,11 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfileEvent);
 
-            const name = await repository.getName("user-pubkey");
+            const name = await service.getName("user-pubkey");
             expect(name).toBe("Alice"); // name takes priority
 
             // Verify caching works
-            const cachedName = await repository.getName("user-pubkey");
+            const cachedName = await service.getName("user-pubkey");
             expect(cachedName).toBe("Alice");
             expect(mockNDK.fetchEvent).toHaveBeenCalledTimes(1); // Not called again
         });
@@ -135,7 +135,7 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfileEvent);
 
-            const name = await repository.getName("user-pubkey");
+            const name = await service.getName("user-pubkey");
             expect(name).toBe("alice");
         });
 
@@ -150,7 +150,7 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfileEvent);
 
-            const name = await repository.getName("user-pubkey");
+            const name = await service.getName("user-pubkey");
             expect(name).toBe("Alice Display");
         });
 
@@ -165,21 +165,21 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfileEvent);
 
-            const name = await repository.getName("user-pubkey");
+            const name = await service.getName("user-pubkey");
             expect(name).toBe("alice123");
         });
 
         it("should return default name if profile fetch fails", async () => {
             mockNDK.fetchEvent.mockRejectedValueOnce(new Error("Network error"));
 
-            const name = await repository.getName("unknown-user-pubkey");
+            const name = await service.getName("unknown-user-pubkey");
             expect(name).toBe("User");
         });
 
         it("should return default name if profile is empty", async () => {
             mockNDK.fetchEvent.mockResolvedValueOnce(null);
 
-            const name = await repository.getName("user-without-profile");
+            const name = await service.getName("user-without-profile");
             expect(name).toBe("User");
         });
 
@@ -191,7 +191,7 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfileEvent);
 
-            const name = await repository.getName("user-with-bad-profile");
+            const name = await service.getName("user-with-bad-profile");
             expect(name).toBe("User");
         });
     });
@@ -212,12 +212,12 @@ describe("PubkeyNameRepository", () => {
                 .mockResolvedValueOnce(firstProfile)
                 .mockResolvedValueOnce(updatedProfile);
 
-            const name1 = await repository.getName("user-pubkey");
+            const name1 = await service.getName("user-pubkey");
             expect(name1).toBe("Alice");
 
-            await repository.refreshUserProfile("user-pubkey");
+            await service.refreshUserProfile("user-pubkey");
 
-            const name2 = await repository.getName("user-pubkey");
+            const name2 = await service.getName("user-pubkey");
             expect(name2).toBe("Alice Updated");
 
             expect(mockNDK.fetchEvent).toHaveBeenCalledTimes(2);
@@ -231,12 +231,12 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValue(mockProfile);
 
-            await repository.getName("user-pubkey");
+            await service.getName("user-pubkey");
             expect(mockNDK.fetchEvent).toHaveBeenCalledTimes(1);
 
-            repository.clearCache();
+            service.clearCache();
 
-            await repository.getName("user-pubkey");
+            await service.getName("user-pubkey");
             expect(mockNDK.fetchEvent).toHaveBeenCalledTimes(2);
         });
 
@@ -248,10 +248,10 @@ describe("PubkeyNameRepository", () => {
 
             mockNDK.fetchEvent.mockResolvedValue(mockProfile);
 
-            await repository.getName("user1-pubkey");
-            await repository.getName("user2-pubkey");
+            await service.getName("user1-pubkey");
+            await service.getName("user2-pubkey");
 
-            const stats = repository.getCacheStats();
+            const stats = service.getCacheStats();
             expect(stats.size).toBe(2);
             expect(stats.entries).toContain("user1-pubkey");
             expect(stats.entries).toContain("user2-pubkey");
@@ -260,7 +260,7 @@ describe("PubkeyNameRepository", () => {
 
     describe("getNameSync", () => {
         it("should return agent slug synchronously for agents", () => {
-            const name = repository.getNameSync("agent1-pubkey");
+            const name = service.getNameSync("agent1-pubkey");
             expect(name).toBe("code-writer");
         });
 
@@ -273,15 +273,15 @@ describe("PubkeyNameRepository", () => {
             mockNDK.fetchEvent.mockResolvedValueOnce(mockProfile);
 
             // First fetch to populate cache
-            await repository.getName("user-pubkey");
+            await service.getName("user-pubkey");
 
             // Now sync should work from cache
-            const name = repository.getNameSync("user-pubkey");
+            const name = service.getNameSync("user-pubkey");
             expect(name).toBe("Dave");
         });
 
         it("should return default name if not cached", () => {
-            const name = repository.getNameSync("uncached-user-pubkey");
+            const name = service.getNameSync("uncached-user-pubkey");
             expect(name).toBe("User");
         });
     });
