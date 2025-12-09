@@ -319,10 +319,16 @@ The code is ready for production with minor improvements.`,
             delay: 4500,
             toolCalls: [
                 {
-                    name: "delegate_phase",
+                    name: "delegate",
                     params: {
-                        phase: "REVIEW",
-                        summary: "Code analysis completed",
+                        delegations: [
+                            {
+                                recipient: "reviewer",
+                                prompt: "Code analysis completed",
+                                phase: "REVIEW",
+                            },
+                        ],
+                        mode: "wait",
                     },
                 },
                 {

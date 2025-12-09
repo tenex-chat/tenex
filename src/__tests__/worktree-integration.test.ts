@@ -6,7 +6,7 @@ describe("Worktree Integration", () => {
     test("full worktree workflow", async () => {
         // This is a documentation test showing the expected flow
 
-        // 1. Agent calls delegate_phase with branch parameter
+        // 1. Agent calls delegate with branch parameter
         // 2. Tool creates worktree via createWorktree()
         // 3. Tool tracks metadata via trackWorktreeCreation()
         // 4. Tool adds branch to delegation intent

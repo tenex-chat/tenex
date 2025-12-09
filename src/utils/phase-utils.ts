@@ -10,12 +10,12 @@ export interface PhaseContext {
 }
 
 /**
- * Extract phase context from triggering event if it contains delegate_phase tags
+ * Extract phase context from triggering event if it contains delegation with phase tags
  */
 export function extractPhaseContext(triggeringEvent: NDKEvent): PhaseContext | undefined {
-    // Check if this is a phase delegation by looking for the tool tag
+    // Check if this is a delegation by looking for the tool tag
     const toolTag = triggeringEvent.tags.find(
-        (tag) => tag[0] === "tool" && tag[1] === "delegate_phase"
+        (tag) => tag[0] === "tool" && tag[1] === "delegate"
     );
     if (!toolTag) {
         return undefined;

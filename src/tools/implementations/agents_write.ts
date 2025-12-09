@@ -21,13 +21,13 @@ const agentsWriteSchema = z.object({
         .array(z.string())
         .nullable()
         .describe(
-            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned based on whether the agent has phases defined - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, nostr_projects, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
+            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, nostr_projects, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
         ),
     phases: z
         .record(z.string(), z.string())
         .nullable()
         .describe(
-            "Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent gets delegate_phase tool instead of delegate tool."
+            "Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent can use the phase parameter when delegating tasks."
         ),
 });
 
@@ -179,7 +179,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_phase, delegate_external, delegate_followup) are automatically assigned based on PM status - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
+            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_external, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {

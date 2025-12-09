@@ -46,7 +46,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         userEvent.sig = "sig1";
         events.push(userEvent);
 
-        // Event 2: PM's tool-call event (delegate_phase)
+        // Event 2: PM's tool-call event (delegate)
         const toolCallEvent = new NDKEvent();
         toolCallEvent.id = "tool-call-event-456";
         toolCallEvent.pubkey = PM_PUBKEY;
@@ -56,12 +56,12 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         toolCallEvent.tags = [
             ["e", userEvent.id, "", "root"],
             ["p", USER_PUBKEY],
-            ["tool", "delegate_phase"],
+            ["tool", "delegate"],
             [
                 "tool-args",
                 JSON.stringify({
-                    recipients: ["nostr-expert"],
-                    request: "Tell me one fact about Nostr, just 2 sentences max",
+                    delegations: [{ recipient: "nostr-expert", prompt: "Tell me one fact about Nostr, just 2 sentences max" }],
+                    mode: "wait",
                 }),
             ],
         ];

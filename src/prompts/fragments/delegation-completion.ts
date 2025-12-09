@@ -24,7 +24,7 @@ THE TASK IS COMPLETE. DO NOT REPEAT IT.
 
 Simply respond with the result from the conversation above.
 
-DO NOT use delegate(), delegate_phase(), or any other tool.
+DO NOT use delegate() or any other tool.
 
 === END CRITICAL NOTIFICATION ===`;
     },

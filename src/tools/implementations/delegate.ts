@@ -7,133 +7,218 @@ import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
-const delegateSchema = z.object({
-    recipients: z
-        .array(z.string())
-        .describe(
-            "Array of agent slug(s) (e.g., ['architect']), name(s) (e.g., ['Architect']), npub(s), or hex pubkey(s) of the recipient agent(s)"
-        ),
-    fullRequest: z
+/**
+ * Base delegation item schema (no phase field)
+ */
+const baseDelegationItemSchema = z.object({
+    recipient: z
         .string()
-        .describe("The complete request or question to delegate to the recipient agent(s)"),
+        .describe(
+            "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"
+        ),
+    prompt: z.string().describe("The request or task for this agent"),
     branch: z
         .string()
         .optional()
-        .describe(
-            "Optional git branch name for worktree isolation. Creates a new worktree for the delegated work."
-        ),
-    mode: z
-        .enum(["blocking", "pair"])
-        .default("blocking")
-        .describe(
-            "Execution mode: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins to validate, continue, stop, or correct the delegated agent"
-        ),
+        .describe("Git branch name for worktree isolation"),
 });
 
-type DelegateInput = z.infer<typeof delegateSchema>;
+/**
+ * Extended delegation item schema with phase field (for agents with phases)
+ */
+const phaseDelegationItemSchema = baseDelegationItemSchema.extend({
+    phase: z
+        .string()
+        .optional()
+        .describe("Phase to switch to for this delegation (must be defined in your phases configuration)"),
+});
+
+type BaseDelegationItem = z.infer<typeof baseDelegationItemSchema>;
+type PhaseDelegationItem = z.infer<typeof phaseDelegationItemSchema>;
+type DelegationItem = BaseDelegationItem | PhaseDelegationItem;
+
+interface DelegateInput {
+    delegations: DelegationItem[];
+    mode: "wait" | "pair";
+}
+
 type DelegateOutput = DelegationResponses;
 
-// Core implementation - extracted from existing execute function
+/**
+ * Execute delegation with unified logic
+ */
 async function executeDelegate(
     input: DelegateInput,
     context: ExecutionContext
 ): Promise<DelegateOutput> {
-    const { recipients, fullRequest, branch, mode } = input;
+    const { delegations, mode } = input;
 
-    // Recipients is always an array due to schema validation
-    if (!Array.isArray(recipients)) {
-        throw new Error("Recipients must be an array of strings");
+    if (!Array.isArray(delegations) || delegations.length === 0) {
+        throw new Error("At least one delegation is required");
     }
 
-    // Resolve recipients to pubkeys
-    const resolvedPubkeys: string[] = [];
+    // Resolve all recipients and build delegation intent
+    const resolvedDelegations: Array<{
+        recipient: string;
+        request: string;
+        branch?: string;
+        phase?: string;
+        phaseInstructions?: string;
+    }> = [];
     const failedRecipients: string[] = [];
 
-    for (const recipient of recipients) {
-        const pubkey = resolveRecipientToPubkey(recipient);
-        if (pubkey) {
-            resolvedPubkeys.push(pubkey);
-        } else {
-            failedRecipients.push(recipient);
+    for (const delegation of delegations) {
+        const pubkey = resolveRecipientToPubkey(delegation.recipient);
+        if (!pubkey) {
+            failedRecipients.push(delegation.recipient);
+            continue;
         }
+
+        // Check for phase if it exists on this delegation item
+        const phase = "phase" in delegation ? delegation.phase : undefined;
+        let phaseInstructions: string | undefined;
+
+        // Look up phase instructions if phase is specified
+        if (phase) {
+            if (!context.agent.phases) {
+                throw new Error(
+                    `Agent ${context.agent.name} does not have any phases defined. Cannot use phase '${phase}'.`
+                );
+            }
+
+            const normalizedPhase = phase.toLowerCase();
+            const phaseEntry = Object.entries(context.agent.phases).find(
+                ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
+            );
+
+            if (!phaseEntry) {
+                const availablePhases = Object.keys(context.agent.phases).join(", ");
+                throw new Error(
+                    `Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`
+                );
+            }
+
+            phaseInstructions = phaseEntry[1];
+        }
+
+        // Check for self-delegation
+        if (pubkey === context.agent.pubkey && !phase) {
+            throw new Error(
+                `Self-delegation is not permitted without a phase. Agent "${context.agent.slug}" cannot delegate to itself without specifying a phase.`
+            );
+        }
+
+        resolvedDelegations.push({
+            recipient: pubkey,
+            request: delegation.prompt,
+            branch: delegation.branch,
+            phase,
+            phaseInstructions,
+        });
     }
 
     if (failedRecipients.length > 0) {
         logger.warn("Some recipients could not be resolved", {
             failed: failedRecipients,
-            resolved: resolvedPubkeys.length,
+            resolved: resolvedDelegations.length,
         });
     }
 
-    if (resolvedPubkeys.length === 0) {
+    if (resolvedDelegations.length === 0) {
         throw new Error("No valid recipients provided.");
     }
 
-    // Check for self-delegation (not allowed in regular delegate tool)
-    const selfDelegationAttempts = resolvedPubkeys.filter(
-        (pubkey) => pubkey === context.agent.pubkey
-    );
-
-    if (selfDelegationAttempts.length > 0) {
-        throw new Error(
-            `Self-delegation is not permitted with the delegate tool. Agent "${context.agent.slug}" cannot delegate to itself. Use the delegate_phase tool if you need to transition phases within the same agent.`
-        );
+    // Use DelegationService to execute
+    if (!context.agentPublisher) {
+        throw new Error("AgentPublisher not available in execution context");
     }
 
-    // Use DelegationService to execute the delegation
     const delegationService = new DelegationService(
         context.agent,
         context.conversationId,
         context.conversationCoordinator,
         context.triggeringEvent,
-        context.agentPublisher!,
+        context.agentPublisher,
         context.projectPath,
         context.currentBranch
     );
 
-    // Convert to new delegations[] format - same request/branch for all recipients
-    return await delegationService.execute(
-        {
-            delegations: resolvedPubkeys.map((pubkey) => ({
-                recipient: pubkey,
-                request: fullRequest,
-                branch, // Same branch for all recipients in delegate
-            })),
-        },
-        {
-            mode: mode as DelegationMode,
-        }
+    // Map "wait" to "blocking" for internal DelegationMode
+    const internalMode: DelegationMode = mode === "wait" ? "blocking" : "pair";
+
+    const responses = await delegationService.execute(
+        { delegations: resolvedDelegations },
+        { mode: internalMode }
     );
+
+    logger.info("[delegate() tool] ✅ COMPLETE: Received responses", {
+        delegationCount: resolvedDelegations.length,
+        responseCount: responses.responses.length,
+        worktreeCount: responses.worktrees?.length ?? 0,
+        mode,
+    });
+
+    return responses;
 }
 
-// AI SDK tool factory
+/**
+ * Create the unified delegate tool with conditional schema based on agent phases
+ */
 export function createDelegateTool(context: ExecutionContext): AISdkTool {
+    const hasPhases = context.agent.phases && Object.keys(context.agent.phases).length > 0;
+
+    // Build delegation item schema based on whether agent has phases
+    const delegationItemSchema = hasPhases
+        ? phaseDelegationItemSchema
+        : baseDelegationItemSchema;
+
+    // Build the full schema
+    const delegateSchema = z.object({
+        delegations: z
+            .array(delegationItemSchema)
+            .min(1)
+            .describe("Array of delegations to execute"),
+        mode: z
+            .enum(["wait", "pair"])
+            .default("wait")
+            .describe(
+                "Execution mode: 'wait' (default) waits for all completions, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent(s)"
+            ),
+    });
+
+    // Build description based on whether agent has phases
+    const description = hasPhases
+        ? "Delegate tasks to one or more agents. Supports two modes: 'wait' (default) waits for completion, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent(s). Each delegation can have its own prompt, branch, and phase. Provide complete context - agents have no visibility into your conversation."
+        : "Delegate tasks to one or more agents. Supports two modes: 'wait' (default) waits for completion, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent(s). Each delegation can have its own prompt and branch. Provide complete context - agents have no visibility into your conversation.";
+
     const aiTool = tool({
-        description:
-            "Delegate a task or question to one or more agents. Supports two modes: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys.",
+        description,
         inputSchema: delegateSchema,
-        execute: async (input: DelegateInput) => {
-            return await executeDelegate(input, context);
+        execute: async (input: unknown) => {
+            return await executeDelegate(input as DelegateInput, context);
         },
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: (args: unknown) => {
-            // Defensive: handle cases where args might not be properly typed
-            if (!args || typeof args !== "object" || !("recipients" in args)) {
+            if (!args || typeof args !== "object" || !("delegations" in args)) {
                 return "Delegating to agent(s)";
             }
 
-            const { recipients } = args as DelegateInput;
+            const { delegations } = args as DelegateInput;
 
-            if (!recipients || !Array.isArray(recipients)) {
+            if (!delegations || !Array.isArray(delegations)) {
                 return "Delegating to agent(s)";
             }
 
-            if (recipients.length === 1) {
-                return `Delegating to ${recipients[0]}`;
+            if (delegations.length === 1) {
+                const d = delegations[0];
+                const phaseStr = "phase" in d && d.phase ? ` (${d.phase} phase)` : "";
+                return `Delegating to ${d.recipient}${phaseStr}`;
             }
-            return `Delegating to ${recipients.length} recipients`;
+
+            const recipients = delegations.map((d) => d.recipient).join(", ");
+            return `Delegating ${delegations.length} tasks to: ${recipients}`;
         },
         enumerable: false,
         configurable: true,
@@ -143,28 +228,49 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
 }
 
 /**
- * Delegate tool - enables agents to communicate with each other via kind:1111 conversation events
+ * Unified Delegate Tool
  *
- * This tool allows an agent to delegate a request or question to one or more agents by:
- * 1. Resolving each recipient (agent slug or pubkey) to a pubkey
- * 2. Publishing a kind:1111 conversation event for each recipient with p-tag assignment
- * 3. Setting up delegation state so the agent waits for all responses
+ * Delegates tasks to one or more agents with optional phase switching and worktree isolation.
+ *
+ * Features:
+ * - Single or multiple delegations in one call
+ * - Each delegation can have a different prompt, branch, and phase
+ * - Supports 'wait' mode (blocks until all complete) and 'pair' mode (periodic check-ins)
+ * - Phase field is only available for agents with defined phases
+ * - Self-delegation is only allowed when a phase is specified
  *
  * Recipients can be:
- * - A single recipient or array of recipients
- * - Agent slugs (e.g., "architect", "planner") - resolved from project agents
- * - Agent names (e.g., "Architect", "Planner") - resolved from project agents
- * - Npubs (e.g., "npub1...") - decoded to hex pubkeys
- * - Hex pubkeys (64 characters) - used directly
+ * - Agent slugs (e.g., "architect", "coder")
+ * - Agent names (e.g., "Architect", "Coder")
+ * - Npubs (e.g., "npub1...")
+ * - Hex pubkeys (64 characters)
  *
- * If any recipient cannot be resolved, the tool fails with an error.
+ * Examples:
  *
- * When delegating to multiple recipients, the agent will wait for all responses
- * before continuing. The agent should NOT complete after delegating.
+ * Single delegation:
+ * ```
+ * delegate({
+ *   delegations: [{ recipient: "coder", prompt: "Implement the login page" }],
+ *   mode: "wait"
+ * })
+ * ```
  *
- * Each delegation creates a kind:1111 conversation event (following NIP-22) that:
- * - Is addressed to a specific agent via p-tag
- * - Maintains conversation threading via E/e tags
- * - Enables natural agent-to-agent communication
- * - Supports parallel execution when delegating to multiple agents
+ * Multiple delegations with different tasks:
+ * ```
+ * delegate({
+ *   delegations: [
+ *     { recipient: "coder", prompt: "Implement OOP approach", branch: "impl-oop" },
+ *     { recipient: "coder", prompt: "Implement FP approach", branch: "impl-fp" }
+ *   ],
+ *   mode: "wait"
+ * })
+ * ```
+ *
+ * With phase (agents with phases only):
+ * ```
+ * delegate({
+ *   delegations: [{ recipient: "architect", prompt: "Design the API", phase: "planning" }],
+ *   mode: "pair"
+ * })
+ * ```
  */

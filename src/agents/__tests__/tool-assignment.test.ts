@@ -16,7 +16,6 @@ describe("Tool assignment", () => {
             expect(tools).toContain("shell");
             // Delegate tools are NOT in defaults, they're added by getDelegateToolsForAgent
             expect(tools).not.toContain("delegate");
-            expect(tools).not.toContain("delegate_phase");
         });
 
         it("different agents should get identical default tools", () => {
@@ -50,7 +49,6 @@ describe("Tool assignment", () => {
             // Delegate tools are NOT in the default set
             // They're added separately via getDelegateToolsForAgent
             expect(tools).not.toContain("delegate");
-            expect(tools).not.toContain("delegate_phase");
             expect(tools).not.toContain("delegate_external");
             expect(tools).not.toContain("delegate_followup");
         });
