@@ -24,7 +24,7 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
         parts.push("## Your Defined Phases");
         parts.push("");
         parts.push(
-            "You manage the following phases. When you use the delegate_phase tool, you must specify one of these phases:"
+            "You manage the following phases. When delegating, you can use the 'phase' parameter to specify one of these phases:"
         );
         parts.push("");
 
@@ -42,8 +42,8 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
         parts.push("- `phase_add`: Add a new phase with its instructions");
         parts.push("- `phase_remove`: Remove an existing phase");
         parts.push("");
-        parts.push("When you delegate to a phase:");
-        parts.push("1. The conversation switches to that phase");
+        parts.push("When you delegate with a phase:");
+        parts.push("1. Use the 'phase' parameter in your delegation item: { recipient, prompt, phase }");
         parts.push("2. The phase instructions are provided to ALL agents working in that phase");
         parts.push("3. The delegated agent receives both your request AND the phase instructions");
         parts.push("");

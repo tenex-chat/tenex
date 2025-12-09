@@ -28,10 +28,16 @@ export const exampleScenario: MockLLMScenario = {
                 content: "I'll delegate this to the appropriate agent for implementation.",
                 toolCalls: [
                     {
-                        function: "delegate_phase",
+                        function: "delegate",
                         args: JSON.stringify({
-                            phase: "execute",
-                            reason: "File creation needs to be implemented",
+                            delegations: [
+                                {
+                                    recipient: "executor",
+                                    prompt: "File creation needs to be implemented",
+                                    phase: "execute",
+                                },
+                            ],
+                            mode: "wait",
                         }),
                     },
                 ],
@@ -50,10 +56,16 @@ export const exampleScenario: MockLLMScenario = {
                     "Let me create a plan for the authentication system:\n1. Set up user model\n2. Implement JWT tokens\n3. Add OAuth support",
                 toolCalls: [
                     {
-                        function: "delegate_phase",
+                        function: "delegate",
                         args: JSON.stringify({
-                            phase: "execute",
-                            reason: "Plan is ready, moving to implementation",
+                            delegations: [
+                                {
+                                    recipient: "executor",
+                                    prompt: "Plan is ready, moving to implementation",
+                                    phase: "execute",
+                                },
+                            ],
+                            mode: "wait",
                         }),
                     },
                 ],

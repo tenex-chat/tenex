@@ -247,17 +247,17 @@ async function handleReplyLogic(
     // Remove agents that had active operations from the list to execute
     targetAgents = targetAgents.filter((agent) => !agentsToInject.includes(agent));
 
-    // 4. Filter out self-replies (except for agents with delegate_phase tool)
+    // 4. Filter out self-replies (except for agents with phases - they can self-delegate for phase transitions)
     const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
 
-    // Check if any of the filtered agents have delegate_phase tool
-    const selfReplyAgentsWithDelegatePhase = targetAgents.filter((agent) => {
-        // Agent is p-tagging themselves AND has delegate_phase tool
-        return agent.pubkey === event.pubkey && agent.tools?.includes("delegate_phase");
+    // Check if any of the filtered agents have phases defined (can self-delegate for phase transitions)
+    const selfReplyAgentsWithPhases = targetAgents.filter((agent) => {
+        // Agent is p-tagging themselves AND has phases defined
+        return agent.pubkey === event.pubkey && agent.phases && Object.keys(agent.phases).length > 0;
     });
 
-    // Allow agents with delegate_phase to continue even if they're self-replying
-    const finalTargetAgents = [...nonSelfReplyAgents, ...selfReplyAgentsWithDelegatePhase];
+    // Allow agents with phases to continue even if they're self-replying (for phase transitions)
+    const finalTargetAgents = [...nonSelfReplyAgents, ...selfReplyAgentsWithPhases];
 
     if (finalTargetAgents.length === 0) {
         const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents);
@@ -272,17 +272,17 @@ async function handleReplyLogic(
     // Log filtering actions
     if (nonSelfReplyAgents.length < targetAgents.length) {
         const filteredAgents = targetAgents.filter((a) => !nonSelfReplyAgents.includes(a));
-        const allowedSelfReplies = filteredAgents.filter((a) =>
-            a.tools?.includes("delegate_phase")
+        const allowedSelfReplies = filteredAgents.filter(
+            (a) => a.phases && Object.keys(a.phases).length > 0
         );
         const blockedSelfReplies = filteredAgents.filter(
-            (a) => !a.tools?.includes("delegate_phase")
+            (a) => !a.phases || Object.keys(a.phases).length === 0
         );
 
         if (allowedSelfReplies.length > 0) {
             logger.info(
                 chalk.gray(
-                    `Allowing self-reply for agents with delegate_phase: ${allowedSelfReplies.map((a) => a.name).join(", ")}`
+                    `Allowing self-reply for agents with phases: ${allowedSelfReplies.map((a) => a.name).join(", ")}`
                 )
             );
         }

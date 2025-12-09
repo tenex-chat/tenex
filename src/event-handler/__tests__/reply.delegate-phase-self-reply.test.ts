@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
 
-describe("Delegate Phase Self-Reply", () => {
+describe("Agent Phase Self-Reply", () => {
     let mockConversationCoordinator: any;
     let mockAgentExecutor: any;
     let mockProjectContext: any;
@@ -36,7 +36,7 @@ describe("Delegate Phase Self-Reply", () => {
                 planning: "Planning phase instructions",
                 execution: "Execution phase instructions",
             },
-            tools: ["delegate_phase", "phase_add", "phase_remove"], // Has delegate_phase due to phases
+            tools: ["delegate", "phase_add", "phase_remove"], // Has phases so can self-delegate
         };
 
         const regularAgent = {
@@ -44,7 +44,7 @@ describe("Delegate Phase Self-Reply", () => {
             pubkey: "regular-agent-pubkey",
             slug: "regular-agent",
             eventId: "regular-event-id",
-            tools: ["delegate", "shell"], // No delegate_phase
+            tools: ["delegate", "shell"], // No phases, cannot self-delegate
         };
 
         mockProjectContext = {
@@ -78,7 +78,7 @@ describe("Delegate Phase Self-Reply", () => {
         }));
     });
 
-    it("should allow agents with delegate_phase to process their own p-tag (phase transition)", async () => {
+    it("should allow agents with phases to process their own p-tag (phase transition)", async () => {
         // Create an event from PM with phases p-tagging itself
         const selfReplyEvent: NDKEvent = {
             id: "event-self-phase",
@@ -119,7 +119,7 @@ describe("Delegate Phase Self-Reply", () => {
             agentExecutor: mockAgentExecutor,
         });
 
-        // Agent executor SHOULD be called because PM has delegate_phase tool
+        // Agent executor SHOULD be called because PM has phases defined
         expect(mockAgentExecutor.execute).toHaveBeenCalledTimes(1);
 
         // Verify the PM was executed (allowed self-reply)
@@ -128,7 +128,7 @@ describe("Delegate Phase Self-Reply", () => {
         expect(executionContext.agent.slug).toBe("pm-with-phases");
     });
 
-    it("should block self-reply for agents WITHOUT delegate_phase tool", async () => {
+    it("should block self-reply for agents WITHOUT phases defined", async () => {
         // Create an event from regular agent p-tagging itself
         const selfReplyEvent: NDKEvent = {
             id: "event-regular-self",
@@ -173,7 +173,7 @@ describe("Delegate Phase Self-Reply", () => {
         expect(mockAgentExecutor.execute).not.toHaveBeenCalled();
     });
 
-    it("should allow mixed routing: delegate_phase agent self-reply + other agents", async () => {
+    it("should allow mixed routing: agent with phases self-reply + other agents", async () => {
         // Create an event from PM p-tagging both itself and another agent
         const mixedEvent: NDKEvent = {
             id: "event-mixed",
@@ -183,7 +183,7 @@ describe("Delegate Phase Self-Reply", () => {
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],
-                ["p", "pm-phases-pubkey"], // P-tagging itself (allowed due to delegate_phase)
+                ["p", "pm-phases-pubkey"], // P-tagging itself (allowed since agent has phases)
                 ["p", "regular-agent-pubkey"], // Also p-tagging regular agent
             ],
             tagValue: (tag: string) => {

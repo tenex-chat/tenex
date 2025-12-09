@@ -34,7 +34,7 @@ async function executeDelegateFollowup(
     // Check for self-delegation (not allowed in delegate_followup tool)
     if (recipientPubkey === context.agent.pubkey) {
         throw new Error(
-            `Self-delegation is not permitted with the delegate_followup tool. Agent "${context.agent.slug}" cannot send follow-up questions to itself. Use the delegate_phase tool if you need to transition phases within the same agent.`
+            `Self-delegation is not permitted with the delegate_followup tool. Agent "${context.agent.slug}" cannot send follow-up questions to itself. Use the delegate tool with a phase if you need to transition phases within the same agent.`
         );
     }
 
@@ -48,7 +48,7 @@ async function executeDelegateFollowup(
 
     if (!delegationRecord) {
         throw new Error(
-            `No recent delegation found to ${recipient}. Use delegate or delegate_phase first, then use delegate_followup to ask clarifying questions.`
+            `No recent delegation found to ${recipient}. Use delegate first, then use delegate_followup to ask clarifying questions.`
         );
     }
 
@@ -102,7 +102,7 @@ async function executeDelegateFollowup(
 export function createDelegateFollowupTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Send a follow-up question to an agent you previously delegated to. Use after delegate or delegate_phase to ask clarifying questions about their response. The tool will wait for their response before continuing.",
+            "Send a follow-up question to an agent you previously delegated to. Use after delegate to ask clarifying questions about their response. The tool will wait for their response before continuing.",
         inputSchema: delegateFollowupSchema,
         execute: async (input: DelegateFollowupInput) => {
             return await executeDelegateFollowup(input, context);

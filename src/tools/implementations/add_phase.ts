@@ -73,22 +73,6 @@ async function executeAddPhase(
             totalPhases: Object.keys(agent.phases).length,
         });
 
-        // Check if agent needs delegate_phase tool now
-        const hasDelegate = agent.tools.includes("delegate");
-        const hasDelegatePhase = agent.tools.includes("delegate_phase");
-
-        if (hasDelegate && !hasDelegatePhase) {
-            // Switch from delegate to delegate_phase
-            agent.tools = agent.tools.filter((t) => t !== "delegate");
-            agent.tools.push("delegate_phase");
-
-            // Update stored agent tools as well
-            storedAgent.tools = agent.tools;
-            await agentStorage.saveAgent(storedAgent);
-
-            logger.info(`Switched agent ${agent.name} from 'delegate' to 'delegate_phase' tool`);
-        }
-
         return {
             success: true,
             message: `Successfully added phase '${phaseName}' to agent ${agent.name}`,
@@ -107,7 +91,7 @@ async function executeAddPhase(
 export function createAddPhaseTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Add a new phase definition to your agent configuration. This allows you to define new phases that you can switch to using delegate_phase. Each phase has a name and detailed instructions for what should be accomplished.",
+            "Add a new phase definition to your agent configuration. This allows you to define new phases that you can use when delegating tasks. Each phase has a name and detailed instructions for what should be accomplished. Once defined, use the 'phase' parameter in the delegate tool to switch to this phase.",
         inputSchema: addPhaseSchema,
         execute: async (input: AddPhaseInput) => {
             return await executeAddPhase(input, context);

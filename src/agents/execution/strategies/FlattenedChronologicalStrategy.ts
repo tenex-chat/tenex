@@ -579,10 +579,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             delegationRequestEventIds.add(delegation.requestEventId);
         }
 
-        // Also identify tool-call events for delegate_phase (they should be skipped)
+        // Also identify tool-call events for delegate (they should be skipped)
         for (const eventWithContext of events) {
             const toolTag = eventWithContext.event.tags.find((t) => t[0] === "tool");
-            if (toolTag && (toolTag[1] === "delegate_phase" || toolTag[1] === "delegate")) {
+            if (toolTag && toolTag[1] === "delegate") {
                 toolCallEventIds.add(eventWithContext.event.id);
             }
         }

@@ -30,7 +30,7 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
 export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
     // Default tools for all agents
     // Specific tools should be configured via agent definition events
-    // NOTE: delegate, delegate_phase, delegate_external, and delegate_followup are NOT included here
+    // NOTE: delegate, delegate_external, and delegate_followup are NOT included here
     // They are added via getDelegateToolsForAgent based on PM status
     const tools: ToolName[] = [
         "read_path",
@@ -52,10 +52,8 @@ export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
 export const DELEGATE_TOOLS: ToolName[] = [
     "ask",
     "delegate",
-    "delegate_phase",
     "delegate_external",
     "delegate_followup",
-    "delegate_multi",
 ] as const;
 
 /**
@@ -76,6 +74,9 @@ export function getDelegateToolsForAgent(
     // All agents get ask tool
     tools.push("ask");
 
+    // All agents get the unified delegate tool
+    tools.push("delegate");
+
     // Check if agent has phases defined
     const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
 
@@ -84,19 +85,13 @@ export function getDelegateToolsForAgent(
         requestedTools?.includes("phase_add") || requestedTools?.includes("phase_remove");
 
     if (hasPhases || phaseToolsRequested) {
-        // Agents with phases (or explicitly requesting phase tools) get delegate_phase
-        tools.push("delegate_phase");
-        // Also add phase management tools
+        // Agents with phases (or explicitly requesting phase tools) get phase management tools
         tools.push("phase_add", "phase_remove");
-    } else {
-        // Agents without phases get delegate
-        tools.push("delegate");
     }
 
-    // All agents get delegate_external, delegate_followup, and delegate_multi
+    // All agents get delegate_external and delegate_followup
     tools.push("delegate_external");
     tools.push("delegate_followup");
-    tools.push("delegate_multi");
 
     return tools;
 }

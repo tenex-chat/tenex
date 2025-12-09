@@ -49,15 +49,19 @@ export class AgentSupervisor {
         // Get all executions from the current tracker
         const allExecutions = this.toolTracker.getAllExecutions();
 
-        // Find delegate_phase executions from this turn
+        // Find delegate executions with phase from this turn
         const executedPhases = new Set<string>();
 
         for (const execution of allExecutions.values()) {
-            if (execution.toolName === "delegate_phase") {
-                // Extract phase name from the args
-                const args = execution.input as { phase?: string };
-                if (args?.phase) {
-                    executedPhases.add(args.phase.toLowerCase());
+            if (execution.toolName === "delegate") {
+                // Extract phase name from the args (unified delegate tool)
+                const args = execution.input as { delegations?: Array<{ phase?: string }> };
+                if (args?.delegations) {
+                    for (const delegation of args.delegations) {
+                        if (delegation.phase) {
+                            executedPhases.add(delegation.phase.toLowerCase());
+                        }
+                    }
                 }
             }
         }
@@ -98,8 +102,9 @@ export class AgentSupervisor {
             if (event.pubkey !== this.agent.pubkey) continue;
             if (event.id === this.context.triggeringEvent.id) break; // Stop at current trigger
 
-            const toolTag = event.tags.find((t) => t[0] === "tool" && t[1] === "delegate_phase");
+            const toolTag = event.tags.find((t) => t[0] === "tool" && t[1] === "delegate");
             if (toolTag) {
+                // Check if this delegation had a phase
                 const phaseTag = event.tags.find((t) => t[0] === "phase");
                 if (phaseTag?.[1]) {
                     historicalPhases.add(phaseTag[1].toLowerCase());
