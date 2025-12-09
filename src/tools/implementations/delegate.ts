@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { type DelegationResponses, DelegationService } from "@/services/delegation";
-import type { DelegationMode, PairModeConfig } from "@/services/delegation/types";
+import type { DelegationMode } from "@/services/delegation/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -28,15 +28,6 @@ const delegateSchema = z.object({
         .describe(
             "Execution mode: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins to validate, continue, stop, or correct the delegated agent"
         ),
-    pairConfig: z
-        .object({
-            stepThreshold: z
-                .number()
-                .default(10)
-                .describe("Number of AI SDK steps between check-ins (default: 10)"),
-        })
-        .optional()
-        .describe("Configuration for pair mode (only used when mode is 'pair')"),
 });
 
 type DelegateInput = z.infer<typeof delegateSchema>;
@@ -47,7 +38,7 @@ async function executeDelegate(
     input: DelegateInput,
     context: ExecutionContext
 ): Promise<DelegateOutput> {
-    const { recipients, fullRequest, branch, mode, pairConfig } = input;
+    const { recipients, fullRequest, branch, mode } = input;
 
     // Recipients is always an array due to schema validation
     if (!Array.isArray(recipients)) {
@@ -111,7 +102,6 @@ async function executeDelegate(
         },
         {
             mode: mode as DelegationMode,
-            pairConfig: pairConfig as Partial<PairModeConfig> | undefined,
         }
     );
 }
