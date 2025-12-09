@@ -28,7 +28,7 @@ describe("Pair Mode Integration", () => {
         // Use unique batchId for each test to avoid state pollution
         batchId = `integration-test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         registry = PairModeRegistry.getInstance();
-        registry.registerPairDelegation(batchId, delegatorPubkey, config);
+        registry.registerPairDelegation(batchId, delegatorPubkey, config, [agentPubkey]);
         controller = new PairModeController(batchId, agentPubkey, agentSlug, config);
     });
 
@@ -217,7 +217,7 @@ describe("Pair Mode Integration", () => {
             registry.registerPairDelegation(batchId, delegatorPubkey, {
                 stepThreshold: 3,
                 checkInTimeoutMs: 50,
-            });
+            }, [agentPubkey]);
             const shortTimeoutController = new PairModeController(
                 batchId,
                 agentPubkey,

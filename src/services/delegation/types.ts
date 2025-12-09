@@ -77,6 +77,8 @@ export interface PairDelegationState {
     status: "running" | "paused" | "aborted" | "completed";
     /** Public key of the delegator agent */
     delegatorPubkey: string;
+    /** Public keys of the delegated agents */
+    delegatedAgentPubkeys: string[];
 }
 
 /**
