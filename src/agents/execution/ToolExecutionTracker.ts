@@ -460,4 +460,22 @@ export class ToolExecutionTracker {
 
         return pending;
     }
+
+    /**
+     * Get the names of recently executed tools.
+     * Returns the most recent tool names (up to 10) for diagnostics/context.
+     *
+     * @returns Array of tool names that have been executed
+     */
+    getRecentToolNames(): string[] {
+        const toolNames: string[] = [];
+
+        // Get all tool names from tracked executions
+        for (const execution of this.executions.values()) {
+            toolNames.push(execution.toolName);
+        }
+
+        // Return the most recent 10 (map preserves insertion order)
+        return toolNames.slice(-10);
+    }
 }

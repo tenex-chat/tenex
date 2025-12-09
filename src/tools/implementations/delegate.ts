@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { type DelegationResponses, DelegationService } from "@/services/delegation";
+import type { DelegationMode, PairModeConfig } from "@/services/delegation/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
@@ -21,6 +22,21 @@ const delegateSchema = z.object({
         .describe(
             "Optional git branch name for worktree isolation. Creates a new worktree for the delegated work."
         ),
+    mode: z
+        .enum(["blocking", "pair"])
+        .default("blocking")
+        .describe(
+            "Execution mode: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins to validate, continue, stop, or correct the delegated agent"
+        ),
+    pairConfig: z
+        .object({
+            stepThreshold: z
+                .number()
+                .default(10)
+                .describe("Number of AI SDK steps between check-ins (default: 10)"),
+        })
+        .optional()
+        .describe("Configuration for pair mode (only used when mode is 'pair')"),
 });
 
 type DelegateInput = z.infer<typeof delegateSchema>;
@@ -31,7 +47,7 @@ async function executeDelegate(
     input: DelegateInput,
     context: ExecutionContext
 ): Promise<DelegateOutput> {
-    const { recipients, fullRequest, branch } = input;
+    const { recipients, fullRequest, branch, mode, pairConfig } = input;
 
     // Recipients is always an array due to schema validation
     if (!Array.isArray(recipients)) {
@@ -85,20 +101,26 @@ async function executeDelegate(
     );
 
     // Convert to new delegations[] format - same request/branch for all recipients
-    return await delegationService.execute({
-        delegations: resolvedPubkeys.map((pubkey) => ({
-            recipient: pubkey,
-            request: fullRequest,
-            branch, // Same branch for all recipients in delegate
-        })),
-    });
+    return await delegationService.execute(
+        {
+            delegations: resolvedPubkeys.map((pubkey) => ({
+                recipient: pubkey,
+                request: fullRequest,
+                branch, // Same branch for all recipients in delegate
+            })),
+        },
+        {
+            mode: mode as DelegationMode,
+            pairConfig: pairConfig as Partial<PairModeConfig> | undefined,
+        }
+    );
 }
 
 // AI SDK tool factory
 export function createDelegateTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Delegate a task or question to one or more agents and wait for their responses. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys. Responses are returned synchronously - the tool waits for all agents to complete.",
+            "Delegate a task or question to one or more agents. Supports two modes: 'blocking' (default) waits for completion, 'pair' enables periodic check-ins where you can CONTINUE, STOP, or CORRECT the delegated agent. Use for complex multi-step operations that require specialized expertise. Provide complete context in the request - agents have no visibility into your conversation. Can delegate to multiple agents in parallel by providing array of recipients. Recipients can be agent slugs (e.g., 'architect'), names (e.g., 'Architect'), npubs, or hex pubkeys.",
         inputSchema: delegateSchema,
         execute: async (input: DelegateInput) => {
             return await executeDelegate(input, context);
