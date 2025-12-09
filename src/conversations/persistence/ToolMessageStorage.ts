@@ -10,7 +10,9 @@ import type { ModelMessage } from "ai";
  * Single Responsibility: Persist and retrieve tool execution messages
  */
 export class ToolMessageStorage {
-    private readonly storageDir = config.getConfigPath("tool-messages");
+    private get storageDir(): string {
+        return config.getConfigPath("tool-messages");
+    }
 
     /**
      * Store tool messages for later reconstruction

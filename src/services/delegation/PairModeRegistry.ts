@@ -11,6 +11,7 @@
 
 import { EventEmitter } from "node:events";
 import { logger } from "@/utils/logger";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import type {
     CheckInResult,
     PairCheckInRequest,
@@ -18,6 +19,8 @@ import type {
     PairModeAction,
     PairModeConfig,
 } from "./types";
+
+const tracer = trace.getTracer("pair-mode-registry");
 
 /** Maximum number of check-in history entries to keep per delegation */
 const MAX_CHECK_IN_HISTORY = 100;
@@ -102,6 +105,18 @@ export class PairModeRegistry extends EventEmitter {
         this.activeDelegations.set(batchId, state);
         this.checkInHistory.set(batchId, []);
 
+        // Add telemetry
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            activeSpan.addEvent("pair_mode.registered", {
+                "pair_mode.batch_id": batchId,
+                "pair_mode.delegator_pubkey": delegatorPubkey.substring(0, 8),
+                "pair_mode.delegated_agents_count": delegatedAgentPubkeys.length,
+                "pair_mode.step_threshold": fullConfig.stepThreshold,
+                "pair_mode.timeout_ms": fullConfig.checkInTimeoutMs,
+            });
+        }
+
         logger.info("[PairModeRegistry] Registered pair mode delegation", {
             batchId,
             delegatorPubkey: delegatorPubkey.substring(0, 8),
@@ -144,52 +159,90 @@ export class PairModeRegistry extends EventEmitter {
      * @returns The action decided by the delegator
      */
     async requestCheckIn(request: PairCheckInRequest): Promise<PairModeAction> {
-        const state = this.activeDelegations.get(request.batchId);
-        if (!state) {
-            throw new Error(`No pair delegation found for batchId: ${request.batchId}`);
-        }
+        return tracer.startActiveSpan(
+            "pair_mode.check_in",
+            {
+                attributes: {
+                    "pair_mode.batch_id": request.batchId,
+                    "pair_mode.step_number": request.stepNumber,
+                    "pair_mode.delegated_agent": request.delegatedAgentSlug,
+                },
+            },
+            async (span) => {
+                try {
+                    const state = this.activeDelegations.get(request.batchId);
+                    if (!state) {
+                        const error = new Error(`No pair delegation found for batchId: ${request.batchId}`);
+                        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                        span.end();
+                        throw error;
+                    }
 
-        // Update state
-        state.status = "paused";
-        state.checkInCount++;
+                    // Update state
+                    state.status = "paused";
+                    state.checkInCount++;
 
-        logger.info("[PairModeRegistry] Requesting check-in from delegator", {
-            batchId: request.batchId,
-            stepNumber: request.stepNumber,
-            checkInNumber: state.checkInCount,
-            delegatedAgent: request.delegatedAgentSlug,
-            recentTools: request.recentToolCalls.slice(-5),
-        });
+                    span.setAttribute("pair_mode.check_in_number", state.checkInCount);
+                    span.addEvent("pair_mode.check_in_requested", {
+                        "pair_mode.recent_tools": request.recentToolCalls.slice(-5).join(","),
+                    });
 
-        // Emit check-in event for the delegator to handle
-        this.emit(`${request.batchId}:checkin`, request);
+                    logger.info("[PairModeRegistry] Requesting check-in from delegator", {
+                        batchId: request.batchId,
+                        stepNumber: request.stepNumber,
+                        checkInNumber: state.checkInCount,
+                        delegatedAgent: request.delegatedAgentSlug,
+                        recentTools: request.recentToolCalls.slice(-5),
+                    });
 
-        // Wait for response with timeout
-        return new Promise<PairModeAction>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                logger.warn("[PairModeRegistry] Check-in timeout, defaulting to CONTINUE", {
-                    batchId: request.batchId,
-                    timeoutMs: state.config.checkInTimeoutMs,
-                });
+                    // Emit check-in event for the delegator to handle
+                    this.emit(`${request.batchId}:checkin`, request);
 
-                this.pendingCheckIns.delete(request.batchId);
+                    // Wait for response with timeout
+                    const action = await new Promise<PairModeAction>((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            logger.warn("[PairModeRegistry] Check-in timeout, defaulting to CONTINUE", {
+                                batchId: request.batchId,
+                                timeoutMs: state.config.checkInTimeoutMs,
+                            });
 
-                // Record the timeout as a CONTINUE in history
-                this.addToHistory(request.batchId, {
-                    action: { type: "CONTINUE" },
-                    timestamp: Date.now(),
-                    stepNumber: request.stepNumber,
-                });
+                            span.addEvent("pair_mode.check_in_timeout", {
+                                "pair_mode.timeout_ms": state.config.checkInTimeoutMs,
+                            });
 
-                // Resume running
-                state.status = "running";
-                state.lastCheckInStep = request.stepNumber;
+                            this.pendingCheckIns.delete(request.batchId);
 
-                resolve({ type: "CONTINUE" });
-            }, state.config.checkInTimeoutMs);
+                            // Record the timeout as a CONTINUE in history
+                            this.addToHistory(request.batchId, {
+                                action: { type: "CONTINUE" },
+                                timestamp: Date.now(),
+                                stepNumber: request.stepNumber,
+                            });
 
-            this.pendingCheckIns.set(request.batchId, { resolve, reject, timeout });
-        });
+                            // Resume running
+                            state.status = "running";
+                            state.lastCheckInStep = request.stepNumber;
+
+                            resolve({ type: "CONTINUE" });
+                        }, state.config.checkInTimeoutMs);
+
+                        this.pendingCheckIns.set(request.batchId, { resolve, reject, timeout });
+                    });
+
+                    span.setAttribute("pair_mode.action_type", action.type);
+                    span.setStatus({ code: SpanStatusCode.OK });
+                    span.end();
+                    return action;
+                } catch (error) {
+                    span.setStatus({
+                        code: SpanStatusCode.ERROR,
+                        message: error instanceof Error ? error.message : "Unknown error",
+                    });
+                    span.end();
+                    throw error;
+                }
+            }
+        );
     }
 
     /**
@@ -200,8 +253,16 @@ export class PairModeRegistry extends EventEmitter {
         const pending = this.pendingCheckIns.get(batchId);
         const state = this.activeDelegations.get(batchId);
 
+        // Add telemetry
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("pair_mode.response_received", {
+            "pair_mode.batch_id": batchId,
+            "pair_mode.action_type": action.type,
+        });
+
         if (!pending) {
             logger.warn("[PairModeRegistry] No pending check-in found", { batchId });
+            activeSpan?.addEvent("pair_mode.response_no_pending", { "pair_mode.batch_id": batchId });
             return;
         }
 
@@ -231,6 +292,10 @@ export class PairModeRegistry extends EventEmitter {
 
             case "STOP":
                 state.status = "aborted";
+                activeSpan?.addEvent("pair_mode.stopped", {
+                    "pair_mode.batch_id": batchId,
+                    "pair_mode.stop_reason": action.reason ?? "no reason provided",
+                });
                 logger.info("[PairModeRegistry] Delegator responded STOP", {
                     batchId,
                     reason: action.reason,
@@ -241,6 +306,10 @@ export class PairModeRegistry extends EventEmitter {
                 state.status = "running";
                 state.lastCheckInStep += state.config.stepThreshold;
                 state.correctionMessages.push(action.message);
+                activeSpan?.addEvent("pair_mode.correction", {
+                    "pair_mode.batch_id": batchId,
+                    "pair_mode.correction_preview": action.message.substring(0, 100),
+                });
                 logger.info("[PairModeRegistry] Delegator responded CORRECT", {
                     batchId,
                     messagePreview: action.message.substring(0, 100),
@@ -289,6 +358,14 @@ export class PairModeRegistry extends EventEmitter {
         const state = this.activeDelegations.get(batchId);
         if (state) {
             state.status = "completed";
+
+            // Add telemetry
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.addEvent("pair_mode.completed", {
+                "pair_mode.batch_id": batchId,
+                "pair_mode.check_in_count": state.checkInCount,
+            });
+
             logger.info("[PairModeRegistry] Pair delegation completed", {
                 batchId,
                 checkInCount: state.checkInCount,
@@ -307,6 +384,15 @@ export class PairModeRegistry extends EventEmitter {
         const state = this.activeDelegations.get(batchId);
         if (state) {
             state.status = "aborted";
+
+            // Add telemetry
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.addEvent("pair_mode.aborted", {
+                "pair_mode.batch_id": batchId,
+                "pair_mode.abort_reason": reason ?? "no reason provided",
+                "pair_mode.check_in_count": state.checkInCount,
+            });
+
             logger.info("[PairModeRegistry] Pair delegation aborted", {
                 batchId,
                 reason,

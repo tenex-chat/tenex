@@ -1,10 +1,10 @@
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import "./test-mocks"; // Import shared mocks - MUST BE FIRST
+
 import type { ConversationCoordinator } from "@/conversations/coordinator/ConversationCoordinator";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ExecutionContext } from "../../types";
 import { ThreadWithMemoryStrategy } from "../ThreadWithMemoryStrategy";
-
-import "./test-mocks"; // Import shared mocks
 describe("ThreadWithMemoryStrategy - Context Duplication Fix", () => {
     let strategy: ThreadWithMemoryStrategy;
     let mockContext: ExecutionContext;

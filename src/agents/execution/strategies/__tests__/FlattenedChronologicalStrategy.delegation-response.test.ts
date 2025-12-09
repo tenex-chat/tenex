@@ -73,9 +73,9 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             tools: [],
         };
         await delegationRegistry.registerDelegation({
-            delegationEventId: "1a4e52fb76791050425f81ec49db55b39093142fd8c1ab46c520bfe51d92373a",
-            recipients: [
+            delegations: [
                 {
+                    eventId: "1a4e52fb76791050425f81ec49db55b39093142fd8c1ab46c520bfe51d92373a",
                     pubkey: CLAUDE_CODE_PUBKEY,
                     request:
                         "Tell me how many uncommitted files we have and what their changes are.",
@@ -84,8 +84,6 @@ describe("FlattenedChronologicalStrategy - Delegation Response Detection", () =>
             ],
             delegatingAgent: pmAgent,
             rootConversationId: CONVERSATION_ID,
-            originalRequest:
-                "Tell me how many uncommitted files we have and what their changes are.",
         });
 
         // Create strategy
