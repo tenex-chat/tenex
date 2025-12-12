@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import type { DelegationResponses } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
@@ -65,7 +65,7 @@ async function executeDelegateExternal(
     logger.debug("Processing recipient", { pubkey });
 
     // Check for previous delegations to the same recipient in this conversation
-    const registry = DelegationRegistry.getInstance();
+    const registry = DelegationRegistryService.getInstance();
     const previousDelegation = registry.getDelegationByConversationKey(
         context.conversationId,
         context.agent.pubkey,

@@ -11,8 +11,8 @@ import { ProjectContext } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { StatusPublisher } from "@/services/status/StatusPublisher";
-import { OperationsStatusPublisher } from "@/services/status/OperationsStatusPublisher";
+import { ProjectStatusService } from "@/services/status/ProjectStatusService";
+import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
@@ -34,8 +34,8 @@ export class ProjectRuntime {
     private project: NDKProject;
     private context: ProjectContext | null = null;
     private eventHandler: EventHandler | null = null;
-    private statusPublisher: StatusPublisher | null = null;
-    private operationsStatusPublisher: OperationsStatusPublisher | null = null;
+    private statusPublisher: ProjectStatusService | null = null;
+    private operationsStatusPublisher: OperationsStatusService | null = null;
     private conversationCoordinator: ConversationCoordinator | null = null;
 
     private isRunning = false;
@@ -135,7 +135,7 @@ export class ProjectRuntime {
             await this.eventHandler.initialize();
 
             // Start status publisher
-            this.statusPublisher = new StatusPublisher();
+            this.statusPublisher = new ProjectStatusService();
             await projectContextStore.run(this.context, async () => {
                 await this.statusPublisher?.startPublishing(
                     this.projectPath,
@@ -144,7 +144,7 @@ export class ProjectRuntime {
             });
 
             // Start operations status publisher
-            this.operationsStatusPublisher = new OperationsStatusPublisher(llmOpsRegistry);
+            this.operationsStatusPublisher = new OperationsStatusService(llmOpsRegistry);
             this.operationsStatusPublisher.start();
 
             this.isRunning = true;

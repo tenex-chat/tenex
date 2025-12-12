@@ -6,8 +6,8 @@
 
 export { DelegationService } from "./DelegationService";
 export type { DelegationResponses, DelegationExecuteOptions } from "./DelegationService";
-export { DelegationRegistry } from "./DelegationRegistry";
-export type { DelegationRecord } from "./DelegationRegistry";
+export { DelegationRegistryService } from "./DelegationRegistryService";
+export type { DelegationRecord } from "./DelegationRegistryService";
 
 // Pair mode exports
 export { PairModeRegistry } from "./PairModeRegistry";

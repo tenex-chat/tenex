@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import "./test-mocks"; // Import shared mocks
@@ -30,7 +30,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
 
     beforeAll(async () => {
         // Initialize services
-        await DelegationRegistry.initialize();
+        await DelegationRegistryService.initialize();
 
         // Create mock events representing a delegation flow
         events = [];
@@ -111,7 +111,7 @@ describe("FlattenedChronologicalStrategy - Condensed Delegation XML", () => {
         } as Conversation;
 
         // Register the delegation
-        const delegationRegistry = DelegationRegistry.getInstance();
+        const delegationRegistry = DelegationRegistryService.getInstance();
         const pmAgent: AgentInstance = {
             name: "Project Manager",
             slug: "project-manager",

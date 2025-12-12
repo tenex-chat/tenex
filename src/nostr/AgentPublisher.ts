@@ -2,7 +2,7 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,
@@ -118,7 +118,7 @@ export class AgentPublisher {
         }
 
         // Register delegation with per-delegation event IDs
-        const registry = DelegationRegistry.getInstance();
+        const registry = DelegationRegistryService.getInstance();
 
         const batchId = await registry.registerDelegation({
             delegations: intent.delegations.map((delegation, i) => ({
@@ -190,7 +190,7 @@ export class AgentPublisher {
         await this.agent.sign(followUpEvent);
 
         // Register with DelegationRegistry for tracking
-        const registry = DelegationRegistry.getInstance();
+        const registry = DelegationRegistryService.getInstance();
         const batchId = await registry.registerDelegation({
             delegations: [
                 {
@@ -240,7 +240,7 @@ export class AgentPublisher {
         await this.agent.sign(event);
 
         // Get project owner pubkey for registration
-        const projectCtx = await import("@/services").then((m) => m.getProjectContext());
+        const projectCtx = await import("@/services/ProjectContext").then((m) => m.getProjectContext());
         const ownerPubkey = projectCtx?.project?.pubkey;
 
         if (!ownerPubkey) {
@@ -248,7 +248,7 @@ export class AgentPublisher {
         }
 
         // Register with DelegationRegistry for tracking (ask uses delegation infrastructure)
-        const registry = DelegationRegistry.getInstance();
+        const registry = DelegationRegistryService.getInstance();
         const batchId = await registry.registerDelegation({
             delegations: [
                 {
@@ -507,7 +507,7 @@ export class AgentPublisher {
      * Reads agent associations from AgentStorage instead of maintaining a separate registry.
      */
     private static async publishProjectAgentSnapshot(projectTag: string): Promise<void> {
-        const config = await import("@/services/ConfigService").then((m) => m.config);
+        const { config } = await import("@/services/ConfigService");
 
         // Get all agents for this project from AgentStorage
         const agents = await agentStorage.getProjectAgents(projectTag);

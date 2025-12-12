@@ -1,7 +1,7 @@
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isProjectContextInitialized } from "@/services/ProjectContext";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -113,7 +113,7 @@ export class EventToModelMessage {
         }
 
         try {
-            const registry = DelegationRegistry.getInstance();
+            const registry = DelegationRegistryService.getInstance();
 
             // Check if there's a delegation record for this conversation
             const delegationContext = registry.getDelegationByConversationKey(

@@ -3,7 +3,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { PubkeyService } from "@/services/PubkeyService";
 import NDK, { type NDKEvent, type NDKFilter } from "@nostr-dev-kit/ndk";
 import { Box, Text, render, useApp, useInput } from "ink";
@@ -94,7 +94,7 @@ function NostrConversationViewer({ eventId, relayUrls }: { eventId: string; rela
     useEffect(() => {
         (async () => {
             try {
-                await DelegationRegistry.initialize();
+                await DelegationRegistryService.initialize();
 
                 // Fetch conversation
                 const events = await fetchConversationThread(eventId, relayUrls);

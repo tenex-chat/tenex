@@ -13,7 +13,7 @@ import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext } from "@/services/ProjectContext";
 import { config } from "@/services/ConfigService";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { ProjectContext } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
@@ -388,7 +388,7 @@ export async function runDebugThreadedFormatter(
             }
 
             // Initialize DelegationRegistry
-            await DelegationRegistry.initialize();
+            await DelegationRegistryService.initialize();
 
             // Create a mock execution context
             const conversationCoordinator = new ConversationCoordinator(metadataPath);
