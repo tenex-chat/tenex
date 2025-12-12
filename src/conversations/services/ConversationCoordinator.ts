@@ -89,6 +89,14 @@ export class ConversationCoordinator {
         this.store.set(conversation.id, conversation);
         await this.persistence.save(conversation);
 
+        // Schedule both initial and inactivity-based summarization for the first event
+        if (this.timerManager) {
+            // Initial summary: 30 seconds after first message
+            this.timerManager.scheduleInitialSummarization(conversation);
+            // Inactivity summary: 2 minutes after last activity (including the first message)
+            this.timerManager.scheduleSummarization(conversation);
+        }
+
         return conversation;
     }
 
@@ -143,7 +151,8 @@ export class ConversationCoordinator {
 
         this.eventProcessor.processIncomingEvent(conversation, event);
 
-        // Schedule summarization if not a metadata event
+        // Skip scheduling for metadata events to prevent summarization loops
+        // (Kind 513 events are summaries themselves, not content to be summarized)
         if (this.timerManager && event.kind !== NDKKind.EventMetadata) {
             this.timerManager.scheduleSummarization(conversation);
         }
