@@ -3,7 +3,7 @@ import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { getProjectContext } from "@/services/ProjectContext";
 import type { DelegationRecord } from "@/services/delegation";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
@@ -31,7 +31,7 @@ export class DelegationCompletionHandler {
         conversation: Conversation,
         conversationCoordinator: ConversationCoordinator
     ): Promise<DelegationCompletionResult> {
-        const registry = DelegationRegistry.getInstance();
+        const registry = DelegationRegistryService.getInstance();
         let delegationContext: DelegationRecord | undefined;
 
         logger.info("🔍 [DelegationCompletionHandler] Processing potential delegation completion", {
@@ -146,7 +146,7 @@ export class DelegationCompletionHandler {
                 return { shouldReactivate: false };
             }
 
-            const isAsyncFallback = !DelegationRegistry.getInstance().listenerCount(
+            const isAsyncFallback = !DelegationRegistryService.getInstance().listenerCount(
                 `${result.batchId}:completion`
             );
 

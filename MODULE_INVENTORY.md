@@ -60,15 +60,15 @@ Use this section to understand each service’s scope and dependencies:
 
 | Service | Location | Responsibility & Key Dependencies |
 | --- | --- | --- |
-| `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services` - never construct `~/.tenex` paths manually. |
-| `DelegationRegistry` | `src/services/DelegationRegistry.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |
-| `DelegationService` | `src/services/DelegationService.ts` | Publishes delegation/ask events via `nostr/AgentPublisher`, waits for responses, enforces policy (self-delegation rules). Requires `conversationCoordinator`. |
+| `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services/ConfigService` - never construct `~/.tenex` paths manually. |
+| `DelegationRegistryService` | `src/services/delegation/DelegationRegistryService.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |
+| `DelegationService` | `src/services/delegation/DelegationService.ts` | Publishes delegation/ask events via `nostr/AgentPublisher`, waits for responses, enforces policy (self-delegation rules). Requires `conversationCoordinator`. |
 | `DynamicToolService` | `src/services/DynamicToolService.ts` | Watches `~/.tenex/tools`, compiles TS tool factories, and exposes them to the tool registry. Uses Bun file APIs and `agents/execution` contexts. |
 | `EmbeddingProvider` | `src/services/EmbeddingProvider.ts` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |
 | `LLMOperationsRegistry` | `src/services/LLMOperationsRegistry.ts` | Tracks active LLM requests per project for throttling and telemetry; referenced by scheduler/status publishers. |
 | `NDKAgentDiscovery` | `src/services/NDKAgentDiscovery.ts` | Subscribes to relays to discover external agents, caches metadata via `PubkeyService`. |
 | `NudgeService` | `src/services/NudgeService.ts` | Emits reminders/prompts to stalled agents or phases; depends on scheduler + conversations. |
-| `OperationsStatusPublisher` & `status/` | `src/services/OperationsStatusPublisher.ts`, `src/services/status/*` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
+| `OperationsStatusService` & `status/` | `src/services/status/OperationsStatusService.ts`, `src/services/status/*` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
 | `ProjectContext` + `ProjectContextStore` | `src/services/ProjectContext*.ts` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
 | `PubkeyService` | `src/services/PubkeyService.ts` | Provides caching and lookup for pubkey display names from Nostr. |
 | `RAG*` services | `src/services/rag/*.ts` | Manage LanceDB collections, document ingestion, query APIs, and subscription services. Tools in `src/tools/implementations/rag_*` should call these. |
@@ -147,14 +147,11 @@ Use this section to understand each service’s scope and dependencies:
 - Added `lint:architecture` script for static architecture checks
 
 ### Ongoing Improvements (Gradual Migration)
-- **Service naming consistency**: Gradually rename remaining services to use "Service" suffix.
 - **Service subdirectory grouping**: Group related services into subdirectories (e.g., `services/delegation/`, `services/reports/`) when 3+ related files exist.
 - **Dependency injection pattern**: Gradually convert singletons to DI pattern with exported convenience instances.
-- **Remove barrel exports**: Phase out `services/index.ts` barrel export in favor of direct imports from service subdirectories.
 
 ### Known Issues to Address
 - **`tools/` vs `services/mcp` coupling**: MCP discovery/install logic spans both tool implementations and services. Action: document ownership each time we touch these areas. Currently: `services/mcp/` handles server lifecycle, `tools/implementations/mcp_discover.ts` discovers tools on Nostr (appropriate separation).
-- **Status publisher naming**: Three status publishers exist (`daemon/StatusPublisher.ts` as `DaemonStatusService`, `services/status/StatusPublisher.ts`, `services/OperationsStatusPublisher.ts`). Consider renaming for clarity: `DaemonStatusService`, `ProjectStatusService`, `OperationsStatusService`.
 
 ### Target State (Long-Term Vision)
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for our detailed architectural roadmap. The key pillars of our target state are:
@@ -173,4 +170,3 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for our detailed architectura
 **Ongoing Goals:**
 - ⏳ **Subdirectory Grouping**: Continue to group related services into subdirectories as domains grow.
 - ⏳ **Dependency Injection**: Consistently apply the dependency injection pattern across all services.
-- ⏳ **No Barrel Exports**: Continue to phase out any remaining barrel exports.

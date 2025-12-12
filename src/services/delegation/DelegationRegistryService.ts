@@ -114,8 +114,8 @@ const PersistedDataSchema = z.object({
     version: z.literal(1),
 });
 
-export class DelegationRegistry extends EventEmitter {
-    private static instance: DelegationRegistry;
+export class DelegationRegistryService extends EventEmitter {
+    private static instance: DelegationRegistryService;
     private static isInitialized = false;
 
     // Primary storage: delegationEventId -> full record (unique and authoritative)
@@ -154,24 +154,24 @@ export class DelegationRegistry extends EventEmitter {
      * Must be called once at app startup before using getInstance().
      */
     static async initialize(): Promise<void> {
-        if (DelegationRegistry.isInitialized) return;
+        if (DelegationRegistryService.isInitialized) return;
 
-        logger.debug("Initializing DelegationRegistry singleton");
+        logger.debug("Initializing DelegationRegistryService singleton");
 
         // Create instance if it doesn't exist
-        if (!DelegationRegistry.instance) {
-            DelegationRegistry.instance = new DelegationRegistry();
+        if (!DelegationRegistryService.instance) {
+            DelegationRegistryService.instance = new DelegationRegistryService();
         }
 
         // Restore data
-        await DelegationRegistry.instance.restore();
+        await DelegationRegistryService.instance.restore();
 
         // Set up periodic cleanup (every hour)
         setInterval(
             () => {
-                DelegationRegistry.instance.cleanupOldDelegations();
-                if (DelegationRegistry.instance.isDirty) {
-                    DelegationRegistry.instance.schedulePersistence();
+                DelegationRegistryService.instance.cleanupOldDelegations();
+                if (DelegationRegistryService.instance.isDirty) {
+                    DelegationRegistryService.instance.schedulePersistence();
                 }
             },
             60 * 60 * 1000
@@ -179,21 +179,21 @@ export class DelegationRegistry extends EventEmitter {
 
         // Set up graceful shutdown
 
-        DelegationRegistry.isInitialized = true;
-        logger.debug("DelegationRegistry singleton initialized successfully");
+        DelegationRegistryService.isInitialized = true;
+        logger.debug("DelegationRegistryService singleton initialized successfully");
     }
 
     /**
      * Get the singleton instance.
      * Throws if initialize() hasn't been called.
      */
-    static getInstance(): DelegationRegistry {
-        if (!DelegationRegistry.isInitialized || !DelegationRegistry.instance) {
+    static getInstance(): DelegationRegistryService {
+        if (!DelegationRegistryService.isInitialized || !DelegationRegistryService.instance) {
             throw new Error(
-                "DelegationRegistry not initialized. Call DelegationRegistry.initialize() at app startup."
+                "DelegationRegistryService not initialized. Call DelegationRegistryService.initialize() at app startup."
             );
         }
-        return DelegationRegistry.instance;
+        return DelegationRegistryService.instance;
     }
 
     /**

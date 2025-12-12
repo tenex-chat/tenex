@@ -11,7 +11,7 @@ import { ProjectContext } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { StatusPublisher } from "@/services/status/StatusPublisher";
+import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -32,7 +32,7 @@ export class ProjectRuntime {
     private project: NDKProject;
     private context: ProjectContext | null = null;
     private eventHandler: EventHandler | null = null;
-    private statusPublisher: StatusPublisher | null = null;
+    private statusPublisher: ProjectStatusService | null = null;
     private conversationCoordinator: ConversationCoordinator | null = null;
 
     private isRunning = false;
@@ -132,7 +132,7 @@ export class ProjectRuntime {
             await this.eventHandler.initialize();
 
             // Start status publisher
-            this.statusPublisher = new StatusPublisher();
+            this.statusPublisher = new ProjectStatusService();
             await projectContextStore.run(this.context, async () => {
                 await this.statusPublisher?.startPublishing(
                     this.projectPath,

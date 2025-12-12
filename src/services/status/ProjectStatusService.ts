@@ -37,7 +37,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  * publisher.stopPublishing();
  * ```
  */
-export class StatusPublisher {
+export class ProjectStatusService {
     private statusInterval?: NodeJS.Timeout;
     private projectContext?: ProjectContext;
 
