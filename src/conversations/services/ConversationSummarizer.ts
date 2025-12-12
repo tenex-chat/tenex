@@ -5,12 +5,21 @@ import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import type { ProjectContext } from "@/services/ProjectContext";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { z } from "zod";
 
 export class ConversationSummarizer {
     constructor(private context: ProjectContext) {}
 
     async summarizeAndPublish(conversation: Conversation): Promise<void> {
+        const tracer = trace.getTracer("tenex.conversation");
+        const span = tracer.startSpan("conversation.summarize_and_publish", {
+            attributes: {
+                "conversation.id": conversation.id,
+                "conversation.message_count": conversation.history.length,
+            },
+        });
+
         try {
             // Get LLM configuration
             const { llms } = await config.loadConfig();
@@ -20,8 +29,12 @@ export class ConversationSummarizer {
 
             if (!metadataConfig) {
                 console.warn("No LLM configuration available for metadata generation");
+                span.setStatus({ code: SpanStatusCode.ERROR, message: "No LLM configuration" });
+                span.end();
                 return;
             }
+
+            span.setAttribute("llm.model", metadataConfig.model);
 
             // Create LLM service
             const llmService = llmServiceFactory.createService(
@@ -44,8 +57,13 @@ export class ConversationSummarizer {
 
             if (!conversationContent.trim()) {
                 console.log("No content to summarize for conversation", conversation.id);
+                span.addEvent("no_content_to_summarize");
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
                 return;
             }
+
+            span.setAttribute("content.length", conversationContent.length);
 
             // Generate title and summary
             const { object: result } = await llmService.generateObject(
@@ -90,14 +108,35 @@ Focus on what was accomplished or discussed, not on the process.`,
             if (this.context.signer) {
                 await event.sign(this.context.signer);
                 await event.publish();
+
+                // Record successful publication
+                span.setAttribute("summary.title", result.title || "");
+                span.setAttribute("summary.length", result.summary?.length || 0);
+                span.setAttribute("event.id", event.id || "");
+                span.addEvent("kind_513_published", {
+                    "event.id": event.id,
+                    "event.kind": 513,
+                    "title": result.title,
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+
                 console.log(
                     `Published metadata for conversation ${conversation.id}: ${result.title}`
                 );
             } else {
                 console.warn("No signer available to publish metadata event");
+                span.setStatus({ code: SpanStatusCode.ERROR, message: "No signer available" });
             }
+
+            span.end();
         } catch (error) {
             console.error("Error generating conversation summary:", error);
+            span.recordException(error instanceof Error ? error : new Error(String(error)));
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            span.end();
         }
     }
 }

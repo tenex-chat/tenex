@@ -113,7 +113,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                         modelId,
                     },
                 };
-            }) as unknown as LanguageModelV2['doGenerate'],
+            }) as unknown as LanguageModelV2["doGenerate"],
 
             doStream: (async (options: LanguageModelV2CallOptions) => {
                 // Extract messages from prompt
@@ -259,7 +259,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                         modelId,
                     },
                 };
-            }) as LanguageModelV2['doStream'],
+            }) as LanguageModelV2["doStream"],
         });
     };
 

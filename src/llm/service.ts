@@ -16,6 +16,7 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
+    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -283,6 +284,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Log the request
         this.llmLogger
             .logLLMRequest({
+                agent: this.agentSlug,
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
@@ -391,6 +393,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // Log the response
             this.llmLogger
                 .logLLMResponse({
+                    agent: this.agentSlug,
                     response: {
                         content: result.text,
                         usage: {
@@ -422,6 +425,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             this.llmLogger
                 .logLLMResponse({
+                    agent: this.agentSlug,
                     error: error as Error,
                     endTime: Date.now(),
                     startTime,
@@ -467,6 +471,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Log the request
         this.llmLogger
             .logLLMRequest({
+                agent: this.agentSlug,
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
@@ -522,10 +527,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             experimental_telemetry: this.getFullTelemetryConfig(),
 
             // Smooth streaming with 15ms delay and line-based chunking
-            // experimental_transform: smoothStream({
-            //     delayInMs: 15,
-            //     chunking: 'word'
-            // }),
+            experimental_transform: smoothStream({
+                delayInMs: 15,
+                chunking: "word"
+            }),
 
             providerOptions: {
                 openrouter: {
@@ -731,6 +736,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                         : e.text || "";
 
                 await this.llmLogger.logLLMResponse({
+                    agent: this.agentSlug,
                     response: {
                         content: e.text,
                         usage: {
@@ -780,6 +786,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         await this.llmLogger
             .logLLMResponse({
+                agent: this.agentSlug,
                 error: error as Error,
                 endTime: Date.now(),
                 startTime,
@@ -931,6 +938,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     private async logGenerationRequest(messages: ModelMessage[], startTime: number): Promise<void> {
         await this.llmLogger.logLLMRequest({
+            agent: this.agentSlug,
             messages,
             model: this.model,
             provider: this.provider,
@@ -948,6 +956,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         startTime: number
     ): Promise<void> {
         await this.llmLogger.logLLMResponse({
+            agent: this.agentSlug,
             response: {
                 content,
                 usage: {

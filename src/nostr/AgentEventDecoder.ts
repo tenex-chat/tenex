@@ -251,7 +251,6 @@ export class AgentEventDecoder {
         NDKKind.TenexStreamingResponse,
         NDKKind.TenexAgentTypingStart,
         NDKKind.TenexAgentTypingStop,
-        NDKKind.TenexOperationsStatus,
     ];
 
     /**

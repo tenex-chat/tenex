@@ -3,6 +3,8 @@ import { createAgentInstance } from "@/agents/agent-loader";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -108,6 +110,36 @@ async function executeAgentsWrite(
             };
         }
 
+        // Publish kind:0 profile for the updated agent
+        const ndkProject = projectContext.agentRegistry.getNDKProject();
+        if (ndkProject) {
+            try {
+                const signer = new NDKPrivateKeySigner(existingAgent.nsec);
+                const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
+                const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+
+                await AgentPublisher.publishAgentProfile(
+                    signer,
+                    existingAgent.name,
+                    existingAgent.role,
+                    projectTitle,
+                    ndkProject,
+                    existingAgent.eventId,
+                    {
+                        description: existingAgent.description,
+                        instructions: existingAgent.instructions,
+                        useCriteria: existingAgent.useCriteria,
+                        phases: existingAgent.phases,
+                    },
+                    whitelistedPubkeys
+                );
+
+                logger.info(`Published kind:0 profile for updated agent "${name}"`);
+            } catch (error) {
+                logger.warn(`Failed to publish kind:0 profile for updated agent "${name}"`, { error });
+            }
+        }
+
         logger.info(`Successfully updated agent "${name}" (${slug})`);
         logger.info(`  Pubkey: ${agent.pubkey}`);
 
@@ -157,6 +189,35 @@ async function executeAgentsWrite(
     // Create instance and add to registry
     const agent = createAgentInstance(storedAgent, projectContext.agentRegistry);
     projectContext.agentRegistry.addAgent(agent);
+
+    // Publish kind:0 profile for the new agent
+    const ndkProject = projectContext.agentRegistry.getNDKProject();
+    if (ndkProject) {
+        try {
+            const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
+            const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+
+            await AgentPublisher.publishAgentProfile(
+                signer,
+                storedAgent.name,
+                storedAgent.role,
+                projectTitle,
+                ndkProject,
+                storedAgent.eventId,
+                {
+                    description: storedAgent.description,
+                    instructions: storedAgent.instructions,
+                    useCriteria: storedAgent.useCriteria,
+                    phases: storedAgent.phases,
+                },
+                whitelistedPubkeys
+            );
+
+            logger.info(`Published kind:0 profile for new agent "${name}"`);
+        } catch (error) {
+            logger.warn(`Failed to publish kind:0 profile for new agent "${name}"`, { error });
+        }
+    }
 
     logger.info(`Successfully created agent "${name}" (${slug})`);
     logger.info(`  Pubkey: ${agent.pubkey}`);
