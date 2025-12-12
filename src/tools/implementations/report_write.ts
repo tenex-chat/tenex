@@ -56,27 +56,6 @@ async function executeReportWrite(
         agent: context.agent.name,
     });
 
-    // Publish status message with the Nostr reference to the article
-    try {
-        // Use shared AgentPublisher instance from context (guaranteed to be present)
-        const conversation = context.getConversation();
-
-        if (context.agentPublisher && conversation?.history?.[0]) {
-            const nostrReference = `nostr:${articleId}`;
-            await context.agentPublisher.conversation(
-                { content: `📄 Writing report: [${title}](${nostrReference})` },
-                {
-                    triggeringEvent: context.triggeringEvent,
-                    rootEvent: conversation.history[0],
-                    conversationId: context.conversationId,
-                }
-            );
-        }
-    } catch (statusError) {
-        // Don't fail the tool if we can't publish the status
-        console.warn("Failed to publish report_write status:", statusError);
-    }
-
     return {
         success: true,
         articleId: `nostr:${articleId}`,

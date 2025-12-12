@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { DelegationRegistry } from "../DelegationRegistry";
+import { DelegationRegistryService } from "../DelegationRegistryService";
 import type { AgentInstance } from "@/agents/types";
 
 describe("DelegationRegistry.getDelegation", () => {
-    let registry: DelegationRegistry;
+    let registry: DelegationRegistryService;
 
     // Mock agent instances
     const mockAgentA: AgentInstance = {
@@ -28,8 +28,8 @@ describe("DelegationRegistry.getDelegation", () => {
 
     beforeEach(async () => {
         // Initialize the singleton instance
-        await DelegationRegistry.initialize();
-        registry = DelegationRegistry.getInstance();
+        await DelegationRegistryService.initialize();
+        registry = DelegationRegistryService.getInstance();
         // Clear any existing state
         await registry.clear();
     });

@@ -42,25 +42,6 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
         timeout,
     });
 
-    // Publish status message about what command we're running
-    try {
-        const agentPublisher = context.agentPublisher;
-        const conversation = context.getConversation();
-
-        if (agentPublisher && conversation?.history?.[0]) {
-            await agentPublisher.conversation(
-                { content: `⚡ Executing: ${command}` },
-                {
-                    triggeringEvent: context.triggeringEvent,
-                    rootEvent: conversation.history[0],
-                    conversationId: context.conversationId,
-                }
-            );
-        }
-    } catch (error) {
-        console.warn("Failed to publish shell status:", error);
-    }
-
     const { stdout, stderr } = await execAsync(command, {
         cwd: workingDir,
         timeout: timeout ?? undefined,

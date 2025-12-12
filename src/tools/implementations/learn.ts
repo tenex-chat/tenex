@@ -75,26 +75,6 @@ async function executeLessonLearn(
     // Use shared AgentPublisher instance from context to create and publish the lesson
     const lessonEvent = await context.agentPublisher.lesson(intent, eventContext);
 
-    // Publish status message with the Nostr reference
-    try {
-        const conversationForStatus = context.getConversation();
-        if (conversationForStatus?.history?.[0]) {
-            const nostrReference = `nostr:${lessonEvent.encode()}`;
-            await context.agentPublisher.conversation(
-                { content: `📚 Learning lesson: ${nostrReference}` },
-                {
-                    triggeringEvent: context.triggeringEvent,
-                    rootEvent: conversationForStatus.history[0],
-                    conversationId: context.conversationId,
-                    model: context.agent.llmConfig, // Include LLM configuration
-                }
-            );
-        }
-    } catch (error) {
-        // Don't fail the tool if we can't publish the status
-        console.warn("Failed to publish learn status:", error);
-    }
-
     // Add lesson to RAG collection for semantic search
     try {
         const ragService = RAGService.getInstance();
