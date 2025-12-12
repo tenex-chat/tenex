@@ -32,7 +32,7 @@ mock.module("@/conversations/processors/EventToModelMessage", () => ({
     },
 }));
 
-mock.module("@/services", () => ({
+mock.module("@/services/ProjectContext", () => ({
     getProjectContext: () => null,
     isProjectContextInitialized: () => false,
 }));
