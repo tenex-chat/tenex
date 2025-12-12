@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
@@ -26,7 +26,7 @@ describe("FlattenedChronologicalStrategy - Thread Path Inclusion", () => {
     let mockConversation: Conversation;
 
     beforeAll(async () => {
-        await DelegationRegistry.initialize();
+        await DelegationRegistryService.initialize();
 
         // Create a linear conversation:
         // Root: User -> Agent A

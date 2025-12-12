@@ -2,7 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { DelegationIntent } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { PairModeRegistry } from "@/services/delegation/PairModeRegistry";
 import type {
     DelegationMode,
@@ -158,7 +158,7 @@ export class DelegationService {
         }
 
         // Wait for all responses
-        const registry = DelegationRegistry.getInstance();
+        const registry = DelegationRegistryService.getInstance();
 
         // Handle pair mode vs blocking mode
         if (mode === "pair") {
@@ -209,7 +209,7 @@ export class DelegationService {
         });
 
         const pairRegistry = PairModeRegistry.getInstance();
-        const delegationRegistry = DelegationRegistry.getInstance();
+        const delegationRegistry = DelegationRegistryService.getInstance();
 
         // Register this delegation for pair mode monitoring
         pairRegistry.registerPairDelegation(batchId, this.agent.pubkey, config, delegatedAgentPubkeys);

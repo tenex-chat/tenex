@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { DelegationRegistry } from "@/services/delegation";
+import { DelegationRegistryService } from "@/services/delegation";
 import { type DelegationResponses, DelegationService } from "@/services/delegation";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
@@ -39,7 +39,7 @@ async function executeDelegateFollowup(
     }
 
     // Get delegation record from registry
-    const registry = DelegationRegistry.getInstance();
+    const registry = DelegationRegistryService.getInstance();
     const delegationRecord = registry.getDelegationByConversationKey(
         context.conversationId,
         context.agent.pubkey,

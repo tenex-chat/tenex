@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../../conversations";
-import { DelegationRegistry } from "../../services/DelegationRegistry";
+import { DelegationRegistryService } from "../../services/delegation/DelegationRegistryService";
 import { handleChatMessage } from "../reply";
 
 // Mock dependencies
@@ -25,7 +25,7 @@ describe("Delegation Event Filtering Bug", () => {
         mock.restore();
 
         // Initialize DelegationRegistry before each test
-        await DelegationRegistry.initialize();
+        await DelegationRegistryService.initialize();
 
         // Create mock conversation manager
         mockConversationCoordinator = {

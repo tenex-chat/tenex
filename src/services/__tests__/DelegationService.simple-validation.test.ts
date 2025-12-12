@@ -88,10 +88,10 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             "main"
         );
 
-        // Mock DelegationRegistry directly
-        const DelegationRegistry = require("@/services/delegation").DelegationRegistry;
-        const originalGetInstance = DelegationRegistry.getInstance;
-        DelegationRegistry.getInstance = () => ({
+        // Mock DelegationRegistryService directly
+        const DelegationRegistryService = require("@/services/delegation").DelegationRegistryService;
+        const originalGetInstance = DelegationRegistryService.getInstance;
+        DelegationRegistryService.getInstance = () => ({
             waitForBatchCompletion: () =>
                 Promise.resolve([
                     {
@@ -121,7 +121,7 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             expect(result.responses).toBeArray();
         } finally {
             // Restore original
-            DelegationRegistry.getInstance = originalGetInstance;
+            DelegationRegistryService.getInstance = originalGetInstance;
         }
     });
 
@@ -155,10 +155,10 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             "main"
         );
 
-        // Mock DelegationRegistry directly
-        const DelegationRegistry = require("@/services/delegation").DelegationRegistry;
-        const originalGetInstance = DelegationRegistry.getInstance;
-        DelegationRegistry.getInstance = () => ({
+        // Mock DelegationRegistryService directly
+        const DelegationRegistryService = require("@/services/delegation").DelegationRegistryService;
+        const originalGetInstance = DelegationRegistryService.getInstance;
+        DelegationRegistryService.getInstance = () => ({
             waitForBatchCompletion: () =>
                 Promise.resolve([
                     {
@@ -188,7 +188,7 @@ describe("DelegationService - Self-delegation validation (simplified)", () => {
             expect(result.responses).toBeArray();
         } finally {
             // Restore original
-            DelegationRegistry.getInstance = originalGetInstance;
+            DelegationRegistryService.getInstance = originalGetInstance;
         }
     });
 });

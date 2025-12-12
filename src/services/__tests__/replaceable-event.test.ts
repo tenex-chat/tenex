@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, jest } from "bun:test";
 import type { NDK } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { ReplaceableEventService } from "../replaceable-event";
@@ -14,6 +14,13 @@ describe("ReplaceableEventService", () => {
         mockNDK = {
             fetchEvents: jest.fn().mockResolvedValue(new Set()),
             createEvent: jest.fn(),
+            pool: {
+                connectedRelays: jest.fn().mockReturnValue([]),
+                permanentAndConnectedRelays: jest.fn().mockReturnValue([]),
+            },
+            debug: {
+                extend: jest.fn().mockReturnValue(jest.fn()),
+            },
         } as unknown as jest.Mocked<NDK>;
 
         service = new ReplaceableEventService(mockNDK, testPrivateKey, testKind);

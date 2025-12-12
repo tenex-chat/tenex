@@ -7,8 +7,8 @@ import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
-import { getProjectContext } from "../services";
-import { DelegationRegistry } from "@/services/delegation";
+import { getProjectContext } from "@/services/ProjectContext";
+import { DelegationRegistryService } from "@/services/delegation";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
@@ -35,8 +35,8 @@ export class EventHandler {
     ) {}
 
     async initialize(): Promise<void> {
-        // Initialize DelegationRegistry singleton first
-        await DelegationRegistry.initialize();
+        // Initialize DelegationRegistryService singleton first
+        await DelegationRegistryService.initialize();
 
         // Initialize components directly
         this.agentExecutor = new AgentExecutor();
@@ -111,7 +111,7 @@ export class EventHandler {
         );
 
         // Check if this is a delegation response BEFORE routing
-        const delegationRegistry = DelegationRegistry.getInstance();
+        const delegationRegistry = DelegationRegistryService.getInstance();
         if (delegationRegistry.isDelegationResponse(event)) {
             await delegationRegistry.handleDelegationResponse(event);
 
