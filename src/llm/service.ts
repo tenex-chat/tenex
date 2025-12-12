@@ -16,6 +16,7 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
+    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -522,10 +523,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             experimental_telemetry: this.getFullTelemetryConfig(),
 
             // Smooth streaming with 15ms delay and line-based chunking
-            // experimental_transform: smoothStream({
-            //     delayInMs: 15,
-            //     chunking: 'word'
-            // }),
+            experimental_transform: smoothStream({
+                delayInMs: 15,
+                chunking: 'word'
+            }),
 
             providerOptions: {
                 openrouter: {
