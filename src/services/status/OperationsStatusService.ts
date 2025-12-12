@@ -18,7 +18,7 @@ import type { LLMOperation, LLMOperationsRegistry } from "@/services/LLMOperatio
  * - P-tags for all agents working on that event
  * - One a-tag for the project reference
  */
-export class OperationsStatusPublisher {
+export class OperationsStatusService {
     private debounceTimer?: NodeJS.Timeout;
     private unsubscribe?: () => void;
     private publishedEvents = new Set<string>(); // Track which events we've published status for

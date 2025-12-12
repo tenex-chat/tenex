@@ -4,7 +4,7 @@ import { mock } from "bun:test";
  * Common mock setup for services module used across many tests
  */
 export function setupServicesMock(projectPath = "/test/project"): void {
-    mock.module("@/services", () => ({
+    mock.module("@/services/ProjectContext", () => ({
         getProjectContext: () => ({
             projectPath,
             config: {

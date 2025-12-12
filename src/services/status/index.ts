@@ -5,10 +5,10 @@
  */
 
 // Project status (single project context)
-export { StatusPublisher } from "./StatusPublisher";
+export { ProjectStatusService } from "./ProjectStatusService";
 
 // Daemon status (multi-project daemon)
 export { DaemonStatusService } from "./DaemonStatusService";
 
 // Operations status (LLM operations)
-export { OperationsStatusPublisher } from "./OperationsStatusPublisher";
+export { OperationsStatusService } from "./OperationsStatusService";

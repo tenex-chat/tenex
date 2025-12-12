@@ -73,10 +73,17 @@ cd tenex
 
 # Install dependencies
 bun install
-
-# Start TENEX
-bun run start
 ```
+
+### Configuration
+
+Before you can start using TENEX, you need to set up your LLM provider credentials. Run the following command for an interactive setup:
+
+```bash
+bunx tenex setup
+```
+
+This will guide you through adding API keys for providers like OpenAI, Anthropic, etc.
 
 ### Quick Start
 
@@ -181,13 +188,13 @@ Built on Nostr from the ground up, not as an afterthought. This enables censorsh
 
 ## 📄 License
 
-MIT - see [LICENSE](LICENSE) file for details
+MIT
 
 ## 📞 Contact & Support
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/tenex-chat/tenex/issues)
 - **Nostr**: Follow the project at `npub1tenex...` 
-- **Documentation**: [Full documentation](./documentation/)
+- **Documentation**: [Full documentation](./docs/)
 
 ---
 
