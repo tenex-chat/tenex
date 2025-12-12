@@ -12,6 +12,8 @@ import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { StatusPublisher } from "@/services/status/StatusPublisher";
+import { OperationsStatusPublisher } from "@/services/status/OperationsStatusPublisher";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -33,6 +35,7 @@ export class ProjectRuntime {
     private context: ProjectContext | null = null;
     private eventHandler: EventHandler | null = null;
     private statusPublisher: StatusPublisher | null = null;
+    private operationsStatusPublisher: OperationsStatusPublisher | null = null;
     private conversationCoordinator: ConversationCoordinator | null = null;
 
     private isRunning = false;
@@ -140,6 +143,10 @@ export class ProjectRuntime {
                 );
             });
 
+            // Start operations status publisher
+            this.operationsStatusPublisher = new OperationsStatusPublisher(llmOpsRegistry);
+            this.operationsStatusPublisher.start();
+
             this.isRunning = true;
             this.startTime = new Date();
 
@@ -215,6 +222,12 @@ export class ProjectRuntime {
         if (this.statusPublisher) {
             await this.statusPublisher.stopPublishing();
             this.statusPublisher = null;
+        }
+
+        // Stop operations status publisher
+        if (this.operationsStatusPublisher) {
+            this.operationsStatusPublisher.stop();
+            this.operationsStatusPublisher = null;
         }
 
         // Cleanup event handler
