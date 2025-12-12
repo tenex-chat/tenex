@@ -30,7 +30,20 @@ export interface TenexConfig {
 
     // Summarization configuration
     summarization?: {
-        inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 300000 = 5 minutes)
+        initialDelay?: number; // Milliseconds to wait after first message before generating initial summary (default: 30000 = 30 seconds)
+        inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 120000 = 2 minutes)
+    };
+
+    // Telemetry configuration
+    telemetry?: {
+        chunks?: {
+            enabled?: boolean; // Enable publishing telemetry on each LLM chunk (default: false)
+            publishToNostr?: boolean; // Publish chunk telemetry as Nostr events (default: false)
+            // Chunks will be published as OpenTelemetry spans with hierarchical traces:
+            // - Each stream gets a parent span (conversation.id)
+            // - Each chunk within the stream becomes a child span
+            // - Spans are linked across agent turns for full RAL execution tracing
+        };
     };
 
     // Project fields (optional for global config)
@@ -58,7 +71,18 @@ export const TenexConfigSchema = z.object({
         .optional(),
     summarization: z
         .object({
+            initialDelay: z.number().optional(),
             inactivityTimeout: z.number().optional(),
+        })
+        .optional(),
+    telemetry: z
+        .object({
+            chunks: z
+                .object({
+                    enabled: z.boolean().optional(),
+                    publishToNostr: z.boolean().optional(),
+                })
+                .optional(),
         })
         .optional(),
     description: z.string().optional(),
