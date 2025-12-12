@@ -110,12 +110,16 @@ src/
 ├── commands/       # User-facing CLI commands
 ├── conversations/  # Conversation history and state management
 ├── daemon/         # Long-running background processes and UI
+├── event-handler/  # Orchestrates workflows from Nostr events
 ├── events/         # Core event schemas and constants
 ├── lib/            # Pure, framework-agnostic utilities (zero TENEX dependencies)
 ├── llm/            # LLM provider abstractions and factories
+├── logging/        # Structured logging utilities
 ├── nostr/          # Nostr protocol integration and clients
 ├── prompts/        # System prompt composition and management
 ├── services/       # Stateful business logic and orchestration
+├── telemetry/      # OpenTelemetry configuration and helpers
+├── test-utils/     # Shared test fixtures and mocks
 ├── tools/          # Agent tool implementations and registry
 └── utils/          # TENEX-specific helper functions
 ```
