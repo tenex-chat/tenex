@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
+import { projectContextStore } from "../../services/ProjectContextStore";
 
 describe("Agent Phase Self-Reply", () => {
     let mockConversationCoordinator: any;
@@ -71,11 +72,6 @@ describe("Agent Phase Self-Reply", () => {
                 tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
             },
         };
-
-        // Mock getProjectContext
-        mock.module("../../services", () => ({
-            getProjectContext: () => mockProjectContext,
-        }));
     });
 
     it("should allow agents with phases to process their own p-tag (phase transition)", async () => {
@@ -113,10 +109,12 @@ describe("Agent Phase Self-Reply", () => {
         // Update mock to return conversation
         mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
 
-        // Handle the event
-        await handleChatMessage(selfReplyEvent, {
-            conversationCoordinator: mockConversationCoordinator,
-            agentExecutor: mockAgentExecutor,
+        // Handle the event within project context
+        await projectContextStore.run(mockProjectContext as any, async () => {
+            await handleChatMessage(selfReplyEvent, {
+                conversationCoordinator: mockConversationCoordinator,
+                agentExecutor: mockAgentExecutor,
+            });
         });
 
         // Agent executor SHOULD be called because PM has phases defined
@@ -163,10 +161,12 @@ describe("Agent Phase Self-Reply", () => {
         // Update mock to return conversation
         mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
 
-        // Handle the event
-        await handleChatMessage(selfReplyEvent, {
-            conversationCoordinator: mockConversationCoordinator,
-            agentExecutor: mockAgentExecutor,
+        // Handle the event within project context
+        await projectContextStore.run(mockProjectContext as any, async () => {
+            await handleChatMessage(selfReplyEvent, {
+                conversationCoordinator: mockConversationCoordinator,
+                agentExecutor: mockAgentExecutor,
+            });
         });
 
         // Agent executor should NOT be called (self-reply blocked)
@@ -214,10 +214,12 @@ describe("Agent Phase Self-Reply", () => {
         // Update mock to return conversation
         mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
 
-        // Handle the event
-        await handleChatMessage(mixedEvent, {
-            conversationCoordinator: mockConversationCoordinator,
-            agentExecutor: mockAgentExecutor,
+        // Handle the event within project context
+        await projectContextStore.run(mockProjectContext as any, async () => {
+            await handleChatMessage(mixedEvent, {
+                conversationCoordinator: mockConversationCoordinator,
+                agentExecutor: mockAgentExecutor,
+            });
         });
 
         // Agent executor should be called twice (PM self-reply allowed + regular agent)
