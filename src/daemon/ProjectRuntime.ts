@@ -12,6 +12,8 @@ import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
+import { OperationsStatusService } from "@/services/status/OperationsStatusService";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -33,6 +35,7 @@ export class ProjectRuntime {
     private context: ProjectContext | null = null;
     private eventHandler: EventHandler | null = null;
     private statusPublisher: ProjectStatusService | null = null;
+    private operationsStatusPublisher: OperationsStatusService | null = null;
     private conversationCoordinator: ConversationCoordinator | null = null;
 
     private isRunning = false;
@@ -139,6 +142,10 @@ export class ProjectRuntime {
                     this.context ?? undefined
                 );
             });
+
+            // Start operations status publisher
+            this.operationsStatusPublisher = new OperationsStatusService(llmOpsRegistry);
+            this.operationsStatusPublisher.start();
 
             this.isRunning = true;
             this.startTime = new Date();
