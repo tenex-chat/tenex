@@ -461,7 +461,6 @@ export class AgentExecutor {
         // Separate buffers for content and reasoning
         let contentBuffer = "";
         let reasoningBuffer = "";
-        let flushedContent = "";
         let completionEvent: CompleteEvent | undefined;
 
         // Check if provider supports streaming
@@ -482,22 +481,6 @@ export class AgentExecutor {
                 );
 
                 reasoningBuffer = "";
-            }
-        };
-
-        // Helper to flush accumulated content
-        const flushContentBuffer = async (): Promise<void> => {
-            if (contentBuffer.trim().length > 0) {
-                // Publish content as kind:1111 (GenericReply)
-                await agentPublisher.conversation(
-                    {
-                        content: contentBuffer,
-                    },
-                    eventContext
-                );
-
-                flushedContent += contentBuffer;
-                contentBuffer = "";
             }
         };
 
@@ -614,11 +597,6 @@ export class AgentExecutor {
         // Tool tracker is always provided from executeWithSupervisor
 
         llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
-            // Flush any pending content before tool execution
-            if (supportsStreaming) {
-                await flushContentBuffer();
-            }
-
             // Display tool execution in console
             const argsPreview = JSON.stringify(event.args).substring(0, 50);
             console.log(
@@ -811,19 +789,6 @@ export class AgentExecutor {
         // Store lastSentEventId for new Claude Code sessions (without session ID yet)
         if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
-        }
-
-        // If we flushed content during execution (e.g. before tool calls), remove it from the final message
-        // to avoid duplication when the caller publishes the result
-        if (completionEvent && flushedContent.length > 0 && completionEvent.message.startsWith(flushedContent)) {
-            logger.debug("[AgentExecutor] Removing already flushed content from completion event", {
-                flushedLength: flushedContent.length,
-                totalLength: completionEvent.message.length,
-            });
-            completionEvent = {
-                ...completionEvent,
-                message: completionEvent.message.slice(flushedContent.length),
-            };
         }
 
         return completionEvent;

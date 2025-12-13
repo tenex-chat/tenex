@@ -11,7 +11,6 @@
 
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { trace } from "@opentelemetry/api";
 import type { StepResult } from "ai";
 import { PairModeRegistry } from "./PairModeRegistry";
 import type { PairCheckInRequest, PairModeConfig } from "./types";
@@ -47,14 +46,6 @@ export class PairModeController {
         private readonly agentSlug: string,
         private readonly config: Required<PairModeConfig>
     ) {
-        // Add telemetry
-        const activeSpan = trace.getActiveSpan();
-        activeSpan?.addEvent("pair_mode.controller_created", {
-            "pair_mode.batch_id": batchId,
-            "pair_mode.agent_slug": agentSlug,
-            "pair_mode.step_threshold": config.stepThreshold,
-        });
-
         logger.info("[PairModeController] Created controller for pair mode delegation", {
             batchId,
             agentSlug,
@@ -97,11 +88,6 @@ export class PairModeController {
 
             // Check if we've already been aborted
             if (this.aborted) {
-                const activeSpan = trace.getActiveSpan();
-                activeSpan?.addEvent("pair_mode.stop_check_already_aborted", {
-                    "pair_mode.batch_id": this.batchId,
-                    "pair_mode.step_count": this.stepCount,
-                });
                 return true; // Stop the stream
             }
 
@@ -112,15 +98,6 @@ export class PairModeController {
             if (!shouldCheckIn) {
                 return false; // Continue
             }
-
-            // Add telemetry for threshold reached
-            const activeSpan = trace.getActiveSpan();
-            activeSpan?.addEvent("pair_mode.threshold_reached", {
-                "pair_mode.batch_id": this.batchId,
-                "pair_mode.current_step": this.stepCount,
-                "pair_mode.last_check_in_step": this.lastCheckInStep,
-                "pair_mode.threshold": this.config.stepThreshold,
-            });
 
             logger.info("[PairModeController] Step threshold reached, requesting check-in", {
                 batchId: this.batchId,
@@ -151,10 +128,6 @@ export class PairModeController {
             // Handle the action
             switch (action.type) {
                 case "CONTINUE":
-                    activeSpan?.addEvent("pair_mode.action_continue", {
-                        "pair_mode.batch_id": this.batchId,
-                        "pair_mode.step_number": this.stepCount,
-                    });
                     logger.info("[PairModeController] Delegator says CONTINUE", {
                         batchId: this.batchId,
                         stepNumber: this.stepCount,
@@ -162,10 +135,6 @@ export class PairModeController {
                     return false; // Continue
 
                 case "STOP":
-                    activeSpan?.addEvent("pair_mode.action_stop", {
-                        "pair_mode.batch_id": this.batchId,
-                        "pair_mode.stop_reason": action.reason ?? "no reason provided",
-                    });
                     logger.info("[PairModeController] Delegator says STOP", {
                         batchId: this.batchId,
                         reason: action.reason,
@@ -175,10 +144,6 @@ export class PairModeController {
                     return true; // Stop the stream
 
                 case "CORRECT":
-                    activeSpan?.addEvent("pair_mode.action_correct", {
-                        "pair_mode.batch_id": this.batchId,
-                        "pair_mode.correction_preview": action.message.substring(0, 100),
-                    });
                     logger.info("[PairModeController] Delegator says CORRECT", {
                         batchId: this.batchId,
                         messagePreview: action.message.substring(0, 100),

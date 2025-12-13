@@ -22,6 +22,7 @@ const IGNORED_EVENT_KINDS = [
     NDKKind.TenexStreamingResponse,
     NDKKind.TenexAgentTypingStart,
     NDKKind.TenexAgentTypingStop,
+    NDKKind.TenexOperationsStatus,
 ];
 
 export class EventHandler {

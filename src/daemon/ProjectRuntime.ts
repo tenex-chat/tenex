@@ -224,12 +224,6 @@ export class ProjectRuntime {
             this.statusPublisher = null;
         }
 
-        // Stop operations status publisher
-        if (this.operationsStatusPublisher) {
-            this.operationsStatusPublisher.stop();
-            this.operationsStatusPublisher = null;
-        }
-
         // Cleanup event handler
         if (this.eventHandler) {
             await this.eventHandler.cleanup();

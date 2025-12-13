@@ -11,19 +11,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { Tool as CoreTool } from "ai";
+import { ToolExecutionTracker } from "../ToolExecutionTracker";
 
-// Mock the toolMessageStorage - must be before imports that use it
+// Mock the toolMessageStorage
 const mockStore = mock(() => Promise.resolve());
+
+// Mock module exports
 mock.module("@/conversations/persistence/ToolMessageStorage", () => ({
     toolMessageStorage: {
         store: mockStore,
-    },
-}));
-
-// Mock ConfigService - needed by ToolMessageStorage
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: mock(() => "/tmp/test-config"),
     },
 }));
 
@@ -36,13 +36,6 @@ mock.module("@/utils/logger", () => ({
         error: mock(() => {}),
     },
 }));
-
-// Now import after mocks are set up
-import type { EventContext } from "@/nostr/AgentEventEncoder";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Tool as CoreTool } from "ai";
-import { ToolExecutionTracker } from "../ToolExecutionTracker";
 
 describe("ToolExecutionTracker", () => {
     let tracker: ToolExecutionTracker;
