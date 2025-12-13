@@ -5,7 +5,7 @@ import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
 import type { ConversationCoordinator } from "../conversations";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
-import { getProjectContext } from "../services/ProjectContext";
+import { getProjectContext } from "../services";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";

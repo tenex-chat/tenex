@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { beforeEach, describe, expect, it, jest } from "bun:test";
 import type { NDK } from "@nostr-dev-kit/ndk";
-import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { ReplaceableEventService } from "../replaceable-event";
 
 describe("ReplaceableEventService", () => {
-    let mockNDK: Partial<NDK>;
+    let mockNDK: jest.Mocked<NDK>;
     let service: ReplaceableEventService;
     const testPrivateKey = NDKPrivateKeySigner.generate().privateKey;
     const testKind = 14199;
@@ -12,10 +12,18 @@ describe("ReplaceableEventService", () => {
     beforeEach(() => {
         // Create mock NDK
         mockNDK = {
-            fetchEvents: mock(() => Promise.resolve(new Set())),
-        } as unknown as Partial<NDK>;
+            fetchEvents: jest.fn().mockResolvedValue(new Set()),
+            createEvent: jest.fn(),
+            pool: {
+                connectedRelays: jest.fn().mockReturnValue([]),
+                permanentAndConnectedRelays: jest.fn().mockReturnValue([]),
+            },
+            debug: {
+                extend: jest.fn().mockReturnValue(jest.fn()),
+            },
+        } as unknown as jest.Mocked<NDK>;
 
-        service = new ReplaceableEventService(mockNDK as NDK, testPrivateKey!, testKind);
+        service = new ReplaceableEventService(mockNDK, testPrivateKey, testKind);
     });
 
     describe("initialize", () => {
@@ -29,7 +37,7 @@ describe("ReplaceableEventService", () => {
                 tags: existingTags,
             };
 
-            (mockNDK.fetchEvents as any).mockResolvedValue(new Set([mockEvent as any]));
+            mockNDK.fetchEvents.mockResolvedValue(new Set([mockEvent as any]));
 
             await service.initialize();
 
@@ -43,7 +51,7 @@ describe("ReplaceableEventService", () => {
         });
 
         it("should start with empty tags if no existing event", async () => {
-            (mockNDK.fetchEvents as any).mockResolvedValue(new Set());
+            mockNDK.fetchEvents.mockResolvedValue(new Set());
 
             await service.initialize();
 
@@ -149,18 +157,25 @@ describe("ReplaceableEventService", () => {
 
             tags.forEach((tag) => service.addTag(tag));
 
-            // Mock NDKEvent.prototype methods
-            const signSpy = spyOn(NDKEvent.prototype, "sign").mockResolvedValue(undefined as any);
-            const publishSpy = spyOn(NDKEvent.prototype, "publish").mockResolvedValue(new Set() as any);
+            const mockEvent = {
+                sign: jest.fn().mockResolvedValue(undefined),
+                publish: jest.fn().mockResolvedValue(undefined),
+            };
+
+            mockNDK.createEvent.mockReturnValue(mockEvent as any);
 
             await service.publish();
 
-            expect(signSpy).toHaveBeenCalled();
-            expect(publishSpy).toHaveBeenCalled();
+            expect(mockNDK.createEvent).toHaveBeenCalledWith({
+                kind: testKind,
+                content: "",
+                tags: tags,
+                pubkey: expect.any(String),
+                created_at: expect.any(Number),
+            });
 
-            // Cleanup
-            signSpy.mockRestore();
-            publishSpy.mockRestore();
+            expect(mockEvent.sign).toHaveBeenCalled();
+            expect(mockEvent.publish).toHaveBeenCalled();
         });
     });
 

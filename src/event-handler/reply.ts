@@ -10,7 +10,7 @@ import { ConversationResolver } from "../conversations/services/ConversationReso
 // New refactored modules
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
-import { getProjectContext } from "../services/ProjectContext";
+import { getProjectContext } from "../services";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
@@ -43,7 +43,7 @@ export const handleChatMessage = async (
 
     // DEBUG: Log filtering decision for delegation events
     const pTags = TagExtractor.getPTags(event);
-    const systemPubkeys = Array.from(projectCtx.agents.values()).map((a: AgentInstance) => a.pubkey);
+    const systemPubkeys = Array.from(projectCtx.agents.values()).map((a) => a.pubkey);
     logger.debug("[EventFilter] Checking event", {
         eventId: event.id?.substring(0, 8),
         eventPubkey: event.pubkey?.substring(0, 8),

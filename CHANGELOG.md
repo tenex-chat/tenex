@@ -14,27 +14,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added - 2025-01-30
-- **New Configuration Option: `telemetry.chunks`**
-  - Added `telemetry.chunks.enabled` to control LLM chunk-level telemetry publishing
-  - Added `telemetry.chunks.publishToNostr` for optional Nostr event publishing of chunk data
-  - Chunks are published as OpenTelemetry spans with hierarchical structure:
-    - Each LLM stream gets a parent span (linked by conversation.id)
-    - Each chunk within the stream becomes a child span
-    - Spans are linked across agent turns for full RAL execution tracing
-  - This enables detailed observability into LLM streaming behavior and chunk-level performance
-  - Configuration example:
-    ```json
-    {
-      "telemetry": {
-        "chunks": {
-          "enabled": true,
-          "publishToNostr": false
-        }
-      }
-    }
-    ```
-
 ### Changed - 2025-01-18
 - **BREAKING: Configuration Architecture Refactored**
   - All configuration now centralized through `ConfigService`

@@ -685,28 +685,18 @@ export class AgentEventEncoder {
 
         // Add tool-args tag with JSON serialization
         // If args are provided and can be serialized, add them
-        // If the serialized args exceed 50,000 chars, add a warning message
+        // If the serialized args are > 1000 chars, add empty tag
         if (intent.args !== undefined) {
             try {
                 const serialized = JSON.stringify(intent.args);
-                if (serialized.length <= 50000) {
+                if (serialized.length <= 1000) {
                     event.tag(["tool-args", serialized]);
                 } else {
-                    // Args too large, provide warning instead of empty tag
-                    const warning = JSON.stringify({
-                        warning: "args_omitted_too_large",
-                        size: serialized.length,
-                        limit: 50000,
-                    });
-                    event.tag(["tool-args", warning]);
+                    event.tag(["tool-args"]);
                 }
-            } catch (error) {
-                // If serialization fails, provide error message instead of empty tag
-                const errorMessage = JSON.stringify({
-                    error: "serialization_failed",
-                    message: error instanceof Error ? error.message : String(error),
-                });
-                event.tag(["tool-args", errorMessage]);
+            } catch {
+                // If serialization fails, add empty tag
+                event.tag(["tool-args"]);
             }
         }
 

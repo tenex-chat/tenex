@@ -8,17 +8,14 @@ TENEX agents can work in isolated git worktrees, enabling parallel development o
 
 ### Creating a Worktree
 
-When delegating work, specify the `branch` parameter:
+When delegating work to a phase, specify the `branch` parameter:
 
 ```typescript
-delegate({
-    delegations: [{
-        recipient: "developer",
-        prompt: "Implement the new feature",
-        branch: "feature-new-thing",  // Creates worktree
-        phase: "implementation"
-    }],
-    mode: "wait"
+delegate_phase({
+    phase: "implementation",
+    recipients: ["developer"],
+    prompt: "Implement the new feature",
+    branch: "feature-new-thing"  // Creates worktree
 })
 ```
 
@@ -53,7 +50,7 @@ This will:
 ```
 
 **Event Flow:**
-1. delegate tool adds ["branch", "name"] tag to delegation event
+1. delegate_phase adds ["branch", "name"] tag to delegation event
 2. Event handler extracts branch tag
 3. Event handler resolves workingDirectory from branch
 4. ExecutionContext includes both projectPath (base) and workingDirectory (worktree)
@@ -79,7 +76,7 @@ This will:
 
 See:
 - `src/utils/git/initializeGitRepo.ts` - Git worktree operations
-- `src/utils/git/worktree.ts` - Metadata tracking
-- `src/tools/implementations/delegate.ts` - Worktree creation
+- `src/utils/worktree/metadata.ts` - Metadata tracking
+- `src/tools/implementations/delegate_phase.ts` - Worktree creation
 - `src/event-handler/reply.ts` - Working directory resolution
 - `src/agents/execution/AgentSupervisor.ts` - Cleanup validation
