@@ -4,11 +4,8 @@
 
 // Timing constants (in milliseconds)
 export const SUMMARIZATION_DEFAULTS = {
-    /** Initial summary delay after first message (30 seconds) */
-    INITIAL_SUMMARY_DELAY_MS: 30 * 1000,
-
-    /** Default inactivity timeout before generating summary (2 minutes) */
-    INACTIVITY_TIMEOUT_MS: 2 * 60 * 1000,
+    /** Default inactivity timeout before generating summary (5 minutes) */
+    INACTIVITY_TIMEOUT_MS: 5 * 60 * 1000,
 
     /** How often to check for conversations needing summarization */
     CHECK_INTERVAL_MS: 30 * 1000,

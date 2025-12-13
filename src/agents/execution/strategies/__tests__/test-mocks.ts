@@ -44,22 +44,3 @@ mock.module("@/nostr/ndkClient", () => ({
         fetchEvents: mock(() => new Set()),
     })),
 }));
-
-// Mock ConfigService
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: mock(() => "/tmp/test-config"),
-        getProjectsBase: mock(() => "/tmp/test-projects"),
-        getConfig: mock(() => ({})),
-        getWhitelistedPubkeys: mock(() => []),
-        ensureBackendPrivateKey: mock(() => Promise.resolve("a".repeat(64))),
-    },
-}));
-
-// Mock ToolMessageStorage to prevent singleton initialization issues
-mock.module("@/conversations/persistence/ToolMessageStorage", () => ({
-    toolMessageStorage: {
-        store: mock(() => Promise.resolve()),
-        load: mock(() => Promise.resolve(null)),
-    },
-}));

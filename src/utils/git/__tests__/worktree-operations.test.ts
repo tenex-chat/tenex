@@ -1,7 +1,4 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-
-// Note: These tests pass in isolation but fail due to test pollution when run
-// with the full test suite. Run with: bun test src/utils/git/__tests__/worktree-operations.test.ts --only
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { getCurrentBranch } from "../initializeGitRepo";
@@ -12,7 +9,7 @@ import * as os from "node:os";
 
 const execAsync = promisify(exec);
 
-describe.skip("Git Worktree Operations", () => {
+describe("Git Worktree Operations", () => {
     let testRepoPath: string;
 
     beforeEach(async () => {
