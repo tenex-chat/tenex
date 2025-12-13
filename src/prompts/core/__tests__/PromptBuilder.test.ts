@@ -15,21 +15,21 @@ describe("PromptBuilder.buildFragment static method", () => {
     });
 
     describe("equivalence with instance method", () => {
-        it("should produce the same output as the instance method for simple fragments", () => {
+        it("should produce the same output as the instance method for simple fragments", async () => {
             const fragment: PromptFragment = {
                 id: "simple-fragment",
                 template: () => "Simple test content",
             };
             fragmentRegistry.register(fragment);
 
-            const staticResult = PromptBuilder.buildFragment("simple-fragment", {});
-            const instanceResult = new PromptBuilder().add("simple-fragment", {}).build();
+            const staticResult = await PromptBuilder.buildFragment("simple-fragment", {});
+            const instanceResult = await new PromptBuilder().add("simple-fragment", {}).build();
 
             expect(staticResult).toBe(instanceResult);
             expect(staticResult).toBe("Simple test content");
         });
 
-        it("should produce the same output for fragments with arguments", () => {
+        it("should produce the same output for fragments with arguments", async () => {
             interface TestArgs {
                 name: string;
                 value: number;
@@ -42,14 +42,14 @@ describe("PromptBuilder.buildFragment static method", () => {
             fragmentRegistry.register(fragment);
 
             const args = { name: "Test", value: 42 };
-            const staticResult = PromptBuilder.buildFragment("args-fragment", args);
-            const instanceResult = new PromptBuilder().add("args-fragment", args).build();
+            const staticResult = await PromptBuilder.buildFragment("args-fragment", args);
+            const instanceResult = await new PromptBuilder().add("args-fragment", args).build();
 
             expect(staticResult).toBe(instanceResult);
             expect(staticResult).toBe("Name: Test, Value: 42");
         });
 
-        it("should produce the same output for fragments with priority", () => {
+        it("should produce the same output for fragments with priority", async () => {
             const fragment: PromptFragment = {
                 id: "priority-fragment",
                 priority: 10,
@@ -57,36 +57,36 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const staticResult = PromptBuilder.buildFragment("priority-fragment", {});
-            const instanceResult = new PromptBuilder().add("priority-fragment", {}).build();
+            const staticResult = await PromptBuilder.buildFragment("priority-fragment", {});
+            const instanceResult = await new PromptBuilder().add("priority-fragment", {}).build();
 
             expect(staticResult).toBe(instanceResult);
             expect(staticResult).toBe("Priority content");
         });
 
-        it("should handle fragments that return empty content", () => {
+        it("should handle fragments that return empty content", async () => {
             const fragment: PromptFragment = {
                 id: "empty-fragment",
                 template: () => "",
             };
             fragmentRegistry.register(fragment);
 
-            const staticResult = PromptBuilder.buildFragment("empty-fragment", {});
-            const instanceResult = new PromptBuilder().add("empty-fragment", {}).build();
+            const staticResult = await PromptBuilder.buildFragment("empty-fragment", {});
+            const instanceResult = await new PromptBuilder().add("empty-fragment", {}).build();
 
             expect(staticResult).toBe(instanceResult);
             expect(staticResult).toBe("");
         });
 
-        it("should handle fragments that return whitespace-only content", () => {
+        it("should handle fragments that return whitespace-only content", async () => {
             const fragment: PromptFragment = {
                 id: "whitespace-fragment",
                 template: () => "   \n  \t  ",
             };
             fragmentRegistry.register(fragment);
 
-            const staticResult = PromptBuilder.buildFragment("whitespace-fragment", {});
-            const instanceResult = new PromptBuilder().add("whitespace-fragment", {}).build();
+            const staticResult = await PromptBuilder.buildFragment("whitespace-fragment", {});
+            const instanceResult = await new PromptBuilder().add("whitespace-fragment", {}).build();
 
             expect(staticResult).toBe(instanceResult);
             expect(staticResult).toBe("");
@@ -94,7 +94,7 @@ describe("PromptBuilder.buildFragment static method", () => {
     });
 
     describe("fragment argument handling", () => {
-        it("should correctly pass simple arguments to fragments", () => {
+        it("should correctly pass simple arguments to fragments", async () => {
             interface SimpleArgs {
                 message: string;
             }
@@ -105,11 +105,11 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("simple-args", { message: "Hello World" });
+            const result = await PromptBuilder.buildFragment("simple-args", { message: "Hello World" });
             expect(result).toBe("Message: Hello World");
         });
 
-        it("should correctly pass complex nested arguments to fragments", () => {
+        it("should correctly pass complex nested arguments to fragments", async () => {
             interface ComplexArgs {
                 user: {
                     name: string;
@@ -147,13 +147,13 @@ describe("PromptBuilder.buildFragment static method", () => {
                 },
             };
 
-            const result = PromptBuilder.buildFragment("complex-args", args);
+            const result = await PromptBuilder.buildFragment("complex-args", args);
             expect(result).toBe(
                 "User: Alice (30)\nRoles: admin, user\nTheme: dark\nNotifications: true"
             );
         });
 
-        it("should handle arrays as arguments", () => {
+        it("should handle arrays as arguments", async () => {
             interface ArrayArgs {
                 items: string[];
                 numbers: number[];
@@ -167,14 +167,14 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("array-args", {
+            const result = await PromptBuilder.buildFragment("array-args", {
                 items: ["apple", "banana", "cherry"],
                 numbers: [1, 2, 3, 4, 5],
             });
             expect(result).toBe("Items: [apple, banana, cherry]\nNumbers: [1, 2, 3, 4, 5]");
         });
 
-        it("should handle null and undefined values in arguments", () => {
+        it("should handle null and undefined values in arguments", async () => {
             interface NullableArgs {
                 optionalString?: string;
                 nullableNumber: number | null;
@@ -189,14 +189,14 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("nullable-args", {
+            const result = await PromptBuilder.buildFragment("nullable-args", {
                 nullableNumber: null,
                 undefinedValue: undefined,
             });
             expect(result).toBe("Optional: not provided\nNullable: null\nUndefined: undefined");
         });
 
-        it("should respect fragment validation if provided", () => {
+        it("should respect fragment validation if provided", async () => {
             interface ValidatedArgs {
                 value: number;
             }
@@ -218,11 +218,11 @@ describe("PromptBuilder.buildFragment static method", () => {
             fragmentRegistry.register(fragment);
 
             // Valid arguments should work
-            const result = PromptBuilder.buildFragment("validated-fragment", { value: 42 });
+            const result = await PromptBuilder.buildFragment("validated-fragment", { value: 42 });
             expect(result).toBe("Value: 42");
 
             // Invalid arguments should throw with descriptive error
-            expect(() => PromptBuilder.buildFragment("validated-fragment", { value: -1 })).toThrow(
+            await expect(PromptBuilder.buildFragment("validated-fragment", { value: -1 })).rejects.toThrow(
                 'Fragment "validated-fragment" received invalid arguments'
             );
         });
@@ -250,7 +250,7 @@ describe("PromptBuilder.buildFragment static method", () => {
             );
         });
 
-        it("should throw error if fragment template throws during execution", () => {
+        it("should throw error if fragment template throws during execution", async () => {
             const fragment: PromptFragment = {
                 id: "throwing-fragment",
                 template: () => {
@@ -260,12 +260,12 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            expect(() => PromptBuilder.buildFragment("throwing-fragment", {})).toThrow(
+            await expect(PromptBuilder.buildFragment("throwing-fragment", {})).rejects.toThrow(
                 'Error executing fragment "throwing-fragment"'
             );
         });
 
-        it("should include argument details in template execution error", () => {
+        it("should include argument details in template execution error", async () => {
             interface ErrorArgs {
                 shouldThrow: boolean;
             }
@@ -282,14 +282,14 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            expect(() =>
+            await expect(
                 PromptBuilder.buildFragment("conditional-error", { shouldThrow: true })
-            ).toThrow('Error executing fragment "conditional-error"');
+            ).rejects.toThrow('Error executing fragment "conditional-error"');
         });
     });
 
     describe("edge cases and boundary conditions", () => {
-        it("should handle fragments with zero priority", () => {
+        it("should handle fragments with zero priority", async () => {
             const fragment: PromptFragment = {
                 id: "zero-priority",
                 priority: 0,
@@ -297,11 +297,11 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("zero-priority", {});
+            const result = await PromptBuilder.buildFragment("zero-priority", {});
             expect(result).toBe("Zero priority content");
         });
 
-        it("should handle fragments with very high priority", () => {
+        it("should handle fragments with very high priority", async () => {
             const fragment: PromptFragment = {
                 id: "high-priority",
                 priority: 999999,
@@ -309,22 +309,22 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("high-priority", {});
+            const result = await PromptBuilder.buildFragment("high-priority", {});
             expect(result).toBe("High priority content");
         });
 
-        it("should handle fragments that return multiline content", () => {
+        it("should handle fragments that return multiline content", async () => {
             const fragment: PromptFragment = {
                 id: "multiline-fragment",
                 template: () => "Line 1\nLine 2\nLine 3",
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("multiline-fragment", {});
+            const result = await PromptBuilder.buildFragment("multiline-fragment", {});
             expect(result).toBe("Line 1\nLine 2\nLine 3");
         });
 
-        it("should handle arguments with special characters and symbols", () => {
+        it("should handle arguments with special characters and symbols", async () => {
             interface SpecialArgs {
                 text: string;
             }
@@ -335,7 +335,7 @@ describe("PromptBuilder.buildFragment static method", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = PromptBuilder.buildFragment("special-chars", {
+            const result = await PromptBuilder.buildFragment("special-chars", {
                 text: "Special chars: !@#$%^&*()_+-=[]{}|;:'\",.<>?/~`",
             });
             expect(result).toBe("Content: Special chars: !@#$%^&*()_+-=[]{}|;:'\",.<>?/~`");
