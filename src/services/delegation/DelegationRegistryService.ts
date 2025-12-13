@@ -983,16 +983,6 @@ export class DelegationRegistryService extends EventEmitter {
     }
 
     /**
-     * Get a delegation record by its event ID
-     *
-     * @param eventId - The delegation event ID to look up
-     * @returns The delegation record if found, undefined otherwise
-     */
-    getDelegation(eventId: string): DelegationRecord | undefined {
-        return this.delegations.get(eventId);
-    }
-
-    /**
      * Find delegation records by event ID and responder pubkey
      * Used when processing completion events
      *

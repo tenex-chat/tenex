@@ -54,7 +54,7 @@ describe("PromptBuilder", () => {
             expect(builder.getFragmentCount()).toBe(2);
         });
 
-        it("should pass arguments to fragment", async () => {
+        it("should pass arguments to fragment", () => {
             interface TestArgs {
                 name: string;
                 value: number;
@@ -66,7 +66,7 @@ describe("PromptBuilder", () => {
             };
             fragmentRegistry.register(fragment);
 
-            const result = await builder.add("test-fragment", { name: "Test", value: 42 }).build();
+            const result = builder.add("test-fragment", { name: "Test", value: 42 }).build();
 
             expect(result).toBe("Name: Test, Value: 42");
         });
@@ -96,53 +96,53 @@ describe("PromptBuilder", () => {
     });
 
     describe("build", () => {
-        it("should concatenate fragments with double newlines", async () => {
+        it("should concatenate fragments with double newlines", () => {
             fragmentRegistry.register({ id: "f1", template: () => "Fragment 1" });
             fragmentRegistry.register({ id: "f2", template: () => "Fragment 2" });
             fragmentRegistry.register({ id: "f3", template: () => "Fragment 3" });
 
-            const result = await builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
+            const result = builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
 
             expect(result).toBe("Fragment 1\n\nFragment 2\n\nFragment 3");
         });
 
-        it("should respect fragment priority ordering", async () => {
+        it("should respect fragment priority ordering", () => {
             fragmentRegistry.register({ id: "f1", priority: 30, template: () => "Third" });
             fragmentRegistry.register({ id: "f2", priority: 10, template: () => "First" });
             fragmentRegistry.register({ id: "f3", priority: 20, template: () => "Second" });
 
-            const result = await builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
+            const result = builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
 
             expect(result).toBe("First\n\nSecond\n\nThird");
         });
 
-        it("should use default priority of 50 when not specified", async () => {
+        it("should use default priority of 50 when not specified", () => {
             fragmentRegistry.register({ id: "f1", priority: 60, template: () => "Last" });
             fragmentRegistry.register({ id: "f2", template: () => "Middle" }); // default 50
             fragmentRegistry.register({ id: "f3", priority: 40, template: () => "First" });
 
-            const result = await builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
+            const result = builder.add("f1", {}).add("f2", {}).add("f3", {}).build();
 
             expect(result).toBe("First\n\nMiddle\n\nLast");
         });
 
-        it("should filter out empty content", async () => {
+        it("should filter out empty content", () => {
             fragmentRegistry.register({ id: "f1", template: () => "Content" });
             fragmentRegistry.register({ id: "f2", template: () => "" });
             fragmentRegistry.register({ id: "f3", template: () => "   " });
             fragmentRegistry.register({ id: "f4", template: () => "More content" });
 
-            const result = await builder.add("f1", {}).add("f2", {}).add("f3", {}).add("f4", {}).build();
+            const result = builder.add("f1", {}).add("f2", {}).add("f3", {}).add("f4", {}).build();
 
             expect(result).toBe("Content\n\nMore content");
         });
 
-        it("should respect conditions", async () => {
+        it("should respect conditions", () => {
             fragmentRegistry.register({ id: "f1", template: () => "Always shown" });
             fragmentRegistry.register({ id: "f2", template: () => "Conditionally shown" });
             fragmentRegistry.register({ id: "f3", template: () => "Not shown" });
 
-            const result = await builder
+            const result = builder
                 .add("f1", {})
                 .add("f2", { show: true }, (args: any) => args.show === true)
                 .add("f3", { show: false }, (args: any) => args.show === true)
@@ -151,7 +151,7 @@ describe("PromptBuilder", () => {
             expect(result).toBe("Always shown\n\nConditionally shown");
         });
 
-        it("should handle complex template functions", async () => {
+        it("should handle complex template functions", () => {
             interface UserArgs {
                 user: { name: string; role: string };
                 permissions: string[];
@@ -170,7 +170,7 @@ describe("PromptBuilder", () => {
 
             fragmentRegistry.register(fragment);
 
-            const result = await builder
+            const result = builder
                 .add("user-fragment", {
                     user: { name: "Alice", role: "Admin" },
                     permissions: ["read", "write", "delete"],
@@ -182,7 +182,7 @@ describe("PromptBuilder", () => {
     });
 
     describe("clear", () => {
-        it("should remove all fragments from builder", async () => {
+        it("should remove all fragments from builder", () => {
             fragmentRegistry.register({ id: "f1", template: () => "Test 1" });
             fragmentRegistry.register({ id: "f2", template: () => "Test 2" });
 
@@ -191,7 +191,7 @@ describe("PromptBuilder", () => {
 
             builder.clear();
             expect(builder.getFragmentCount()).toBe(0);
-            expect(await builder.build()).toBe("");
+            expect(builder.build()).toBe("");
         });
 
         it("should support chaining", () => {
@@ -205,11 +205,11 @@ describe("PromptBuilder", () => {
     });
 
     describe("error handling", () => {
-        it("should throw error if fragment not found during build", async () => {
+        it("should throw error if fragment not found during build", () => {
             // Manually add a fragment config without registering the fragment
             (builder as any).fragments.push({ fragmentId: "non-existent", args: {} });
 
-            await expect(builder.build()).rejects.toThrow("Fragment non-existent not found");
+            expect(() => builder.build()).toThrow("Fragment non-existent not found");
         });
     });
 });

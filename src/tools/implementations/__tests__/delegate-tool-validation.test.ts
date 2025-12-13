@@ -43,8 +43,8 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [{ recipient: "self-agent", prompt: "Do something" }],
-                mode: "wait",
+                recipients: ["self-agent"],
+                fullRequest: "Do something",
             };
 
             try {
@@ -52,7 +52,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 expect(error.message).toContain(
-                    "Self-delegation is not permitted without a phase"
+                    "Self-delegation is not permitted with the delegate tool"
                 );
                 expect(error.message).toContain("self-agent");
             }
@@ -63,8 +63,8 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [{ recipient: "agent-pubkey-123", prompt: "Do something" }],
-                mode: "wait",
+                recipients: ["agent-pubkey-123"],
+                fullRequest: "Do something",
             };
 
             try {
@@ -72,7 +72,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 expect(error.message).toContain(
-                    "Self-delegation is not permitted without a phase"
+                    "Self-delegation is not permitted with the delegate tool"
                 );
             }
         });
@@ -82,11 +82,8 @@ describe("Delegation tools - Self-delegation validation", () => {
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                delegations: [
-                    { recipient: "self-agent", prompt: "Do something" },
-                    { recipient: "other-agent", prompt: "Do something else" },
-                ],
-                mode: "wait",
+                recipients: ["self-agent", "other-agent"],
+                fullRequest: "Do something",
             };
 
             try {
@@ -94,7 +91,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 expect(error.message).toContain(
-                    "Self-delegation is not permitted without a phase"
+                    "Self-delegation is not permitted with the delegate tool"
                 );
             }
         });

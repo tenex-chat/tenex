@@ -28,45 +28,25 @@ mock.module("@/services/AgentsRegistryService", () => ({
     },
 }));
 
-// Mock ConfigService
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mock(() => ({})),
-        getWhitelistedPubkeys: mock(() => []),
-        ensureBackendPrivateKey: mock(() => Promise.resolve("a".repeat(64))),
-    },
-}));
-
-// Mock agentStorage
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getAgentProjects: mock(() => Promise.resolve([])),
-        getProjectAgents: mock(() => Promise.resolve([])),
-    },
-}));
-
 describe("AgentPublisher - Agent Metadata in Kind:0", () => {
     let mockPublish: any;
     let mockSign: any;
-    let capturedEvents: NDKEvent[] = [];
+    let capturedEvent: NDKEvent | null = null;
 
     beforeEach(() => {
-        capturedEvents = [];
+        capturedEvent = null;
 
-        // Mock NDKEvent to capture all published events
+        // Mock NDKEvent to capture the created event
         mockPublish = mock();
         mockSign = mock();
 
         spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
-            capturedEvents.push(this);
+            capturedEvent = this;
             return mockPublish();
         });
 
         spyOn(NDKEvent.prototype, "sign").mockImplementation(mockSign);
     });
-
-    // Helper to get the kind:0 event from captured events
-    const getKind0Event = (): NDKEvent | undefined => capturedEvents.find(e => e.kind === 0);
 
     describe("publishAgentProfile", () => {
         it("should include metadata tags for agents without NDKAgentDefinition event ID", async () => {
@@ -98,8 +78,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
             expect(mockSign).toHaveBeenCalled();
             expect(mockPublish).toHaveBeenCalled();
-
-            const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
 
             if (capturedEvent) {
@@ -177,8 +155,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
             expect(mockSign).toHaveBeenCalled();
             expect(mockPublish).toHaveBeenCalled();
-
-            const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
 
             if (capturedEvent) {
@@ -239,8 +215,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
             expect(mockSign).toHaveBeenCalled();
             expect(mockPublish).toHaveBeenCalled();
-
-            const capturedEvent = getKind0Event();
             expect(capturedEvent).toBeDefined();
 
             if (capturedEvent) {
@@ -289,8 +263,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
         expect(mockSign).toHaveBeenCalled();
         expect(mockPublish).toHaveBeenCalled();
-
-        const capturedEvent = getKind0Event();
         expect(capturedEvent).toBeDefined();
 
         if (capturedEvent) {
@@ -313,4 +285,64 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         }
     });
 
+    describe("publishAgentCreation", () => {
+        it("should pass metadata to publishAgentProfile for agents without eventId", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            const agentConfig = {
+                name: "TestAgent",
+                role: "Tester",
+                description: "A comprehensive test agent",
+                instructions: "Test everything thoroughly",
+                useCriteria: "Use for all testing needs",
+                phases: {
+                    setup: "Set up test environment",
+                    testing: "Run all tests",
+                    cleanup: "Clean up after tests",
+                },
+            };
+
+            // Mock publishAgentRequest to prevent errors
+            const mockPublishRequest = spyOn(
+                AgentPublisher,
+                "publishAgentRequest"
+            ).mockResolvedValue(new NDKEvent(getNDK()));
+
+            await AgentPublisher.publishAgentCreation(
+                signer,
+                agentConfig,
+                "Test Project",
+                projectEvent,
+                undefined, // No eventId
+                [] // No whitelisted pubkeys for this test
+            );
+
+            expect(mockSign).toHaveBeenCalled();
+            expect(mockPublish).toHaveBeenCalled();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+
+                // Verify all metadata tags are present
+                expect(tags.find((tag) => tag[0] === "description")?.[1]).toBe(
+                    "A comprehensive test agent"
+                );
+                expect(tags.find((tag) => tag[0] === "instructions")?.[1]).toBe(
+                    "Test everything thoroughly"
+                );
+                expect(tags.find((tag) => tag[0] === "use-criteria")?.[1]).toBe(
+                    "Use for all testing needs"
+                );
+
+                const phaseTags = tags.filter((tag) => tag[0] === "phase" && tag.length === 3);
+                expect(phaseTags.length).toBe(3);
+            }
+
+            // Cleanup is automatic in Bun
+        });
+    });
 });
