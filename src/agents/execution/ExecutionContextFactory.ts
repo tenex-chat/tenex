@@ -55,13 +55,16 @@ export async function createExecutionContext(params: {
             });
         } else {
             // Worktree not found - construct expected path in .worktrees/
+            // This is intentional: the worktree may be created later by the delegate tool.
+            // If the path doesn't exist when commands run, git/shell will fail with clear errors.
             const sanitizedBranch = sanitizeBranchName(branchTag);
             const expectedPath = path.join(params.projectBasePath, WORKTREES_DIR, sanitizedBranch);
 
-            logger.warn("Branch tag specified but worktree not found, using expected path", {
+            logger.warn("Branch tag specified but worktree not found, using expected path (may not exist yet)", {
                 branch: branchTag,
                 expectedPath,
-                availableWorktrees: worktrees.map(wt => wt.branch)
+                availableWorktrees: worktrees.map(wt => wt.branch),
+                hint: "Worktree may be created later by delegate tool, or this is a stale branch tag"
             });
 
             workingDirectory = expectedPath;

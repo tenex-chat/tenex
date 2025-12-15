@@ -14,7 +14,8 @@ interface EventHandlerContext {
     conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
     /**
-     * Base project directory containing .bare/ and all worktrees.
+     * Project directory (normal git repository root).
+     * Worktrees are in .worktrees/ subdirectory.
      */
     projectBasePath: string;
 }
