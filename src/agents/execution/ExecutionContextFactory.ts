@@ -2,9 +2,9 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
 import { listWorktrees } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
+import * as path from "node:path";
 import type { ExecutionContext } from "./types";
 
 /**
@@ -20,7 +20,11 @@ import type { ExecutionContext } from "./types";
 export async function createExecutionContext(params: {
     agent: AgentInstance;
     conversationId: string;
-    projectPath: string;
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     * Example: ~/tenex/{dTag}
+     */
+    projectBasePath: string;
     triggeringEvent: NDKEvent;
     conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher;
@@ -37,7 +41,7 @@ export async function createExecutionContext(params: {
 
     if (branchTag) {
         // Branch specified in event - find matching worktree
-        const worktrees = await listWorktrees(params.projectPath);
+        const worktrees = await listWorktrees(params.projectBasePath);
         const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
 
         if (matchingWorktree) {
@@ -48,24 +52,40 @@ export async function createExecutionContext(params: {
                 path: matchingWorktree.path
             });
         } else {
-            // Worktree not found - fall back to main
-            logger.warn("Branch tag specified but worktree not found, using main", {
+            // Worktree not found - fall back to default worktree
+            logger.warn("Branch tag specified but worktree not found, using default", {
                 branch: branchTag,
                 availableWorktrees: worktrees.map(wt => wt.branch)
             });
-            workingDirectory = params.projectPath;
-            currentBranch = await getCurrentBranchWithFallback(params.projectPath);
+            // Find the default worktree (first one, typically master/main)
+            const defaultWorktree = worktrees[0];
+            if (defaultWorktree) {
+                workingDirectory = defaultWorktree.path;
+                currentBranch = defaultWorktree.branch;
+            } else {
+                // No worktrees at all - construct path for main branch
+                workingDirectory = path.join(params.projectBasePath, "main");
+                currentBranch = "main";
+            }
         }
     } else {
-        // No branch tag - use main worktree
-        workingDirectory = params.projectPath;
-        currentBranch = await getCurrentBranchWithFallback(params.projectPath);
+        // No branch tag - use default worktree
+        const worktrees = await listWorktrees(params.projectBasePath);
+        const defaultWorktree = worktrees[0];
+        if (defaultWorktree) {
+            workingDirectory = defaultWorktree.path;
+            currentBranch = defaultWorktree.branch;
+        } else {
+            // No worktrees at all - construct path for main branch
+            workingDirectory = path.join(params.projectBasePath, "main");
+            currentBranch = "main";
+        }
     }
 
     return {
         agent: params.agent,
         conversationId: params.conversationId,
-        projectPath: params.projectPath,
+        projectBasePath: params.projectBasePath,
         workingDirectory,
         currentBranch,
         triggeringEvent: params.triggeringEvent,

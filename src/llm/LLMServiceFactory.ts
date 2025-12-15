@@ -170,7 +170,8 @@ export class LLMServiceFactory {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
             sessionId?: string;
-            projectPath?: string;
+            /** Working directory path for Claude Code execution */
+            workingDirectory?: string;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -250,9 +251,7 @@ export class LLMServiceFactory {
             const defaultSettings: ClaudeCodeSettings = {
                 permissionMode: "bypassPermissions",
                 verbose: true,
-                cwd: context?.projectPath,
-                allowedTools: ["Bash(echo:*)", "Bash(date)", "Bash(pwd)"],
-                mcpServers: mcpServersConfig as any,
+                cwd: context?.workingDirectory,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),

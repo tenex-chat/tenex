@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
+import { getProjectContext } from "@/services/ProjectContext";
 import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
@@ -65,7 +66,9 @@ export class AgentExecutor {
             agent,
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id, // Use event ID as conversation ID for stateless calls
-            projectPath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            currentBranch: "main", // Default to main for stateless calls
         };
 
         // If we have conversation history, prepend it to the messages
@@ -645,9 +648,18 @@ export class AgentExecutor {
                 if (pairModeController) {
                     const corrections = pairModeController.getPendingCorrections();
                     if (corrections.length > 0) {
+                        // Get delegator's slug for the correction message
+                        const pairRegistry = PairModeRegistry.getInstance();
+                        const pairState = pairRegistry.getState(pairModeController.getBatchId());
+                        const delegatorPubkey = pairState?.delegatorPubkey;
+                        const delegator = delegatorPubkey
+                            ? getProjectContext().getAgentByPubkey(delegatorPubkey)
+                            : undefined;
+                        const delegatorSlug = delegator?.slug || "delegator";
+
                         const correctionMessages: ModelMessage[] = corrections.map((msg) => ({
-                            role: "system" as const,
-                            content: `[PAIR MODE CORRECTION from supervisor]: ${msg}`,
+                            role: "user" as const,
+                            content: `[PAIR MODE CORRECTION from ${delegatorSlug}]: ${msg}`,
                         }));
 
                         // Add trace event for pair mode correction injection

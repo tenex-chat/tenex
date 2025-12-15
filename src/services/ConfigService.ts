@@ -266,7 +266,8 @@ export class ConfigService {
         context?: {
             tools?: Record<string, unknown>;
             agentName?: string;
-            projectPath?: string;
+            /** Working directory path for Claude Code execution */
+            workingDirectory?: string;
             sessionId?: string;
         }
     ): LLMService {

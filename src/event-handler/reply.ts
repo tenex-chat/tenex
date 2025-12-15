@@ -300,7 +300,7 @@ async function handleReplyLogic(
         const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath: projectCtx.agentRegistry.getBasePath(),
+            projectBasePath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: event,
             conversationCoordinator,
         });

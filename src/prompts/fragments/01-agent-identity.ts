@@ -9,13 +9,17 @@ interface AgentIdentityArgs {
     agent: AgentInstance;
     projectTitle: string;
     projectOwnerPubkey: string;
-    projectPath?: string;
+    /**
+     * Actual worktree path where code execution happens.
+     * This is displayed as "Absolute Path" in the system prompt.
+     */
+    workingDirectory?: string;
 }
 
 export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
     id: "agent-identity",
     priority: 1,
-    template: ({ agent, projectTitle, projectOwnerPubkey, projectPath }) => {
+    template: ({ agent, projectTitle, projectOwnerPubkey, workingDirectory }) => {
         const parts: string[] = [];
 
         // Identity
@@ -40,7 +44,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
             [
                 "## Project Context",
                 `- Title: "${projectTitle}"`,
-                `- Absolute Path: ${projectPath || process.cwd()}`,
+                `- Absolute Path: ${workingDirectory || process.cwd()}`,
                 `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
             ].join("\n")
         );

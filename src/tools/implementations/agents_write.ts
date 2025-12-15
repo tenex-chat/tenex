@@ -74,8 +74,8 @@ async function executeAgentsWrite(
     // Get project context
     const projectContext = getProjectContext();
 
-    if (!context?.projectPath) {
-        throw new Error("ExecutionContext with projectPath is required for agents_write tool");
+    if (!context?.workingDirectory) {
+        throw new Error("ExecutionContext with workingDirectory is required for agents_write tool");
     }
 
     // Check if agent exists by slug

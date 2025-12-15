@@ -28,7 +28,10 @@ export class EventHandler {
     private isUpdatingProject = false;
 
     constructor(
-        private projectPath: string,
+        /**
+         * Base project directory containing .bare/ and all worktrees.
+         */
+        private projectBasePath: string,
         private conversationCoordinator: ConversationCoordinator
     ) {}
 
@@ -146,7 +149,7 @@ export class EventHandler {
                 await handleNewConversation(event, {
                     conversationCoordinator: this.conversationCoordinator,
                     agentExecutor: this.agentExecutor,
-                    projectPath: this.projectPath,
+                    projectBasePath: this.projectBasePath,
                 });
                 break;
 
@@ -160,7 +163,7 @@ export class EventHandler {
 
                 this.isUpdatingProject = true;
                 try {
-                    await handleProjectEvent(event, this.projectPath);
+                    await handleProjectEvent(event, this.projectBasePath);
                 } finally {
                     this.isUpdatingProject = false;
                 }

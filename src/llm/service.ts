@@ -565,18 +565,14 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             this.cachedContentForComplete = "";
         }
 
-        console.log("Received chunk:", chunk.type);
-
         // Update previousChunkType AFTER emitting the change event
         this.previousChunkType = chunk.type;
 
         switch (chunk.type) {
             case "text-delta":
-                console.log("\t\t", chunk);
                 this.handleTextDelta(chunk.text);
                 break;
             case "reasoning-delta": {
-                console.log("\t\t", chunk);
                 // Handle reasoning-delta separately - emit reasoning event
                 // The AI SDK may transform our custom reasoning-delta chunks
                 // to use 'text' property instead of 'delta'
