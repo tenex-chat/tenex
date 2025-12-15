@@ -120,11 +120,10 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
                 );
                 logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
             } catch {
-                // Check if worktree was created by another process
-                try {
-                    await fs.access(worktreeDir);
+                // Check if worktree was created by another process (verify it's a valid git repo, not just a directory)
+                if (await isGitRepository(worktreeDir)) {
                     logger.info("Worktree was created by another process", { worktreeDir });
-                } catch {
+                } else {
                     throw new Error(`Failed to create worktree at ${worktreeDir}`);
                 }
             }
@@ -157,11 +156,10 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
         );
         logger.info("Created initial worktree", { worktreeDir, branchName });
     } catch {
-        // Check if worktree was created by another process
-        try {
-            await fs.access(worktreeDir);
+        // Check if worktree was created by another process (verify it's a valid git repo, not just a directory)
+        if (await isGitRepository(worktreeDir)) {
             logger.info("Worktree was created by another process", { worktreeDir });
-        } catch {
+        } else {
             throw new Error(`Failed to create worktree at ${worktreeDir}`);
         }
     }

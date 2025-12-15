@@ -36,6 +36,9 @@ export class ProjectRuntime {
      * Default worktree path (initial branch like master/main).
      * Example: ~/tenex/{dTag}/master
      * Used as fallback working directory when no branch is specified.
+     *
+     * Note: Not readonly because it's set to a placeholder in the constructor
+     * and updated to the actual worktree path after git initialization in start().
      */
     public defaultWorktreePath: string;
     private readonly metadataPath: string; // TENEX metadata path

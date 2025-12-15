@@ -35,13 +35,15 @@ export async function createExecutionContext(params: {
     // Extract branch tag from event
     const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
 
+    // List worktrees once (avoid duplicate calls)
+    const worktrees = await listWorktrees(params.projectBasePath);
+
     // Resolve execution environment
     let workingDirectory: string;
     let currentBranch: string;
 
     if (branchTag) {
         // Branch specified in event - find matching worktree
-        const worktrees = await listWorktrees(params.projectBasePath);
         const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
 
         if (matchingWorktree) {
@@ -63,20 +65,29 @@ export async function createExecutionContext(params: {
                 workingDirectory = defaultWorktree.path;
                 currentBranch = defaultWorktree.branch;
             } else {
-                // No worktrees at all - construct path for main branch
+                // No worktrees at all - this is an unusual state, log warning
+                logger.warn("No worktrees found, using constructed fallback path", {
+                    projectBasePath: params.projectBasePath,
+                    fallbackPath: path.join(params.projectBasePath, "main"),
+                    hint: "This may indicate a corrupted or uninitialized git repository"
+                });
                 workingDirectory = path.join(params.projectBasePath, "main");
                 currentBranch = "main";
             }
         }
     } else {
         // No branch tag - use default worktree
-        const worktrees = await listWorktrees(params.projectBasePath);
         const defaultWorktree = worktrees[0];
         if (defaultWorktree) {
             workingDirectory = defaultWorktree.path;
             currentBranch = defaultWorktree.branch;
         } else {
-            // No worktrees at all - construct path for main branch
+            // No worktrees at all - this is an unusual state, log warning
+            logger.warn("No worktrees found, using constructed fallback path", {
+                projectBasePath: params.projectBasePath,
+                fallbackPath: path.join(params.projectBasePath, "main"),
+                hint: "This may indicate a corrupted or uninitialized git repository"
+            });
             workingDirectory = path.join(params.projectBasePath, "main");
             currentBranch = "main";
         }
