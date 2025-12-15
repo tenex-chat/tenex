@@ -1,9 +1,12 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { JaegerClient } from "../services/JaegerClient.js";
-import type { Trace, TraceSummary } from "../types.js";
-import { TraceTree } from "./TraceTree.js";
+import type { Conversation, StreamItem } from "../types.js";
+import { ConversationList } from "./ConversationList.js";
+import { ConversationStream } from "./ConversationStream.js";
+
+type ViewState = "conversations" | "stream";
 
 interface AppProps {
     jaegerUrl?: string;
@@ -14,111 +17,125 @@ export function App({
     jaegerUrl = "http://localhost:16686",
     serviceName = "tenex-daemon",
 }: AppProps) {
-    const [traces, setTraces] = useState<TraceSummary[]>([]);
-    const [currentTraceIndex, setCurrentTraceIndex] = useState(0);
-    const [currentTrace, setCurrentTrace] = useState<Trace | undefined>();
+    const [view, setView] = useState<ViewState>("conversations");
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
+    const [currentConversationIndex, setCurrentConversationIndex] = useState(0);
+    const [streamItems, setStreamItems] = useState<StreamItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | undefined>();
 
-    const jaegerClient = new JaegerClient(jaegerUrl);
+    const jaegerClient = useMemo(() => new JaegerClient(jaegerUrl), [jaegerUrl]);
 
-    // Load traces and first trace on mount
+    // Load conversations on mount
     useEffect(() => {
-        loadTracesAndFirst();
+        loadConversations();
     }, []);
 
-    const loadTracesAndFirst = async () => {
+    const loadConversations = async () => {
         setLoading(true);
         setError(undefined);
         try {
-            const fetchedTraces = await jaegerClient.getTraces(serviceName, 50);
-            setTraces(fetchedTraces);
-
-            if (fetchedTraces.length > 0) {
-                // Load the first (most recent) trace immediately
-                const firstTrace = await jaegerClient.getTrace(fetchedTraces[0].traceId);
-                setCurrentTrace(firstTrace);
-                setCurrentTraceIndex(0);
-            }
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Unknown error");
+            const fetchedConversations = await jaegerClient.getConversations(serviceName, 50);
+            setConversations(fetchedConversations);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unknown error");
         } finally {
             setLoading(false);
         }
     };
 
-    const navigateToTrace = async (index: number) => {
-        if (index < 0 || index >= traces.length) return;
-
+    const handleSelectConversation = async (conversation: Conversation) => {
         setLoading(true);
+        setError(undefined);
         try {
-            const trace = await jaegerClient.getTrace(traces[index].traceId);
-            setCurrentTrace(trace);
-            setCurrentTraceIndex(index);
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Unknown error");
+            const items = await jaegerClient.getConversationStream(conversation.id, serviceName);
+            setStreamItems(items);
+            setCurrentConversation(conversation);
+            setCurrentConversationIndex(conversations.findIndex((c) => c.id === conversation.id));
+            setView("stream");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unknown error");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleNext = () => {
-        if (currentTraceIndex < traces.length - 1) {
-            navigateToTrace(currentTraceIndex + 1);
+    const handleJumpToEvent = async (eventId: string) => {
+        setLoading(true);
+        setError(undefined);
+        try {
+            // Try to fetch conversation stream for this event ID
+            const items = await jaegerClient.getConversationStream(eventId, serviceName);
+
+            if (items.length === 0) {
+                setError(`No traces found for event ID: ${eventId}`);
+                setLoading(false);
+                return;
+            }
+
+            // Create a synthetic conversation for display
+            const syntheticConversation: Conversation = {
+                id: eventId,
+                firstMessage: items[0]?.preview || "Unknown",
+                timestamp: items[0]?.timestamp || Date.now(),
+                messageCount: items.length,
+                agents: [...new Set(items.map((i) => i.agent).filter((a) => a !== "unknown"))],
+            };
+
+            setStreamItems(items);
+            setCurrentConversation(syntheticConversation);
+            setCurrentConversationIndex(-1); // Not in the list
+            setView("stream");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unknown error");
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handlePrevious = () => {
-        if (currentTraceIndex > 0) {
-            navigateToTrace(currentTraceIndex - 1);
+    const handleBack = () => {
+        setView("conversations");
+        setCurrentConversation(null);
+        setStreamItems([]);
+    };
+
+    const handleNextConversation = async () => {
+        if (currentConversationIndex < conversations.length - 1) {
+            const nextConv = conversations[currentConversationIndex + 1];
+            await handleSelectConversation(nextConv);
         }
     };
 
-    const handleRefresh = async () => {
-        await loadTracesAndFirst();
-    };
-
-    // Handle trace navigation
-    useInput((input: string, key: any) => {
-        if (loading) return;
-
-        if (input === "n" && !key.shift) {
-            handleNext();
-        } else if (input === "p" && !key.shift) {
-            handlePrevious();
-        } else if (input === "r" && !key.shift) {
-            handleRefresh();
-        } else if (key.leftArrow && key.meta) {
-            // Cmd+Left or Alt+Left for previous trace
-            handlePrevious();
-        } else if (key.rightArrow && key.meta) {
-            // Cmd+Right or Alt+Right for next trace
-            handleNext();
+    const handlePrevConversation = async () => {
+        if (currentConversationIndex > 0) {
+            const prevConv = conversations[currentConversationIndex - 1];
+            await handleSelectConversation(prevConv);
         }
-    });
+    };
 
     // Loading state
-    if (loading && !currentTrace) {
+    if (loading) {
         return (
             <Box flexDirection="column">
                 <Box borderStyle="single" borderColor="gray" paddingX={1}>
                     <Text bold color="cyan">
                         TENEX Trace Viewer
                     </Text>
-                    <Text dimColor> - Loading traces...</Text>
+                    <Text dimColor> - Loading...</Text>
                 </Box>
                 <Box marginTop={1} paddingX={2}>
                     <Text color="green">
                         <Spinner type="dots" />
                     </Text>
-                    <Text> Loading traces from Jaeger...</Text>
+                    <Text> Loading from Jaeger...</Text>
                 </Box>
             </Box>
         );
     }
 
-    // Error state
-    if (error && !currentTrace) {
+    // Error state (only show if no data at all)
+    if (error && conversations.length === 0 && !currentConversation) {
         return (
             <Box flexDirection="column">
                 <Box borderStyle="single" borderColor="red" paddingX={1}>
@@ -127,7 +144,7 @@ export function App({
                     </Text>
                 </Box>
                 <Box marginTop={1} paddingX={2} flexDirection="column">
-                    <Text color="red">Failed to load traces:</Text>
+                    <Text color="red">Failed to load:</Text>
                     <Text color="red">{error}</Text>
                     <Box marginTop={1}>
                         <Text dimColor>Press 'r' to retry, 'q' to quit</Text>
@@ -137,67 +154,34 @@ export function App({
         );
     }
 
-    // No traces state
-    if (traces.length === 0) {
+    // Conversations list view
+    if (view === "conversations") {
         return (
-            <Box flexDirection="column">
-                <Box borderStyle="single" borderColor="gray" paddingX={1}>
-                    <Text bold color="cyan">
-                        TENEX Trace Viewer
-                    </Text>
-                </Box>
-                <Box marginTop={1} paddingX={2} flexDirection="column">
-                    <Text color="yellow">No traces found</Text>
-                    <Box marginTop={1}>
-                        <Text dimColor>Make sure TENEX is running and processing events.</Text>
-                    </Box>
-                    <Text dimColor>Press 'r' to refresh, 'q' to quit</Text>
-                </Box>
-            </Box>
+            <ConversationList
+                conversations={conversations}
+                onSelect={handleSelectConversation}
+                onJumpToEvent={handleJumpToEvent}
+                onRefresh={loadConversations}
+            />
         );
     }
 
-    // Show current trace
-    if (currentTrace) {
-        const currentTraceSummary = traces[currentTraceIndex];
-        const ageMs = Date.now() - currentTraceSummary.timestamp;
-        const ageSeconds = Math.floor(ageMs / 1000);
-        const ageMinutes = Math.floor(ageSeconds / 60);
-        const ageHours = Math.floor(ageMinutes / 60);
-
-        let ageStr = "";
-        if (ageHours > 0) {
-            ageStr = `${ageHours}h ago`;
-        } else if (ageMinutes > 0) {
-            ageStr = `${ageMinutes}m ago`;
-        } else {
-            ageStr = `${ageSeconds}s ago`;
-        }
-
+    // Conversation stream view
+    if (view === "stream" && currentConversation) {
         return (
-            <Box flexDirection="column">
-                {/* Trace metadata header */}
-                <Box borderStyle="single" borderColor="cyan" paddingX={1}>
-                    <Text bold color="cyan">
-                        Trace {currentTraceIndex + 1}/{traces.length}
-                    </Text>
-                    <Text dimColor> - {ageStr}</Text>
-                    <Text> </Text>
-                    <Text color="white">{currentTraceSummary.summary}</Text>
-                    <Text dimColor> ({currentTraceSummary.duration}ms)</Text>
-                </Box>
-
-                {/* Trace hierarchy */}
-                <TraceTree
-                    rootSpan={currentTrace.rootSpan}
-                    traceNavigation={{
-                        current: currentTraceIndex + 1,
-                        total: traces.length,
-                        canGoPrevious: currentTraceIndex > 0,
-                        canGoNext: currentTraceIndex < traces.length - 1,
-                    }}
-                />
-            </Box>
+            <ConversationStream
+                conversation={currentConversation}
+                items={streamItems}
+                onBack={handleBack}
+                onNextConversation={
+                    currentConversationIndex >= 0 && currentConversationIndex < conversations.length - 1
+                        ? handleNextConversation
+                        : undefined
+                }
+                onPrevConversation={
+                    currentConversationIndex > 0 ? handlePrevConversation : undefined
+                }
+            />
         );
     }
 
