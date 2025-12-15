@@ -22,7 +22,7 @@ interface TraceTreeProps {
 
 function flattenTree(
     span: TraceSpan,
-    depth,
+    depth: number,
     expandedSet: Set<string>,
     index = { current: 0 }
 ): TreeNode[] {
