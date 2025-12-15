@@ -22,7 +22,6 @@ import {
     type LessonIntent,
     type StreamingIntent,
     type ToolUseIntent,
-    type TypingIntent,
 } from "./AgentEventEncoder";
 
 /**
@@ -184,7 +183,7 @@ export class AgentPublisher {
         });
 
         // Use encoder to create the follow-up event
-        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, delegation.request);
+        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, delegation.request, context);
 
         // Sign the event
         await this.agent.sign(followUpEvent);
@@ -312,25 +311,6 @@ export class AgentPublisher {
             agent: this.agent.slug,
             error: intent.message,
         });
-
-        return event;
-    }
-
-    /**
-     * Publish a typing indicator event.
-     */
-    async typing(intent: TypingIntent, context: EventContext): Promise<NDKEvent> {
-        // Note: Don't flush stream for typing indicators as they're transient
-        logger.debug("Dispatching typing indicator", {
-            agent: this.agent.slug,
-            state: intent.state,
-        });
-
-        const event = this.encoder.encodeTypingIndicator(intent, context, this.agent);
-
-        // Sign and publish
-        await this.agent.sign(event);
-        await this.safePublish(event, "typing indicator");
 
         return event;
     }

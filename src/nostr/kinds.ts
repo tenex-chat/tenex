@@ -25,8 +25,6 @@ export const NDKKind = {
     TenexStreamingResponse: 21111 as BaseNDKKind,
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
-    TenexAgentTypingStart: 24111 as BaseNDKKind,
-    TenexAgentTypingStop: 24112 as BaseNDKKind,
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
 } as const;
