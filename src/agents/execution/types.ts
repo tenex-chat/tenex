@@ -14,7 +14,7 @@ export interface ExecutionContext {
     conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher; // Injected by AgentExecutor - shared publisher instance for consistent event ordering
     isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
-    additionalSystemMessage?: string; // System message to add for retries (used by AgentSupervisor)
+    additionalSystemMessage?: string; // Continuation message injected as user role for phase/retry handling (used by AgentSupervisor)
     debug?: boolean; // True when running in debug mode - enables additional output like event IDs
 
     /**

@@ -276,7 +276,7 @@ export class AgentExecutor {
 
             logger.info("[AgentExecutor] 🔄 Resetting supervisor and recursing", {
                 agent: context.agent.slug,
-                systemMessage: context.additionalSystemMessage,
+                continuationMessage: context.additionalSystemMessage,
             });
 
             // Reset supervisor and recurse
@@ -403,12 +403,15 @@ export class AgentExecutor {
             );
         }
 
-        // Add any additional system message from retry
+        // Add continuation message from supervisor as user message
+        // Using "user" role ensures the LLM treats it as a request to act on,
+        // not just background context. This is critical for phase continuation
+        // where the LLM needs to understand it should continue working.
         if (context.additionalSystemMessage) {
             messages = [
                 ...messages,
                 {
-                    role: "system",
+                    role: "user",
                     content: context.additionalSystemMessage,
                 },
             ];
@@ -628,6 +631,10 @@ export class AgentExecutor {
         const pairModeController = this.createPairModeController(context);
 
         try {
+            // Capture the current span for use in prepareStep callback
+            // prepareStep is called synchronously by AI SDK and may not have access to OTel context
+            const executionSpan = trace.getActiveSpan();
+
             // Create prepareStep callback for message injection and pair mode corrections (SYNC)
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
@@ -643,6 +650,15 @@ export class AgentExecutor {
                             content: `[PAIR MODE CORRECTION from supervisor]: ${msg}`,
                         }));
 
+                        // Add trace event for pair mode correction injection
+                        if (executionSpan) {
+                            executionSpan.addEvent("pair_mode.correction_injected", {
+                                "correction.count": corrections.length,
+                                "correction.step_number": step.stepNumber,
+                                "agent.slug": context.agent.slug,
+                            });
+                        }
+
                         logger.info("[prepareStep] Injecting pair mode corrections", {
                             agent: context.agent.slug,
                             correctionCount: corrections.length,
@@ -657,9 +673,9 @@ export class AgentExecutor {
                 // Handle existing message injection
                 if (injectedEvents.length > 0) {
                     // Add trace event for message injection processing
-                    const activeSpan = trace.getActiveSpan();
-                    if (activeSpan) {
-                        activeSpan.addEvent("message_injection.process", {
+                    // Use captured span instead of getActiveSpan() which may be null
+                    if (executionSpan) {
+                        executionSpan.addEvent("message_injection.process", {
                             "injection.message_count": injectedEvents.length,
                             "injection.step_number": step.stepNumber,
                             "injection.event_ids": injectedEvents.map((e) => e.id || "").join(","),
