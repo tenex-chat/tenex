@@ -6,14 +6,9 @@ import { createExecutionContext } from "../ExecutionContextFactory";
 
 // Mock git utilities
 const mockListWorktrees = mock(() => Promise.resolve([]));
-const mockGetCurrentBranchWithFallback = mock(() => Promise.resolve("main"));
 
 mock.module("@/utils/git/worktree", () => ({
     listWorktrees: mockListWorktrees,
-}));
-
-mock.module("@/utils/git/initializeGitRepo", () => ({
-    getCurrentBranchWithFallback: mockGetCurrentBranchWithFallback,
 }));
 
 describe("ExecutionContextFactory", () => {
@@ -32,11 +27,10 @@ describe("ExecutionContextFactory", () => {
         id: "test-event-id",
     } as NDKEvent;
 
-    const projectPath = "/test/project";
+    const projectBasePath = "/test/project";
 
     beforeEach(() => {
         mockListWorktrees.mockClear();
-        mockGetCurrentBranchWithFallback.mockClear();
         mockCoordinator.getConversation = mock(() => undefined);
     });
 
@@ -49,28 +43,28 @@ describe("ExecutionContextFactory", () => {
             };
 
             mockListWorktrees.mockResolvedValue([
-                { branch: "main", path: "/test/project" },
-                { branch: "feature-branch", path: "/test/project-feature-branch" },
+                { branch: "main", path: "/test/project/main" },
+                { branch: "feature-branch", path: "/test/project/feature-branch" },
             ]);
 
             // Execute
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: eventWithBranch,
                 conversationCoordinator: mockCoordinator,
             });
 
             // Assert
-            expect(context.workingDirectory).toBe("/test/project-feature-branch");
+            expect(context.workingDirectory).toBe("/test/project/feature-branch");
             expect(context.currentBranch).toBe("feature-branch");
-            expect(context.projectPath).toBe(projectPath);
+            expect(context.projectBasePath).toBe(projectBasePath);
             expect(context.agent).toBe(mockAgent);
-            expect(mockListWorktrees).toHaveBeenCalledWith(projectPath);
+            expect(mockListWorktrees).toHaveBeenCalledWith(projectBasePath);
         });
 
-        it("should fall back to main when branch tag has no matching worktree", async () => {
+        it("should fall back to default worktree when branch tag has no matching worktree", async () => {
             // Setup: Event has branch tag, but no matching worktree
             const eventWithBranch: NDKEvent = {
                 ...mockEvent,
@@ -78,56 +72,56 @@ describe("ExecutionContextFactory", () => {
             };
 
             mockListWorktrees.mockResolvedValue([
-                { branch: "main", path: "/test/project" },
+                { branch: "main", path: "/test/project/main" },
             ]);
-
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
 
             // Execute
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: eventWithBranch,
                 conversationCoordinator: mockCoordinator,
             });
 
-            // Assert
-            expect(context.workingDirectory).toBe(projectPath);
+            // Assert - should fall back to first worktree (main)
+            expect(context.workingDirectory).toBe("/test/project/main");
             expect(context.currentBranch).toBe("main");
-            expect(mockGetCurrentBranchWithFallback).toHaveBeenCalledWith(projectPath);
         });
 
-        it("should use main worktree when no branch tag", async () => {
+        it("should use default worktree when no branch tag", async () => {
             // Setup: Event has no branch tag
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            mockListWorktrees.mockResolvedValue([
+                { branch: "main", path: "/test/project/main" },
+            ]);
 
             // Execute
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: mockEvent,
                 conversationCoordinator: mockCoordinator,
             });
 
-            // Assert
-            expect(context.workingDirectory).toBe(projectPath);
+            // Assert - should use first worktree as default
+            expect(context.workingDirectory).toBe("/test/project/main");
             expect(context.currentBranch).toBe("main");
-            expect(mockGetCurrentBranchWithFallback).toHaveBeenCalledWith(projectPath);
-            expect(mockListWorktrees).not.toHaveBeenCalled();
+            expect(mockListWorktrees).toHaveBeenCalledWith(projectBasePath);
         });
 
         it("should pass through optional fields", async () => {
             // Setup
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            mockListWorktrees.mockResolvedValue([
+                { branch: "main", path: "/test/project/main" },
+            ]);
             const mockPublisher = { publish: mock() };
 
             // Execute
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: mockEvent,
                 conversationCoordinator: mockCoordinator,
                 agentPublisher: mockPublisher as any,
@@ -145,7 +139,9 @@ describe("ExecutionContextFactory", () => {
 
         it("should create getConversation function", async () => {
             // Setup
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            mockListWorktrees.mockResolvedValue([
+                { branch: "main", path: "/test/project/main" },
+            ]);
             const mockConversation = { id: "test-conversation" };
             mockCoordinator.getConversation = mock(() => mockConversation);
 
@@ -153,7 +149,7 @@ describe("ExecutionContextFactory", () => {
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: mockEvent,
                 conversationCoordinator: mockCoordinator,
             });
@@ -163,21 +159,22 @@ describe("ExecutionContextFactory", () => {
             expect(mockCoordinator.getConversation).toHaveBeenCalledWith("test-conversation");
         });
 
-        it("should handle getCurrentBranchWithFallback returning fallback branch", async () => {
-            // Setup: getCurrentBranchWithFallback returns fallback
-            mockGetCurrentBranchWithFallback.mockResolvedValue("master");
+        it("should construct fallback path when no worktrees exist", async () => {
+            // Setup: No worktrees available
+            mockListWorktrees.mockResolvedValue([]);
 
             // Execute
             const context = await createExecutionContext({
                 agent: mockAgent,
                 conversationId: "test-conversation",
-                projectPath,
+                projectBasePath,
                 triggeringEvent: mockEvent,
                 conversationCoordinator: mockCoordinator,
             });
 
-            // Assert
-            expect(context.currentBranch).toBe("master");
+            // Assert - should construct path with "main" branch
+            expect(context.workingDirectory).toBe("/test/project/main");
+            expect(context.currentBranch).toBe("main");
         });
     });
 });
