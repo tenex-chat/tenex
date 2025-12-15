@@ -70,8 +70,31 @@ export async function listWorktrees(projectPath: string): Promise<Array<{ branch
 }
 
 /**
+ * Find the bare repository directory for a given worktree
+ * @param projectPath - Path to a worktree
+ * @returns Path to the bare repository
+ */
+async function findBareRepo(projectPath: string): Promise<string> {
+    // The bare repo should be at {parentDir}/.bare
+    const parentDir = path.dirname(projectPath);
+    const bareRepoPath = path.join(parentDir, ".bare");
+
+    // Verify it's a bare repository
+    try {
+        const { stdout } = await execAsync("git rev-parse --is-bare-repository", { cwd: bareRepoPath });
+        if (stdout.trim() === "true") {
+            return bareRepoPath;
+        }
+    } catch {
+        // Not a bare repo or doesn't exist
+    }
+
+    throw new Error(`Bare repository not found at ${bareRepoPath}`);
+}
+
+/**
  * Create a new git worktree
- * @param projectPath - Base project path (main worktree)
+ * @param projectPath - Base project path (any worktree)
  * @param branchName - Name for the new branch
  * @param baseBranch - Branch to create from (typically current branch)
  * @returns Path to the new worktree
@@ -82,12 +105,15 @@ export async function createWorktree(
     baseBranch: string
 ): Promise<string> {
     try {
-        // Worktree path is sibling to main worktree
+        // Find the bare repository
+        const bareRepoPath = await findBareRepo(projectPath);
+
+        // Worktree path is sibling to other worktrees
         const parentDir = path.dirname(projectPath);
         const worktreePath = path.join(parentDir, branchName);
 
         // Check if worktree already exists
-        const existingWorktrees = await listWorktrees(projectPath);
+        const existingWorktrees = await listWorktrees(bareRepoPath);
         if (existingWorktrees.some((wt) => wt.branch === branchName)) {
             logger.info("Worktree already exists", { branchName, path: worktreePath });
             return worktreePath;
@@ -106,13 +132,13 @@ export async function createWorktree(
             // Path doesn't exist - safe to create
         }
 
-        // Create worktree
+        // Create worktree from bare repository
         await execAsync(
             `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
-            { cwd: projectPath }
+            { cwd: bareRepoPath }
         );
 
-        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch });
+        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch, bareRepoPath });
         return worktreePath;
     } catch (error) {
         logger.error("Failed to create worktree", { projectPath, branchName, baseBranch, error });
