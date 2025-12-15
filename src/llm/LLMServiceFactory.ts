@@ -223,8 +223,8 @@ export class LLMServiceFactory {
 
             // Add TENEX's MCP servers from config
             // Load MCP config and convert TENEX MCP servers to Claude Code format
-            const mcpConfig = configService.getConfig().mcp;
-            if (mcpConfig?.enabled && mcpConfig.servers) {
+            const mcpConfig = configService.getMCP();
+            if (mcpConfig.enabled && mcpConfig.servers) {
                 for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
                     // Convert TENEX's MCPServerConfig to Claude Code's McpStdioServerConfig
                     mcpServersConfig[serverName] = {

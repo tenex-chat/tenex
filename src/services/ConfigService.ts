@@ -90,6 +90,13 @@ export class ConfigService {
         return this.loadedConfig.config;
     }
 
+    getMCP(): TenexMCP {
+        if (!this.loadedConfig) {
+            throw new Error("Config not loaded. Call loadConfig() first.");
+        }
+        return this.loadedConfig.mcp;
+    }
+
     async loadConfig(projectPath?: string): Promise<LoadedConfig> {
         const globalPath = this.getGlobalPath();
         const projPath = projectPath ? this.getProjectPath(projectPath) : undefined;
