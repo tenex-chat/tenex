@@ -131,15 +131,21 @@ export async function createWorktree(
     baseBranch: string
 ): Promise<string> {
     try {
-        // Find the bare repository
-        const bareRepoPath = await findBareRepo(projectPath);
+        // Find the repository path - try bare repo first, fall back to projectPath
+        let repoPath: string;
+        try {
+            repoPath = await findBareRepo(projectPath);
+        } catch {
+            // No bare repo found, use projectPath directly (legacy non-bare setup)
+            repoPath = projectPath;
+        }
 
         // Worktree path is sibling to other worktrees
         const parentDir = path.dirname(projectPath);
         const worktreePath = path.join(parentDir, branchName);
 
         // Check if worktree already exists
-        const existingWorktrees = await listWorktrees(bareRepoPath);
+        const existingWorktrees = await listWorktrees(repoPath);
         if (existingWorktrees.some((wt) => wt.branch === branchName)) {
             logger.info("Worktree already exists", { branchName, path: worktreePath });
             return worktreePath;
@@ -158,16 +164,16 @@ export async function createWorktree(
             // Path doesn't exist - safe to create
         }
 
-        // Create worktree from bare repository
+        // Create worktree from repository
         // Wrap in try-catch to handle race conditions where another process creates the worktree
         try {
             await execAsync(
                 `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
-                { cwd: bareRepoPath }
+                { cwd: repoPath }
             );
         } catch (createError: unknown) {
             // Check if worktree was created by another process (race condition)
-            const refreshedWorktrees = await listWorktrees(bareRepoPath);
+            const refreshedWorktrees = await listWorktrees(repoPath);
             if (refreshedWorktrees.some((wt) => wt.branch === branchName)) {
                 logger.info("Worktree was created by another process", { branchName, path: worktreePath });
                 return worktreePath;
@@ -176,7 +182,7 @@ export async function createWorktree(
             throw createError;
         }
 
-        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch, bareRepoPath });
+        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch, repoPath });
         return worktreePath;
     } catch (error) {
         logger.error("Failed to create worktree", { projectPath, branchName, baseBranch, error });

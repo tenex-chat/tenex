@@ -151,6 +151,18 @@ export class LLMLogger {
 
         const agent = params.agent || this.agent;
         if (!agent) {
+            // Add stack trace to identify where this is being called from
+            const stack = new Error().stack;
+            console.error("DEBUG [LLMLogger] Missing agent:", {
+                paramsAgent: params.agent,
+                thisAgent: this.agent,
+                configKey: params.configKey,
+                provider: params.provider,
+                model: params.model,
+                phase: params.phase,
+                conversationId: params.conversationId,
+                stack,
+            });
             throw new Error("[LLMLogger] Agent name is required for logging");
         }
         const logEntry: LLMLogEntry = {
@@ -206,6 +218,15 @@ export class LLMLogger {
 
         const agent = params.agent || this.agent;
         if (!agent) {
+            // Add stack trace to identify where this is being called from
+            const stack = new Error().stack;
+            console.error("DEBUG [LLMLogger] Missing agent in response:", {
+                paramsAgent: params.agent,
+                thisAgent: this.agent,
+                hasResponse: !!params.response,
+                hasError: !!params.error,
+                stack,
+            });
             throw new Error("[LLMLogger] Agent name is required for logging");
         }
         const responseEntry: Partial<LLMLogEntry> = {
