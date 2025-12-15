@@ -217,13 +217,13 @@ export async function runDebugSystemPrompt(options: DebugSystemPromptOptions): P
                 const systemMessages = await buildSystemPromptMessages({
                     agent,
                     project: projectCtx.project,
-                    projectPath,
+                    projectBasePath: projectPath, // In debug mode, base path is what we have
+                    workingDirectory: projectPath, // Use same as base in debug mode
+                    currentBranch,
                     availableAgents,
                     conversation: undefined, // No conversation in debug mode
                     agentLessons: agentLessonsMap,
                     isProjectManager,
-                    workingDirectory: projectPath,
-                    currentBranch,
                 });
 
                 // Display each system message separately with metadata
@@ -415,7 +415,7 @@ export async function runDebugThreadedFormatter(
             const mockContext = await createExecutionContext({
                 agent: selectedAgent,
                 conversationId: options.conversationId,
-                projectPath,
+                projectBasePath: projectPath, // In debug mode, project path is the base
                 triggeringEvent,
                 conversationCoordinator,
                 agentPublisher: mockAgentPublisher,

@@ -74,7 +74,7 @@ async function executeDelegateFollowup(
         context.conversationCoordinator,
         responseEvent, // This becomes the triggering event for threading
         context.agentPublisher!,
-        context.projectPath,
+        context.projectBasePath,
         context.currentBranch
     );
 

@@ -8,6 +8,28 @@ import { BARE_REPO_DIR } from "./worktree";
 const execAsync = promisify(exec);
 
 /**
+ * Result from git repository initialization or cloning.
+ * Contains both the base path and the default worktree path.
+ */
+export interface GitRepoResult {
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     * Example: ~/tenex/{dTag}
+     */
+    basePath: string;
+    /**
+     * Path to the default worktree (initial branch).
+     * Example: ~/tenex/{dTag}/master
+     */
+    worktreePath: string;
+    /**
+     * Name of the default branch.
+     * Example: "master" or "main"
+     */
+    branch: string;
+}
+
+/**
  * Get the default branch name for a git repository
  * Tries to detect from remote HEAD, falls back to common defaults
  */
@@ -62,9 +84,9 @@ export async function isGitRepository(dir?: string): Promise<boolean> {
  * Initialize a new Git repository using bare repo pattern
  * Creates a bare repository at {projectBaseDir}/.bare/ and a worktree at {projectBaseDir}/{branchName}/
  * @param projectBaseDir - The base project directory
- * @returns The path to the first worktree
+ * @returns GitRepoResult with basePath, worktreePath, and branch
  */
-export async function initializeGitRepository(projectBaseDir?: string): Promise<string> {
+export async function initializeGitRepository(projectBaseDir?: string): Promise<GitRepoResult> {
     const baseDir = projectBaseDir || process.cwd();
 
     // Get the configured default branch name
@@ -88,7 +110,7 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
         // Check if worktree exists
         try {
             await fs.access(worktreeDir);
-            return worktreeDir;
+            return { basePath: baseDir, worktreePath: worktreeDir, branch: branchName };
         } catch {
             // Worktree doesn't exist, create it with race condition handling
             try {
@@ -106,7 +128,7 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
                     throw new Error(`Failed to create worktree at ${worktreeDir}`);
                 }
             }
-            return worktreeDir;
+            return { basePath: baseDir, worktreePath: worktreeDir, branch: branchName };
         }
     }
 
@@ -144,7 +166,7 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
         }
     }
 
-    return worktreeDir;
+    return { basePath: baseDir, worktreePath: worktreeDir, branch: branchName };
 }
 
 /**
@@ -152,12 +174,12 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
  * Creates a bare repository at {projectBaseDir}/.bare/ and a worktree at {projectBaseDir}/{branchName}/
  * @param repoUrl - The git repository URL to clone
  * @param projectBaseDir - The base project directory
- * @returns The path to the cloned repository worktree, or null if failed
+ * @returns GitRepoResult with basePath, worktreePath, and branch, or null if failed
  */
 export async function cloneGitRepository(
     repoUrl: string,
     projectBaseDir: string
-): Promise<string | null> {
+): Promise<GitRepoResult | null> {
     try {
         // Ensure project base directory exists
         await fs.mkdir(projectBaseDir, { recursive: true });
@@ -174,7 +196,7 @@ export async function cloneGitRepository(
                 const possibleDir = path.join(projectBaseDir, branchName);
                 if (await isGitRepository(possibleDir)) {
                     logger.info("Found existing worktree", { targetDir: possibleDir });
-                    return possibleDir;
+                    return { basePath: projectBaseDir, worktreePath: possibleDir, branch: branchName };
                 }
             }
 
@@ -186,7 +208,7 @@ export async function cloneGitRepository(
                 { cwd: bareRepoDir }
             );
             logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
-            return worktreeDir;
+            return { basePath: projectBaseDir, worktreePath: worktreeDir, branch: branchName };
         }
 
         // Clone as bare repository
@@ -213,7 +235,7 @@ export async function cloneGitRepository(
             worktreeDir,
             branchName
         });
-        return worktreeDir;
+        return { basePath: projectBaseDir, worktreePath: worktreeDir, branch: branchName };
     } catch (error) {
         logger.error("Failed to clone git repository", {
             error: error instanceof Error ? error.message : String(error),

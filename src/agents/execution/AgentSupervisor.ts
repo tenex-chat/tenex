@@ -483,14 +483,14 @@ export class AgentSupervisor {
             const systemMessages = await buildSystemPromptMessages({
                 agent: this.context.agent,
                 project,
-                projectPath: this.context.projectPath,
+                projectBasePath: this.context.projectBasePath,
+                workingDirectory: this.context.workingDirectory,
+                currentBranch: this.context.currentBranch,
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
-                workingDirectory: this.context.workingDirectory,
-                currentBranch: this.context.currentBranch,
             });
 
             // Combine all system messages into one
@@ -539,7 +539,7 @@ Respond in one of two formats:
      */
     async checkWorktreeCreation(): Promise<{ created: boolean; worktrees: WorktreeMetadata[] }> {
         const agentWorktrees = await getAgentWorktrees(
-            this.context.projectPath,
+            this.context.projectBasePath,
             this.agent.pubkey,
             this.context.conversationId
         );

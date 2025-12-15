@@ -13,7 +13,10 @@ import { AgentRouter } from "./AgentRouter";
 interface EventHandlerContext {
     conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
-    projectPath: string;
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     */
+    projectBasePath: string;
 }
 
 export const handleNewConversation = async (
@@ -62,7 +65,7 @@ export const handleNewConversation = async (
         const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectPath: context.projectPath,
+            projectBasePath: context.projectBasePath,
             triggeringEvent: event,
             conversationCoordinator: context.conversationCoordinator,
         });

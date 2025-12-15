@@ -166,11 +166,14 @@ export class DynamicToolService {
             // We'll need a minimal context to validate it returns a valid tool
             const testContext = {
                 agent: { name: "test" },
-                projectPath: process.cwd(),
+                projectBasePath: process.cwd(),
+                workingDirectory: process.cwd(),
+                currentBranch: "main",
                 conversationId: "test",
                 triggeringEvent: {} as ExecutionContext["triggeringEvent"],
                 conversationCoordinator: {} as ExecutionContext["conversationCoordinator"],
                 agentPublisher: {} as ExecutionContext["agentPublisher"],
+                getConversation: () => undefined,
             } as ExecutionContext;
 
             const testTool = module.default(testContext);

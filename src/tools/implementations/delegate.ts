@@ -139,7 +139,7 @@ async function executeDelegate(
         context.conversationCoordinator,
         context.triggeringEvent,
         context.agentPublisher,
-        context.projectPath,
+        context.projectBasePath,
         context.currentBranch
     );
 

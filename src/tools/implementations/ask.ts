@@ -46,7 +46,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         context.conversationCoordinator,
         context.triggeringEvent,
         context.agentPublisher!,
-        context.projectPath,
+        context.projectBasePath,
         context.currentBranch
     );
 
