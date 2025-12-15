@@ -15,22 +15,28 @@ delegate_phase({
     phase: "implementation",
     recipients: ["developer"],
     prompt: "Implement the new feature",
-    branch: "feature-new-thing"  // Creates worktree
+    branch: "feature/new-thing"  // Creates worktree
 })
 ```
 
 This will:
-1. Create a new worktree at `~/tenex/{project}/../feature-new-thing/`
+1. Create a new worktree at `~/tenex/{project}/.worktrees/feature_new-thing/`
 2. Create branch from your current branch
 3. Track metadata (creator, conversation, timestamps)
 4. Execute delegated agent in the new worktree
 5. Prompt for cleanup when agent completes
 
+### Branch Name Sanitization
+
+Branch names with slashes are sanitized for directory names:
+- `feature/new-thing` → `.worktrees/feature_new-thing/`
+- `bugfix/issue/123` → `.worktrees/bugfix_issue_123/`
+
 ### Worktree Lifecycle
 
 **Creation:**
 - Automatic via delegate_phase with branch parameter
-- Worktree is sibling to main project directory
+- Worktrees are created in `.worktrees/` subdirectory (gitignored)
 - Metadata stored in `~/tenex/{project}/worktrees.json`
 
 **Cleanup:**
@@ -40,41 +46,48 @@ This will:
 
 ### Architecture
 
-**Directory Structure (Bare Repository Pattern):**
+**Directory Structure:**
 ```
 ~/tenex/
-  my-project/
-    .bare/               # Bare git repository (database only)
-    main/                # Worktree for main branch
-      .git               # File pointing to ../.bare/worktrees/main
-      src/
-      ...
-    feature-branch/      # Worktree for feature branch
-      .git               # File pointing to ../.bare/worktrees/feature-branch
-      src/
-      ...
-    worktrees.json       # Metadata
+  my-project/                    # Normal git repository (default branch checked out)
+    .git/                        # Standard git directory
+    .worktrees/                  # All worktrees (gitignored)
+      feature_new-thing/         # feature/new-thing → feature_new-thing
+        .git                     # File pointing to main .git/worktrees/
+        src/
+        ...
+      bugfix_issue_123/          # bugfix/issue/123 → bugfix_issue_123
+        .git
+        src/
+        ...
+    .gitignore                   # Includes .worktrees automatically
+    src/
+    ...
+    worktrees.json               # Metadata
 ```
 
-This follows the standard git bare repository pattern where:
-- The `.bare/` directory contains the git database (objects, refs, etc.)
-- Each branch has its own worktree directory with a `.git` file pointing to the bare repo
+This is a standard git repository with worktrees in a dedicated subdirectory:
+- The project root has the default branch (main/master) checked out
+- Feature branches live in `.worktrees/{sanitized_branch}/`
+- The `.worktrees/` directory is automatically added to `.gitignore`
 - All standard git commands work normally in each worktree
-- Agents don't need to know about bare repos - they just work in their worktree
+- Agents don't need to know implementation details - they just work in their worktree
 
 **Event Flow:**
 1. delegate_phase adds ["branch", "name"] tag to delegation event
 2. Event handler extracts branch tag
-3. Event handler resolves workingDirectory from branch
-4. ExecutionContext includes both projectPath (base) and workingDirectory (worktree)
+3. ExecutionContextFactory resolves workingDirectory:
+   - No branch tag → use project root
+   - With branch tag → use `.worktrees/{sanitized_branch}/`
+4. ExecutionContext includes both projectBasePath (root) and workingDirectory (worktree)
 5. Agent operates in worktree
 
 **Metadata:**
 ```typescript
 {
-  "feature-branch": {
-    "path": "/Users/you/tenex/feature-branch",
-    "branch": "feature-branch",
+  "feature/new-thing": {
+    "path": "/Users/you/tenex/my-project/.worktrees/feature_new-thing",
+    "branch": "feature/new-thing",
     "createdBy": "agent-pubkey",
     "conversationId": "conversation-id",
     "parentBranch": "main",
@@ -88,8 +101,9 @@ This follows the standard git bare repository pattern where:
 ## Implementation Details
 
 See:
-- `src/utils/git/initializeGitRepo.ts` - Git worktree operations
-- `src/utils/worktree/metadata.ts` - Metadata tracking
+- `src/utils/git/worktree.ts` - Git worktree operations, sanitizeBranchName()
+- `src/utils/git/initializeGitRepo.ts` - Repository initialization
+- `src/utils/git/gitignore.ts` - Automatic .gitignore management
 - `src/tools/implementations/delegate_phase.ts` - Worktree creation
-- `src/event-handler/reply.ts` - Working directory resolution
+- `src/agents/execution/ExecutionContextFactory.ts` - Working directory resolution
 - `src/agents/execution/AgentSupervisor.ts` - Cleanup validation

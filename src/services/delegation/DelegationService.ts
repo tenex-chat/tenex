@@ -54,7 +54,8 @@ export class DelegationService {
         private triggeringEvent: NDKEvent,
         private publisher: AgentPublisher,
         /**
-         * Base project directory containing .bare/ and all worktrees.
+         * Project directory (normal git repository root).
+         * Worktrees are in .worktrees/ subdirectory.
          */
         private projectBasePath: string,
         private currentBranch: string

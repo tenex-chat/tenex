@@ -8,14 +8,15 @@ export interface ExecutionContext {
     agent: AgentInstance;
     conversationId: string;
     /**
-     * Base project directory containing .bare/ and all worktrees.
+     * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
-     * This is the parent of all worktree directories.
+     * The default branch is checked out here directly.
      */
     projectBasePath: string;
     /**
-     * Actual worktree path where code execution happens.
-     * Example: ~/tenex/{dTag}/master or ~/tenex/{dTag}/feature/branch-name
+     * Working directory for code execution.
+     * - Default branch: same as projectBasePath (~/tenex/{dTag})
+     * - Feature branch: ~/tenex/{dTag}/.worktrees/feature_branch/
      * This is where git commands run and files are edited.
      */
     workingDirectory: string;

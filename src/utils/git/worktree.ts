@@ -4,11 +4,21 @@ import { promisify } from "node:util";
 import { exec } from "node:child_process";
 import { logger } from "@/utils/logger";
 import { config } from "@/services/ConfigService";
+import { ensureWorktreesGitignore } from "./gitignore";
 
 const execAsync = promisify(exec);
 
-/** Directory name for bare repositories in the standard pattern */
-export const BARE_REPO_DIR = ".bare";
+/** Directory name for worktrees (relative to project root) */
+export const WORKTREES_DIR = ".worktrees";
+
+/**
+ * Sanitize a branch name for use as a directory name.
+ * Replaces forward slashes with underscores to avoid nested directories.
+ * @example sanitizeBranchName("feature/whatever") => "feature_whatever"
+ */
+export function sanitizeBranchName(branch: string): string {
+    return branch.replace(/\//g, "_");
+}
 
 /**
  * Metadata for a git worktree
@@ -29,39 +39,16 @@ export interface WorktreeMetadata {
 // ============================================================================
 
 /**
- * Check if a path is a bare repository
- */
-async function isBareRepository(repoPath: string): Promise<boolean> {
-    try {
-        const { stdout } = await execAsync("git rev-parse --is-bare-repository", { cwd: repoPath });
-        return stdout.trim() === "true";
-    } catch {
-        return false;
-    }
-}
-
-/**
- * List all git worktrees
- * Accepts either a bare repo path or a worktree path
+ * List all git worktrees for a project.
+ * The main repository is always included as the first entry.
+ * Additional worktrees are located in .worktrees/ subdirectory.
+ *
+ * @param projectPath - Root project directory (normal git repo)
+ * @returns Array of worktrees with branch name and path
  */
 export async function listWorktrees(projectPath: string): Promise<Array<{ branch: string; path: string }>> {
     try {
-        // Determine the correct path to use for git worktree list
-        let repoPath = projectPath;
-
-        // Check if this is a bare repo or try to find it
-        const isBare = await isBareRepository(projectPath);
-        if (!isBare) {
-            // Try to find bare repo from worktree
-            try {
-                repoPath = await findBareRepo(projectPath);
-            } catch {
-                // Fall back to using the provided path (for non-bare repo setups)
-                repoPath = projectPath;
-            }
-        }
-
-        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: repoPath });
+        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: projectPath });
 
         const worktrees: Array<{ branch: string; path: string }> = [];
         const lines = stdout.trim().split("\n");
@@ -101,29 +88,18 @@ export async function listWorktrees(projectPath: string): Promise<Array<{ branch
 }
 
 /**
- * Find the bare repository directory for a given worktree
- * @param projectPath - Path to a worktree
- * @returns Path to the bare repository
- */
-export async function findBareRepo(projectPath: string): Promise<string> {
-    // The bare repo should be at {parentDir}/{BARE_REPO_DIR}
-    const parentDir = path.dirname(projectPath);
-    const bareRepoPath = path.join(parentDir, BARE_REPO_DIR);
-
-    // Verify it's a bare repository
-    if (await isBareRepository(bareRepoPath)) {
-        return bareRepoPath;
-    }
-
-    throw new Error(`Bare repository not found at ${bareRepoPath}`);
-}
-
-/**
- * Create a new git worktree
- * @param projectPath - Base project path (any worktree)
- * @param branchName - Name for the new branch
+ * Create a new git worktree in the .worktrees/ directory.
+ * Branch names are sanitized (slashes replaced with underscores) for directory names.
+ * Also ensures .worktrees is added to .gitignore.
+ *
+ * @param projectPath - Root project directory (normal git repo)
+ * @param branchName - Name for the new branch (can contain slashes)
  * @param baseBranch - Branch to create from (typically current branch)
  * @returns Path to the new worktree
+ *
+ * @example
+ * // Creates worktree at ~/tenex/project/.worktrees/feature_auth/
+ * await createWorktree("~/tenex/project", "feature/auth", "main");
  */
 export async function createWorktree(
     projectPath: string,
@@ -131,15 +107,19 @@ export async function createWorktree(
     baseBranch: string
 ): Promise<string> {
     try {
-        // Find the bare repository
-        const repoPath = await findBareRepo(projectPath);
+        // Ensure .worktrees is in .gitignore before creating any worktrees
+        await ensureWorktreesGitignore(projectPath);
 
-        // Worktree path is sibling to other worktrees
-        const parentDir = path.dirname(projectPath);
-        const worktreePath = path.join(parentDir, branchName);
+        // Create .worktrees directory if it doesn't exist
+        const worktreesDir = path.join(projectPath, WORKTREES_DIR);
+        await fs.mkdir(worktreesDir, { recursive: true });
+
+        // Sanitize branch name for directory (feature/whatever -> feature_whatever)
+        const sanitizedName = sanitizeBranchName(branchName);
+        const worktreePath = path.join(worktreesDir, sanitizedName);
 
         // Check if worktree already exists
-        const existingWorktrees = await listWorktrees(repoPath);
+        const existingWorktrees = await listWorktrees(projectPath);
         if (existingWorktrees.some((wt) => wt.branch === branchName)) {
             logger.info("Worktree already exists", { branchName, path: worktreePath });
             return worktreePath;
@@ -163,11 +143,11 @@ export async function createWorktree(
         try {
             await execAsync(
                 `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
-                { cwd: repoPath }
+                { cwd: projectPath }
             );
         } catch (createError: unknown) {
             // Check if worktree was created by another process (race condition)
-            const refreshedWorktrees = await listWorktrees(repoPath);
+            const refreshedWorktrees = await listWorktrees(projectPath);
             if (refreshedWorktrees.some((wt) => wt.branch === branchName)) {
                 logger.info("Worktree was created by another process", { branchName, path: worktreePath });
                 return worktreePath;
@@ -176,7 +156,12 @@ export async function createWorktree(
             throw createError;
         }
 
-        logger.info("Created worktree", { branchName, path: worktreePath, baseBranch, repoPath });
+        logger.info("Created worktree", {
+            branchName,
+            sanitizedName,
+            path: worktreePath,
+            baseBranch
+        });
         return worktreePath;
     } catch (error) {
         logger.error("Failed to create worktree", { projectPath, branchName, baseBranch, error });
