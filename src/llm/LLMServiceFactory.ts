@@ -251,8 +251,6 @@ export class LLMServiceFactory {
                 permissionMode: "bypassPermissions",
                 verbose: true,
                 cwd: context?.projectPath,
-                allowedTools: ["Bash(echo:*)", "Bash(date)", "Bash(pwd)"],
-                mcpServers: mcpServersConfig as any,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),
