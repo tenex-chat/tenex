@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { listWorktrees, loadWorktreeMetadata } from "@/utils/git/worktree";
+import { logger } from "@/utils/logger";
 
 /**
  * Worktree context for the fragment.
@@ -68,7 +69,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
       }
     } catch (error) {
       // If we can't list worktrees (e.g., not a git repo yet), just skip
-      console.warn("Failed to list worktrees", { error });
+      logger.warn("Failed to list worktrees", { error });
     }
 
     // Add worktree commands guidance for agents with shell access or phases
