@@ -22,6 +22,10 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
     const currentBranch = context.currentBranch;
 
     parts.push("## Git Worktree Context\n");
+    parts.push("This project uses git worktrees with a bare repository structure.");
+    parts.push("Each branch has its own working directory, allowing parallel work on different branches.");
+    parts.push("All standard git commands (status, commit, push, etc.) work normally in your worktree.");
+    parts.push("");
     parts.push(`**Current Working Directory:** ${workingDirectory}`);
     parts.push(`**Current Branch:** ${currentBranch}`);
     parts.push(`**Project Base:** ${context.projectPath}`);

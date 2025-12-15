@@ -40,14 +40,27 @@ This will:
 
 ### Architecture
 
-**Directory Structure:**
+**Directory Structure (Bare Repository Pattern):**
 ```
 ~/tenex/
-  my-project/          # Main worktree (e.g., main branch)
-  feature-branch/      # Additional worktree
-  another-feature/     # Another worktree
-  worktrees.json       # Metadata
+  my-project/
+    .bare/               # Bare git repository (database only)
+    main/                # Worktree for main branch
+      .git               # File pointing to ../.bare/worktrees/main
+      src/
+      ...
+    feature-branch/      # Worktree for feature branch
+      .git               # File pointing to ../.bare/worktrees/feature-branch
+      src/
+      ...
+    worktrees.json       # Metadata
 ```
+
+This follows the standard git bare repository pattern where:
+- The `.bare/` directory contains the git database (objects, refs, etc.)
+- Each branch has its own worktree directory with a `.git` file pointing to the bare repo
+- All standard git commands work normally in each worktree
+- Agents don't need to know about bare repos - they just work in their worktree
 
 **Event Flow:**
 1. delegate_phase adds ["branch", "name"] tag to delegation event
