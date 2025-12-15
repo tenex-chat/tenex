@@ -249,8 +249,6 @@ export class AgentEventDecoder {
     private static readonly NEVER_ROUTE_EVENT_KINDS = [
         NDKKind.TenexProjectStatus,
         NDKKind.TenexStreamingResponse,
-        NDKKind.TenexAgentTypingStart,
-        NDKKind.TenexAgentTypingStop,
         NDKKind.TenexOperationsStatus,
     ];
 

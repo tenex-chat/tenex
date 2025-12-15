@@ -87,7 +87,6 @@ export type AgentIntent =
     | AskIntent
     | ConversationIntent
     | ErrorIntent
-    | TypingIntent
     | StreamingIntent
     | LessonIntent
     | StatusIntent
