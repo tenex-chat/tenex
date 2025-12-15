@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { logger } from "@/utils/logger";
+import { BARE_REPO_DIR } from "./worktree";
 
 const execAsync = promisify(exec);
 
@@ -77,7 +78,7 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
         // Use 'main' as default
     }
 
-    const bareRepoDir = path.join(baseDir, ".bare");
+    const bareRepoDir = path.join(baseDir, BARE_REPO_DIR);
     const worktreeDir = path.join(baseDir, branchName);
 
     // Check if bare repo already exists
@@ -193,7 +194,7 @@ export async function cloneGitRepository(
 
         // Clean up bare repo directory if it exists
         try {
-            const bareRepoDir = path.join(projectBaseDir, ".bare");
+            const bareRepoDir = path.join(projectBaseDir, BARE_REPO_DIR);
             await fs.rm(bareRepoDir, { recursive: true, force: true });
         } catch {
             // Ignore cleanup errors

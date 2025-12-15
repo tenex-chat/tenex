@@ -7,6 +7,9 @@ import { config } from "@/services/ConfigService";
 
 const execAsync = promisify(exec);
 
+/** Directory name for bare repositories in the standard pattern */
+export const BARE_REPO_DIR = ".bare";
+
 /**
  * Metadata for a git worktree
  */
@@ -26,11 +29,39 @@ export interface WorktreeMetadata {
 // ============================================================================
 
 /**
+ * Check if a path is a bare repository
+ */
+async function isBareRepository(repoPath: string): Promise<boolean> {
+    try {
+        const { stdout } = await execAsync("git rev-parse --is-bare-repository", { cwd: repoPath });
+        return stdout.trim() === "true";
+    } catch {
+        return false;
+    }
+}
+
+/**
  * List all git worktrees
+ * Accepts either a bare repo path or a worktree path
  */
 export async function listWorktrees(projectPath: string): Promise<Array<{ branch: string; path: string }>> {
     try {
-        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: projectPath });
+        // Determine the correct path to use for git worktree list
+        let repoPath = projectPath;
+
+        // Check if this is a bare repo or try to find it
+        const isBare = await isBareRepository(projectPath);
+        if (!isBare) {
+            // Try to find bare repo from worktree
+            try {
+                repoPath = await findBareRepo(projectPath);
+            } catch {
+                // Fall back to using the provided path (for non-bare repo setups)
+                repoPath = projectPath;
+            }
+        }
+
+        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: repoPath });
 
         const worktrees: Array<{ branch: string; path: string }> = [];
         const lines = stdout.trim().split("\n");
@@ -74,19 +105,14 @@ export async function listWorktrees(projectPath: string): Promise<Array<{ branch
  * @param projectPath - Path to a worktree
  * @returns Path to the bare repository
  */
-async function findBareRepo(projectPath: string): Promise<string> {
-    // The bare repo should be at {parentDir}/.bare
+export async function findBareRepo(projectPath: string): Promise<string> {
+    // The bare repo should be at {parentDir}/{BARE_REPO_DIR}
     const parentDir = path.dirname(projectPath);
-    const bareRepoPath = path.join(parentDir, ".bare");
+    const bareRepoPath = path.join(parentDir, BARE_REPO_DIR);
 
     // Verify it's a bare repository
-    try {
-        const { stdout } = await execAsync("git rev-parse --is-bare-repository", { cwd: bareRepoPath });
-        if (stdout.trim() === "true") {
-            return bareRepoPath;
-        }
-    } catch {
-        // Not a bare repo or doesn't exist
+    if (await isBareRepository(bareRepoPath)) {
+        return bareRepoPath;
     }
 
     throw new Error(`Bare repository not found at ${bareRepoPath}`);
@@ -133,10 +159,22 @@ export async function createWorktree(
         }
 
         // Create worktree from bare repository
-        await execAsync(
-            `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
-            { cwd: bareRepoPath }
-        );
+        // Wrap in try-catch to handle race conditions where another process creates the worktree
+        try {
+            await execAsync(
+                `git worktree add -b ${JSON.stringify(branchName)} ${JSON.stringify(worktreePath)} ${JSON.stringify(baseBranch)}`,
+                { cwd: bareRepoPath }
+            );
+        } catch (createError: unknown) {
+            // Check if worktree was created by another process (race condition)
+            const refreshedWorktrees = await listWorktrees(bareRepoPath);
+            if (refreshedWorktrees.some((wt) => wt.branch === branchName)) {
+                logger.info("Worktree was created by another process", { branchName, path: worktreePath });
+                return worktreePath;
+            }
+            // Re-throw if it's a different error
+            throw createError;
+        }
 
         logger.info("Created worktree", { branchName, path: worktreePath, baseBranch, bareRepoPath });
         return worktreePath;
