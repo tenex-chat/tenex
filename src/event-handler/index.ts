@@ -29,7 +29,8 @@ export class EventHandler {
 
     constructor(
         /**
-         * Base project directory containing .bare/ and all worktrees.
+         * Project directory (normal git repository root).
+         * Worktrees are in .worktrees/ subdirectory.
          */
         private projectBasePath: string,
         private conversationCoordinator: ConversationCoordinator

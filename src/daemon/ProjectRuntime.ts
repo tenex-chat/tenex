@@ -28,19 +28,12 @@ import chalk from "chalk";
 export class ProjectRuntime {
     public readonly projectId: string;
     /**
-     * Base project directory containing .bare/ and all worktrees.
+     * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
+     * The default branch is checked out here directly.
+     * Worktrees go in .worktrees/ subdirectory.
      */
     public readonly projectBasePath: string;
-    /**
-     * Default worktree path (initial branch like master/main).
-     * Example: ~/tenex/{dTag}/master
-     * Used as fallback working directory when no branch is specified.
-     *
-     * Note: Not readonly because it's set to a placeholder in the constructor
-     * and updated to the actual worktree path after git initialization in start().
-     */
-    public defaultWorktreePath: string;
     private readonly metadataPath: string; // TENEX metadata path
     private readonly dTag: string;
 
@@ -67,11 +60,10 @@ export class ProjectRuntime {
         this.dTag = dTag;
         this.projectId = `31933:${project.pubkey}:${dTag}`;
 
-        // Base project directory: {projectsBase}/{dTag}
-        // Contains .bare/ and all worktrees like master/, feature/foo/, etc.
+        // Project directory: {projectsBase}/{dTag}
+        // Normal git repo with default branch checked out.
+        // Worktrees go in .worktrees/ subdirectory.
         this.projectBasePath = path.join(projectsBase, dTag);
-        // Will be set after git initialization
-        this.defaultWorktreePath = this.projectBasePath;
 
         // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
         this.metadataPath = path.join(config.getConfigPath("projects"), dTag);
@@ -98,7 +90,7 @@ export class ProjectRuntime {
             await fs.mkdir(path.join(this.metadataPath, "conversations"), { recursive: true });
             await fs.mkdir(path.join(this.metadataPath, "logs"), { recursive: true });
 
-            // Clone git repository to user-facing location: ~/tenex/<dTag>/<branchName>/
+            // Clone or init git repository at ~/tenex/<dTag>/
             const repoUrl = this.project.repo;
 
             if (repoUrl) {
@@ -107,16 +99,13 @@ export class ProjectRuntime {
                 if (!result) {
                     throw new Error(`Failed to clone repository: ${repoUrl}`);
                 }
-                this.defaultWorktreePath = result.worktreePath;
             } else {
                 logger.info("Initializing new git repository", { projectId: this.projectId });
-                const result = await initializeGitRepository(this.projectBasePath);
-                this.defaultWorktreePath = result.worktreePath;
+                await initializeGitRepository(this.projectBasePath);
             }
 
             logger.info(`Git repository ready`, {
-                basePath: this.projectBasePath,
-                defaultWorktree: this.defaultWorktreePath,
+                projectPath: this.projectBasePath,
             });
 
             // Initialize components
@@ -359,7 +348,7 @@ export class ProjectRuntime {
                         }
                     );
 
-                    await installMCPServerFromEvent(this.defaultWorktreePath, mcpTool);
+                    await installMCPServerFromEvent(this.projectBasePath, mcpTool);
                     installedCount.success++;
 
                     logger.info(`[ProjectRuntime] Installed MCP tool: ${mcpTool.name}`, {
@@ -386,7 +375,7 @@ export class ProjectRuntime {
                 logger.info(
                     `[ProjectRuntime] Initializing MCP service with ${installedCount.success} tool(s)`
                 );
-                await mcpService.initialize(this.defaultWorktreePath);
+                await mcpService.initialize(this.projectBasePath);
 
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());

@@ -14,14 +14,16 @@ export interface BuildSystemPromptOptions {
     project: NDKProject;
 
     /**
-     * Base project directory containing .bare/ and all worktrees.
+     * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
+     * Worktrees are in .worktrees/ subdirectory.
      */
     projectBasePath?: string;
 
     /**
-     * Actual worktree path where code execution happens.
-     * Example: ~/tenex/{dTag}/master or ~/tenex/{dTag}/feature/branch-name
+     * Working directory for code execution.
+     * - Default branch: same as projectBasePath (~/tenex/{dTag})
+     * - Feature branch: ~/tenex/{dTag}/.worktrees/feature_branch/
      * This is displayed as "Absolute Path" in the system prompt.
      */
     workingDirectory?: string;
