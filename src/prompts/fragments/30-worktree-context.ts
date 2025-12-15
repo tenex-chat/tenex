@@ -1,14 +1,28 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { listWorktrees, loadWorktreeMetadata } from "@/utils/git/worktree";
+import { logger } from "@/utils/logger";
+
+/**
+ * Worktree context for the fragment.
+ */
+interface WorktreeContext {
+  workingDirectory: string;
+  currentBranch: string;
+  /**
+   * Base project directory containing .bare/ and all worktrees.
+   */
+  projectBasePath: string;
+  agent: AgentInstance;
+}
 
 /**
  * Worktree context fragment for agents.
  * Shows current working directory and available worktrees.
  */
 interface WorktreeContextArgs {
-  context: ExecutionContext;
+  context: WorktreeContext;
 }
 
 export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
@@ -28,13 +42,13 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
     parts.push("");
     parts.push(`**Current Working Directory:** ${workingDirectory}`);
     parts.push(`**Current Branch:** ${currentBranch}`);
-    parts.push(`**Project Base:** ${context.projectPath}`);
+    parts.push(`**Project Base:** ${context.projectBasePath}`);
     parts.push("");
 
     try {
       // List all worktrees
-      const worktrees = await listWorktrees(context.projectPath);
-      const metadata = await loadWorktreeMetadata(context.projectPath);
+      const worktrees = await listWorktrees(context.projectBasePath);
+      const metadata = await loadWorktreeMetadata(context.projectBasePath);
 
       if (worktrees.length > 0) {
         parts.push("### Available Worktrees:");
@@ -55,7 +69,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
       }
     } catch (error) {
       // If we can't list worktrees (e.g., not a git repo yet), just skip
-      console.warn("Failed to list worktrees", { error });
+      logger.warn("Failed to list worktrees", { error });
     }
 
     // Add worktree commands guidance for agents with shell access or phases

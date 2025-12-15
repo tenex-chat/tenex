@@ -762,14 +762,14 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             const systemMessages = await buildSystemPromptMessages({
                 agent: context.agent,
                 project,
-                projectPath: context.projectPath,
+                projectBasePath: context.projectBasePath,
+                workingDirectory: context.workingDirectory,
+                currentBranch: context.currentBranch,
                 availableAgents,
                 conversation,
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
-                workingDirectory: context.workingDirectory,
-                currentBranch: context.currentBranch,
             });
 
             for (const systemMsg of systemMessages) {

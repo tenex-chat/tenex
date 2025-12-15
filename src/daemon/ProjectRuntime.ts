@@ -27,7 +27,17 @@ import chalk from "chalk";
  */
 export class ProjectRuntime {
     public readonly projectId: string;
-    public projectPath: string; // User's git repo path (updated after git initialization)
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     * Example: ~/tenex/{dTag}
+     */
+    public readonly projectBasePath: string;
+    /**
+     * Default worktree path (initial branch like master/main).
+     * Example: ~/tenex/{dTag}/master
+     * Used as fallback working directory when no branch is specified.
+     */
+    public defaultWorktreePath: string;
     private readonly metadataPath: string; // TENEX metadata path
     private readonly dTag: string;
 
@@ -54,9 +64,11 @@ export class ProjectRuntime {
         this.dTag = dTag;
         this.projectId = `31933:${project.pubkey}:${dTag}`;
 
-        // User's git repository base: {projectsBase}/{dTag}
-        // (The actual repo will be at {projectsBase}/{dTag}/{branchName} after initialization)
-        this.projectPath = path.join(projectsBase, dTag);
+        // Base project directory: {projectsBase}/{dTag}
+        // Contains .bare/ and all worktrees like master/, feature/foo/, etc.
+        this.projectBasePath = path.join(projectsBase, dTag);
+        // Will be set after git initialization
+        this.defaultWorktreePath = this.projectBasePath;
 
         // TENEX metadata (hidden): ~/.tenex/projects/{dTag}
         this.metadataPath = path.join(config.getConfigPath("projects"), dTag);
@@ -85,26 +97,27 @@ export class ProjectRuntime {
 
             // Clone git repository to user-facing location: ~/tenex/<dTag>/<branchName>/
             const repoUrl = this.project.repo;
-            let actualRepoPath: string;
 
             if (repoUrl) {
                 logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
-                const clonedPath = await cloneGitRepository(repoUrl, this.projectPath);
-                if (!clonedPath) {
+                const result = await cloneGitRepository(repoUrl, this.projectBasePath);
+                if (!result) {
                     throw new Error(`Failed to clone repository: ${repoUrl}`);
                 }
-                actualRepoPath = clonedPath;
+                this.defaultWorktreePath = result.worktreePath;
             } else {
                 logger.info("Initializing new git repository", { projectId: this.projectId });
-                actualRepoPath = await initializeGitRepository(this.projectPath);
+                const result = await initializeGitRepository(this.projectBasePath);
+                this.defaultWorktreePath = result.worktreePath;
             }
 
-            // Update projectPath to point to the actual repository location
-            this.projectPath = actualRepoPath;
-            logger.info(`Git repository ready at: ${this.projectPath}`);
+            logger.info(`Git repository ready`, {
+                basePath: this.projectBasePath,
+                defaultWorktree: this.defaultWorktreePath,
+            });
 
             // Initialize components
-            const agentRegistry = new AgentRegistry(this.projectPath, this.metadataPath);
+            const agentRegistry = new AgentRegistry(this.projectBasePath, this.metadataPath);
             await agentRegistry.loadFromProject(this.project);
 
             const llmLogger = new LLMLogger();
@@ -129,7 +142,7 @@ export class ProjectRuntime {
 
             // Initialize event handler with the conversation coordinator
             this.eventHandler = new EventHandler(
-                this.projectPath, // Git repo path for code execution
+                this.projectBasePath, // Base project path for worktree operations
                 this.conversationCoordinator // Shared conversation coordinator
             );
             await this.eventHandler.initialize();
@@ -138,7 +151,7 @@ export class ProjectRuntime {
             this.statusPublisher = new ProjectStatusService();
             await projectContextStore.run(this.context, async () => {
                 await this.statusPublisher?.startPublishing(
-                    this.projectPath,
+                    this.projectBasePath,
                     this.context ?? undefined
                 );
             });
@@ -157,7 +170,7 @@ export class ProjectRuntime {
 
             console.log(chalk.green(`✅ Project started: ${chalk.bold(projectTitle)}`));
             console.log(
-                chalk.gray(`   Agents: ${this.context.agents.size} | Path: ${this.projectPath}`)
+                chalk.gray(`   Agents: ${this.context.agents.size} | Path: ${this.projectBasePath}`)
             );
             console.log();
         } catch (error) {
@@ -343,7 +356,7 @@ export class ProjectRuntime {
                         }
                     );
 
-                    await installMCPServerFromEvent(this.projectPath, mcpTool);
+                    await installMCPServerFromEvent(this.defaultWorktreePath, mcpTool);
                     installedCount.success++;
 
                     logger.info(`[ProjectRuntime] Installed MCP tool: ${mcpTool.name}`, {
@@ -370,7 +383,7 @@ export class ProjectRuntime {
                 logger.info(
                     `[ProjectRuntime] Initializing MCP service with ${installedCount.success} tool(s)`
                 );
-                await mcpService.initialize(this.projectPath);
+                await mcpService.initialize(this.defaultWorktreePath);
 
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());

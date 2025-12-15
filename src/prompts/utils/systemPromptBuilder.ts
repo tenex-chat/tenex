@@ -12,7 +12,25 @@ export interface BuildSystemPromptOptions {
     // Required data
     agent: AgentInstance;
     project: NDKProject;
-    projectPath?: string; // Absolute path to the project working directory
+
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     * Example: ~/tenex/{dTag}
+     */
+    projectBasePath?: string;
+
+    /**
+     * Actual worktree path where code execution happens.
+     * Example: ~/tenex/{dTag}/master or ~/tenex/{dTag}/feature/branch-name
+     * This is displayed as "Absolute Path" in the system prompt.
+     */
+    workingDirectory?: string;
+
+    /**
+     * Current git branch name.
+     * Example: "master", "feature/branch-name", "research/foo"
+     */
+    currentBranch?: string;
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
@@ -20,8 +38,6 @@ export interface BuildSystemPromptOptions {
     agentLessons?: Map<string, NDKAgentLesson[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
-    workingDirectory?: string; // Actual working directory - worktree path
-    currentBranch?: string; // Current git branch/worktree name
 }
 
 export interface BuildStandalonePromptOptions {
@@ -146,34 +162,34 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     const {
         agent,
         project,
-        projectPath,
+        projectBasePath,
+        workingDirectory,
+        currentBranch,
         availableAgents = [],
         conversation,
         agentLessons,
-        workingDirectory,
-        currentBranch,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
 
-    // Add agent identity
+    // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
     systemPromptBuilder.add("agent-identity", {
         agent,
         projectTitle: project.tagValue("title") || "Unknown Project",
         projectOwnerPubkey: project.pubkey,
-        projectPath,
+        workingDirectory,
     });
 
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
 
     // Add worktree context if we have the necessary information
-    if (workingDirectory && currentBranch && projectPath) {
+    if (workingDirectory && currentBranch && projectBasePath) {
         systemPromptBuilder.add("worktree-context", {
             context: {
                 workingDirectory,
                 currentBranch,
-                projectPath,
+                projectBasePath,
                 agent,
             },
         });
