@@ -12,6 +12,7 @@ import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createOllama } from "ollama-ai-provider-v2";
 import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
 import { LLMService } from "./service";
+import { config as configService } from "@/services/ConfigService";
 
 /**
  * Factory for creating LLM services with proper provider initialization
@@ -214,8 +215,30 @@ export class LLMServiceFactory {
 
             // Build mcpServers configuration
             const mcpServersConfig: Record<string, any> = {};
+
+            // Add TENEX tools wrapper if enabled
             if (tenexSdkServer) {
                 mcpServersConfig.tenex = tenexSdkServer;
+            }
+
+            // Add TENEX's MCP servers from config
+            // Load MCP config and convert TENEX MCP servers to Claude Code format
+            const mcpConfig = configService.getConfig().mcp;
+            if (mcpConfig?.enabled && mcpConfig.servers) {
+                for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
+                    // Convert TENEX's MCPServerConfig to Claude Code's McpStdioServerConfig
+                    mcpServersConfig[serverName] = {
+                        type: "stdio" as const,
+                        command: serverConfig.command,
+                        args: serverConfig.args,
+                        env: serverConfig.env,
+                    };
+                }
+
+                logger.info("[LLMServiceFactory] Added MCP servers to Claude Code agent", {
+                    serverCount: Object.keys(mcpConfig.servers).length,
+                    servers: Object.keys(mcpConfig.servers),
+                });
             }
 
             // Create Claude Code provider with runtime configuration
@@ -226,7 +249,7 @@ export class LLMServiceFactory {
                 verbose: true,
                 cwd: context?.projectPath,
                 allowedTools: ["Bash(echo:*)", "Bash(date)", "Bash(pwd)"],
-                // mcpServers: mcpServersConfig as any,
+                mcpServers: mcpServersConfig as any,
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),

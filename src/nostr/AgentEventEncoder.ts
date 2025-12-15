@@ -53,10 +53,6 @@ export interface ErrorIntent {
     errorType?: string;
 }
 
-export interface TypingIntent {
-    state: "start" | "stop";
-}
-
 export interface StreamingIntent {
     content: string;
     sequence: number;
@@ -470,38 +466,6 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Encode a typing indicator intent.
-     */
-    encodeTypingIndicator(
-        intent: TypingIntent,
-        context: EventContext,
-        agent: { name: string }
-    ): NDKEvent {
-        const event = new NDKEvent(getNDK());
-
-        // Use appropriate event kind based on state
-        if (intent.state === "start") {
-            event.kind = NDKKind.TenexAgentTypingStart;
-            event.content = `${agent.name} is typing`;
-        } else {
-            // Stop event uses different kind
-            event.kind = NDKKind.TenexAgentTypingStop;
-            event.content = "";
-        }
-
-        // Add conversation tags
-        this.addConversationTags(event, context);
-
-        // Add standard metadata tags (includes project tag)
-        this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
-        return event;
-    }
-
-    /**
      * Encode a streaming progress intent.
      */
     encodeStreamingContent(intent: StreamingIntent, context: EventContext): NDKEvent {
@@ -644,9 +608,10 @@ export class AgentEventEncoder {
      *
      * @param responseEvent The event being responded to
      * @param message The follow-up message content
+     * @param context Event context for standard tags
      * @returns The encoded follow-up event
      */
-    encodeFollowUp(responseEvent: NDKEvent, message: string): NDKEvent {
+    encodeFollowUp(responseEvent: NDKEvent, message: string, context: EventContext): NDKEvent {
         // Create a reply to the response event to maintain thread
         const followUpEvent = responseEvent.reply();
 
@@ -664,6 +629,12 @@ export class AgentEventEncoder {
         // Clean out p-tags and add recipient
         followUpEvent.tags = followUpEvent.tags.filter((t) => t[0] !== "p");
         followUpEvent.tag(responseEvent.author);
+
+        // Add standard metadata (project tag, phase, model, cost, etc)
+        this.addStandardTags(followUpEvent, context);
+
+        // Forward branch tag from response event
+        this.forwardBranchTag(followUpEvent, responseEvent);
 
         return followUpEvent;
     }

@@ -16,6 +16,7 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
+    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -522,10 +523,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             experimental_telemetry: this.getFullTelemetryConfig(),
 
             // Smooth streaming with 15ms delay and line-based chunking
-            // experimental_transform: smoothStream({
-            //     delayInMs: 15,
-            //     chunking: 'word'
-            // }),
+            experimental_transform: smoothStream({
+                delayInMs: 15,
+                chunking: 'word'
+            }),
 
             providerOptions: {
                 openrouter: {
@@ -556,20 +557,26 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Emit chunk-type-change event BEFORE processing the new chunk
         // This allows listeners to flush buffers before new content of a different type arrives
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
+            console.log("Chunk type changed from", this.previousChunkType, "to", chunk.type);
             this.emit("chunk-type-change", {
                 from: this.previousChunkType,
                 to: chunk.type,
             });
+            this.cachedContentForComplete = "";
         }
+
+        console.log("Received chunk:", chunk.type);
 
         // Update previousChunkType AFTER emitting the change event
         this.previousChunkType = chunk.type;
 
         switch (chunk.type) {
             case "text-delta":
+                console.log("\t\t", chunk);
                 this.handleTextDelta(chunk.text);
                 break;
             case "reasoning-delta": {
+                console.log("\t\t", chunk);
                 // Handle reasoning-delta separately - emit reasoning event
                 // The AI SDK may transform our custom reasoning-delta chunks
                 // to use 'text' property instead of 'delta'
@@ -726,9 +733,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // For non-streaming providers, use cached content; for streaming, use e.text
                 const finalMessage =
-                    !supportsStreaming && this.cachedContentForComplete
+                    this.cachedContentForComplete
                         ? this.cachedContentForComplete
                         : e.text || "";
+                
+                console.log("Final message on finish:", finalMessage, { supportsStreaming, cachedContent: this.cachedContentForComplete,  });
 
                 await this.llmLogger.logLLMResponse({
                     response: {
@@ -766,6 +775,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // Clear cached content after use
                 this.cachedContentForComplete = "";
+                
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
                     error: error instanceof Error ? error.message : String(error),
@@ -810,10 +820,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const supportsStreaming = isAISdkProvider(this.provider)
             ? providerSupportsStreaming(this.provider)
             : true;
+        
+        console.log("Text delta received:", text, { supportsStreaming });
 
         if (supportsStreaming) {
             // Streaming providers: emit immediately
             this.emit("content", { delta: text });
+            this.cachedContentForComplete += text;
         } else {
             // Non-streaming providers: cache content and delay emission
             this.cachedContentForComplete = text;

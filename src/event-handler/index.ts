@@ -20,8 +20,6 @@ const IGNORED_EVENT_KINDS = [
     NDKKind.Contacts,
     NDKKind.TenexProjectStatus,
     NDKKind.TenexStreamingResponse,
-    NDKKind.TenexAgentTypingStart,
-    NDKKind.TenexAgentTypingStop,
     NDKKind.TenexOperationsStatus,
 ];
 

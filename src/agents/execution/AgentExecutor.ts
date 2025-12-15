@@ -205,26 +205,10 @@ export class AgentExecutor {
         // Start execution time tracking
         startExecutionTime(conversation);
 
-        // Publish typing indicator start
-        const eventContext = createEventContext(context);
-        agentPublisher
-            .typing({ state: "start" }, eventContext)
-            .catch((err) => logger.warn("Failed to start typing indicator", { error: err }));
-
         // Create cleanup function
         const cleanup = async (): Promise<void> => {
             if (conversation) stopExecutionTime(conversation);
             toolTracker.clear();
-
-            // Ensure typing indicator is stopped
-            try {
-                const eventContext = createEventContext(context);
-                await agentPublisher.typing({ state: "stop" }, eventContext);
-            } catch (typingError) {
-                logger.warn("Failed to stop typing indicator", {
-                    error: formatAnyError(typingError),
-                });
-            }
         };
 
         return { fullContext, supervisor, toolTracker, agentPublisher, cleanup };
@@ -534,6 +518,9 @@ export class AgentExecutor {
         });
 
         llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
+            console.log('chunk-type-change event:');
+            console.log(event);
+            
             logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
                 agentName: context.agent.slug,
                 hasReasoningBuffer: reasoningBuffer.length > 0,
@@ -544,6 +531,19 @@ export class AgentExecutor {
             // flush reasoning as complete event
             if (event.from === "reasoning-delta") {
                 await flushReasoningBuffer();
+            }
+
+            // if we are switching from text-delta to anything else, we flush conversation buffer
+            if (event.from === "text-delta" ) {
+                if (contentBuffer.trim().length > 0) {
+                    await agentPublisher.conversation(
+                        {
+                            content: contentBuffer,
+                        },
+                        eventContext
+                    );
+                    contentBuffer = "";
+                }
             }
         });
 
@@ -709,6 +709,9 @@ export class AgentExecutor {
 
             // Create onStopCheck for pair mode (async - handles check-ins)
             const onStopCheck = pairModeController?.createStopCheck();
+
+            // Publish empty 21111 to signal execution start (implicit typing indicator)
+            await agentPublisher.publishStreamingDelta("", eventContext, false);
 
             await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
 
