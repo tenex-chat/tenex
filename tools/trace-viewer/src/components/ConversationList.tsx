@@ -1,6 +1,6 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import type { Conversation } from "../types.js";
 
 interface ConversationListProps {
@@ -36,6 +36,32 @@ export function ConversationList({
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [searchMode, setSearchMode] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const { stdout } = useStdout();
+
+    // Calculate visible window - reserve 6 lines for header, title, and footer
+    const terminalHeight = stdout?.rows || 24;
+    const headerLines = 6;
+    const availableLines = Math.max(5, terminalHeight - headerLines);
+
+    // Calculate window of visible items based on selection
+    const { visibleItems, startIndex } = useMemo(() => {
+        if (conversations.length === 0) {
+            return { visibleItems: [], startIndex: 0 };
+        }
+
+        const halfWindow = Math.floor(availableLines / 2);
+        let start = Math.max(0, selectedIndex - halfWindow);
+        const end = Math.min(conversations.length, start + availableLines);
+
+        if (end === conversations.length) {
+            start = Math.max(0, conversations.length - availableLines);
+        }
+
+        return {
+            visibleItems: conversations.slice(start, end),
+            startIndex: start,
+        };
+    }, [conversations, selectedIndex, availableLines]);
 
     useInput((input, key) => {
         if (searchMode) {
@@ -69,7 +95,7 @@ export function ConversationList({
 
     if (searchMode) {
         return (
-            <Box flexDirection="column">
+            <Box flexDirection="column" height={terminalHeight}>
                 <Box borderStyle="single" borderColor="cyan" paddingX={1}>
                     <Text bold color="cyan">
                         Jump to Event ID
@@ -91,7 +117,7 @@ export function ConversationList({
     }
 
     return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" height={terminalHeight}>
             <Box borderStyle="single" borderColor="gray" paddingX={1}>
                 <Text bold color="cyan">
                     TENEX Trace Viewer
@@ -103,14 +129,21 @@ export function ConversationList({
                 <Text bold>Recent Conversations ({conversations.length})</Text>
             </Box>
 
-            <Box flexDirection="column" marginTop={1}>
+            {startIndex > 0 && (
+                <Box paddingX={1}>
+                    <Text dimColor>↑ {startIndex} more above</Text>
+                </Box>
+            )}
+
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
                 {conversations.length === 0 ? (
                     <Box paddingX={2}>
                         <Text dimColor>No conversations found. Make sure Jaeger is running.</Text>
                     </Box>
                 ) : (
-                    conversations.map((conv, idx) => {
-                        const isSelected = idx === selectedIndex;
+                    visibleItems.map((conv, visibleIdx) => {
+                        const actualIdx = startIndex + visibleIdx;
+                        const isSelected = actualIdx === selectedIndex;
                         const timeStr = formatRelativeTime(conv.timestamp);
 
                         return (
@@ -129,13 +162,21 @@ export function ConversationList({
                 )}
             </Box>
 
-            <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
+            {startIndex + visibleItems.length < conversations.length && (
+                <Box paddingX={1}>
+                    <Text dimColor>↓ {conversations.length - startIndex - visibleItems.length} more below</Text>
+                </Box>
+            )}
+
+            <Box borderStyle="single" borderColor="gray" paddingX={1}>
                 <Text dimColor>
                     <Text color="cyan">↑↓</Text> navigate
                     <Text> </Text>
                     <Text color="cyan">Enter</Text> view
                     <Text> </Text>
                     <Text color="cyan">/</Text> jump to event ID
+                    <Text> </Text>
+                    <Text dimColor>({selectedIndex + 1}/{conversations.length})</Text>
                 </Text>
             </Box>
         </Box>

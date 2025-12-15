@@ -1,5 +1,5 @@
-import { Box, Text, useInput } from "ink";
-import React, { useState } from "react";
+import { Box, Text, useInput, useStdout } from "ink";
+import React, { useState, useMemo } from "react";
 import type { Conversation, StreamItem, StreamItemType } from "../types.js";
 
 interface ConversationStreamProps {
@@ -98,6 +98,34 @@ export function ConversationStream({
 }: ConversationStreamProps) {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+    const { stdout } = useStdout();
+
+    // Calculate visible window - reserve 7 lines for header, metadata, and footer
+    const terminalHeight = stdout?.rows || 24;
+    const headerLines = 7;
+    const availableLines = Math.max(5, terminalHeight - headerLines);
+
+    // Calculate window of visible items based on selection
+    const { visibleItems, startIndex } = useMemo(() => {
+        if (items.length === 0) {
+            return { visibleItems: [], startIndex: 0 };
+        }
+
+        // Keep selected item roughly in the middle of the visible area
+        const halfWindow = Math.floor(availableLines / 2);
+        let start = Math.max(0, selectedIndex - halfWindow);
+        const end = Math.min(items.length, start + availableLines);
+
+        // Adjust start if we're near the end
+        if (end === items.length) {
+            start = Math.max(0, items.length - availableLines);
+        }
+
+        return {
+            visibleItems: items.slice(start, end),
+            startIndex: start,
+        };
+    }, [items, selectedIndex, availableLines]);
 
     useInput((input, key) => {
         if (input === "q") {
@@ -135,7 +163,7 @@ export function ConversationStream({
     const relativeTime = formatRelativeTime(conversation.timestamp);
 
     return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" height={terminalHeight}>
             <Box borderStyle="single" borderColor="cyan" paddingX={1}>
                 <Text bold color="cyan">
                     Conversation:
@@ -153,22 +181,30 @@ export function ConversationStream({
                 </Text>
             </Box>
 
-            <Box flexDirection="column" marginTop={1}>
+            {/* Scroll indicator */}
+            {startIndex > 0 && (
+                <Box paddingX={1}>
+                    <Text dimColor>↑ {startIndex} more above</Text>
+                </Box>
+            )}
+
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
                 {items.length === 0 ? (
                     <Box paddingX={2}>
                         <Text dimColor>No items found for this conversation.</Text>
                     </Box>
                 ) : (
-                    items.map((item, idx) => {
-                        const isSelected = idx === selectedIndex;
-                        const isExpanded = expandedItems.has(idx);
+                    visibleItems.map((item, visibleIdx) => {
+                        const actualIdx = startIndex + visibleIdx;
+                        const isSelected = actualIdx === selectedIndex;
+                        const isExpanded = expandedItems.has(actualIdx);
                         const icon = getItemIcon(item.type);
                         const color = getItemColor(item.type);
                         const action = getItemAction(item.type);
                         const timeStr = formatTime(item.timestamp);
 
                         return (
-                            <Box key={idx} flexDirection="column">
+                            <Box key={actualIdx} flexDirection="column">
                                 <Box>
                                     <Text backgroundColor={isSelected ? "blue" : undefined}>
                                         <Text dimColor>{timeStr}</Text>
@@ -190,7 +226,14 @@ export function ConversationStream({
                 )}
             </Box>
 
-            <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
+            {/* Scroll indicator */}
+            {startIndex + visibleItems.length < items.length && (
+                <Box paddingX={1}>
+                    <Text dimColor>↓ {items.length - startIndex - visibleItems.length} more below</Text>
+                </Box>
+            )}
+
+            <Box borderStyle="single" borderColor="gray" paddingX={1}>
                 <Text dimColor>
                     <Text color="cyan">↑↓</Text> navigate
                     <Text> </Text>
@@ -201,6 +244,8 @@ export function ConversationStream({
                     <Text color="cyan">n/p</Text> next/prev conversation
                     <Text> </Text>
                     <Text color="cyan">Esc</Text> back
+                    <Text> </Text>
+                    <Text dimColor>({selectedIndex + 1}/{items.length})</Text>
                 </Text>
             </Box>
         </Box>
