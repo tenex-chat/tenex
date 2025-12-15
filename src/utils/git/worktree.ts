@@ -131,14 +131,8 @@ export async function createWorktree(
     baseBranch: string
 ): Promise<string> {
     try {
-        // Find the repository path - try bare repo first, fall back to projectPath
-        let repoPath: string;
-        try {
-            repoPath = await findBareRepo(projectPath);
-        } catch {
-            // No bare repo found, use projectPath directly (legacy non-bare setup)
-            repoPath = projectPath;
-        }
+        // Find the bare repository
+        const repoPath = await findBareRepo(projectPath);
 
         // Worktree path is sibling to other worktrees
         const parentDir = path.dirname(projectPath);
