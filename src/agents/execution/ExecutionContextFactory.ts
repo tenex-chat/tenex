@@ -2,7 +2,8 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { listWorktrees } from "@/utils/git/worktree";
+import { listWorktrees, sanitizeBranchName, WORKTREES_DIR } from "@/utils/git/worktree";
+import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
 import { logger } from "@/utils/logger";
 import * as path from "node:path";
 import type { ExecutionContext } from "./types";
@@ -10,9 +11,9 @@ import type { ExecutionContext } from "./types";
 /**
  * Create an ExecutionContext with environment resolution from event
  *
- * This factory encapsulates the logic of deriving workingDirectory and currentBranch
- * from the triggering event's branch tag and git worktrees. Callers don't need to
- * know about worktree resolution - they just pass the event and get a complete context.
+ * This factory resolves the working directory based on the triggering event's branch tag:
+ * - No branch tag: Uses projectBasePath directly (main repo with default branch)
+ * - With branch tag: Uses .worktrees/{sanitized_branch}/ directory
  *
  * @param params Context creation parameters
  * @returns Complete ExecutionContext with resolved environment
@@ -21,7 +22,7 @@ export async function createExecutionContext(params: {
     agent: AgentInstance;
     conversationId: string;
     /**
-     * Base project directory containing .bare/ and all worktrees.
+     * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
      */
     projectBasePath: string;
@@ -35,18 +36,17 @@ export async function createExecutionContext(params: {
     // Extract branch tag from event
     const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
 
-    // List worktrees once (avoid duplicate calls)
-    const worktrees = await listWorktrees(params.projectBasePath);
-
     // Resolve execution environment
     let workingDirectory: string;
     let currentBranch: string;
 
     if (branchTag) {
-        // Branch specified in event - find matching worktree
+        // Branch specified in event - check if it's in a worktree
+        const worktrees = await listWorktrees(params.projectBasePath);
         const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
 
         if (matchingWorktree) {
+            // Found the worktree
             workingDirectory = matchingWorktree.path;
             currentBranch = branchTag;
             logger.info("Using worktree from branch tag", {
@@ -54,43 +54,27 @@ export async function createExecutionContext(params: {
                 path: matchingWorktree.path
             });
         } else {
-            // Worktree not found - fall back to default worktree
-            logger.warn("Branch tag specified but worktree not found, using default", {
+            // Worktree not found - construct expected path in .worktrees/
+            const sanitizedBranch = sanitizeBranchName(branchTag);
+            const expectedPath = path.join(params.projectBasePath, WORKTREES_DIR, sanitizedBranch);
+
+            logger.warn("Branch tag specified but worktree not found, using expected path", {
                 branch: branchTag,
+                expectedPath,
                 availableWorktrees: worktrees.map(wt => wt.branch)
             });
-            // Find the default worktree (first one, typically master/main)
-            const defaultWorktree = worktrees[0];
-            if (defaultWorktree) {
-                workingDirectory = defaultWorktree.path;
-                currentBranch = defaultWorktree.branch;
-            } else {
-                // No worktrees at all - this is an unusual state, log warning
-                logger.warn("No worktrees found, using constructed fallback path", {
-                    projectBasePath: params.projectBasePath,
-                    fallbackPath: path.join(params.projectBasePath, "main"),
-                    hint: "This may indicate a corrupted or uninitialized git repository"
-                });
-                workingDirectory = path.join(params.projectBasePath, "main");
-                currentBranch = "main";
-            }
+
+            workingDirectory = expectedPath;
+            currentBranch = branchTag;
         }
     } else {
-        // No branch tag - use default worktree
-        const defaultWorktree = worktrees[0];
-        if (defaultWorktree) {
-            workingDirectory = defaultWorktree.path;
-            currentBranch = defaultWorktree.branch;
-        } else {
-            // No worktrees at all - this is an unusual state, log warning
-            logger.warn("No worktrees found, using constructed fallback path", {
-                projectBasePath: params.projectBasePath,
-                fallbackPath: path.join(params.projectBasePath, "main"),
-                hint: "This may indicate a corrupted or uninitialized git repository"
-            });
-            workingDirectory = path.join(params.projectBasePath, "main");
-            currentBranch = "main";
-        }
+        // No branch tag - use project root (default branch)
+        workingDirectory = params.projectBasePath;
+        currentBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+        logger.info("Using project root as working directory", {
+            path: workingDirectory,
+            branch: currentBranch
+        });
     }
 
     return {
