@@ -9,13 +9,15 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { LLMOperation, LLMOperationsRegistry } from "@/services/LLMOperationsRegistry";
+import { config } from "@/services/ConfigService";
 
 /**
  * OperationsStatusPublisher handles publishing of LLM operation status events to Nostr.
  *
  * Publishes one event per event being processed, with:
  * - One e-tag for the event being processed
- * - P-tags for all agents working on that event
+ * - Uppercase P-tags for whitelisted human users from config.json
+ * - Lowercase p-tags for all agents working on that event
  * - One a-tag for the project reference
  */
 export class OperationsStatusService {
@@ -181,7 +183,13 @@ export class OperationsStatusService {
         // Single e-tag for the event being processed
         event.tag(["e", eventId]);
 
-        // P-tags for all agents working on this event
+        // Uppercase P-tags for whitelisted human users from config
+        const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        for (const pubkey of whitelistedPubkeys) {
+            event.tag(["P", pubkey]);
+        }
+
+        // Lowercase p-tags for all agents working on this event
         const agentPubkeys = new Set(operations.map((op) => op.agentPubkey));
         for (const pubkey of agentPubkeys) {
             event.tag(["p", pubkey]);
@@ -202,6 +210,7 @@ export class OperationsStatusService {
         const isCleanup = operations.length === 0;
         logger.debug("[OperationsStatusPublisher] Published event status", {
             eventId: eventId.substring(0, 8),
+            whitelistedUsers: whitelistedPubkeys.map((p) => p.substring(0, 8)),
             agentCount: agentPubkeys.size,
             operationCount: operations.length,
             type: isCleanup ? "cleanup" : "active",
