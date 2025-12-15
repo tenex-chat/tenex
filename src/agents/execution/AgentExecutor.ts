@@ -628,6 +628,10 @@ export class AgentExecutor {
         const pairModeController = this.createPairModeController(context);
 
         try {
+            // Capture the current span for use in prepareStep callback
+            // prepareStep is called synchronously by AI SDK and may not have access to OTel context
+            const executionSpan = trace.getActiveSpan();
+
             // Create prepareStep callback for message injection and pair mode corrections (SYNC)
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
@@ -643,6 +647,15 @@ export class AgentExecutor {
                             content: `[PAIR MODE CORRECTION from supervisor]: ${msg}`,
                         }));
 
+                        // Add trace event for pair mode correction injection
+                        if (executionSpan) {
+                            executionSpan.addEvent("pair_mode.correction_injected", {
+                                "correction.count": corrections.length,
+                                "correction.step_number": step.stepNumber,
+                                "agent.slug": context.agent.slug,
+                            });
+                        }
+
                         logger.info("[prepareStep] Injecting pair mode corrections", {
                             agent: context.agent.slug,
                             correctionCount: corrections.length,
@@ -657,9 +670,9 @@ export class AgentExecutor {
                 // Handle existing message injection
                 if (injectedEvents.length > 0) {
                     // Add trace event for message injection processing
-                    const activeSpan = trace.getActiveSpan();
-                    if (activeSpan) {
-                        activeSpan.addEvent("message_injection.process", {
+                    // Use captured span instead of getActiveSpan() which may be null
+                    if (executionSpan) {
+                        executionSpan.addEvent("message_injection.process", {
                             "injection.message_count": injectedEvents.length,
                             "injection.step_number": step.stepNumber,
                             "injection.event_ids": injectedEvents.map((e) => e.id || "").join(","),
