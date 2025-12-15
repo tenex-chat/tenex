@@ -276,7 +276,7 @@ export class AgentExecutor {
 
             logger.info("[AgentExecutor] 🔄 Resetting supervisor and recursing", {
                 agent: context.agent.slug,
-                systemMessage: context.additionalSystemMessage,
+                continuationMessage: context.additionalSystemMessage,
             });
 
             // Reset supervisor and recurse
@@ -403,12 +403,15 @@ export class AgentExecutor {
             );
         }
 
-        // Add any additional system message from retry
+        // Add continuation message from supervisor as user message
+        // Using "user" role ensures the LLM treats it as a request to act on,
+        // not just background context. This is critical for phase continuation
+        // where the LLM needs to understand it should continue working.
         if (context.additionalSystemMessage) {
             messages = [
                 ...messages,
                 {
-                    role: "system",
+                    role: "user",
                     content: context.additionalSystemMessage,
                 },
             ];
