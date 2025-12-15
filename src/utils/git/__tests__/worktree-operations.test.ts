@@ -10,51 +10,61 @@ import * as os from "node:os";
 const execAsync = promisify(exec);
 
 describe("Git Worktree Operations", () => {
-    let testRepoPath: string;
+    let testBaseDir: string;
+    let bareRepoPath: string;
+    let mainWorktreePath: string;
 
     beforeEach(async () => {
-        // Create temporary test repo
-        testRepoPath = path.join(os.tmpdir(), `test-repo-${Date.now()}`);
-        await fs.mkdir(testRepoPath, { recursive: true });
+        // Create temporary test directory using bare repo pattern
+        testBaseDir = path.join(os.tmpdir(), `test-repo-${Date.now()}`);
+        bareRepoPath = path.join(testBaseDir, ".bare");
+        mainWorktreePath = path.join(testBaseDir, "main");
 
-        // Initialize git repo
-        await execAsync("git init", { cwd: testRepoPath });
-        await execAsync('git config user.email "test@test.com"', { cwd: testRepoPath });
-        await execAsync('git config user.name "Test"', { cwd: testRepoPath });
+        await fs.mkdir(bareRepoPath, { recursive: true });
+
+        // Initialize bare repo
+        await execAsync("git init --bare", { cwd: bareRepoPath });
+
+        // Create main worktree
+        await execAsync(`git worktree add "${mainWorktreePath}" -b main`, { cwd: bareRepoPath });
+
+        // Configure git in the worktree
+        await execAsync('git config user.email "test@test.com"', { cwd: mainWorktreePath });
+        await execAsync('git config user.name "Test"', { cwd: mainWorktreePath });
 
         // Create initial commit
-        await fs.writeFile(path.join(testRepoPath, "README.md"), "# Test");
-        await execAsync("git add .", { cwd: testRepoPath });
-        await execAsync('git commit -m "Initial commit"', { cwd: testRepoPath });
+        await fs.writeFile(path.join(mainWorktreePath, "README.md"), "# Test");
+        await execAsync("git add .", { cwd: mainWorktreePath });
+        await execAsync('git commit -m "Initial commit"', { cwd: mainWorktreePath });
     });
 
     afterEach(async () => {
-        // Clean up test repo
-        await fs.rm(testRepoPath, { recursive: true, force: true });
+        // Clean up test directory
+        await fs.rm(testBaseDir, { recursive: true, force: true });
     });
 
     test("listWorktrees returns main worktree", async () => {
-        const worktrees = await listWorktrees(testRepoPath);
+        const worktrees = await listWorktrees(mainWorktreePath);
 
         expect(worktrees).toHaveLength(1);
-        expect(worktrees[0].branch).toMatch(/main|master/);
+        expect(worktrees[0].branch).toBe("main");
 
         // Resolve real paths for comparison (macOS /var -> /private/var)
-        const realTestPath = await fs.realpath(testRepoPath);
+        const realMainPath = await fs.realpath(mainWorktreePath);
         const realWorktreePath = await fs.realpath(worktrees[0].path);
-        expect(realWorktreePath).toBe(realTestPath);
+        expect(realWorktreePath).toBe(realMainPath);
     });
 
     test("getCurrentBranch returns current branch name", async () => {
-        const branch = await getCurrentBranch(testRepoPath);
-        expect(branch).toMatch(/main|master/);
+        const branch = await getCurrentBranch(mainWorktreePath);
+        expect(branch).toBe("main");
     });
 
     test("createWorktree creates new worktree", async () => {
         const branchName = `feature-test-${Date.now()}`;
-        const currentBranch = await getCurrentBranch(testRepoPath);
+        const currentBranch = await getCurrentBranch(mainWorktreePath);
 
-        const worktreePath = await createWorktree(testRepoPath, branchName, currentBranch);
+        const worktreePath = await createWorktree(mainWorktreePath, branchName, currentBranch);
 
         // Verify worktree was created
         expect(worktreePath).toContain(branchName);
@@ -62,8 +72,15 @@ describe("Git Worktree Operations", () => {
         expect(exists).toBe(true);
 
         // Verify it appears in worktree list
-        const worktrees = await listWorktrees(testRepoPath);
+        const worktrees = await listWorktrees(mainWorktreePath);
         expect(worktrees).toHaveLength(2);
         expect(worktrees.some(wt => wt.branch === branchName)).toBe(true);
+    });
+
+    test("listWorktrees works with bare repo path", async () => {
+        const worktrees = await listWorktrees(bareRepoPath);
+
+        expect(worktrees).toHaveLength(1);
+        expect(worktrees[0].branch).toBe("main");
     });
 });

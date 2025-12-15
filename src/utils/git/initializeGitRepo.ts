@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { logger } from "@/utils/logger";
+import { BARE_REPO_DIR } from "./worktree";
 
 const execAsync = promisify(exec);
 
@@ -58,9 +59,10 @@ export async function isGitRepository(dir?: string): Promise<boolean> {
 }
 
 /**
- * Initialize a new Git repository if not already initialized
- * @param projectBaseDir - The base project directory (will create repo in {projectBaseDir}/{branchName})
- * @returns The path to the initialized repository
+ * Initialize a new Git repository using bare repo pattern
+ * Creates a bare repository at {projectBaseDir}/.bare/ and a worktree at {projectBaseDir}/{branchName}/
+ * @param projectBaseDir - The base project directory
+ * @returns The path to the first worktree
  */
 export async function initializeGitRepository(projectBaseDir?: string): Promise<string> {
     const baseDir = projectBaseDir || process.cwd();
@@ -76,25 +78,81 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
         // Use 'main' as default
     }
 
-    const targetDir = path.join(baseDir, branchName);
+    const bareRepoDir = path.join(baseDir, BARE_REPO_DIR);
+    const worktreeDir = path.join(baseDir, branchName);
 
-    // Ensure directory exists
-    await fs.mkdir(targetDir, { recursive: true });
-
-    const isRepo = await isGitRepository(targetDir);
-    if (!isRepo) {
-        await execAsync("git init", { cwd: targetDir });
-        logger.info("Initialized new git repository", { targetDir, branchName });
+    // Check if bare repo already exists
+    const isBareRepo = await isGitRepository(bareRepoDir);
+    if (isBareRepo) {
+        logger.info("Bare repository already exists", { bareRepoDir });
+        // Check if worktree exists
+        try {
+            await fs.access(worktreeDir);
+            return worktreeDir;
+        } catch {
+            // Worktree doesn't exist, create it with race condition handling
+            try {
+                await execAsync(
+                    `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
+                    { cwd: bareRepoDir }
+                );
+                logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
+            } catch {
+                // Check if worktree was created by another process
+                try {
+                    await fs.access(worktreeDir);
+                    logger.info("Worktree was created by another process", { worktreeDir });
+                } catch {
+                    throw new Error(`Failed to create worktree at ${worktreeDir}`);
+                }
+            }
+            return worktreeDir;
+        }
     }
 
-    return targetDir;
+    // Ensure base directory exists
+    await fs.mkdir(baseDir, { recursive: true });
+
+    // Create bare repository with race condition handling
+    try {
+        await fs.mkdir(bareRepoDir, { recursive: true });
+        await execAsync("git init --bare", { cwd: bareRepoDir });
+        logger.info("Initialized bare git repository", { bareRepoDir });
+    } catch {
+        // Check if bare repo was created by another process
+        if (await isGitRepository(bareRepoDir)) {
+            logger.info("Bare repository was created by another process", { bareRepoDir });
+        } else {
+            throw new Error(`Failed to initialize bare repository at ${bareRepoDir}`);
+        }
+    }
+
+    // Create first worktree with race condition handling
+    try {
+        await execAsync(
+            `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
+            { cwd: bareRepoDir }
+        );
+        logger.info("Created initial worktree", { worktreeDir, branchName });
+    } catch {
+        // Check if worktree was created by another process
+        try {
+            await fs.access(worktreeDir);
+            logger.info("Worktree was created by another process", { worktreeDir });
+        } catch {
+            throw new Error(`Failed to create worktree at ${worktreeDir}`);
+        }
+    }
+
+    return worktreeDir;
 }
 
 /**
- * Clone a git repository into a directory
+ * Clone a git repository using bare repo pattern
+ * Creates a bare repository at {projectBaseDir}/.bare/ and a worktree at {projectBaseDir}/{branchName}/
  * @param repoUrl - The git repository URL to clone
- * @param projectBaseDir - The base project directory (will clone into {projectBaseDir}/{branchName})
- * @returns The path to the cloned repository, or null if failed
+ * @param projectBaseDir - The base project directory
+ * @returns The path to the cloned repository worktree, or null if failed
  */
 export async function cloneGitRepository(
     repoUrl: string,
@@ -104,49 +162,58 @@ export async function cloneGitRepository(
         // Ensure project base directory exists
         await fs.mkdir(projectBaseDir, { recursive: true });
 
-        // First check if we can detect an existing repo in common branch names
-        const commonBranches = ["main", "master", "develop"];
-        for (const branchName of commonBranches) {
-            const possibleDir = path.join(projectBaseDir, branchName);
-            if (await isGitRepository(possibleDir)) {
-                logger.info("Found existing git repository", { targetDir: possibleDir });
-                return possibleDir;
+        const bareRepoDir = path.join(projectBaseDir, ".bare");
+
+        // Check if bare repo already exists
+        if (await isGitRepository(bareRepoDir)) {
+            logger.info("Bare repository already exists", { bareRepoDir });
+
+            // Find existing worktree
+            const commonBranches = ["main", "master", "develop"];
+            for (const branchName of commonBranches) {
+                const possibleDir = path.join(projectBaseDir, branchName);
+                if (await isGitRepository(possibleDir)) {
+                    logger.info("Found existing worktree", { targetDir: possibleDir });
+                    return possibleDir;
+                }
             }
+
+            // No worktree found, create one for the default branch
+            const branchName = await getDefaultBranchName(bareRepoDir);
+            const worktreeDir = path.join(projectBaseDir, branchName);
+            await execAsync(
+                `git worktree add ${JSON.stringify(worktreeDir)} ${JSON.stringify(branchName)}`,
+                { cwd: bareRepoDir }
+            );
+            logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
+            return worktreeDir;
         }
 
-        // No existing repo found, proceed with cloning
-        // Clone into a temporary directory to detect the default branch
-        const tempDir = path.join(projectBaseDir, ".git-clone-temp");
-
-        logger.info("Cloning git repository to detect default branch", { repoUrl, tempDir });
-
-        await execAsync(`git clone "${repoUrl}" "${tempDir}"`, {
+        // Clone as bare repository
+        logger.info("Cloning git repository as bare", { repoUrl, bareRepoDir });
+        await execAsync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareRepoDir)}`, {
             cwd: projectBaseDir,
             maxBuffer: 1024 * 1024 * 10, // 10MB buffer for large repos
         });
 
-        // Detect the default branch name
-        const branchName = await getDefaultBranchName(tempDir);
+        // Detect the default branch name from the bare repo
+        const branchName = await getDefaultBranchName(bareRepoDir);
         logger.info("Detected default branch", { branchName });
 
-        // The final target directory with branch name
-        const targetDir = path.join(projectBaseDir, branchName);
+        // Create first worktree for the default branch
+        const worktreeDir = path.join(projectBaseDir, branchName);
+        await execAsync(
+            `git worktree add ${JSON.stringify(worktreeDir)} ${JSON.stringify(branchName)}`,
+            { cwd: bareRepoDir }
+        );
 
-        // Check if target already exists (in case it's not one of the common branches we checked)
-        try {
-            await fs.access(targetDir);
-            logger.warn("Target directory already exists, removing temp clone", { targetDir });
-            await fs.rm(tempDir, { recursive: true, force: true });
-            return targetDir;
-        } catch {
-            // Target doesn't exist, proceed with move
-        }
-
-        // Move the cloned repo to the branch-named directory
-        await fs.rename(tempDir, targetDir);
-
-        logger.info("Git repository cloned successfully", { repoUrl, targetDir, branchName });
-        return targetDir;
+        logger.info("Git repository cloned successfully as bare repo with worktree", {
+            repoUrl,
+            bareRepoDir,
+            worktreeDir,
+            branchName
+        });
+        return worktreeDir;
     } catch (error) {
         logger.error("Failed to clone git repository", {
             error: error instanceof Error ? error.message : String(error),
@@ -154,10 +221,10 @@ export async function cloneGitRepository(
             projectBaseDir,
         });
 
-        // Clean up temp directory if it exists
+        // Clean up bare repo directory if it exists
         try {
-            const tempDir = path.join(projectBaseDir, ".git-clone-temp");
-            await fs.rm(tempDir, { recursive: true, force: true });
+            const bareRepoDir = path.join(projectBaseDir, BARE_REPO_DIR);
+            await fs.rm(bareRepoDir, { recursive: true, force: true });
         } catch {
             // Ignore cleanup errors
         }
