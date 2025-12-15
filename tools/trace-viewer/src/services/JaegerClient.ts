@@ -277,6 +277,7 @@ export class JaegerClient {
 
     /**
      * Fetch recent conversations (traces grouped by conversation.id)
+     * Only includes traces that represent actual conversations (not metadata events)
      */
     async getConversations(
         service = "tenex-daemon",
@@ -286,8 +287,8 @@ export class JaegerClient {
             const response = await axios.get<JaegerTracesResponse>(`${this.baseUrl}/api/traces`, {
                 params: {
                     service,
-                    limit: limit * 5, // Fetch more traces to group into conversations
-                    lookback: "6h",
+                    limit: limit * 10, // Fetch more to filter down
+                    lookback: "24h",
                 },
             });
 
@@ -295,22 +296,54 @@ export class JaegerClient {
                 return [];
             }
 
-            // Group traces by conversation.id
+            // Group traces by conversation.id, filtering to actual conversations
             const conversationMap = new Map<string, {
                 traces: JaegerTrace[];
                 firstMessage: string;
                 timestamp: number;
                 agents: Set<string>;
+                hasAgentExecution: boolean;
             }>();
 
             for (const trace of response.data.data) {
                 const rootSpan = this.findRootSpan(trace.spans);
                 if (!rootSpan) continue;
 
+                // Skip traces that are just metadata events (no actual agent work)
+                // Real conversations have multiple spans (agent execution, LLM calls, etc.)
+                // Or are kind 1111 (GenericReply)
+                const eventKind = Number(this.getTagValue(rootSpan, "event.kind") || 0);
+                const hasMultipleSpans = trace.spans.length > 1;
+                const hasAgentExecution = trace.spans.some(s =>
+                    s.operationName.includes("agent.execute") ||
+                    s.operationName.includes("ai.streamText") ||
+                    s.operationName.includes("ai.generateText")
+                );
+
+                // Skip metadata (0), agent definitions (31933) unless they triggered real work
+                if (!hasAgentExecution && !hasMultipleSpans && eventKind !== 1111) {
+                    continue;
+                }
+
                 const conversationId = this.getTagValue(rootSpan, "conversation.id") || trace.traceID;
                 const eventContent = this.getTagValue(rootSpan, "event.content");
-                const agentName = this.getTagValue(rootSpan, "agent.name") ||
+
+                // Extract agent name from execution spans if available
+                let agentName = this.getTagValue(rootSpan, "agent.name") ||
                     this.getTagValue(rootSpan, "agent.slug");
+
+                // Also check child spans for agent info
+                for (const span of trace.spans) {
+                    if (span.operationName.includes("agent.execute")) {
+                        const execAgent = this.getTagValue(span, "agent.slug") ||
+                            this.getTagValue(span, "agent.name");
+                        if (execAgent) agentName = execAgent;
+
+                        // Extract from operation name like "[claude_code] agent.execute"
+                        const match = span.operationName.match(/^\[([^\]]+)\]/);
+                        if (match) agentName = match[1];
+                    }
+                }
 
                 if (!conversationMap.has(conversationId)) {
                     conversationMap.set(conversationId, {
@@ -318,11 +351,13 @@ export class JaegerClient {
                         firstMessage: eventContent || rootSpan.operationName,
                         timestamp: rootSpan.startTime,
                         agents: new Set(),
+                        hasAgentExecution,
                     });
                 }
 
                 const conv = conversationMap.get(conversationId)!;
                 conv.traces.push(trace);
+                conv.hasAgentExecution = conv.hasAgentExecution || hasAgentExecution;
 
                 if (agentName) {
                     conv.agents.add(agentName);
@@ -341,13 +376,10 @@ export class JaegerClient {
             const conversations: Conversation[] = [];
 
             for (const [id, data] of conversationMap) {
-                // Count unique spans as "messages" (approximation)
-                let messageCount = 0;
+                // Count total spans across all traces as activity indicator
+                let spanCount = 0;
                 for (const trace of data.traces) {
-                    // Count event processing spans as messages
-                    messageCount += trace.spans.filter(
-                        (s) => s.operationName === "tenex.event.process"
-                    ).length;
+                    spanCount += trace.spans.length;
                 }
 
                 conversations.push({
@@ -356,7 +388,7 @@ export class JaegerClient {
                         ? data.firstMessage.substring(0, 60) + "..."
                         : data.firstMessage,
                     timestamp: Math.round(data.timestamp / 1000),
-                    messageCount: messageCount || data.traces.length,
+                    messageCount: spanCount,
                     agents: Array.from(data.agents),
                 });
             }
