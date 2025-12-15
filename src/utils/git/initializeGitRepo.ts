@@ -90,12 +90,22 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
             await fs.access(worktreeDir);
             return worktreeDir;
         } catch {
-            // Worktree doesn't exist, create it
-            await execAsync(
-                `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
-                { cwd: bareRepoDir }
-            );
-            logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
+            // Worktree doesn't exist, create it with race condition handling
+            try {
+                await execAsync(
+                    `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
+                    { cwd: bareRepoDir }
+                );
+                logger.info("Created worktree for existing bare repo", { worktreeDir, branchName });
+            } catch {
+                // Check if worktree was created by another process
+                try {
+                    await fs.access(worktreeDir);
+                    logger.info("Worktree was created by another process", { worktreeDir });
+                } catch {
+                    throw new Error(`Failed to create worktree at ${worktreeDir}`);
+                }
+            }
             return worktreeDir;
         }
     }
@@ -103,17 +113,36 @@ export async function initializeGitRepository(projectBaseDir?: string): Promise<
     // Ensure base directory exists
     await fs.mkdir(baseDir, { recursive: true });
 
-    // Create bare repository
-    await fs.mkdir(bareRepoDir, { recursive: true });
-    await execAsync("git init --bare", { cwd: bareRepoDir });
-    logger.info("Initialized bare git repository", { bareRepoDir });
+    // Create bare repository with race condition handling
+    try {
+        await fs.mkdir(bareRepoDir, { recursive: true });
+        await execAsync("git init --bare", { cwd: bareRepoDir });
+        logger.info("Initialized bare git repository", { bareRepoDir });
+    } catch {
+        // Check if bare repo was created by another process
+        if (await isGitRepository(bareRepoDir)) {
+            logger.info("Bare repository was created by another process", { bareRepoDir });
+        } else {
+            throw new Error(`Failed to initialize bare repository at ${bareRepoDir}`);
+        }
+    }
 
-    // Create first worktree
-    await execAsync(
-        `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
-        { cwd: bareRepoDir }
-    );
-    logger.info("Created initial worktree", { worktreeDir, branchName });
+    // Create first worktree with race condition handling
+    try {
+        await execAsync(
+            `git worktree add ${JSON.stringify(worktreeDir)} -b ${JSON.stringify(branchName)}`,
+            { cwd: bareRepoDir }
+        );
+        logger.info("Created initial worktree", { worktreeDir, branchName });
+    } catch {
+        // Check if worktree was created by another process
+        try {
+            await fs.access(worktreeDir);
+            logger.info("Worktree was created by another process", { worktreeDir });
+        } catch {
+            throw new Error(`Failed to create worktree at ${worktreeDir}`);
+        }
+    }
 
     return worktreeDir;
 }
@@ -162,7 +191,7 @@ export async function cloneGitRepository(
 
         // Clone as bare repository
         logger.info("Cloning git repository as bare", { repoUrl, bareRepoDir });
-        await execAsync(`git clone --bare "${repoUrl}" "${bareRepoDir}"`, {
+        await execAsync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareRepoDir)}`, {
             cwd: projectBaseDir,
             maxBuffer: 1024 * 1024 * 10, // 10MB buffer for large repos
         });
