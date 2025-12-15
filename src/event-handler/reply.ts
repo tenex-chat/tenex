@@ -93,7 +93,6 @@ async function executeAgent(
     executionContext: ExecutionContext,
     agentExecutor: AgentExecutor,
     conversation: Conversation,
-    projectManager: AgentInstance,
     event: NDKEvent
 ): Promise<void> {
     try {
@@ -107,11 +106,11 @@ async function executeAgent(
 
         const displayMessage = isCreditsError
             ? "⚠️ Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
-            : "⚠️ Unable to process your request due to an error. Please try again later.";
+            : `⚠️ Unable to process your request due to an error: ${errorMessage}`;
 
         // Use AgentPublisher to publish error
         const { AgentPublisher } = await import("@/nostr/AgentPublisher");
-        const agentPublisher = new AgentPublisher(projectManager);
+        const agentPublisher = new AgentPublisher(executionContext.agent);
 
         await agentPublisher.error(
             {
@@ -145,10 +144,6 @@ async function handleReplyLogic(
     { conversationCoordinator, agentExecutor }: EventHandlerContext
 ): Promise<void> {
     const projectCtx = getProjectContext();
-    const projectManager = projectCtx.getProjectManager();
-    if (!projectManager) {
-        throw new Error("Project Manager agent not found - required for conversation coordination");
-    }
 
     // Resolve conversation for this event
     const conversationResolver = new ConversationResolver(conversationCoordinator);
@@ -311,7 +306,7 @@ async function handleReplyLogic(
         });
 
         // Execute agent
-        await executeAgent(executionContext, agentExecutor, conversation, projectManager, event);
+        await executeAgent(executionContext, agentExecutor, conversation, event);
     });
 
     // Wait for all agents to complete
