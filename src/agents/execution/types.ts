@@ -7,9 +7,23 @@ import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/n
 export interface ExecutionContext {
     agent: AgentInstance;
     conversationId: string;
-    projectPath: string; // Base project path (e.g., ~/tenex/{dTag}/main)
-    workingDirectory: string; // Actual working directory - worktree path (e.g., ~/tenex/{dTag}/feature-branch)
-    currentBranch: string; // Current git branch/worktree name (e.g., "main" or "feature-branch")
+    /**
+     * Base project directory containing .bare/ and all worktrees.
+     * Example: ~/tenex/{dTag}
+     * This is the parent of all worktree directories.
+     */
+    projectBasePath: string;
+    /**
+     * Actual worktree path where code execution happens.
+     * Example: ~/tenex/{dTag}/master or ~/tenex/{dTag}/feature/branch-name
+     * This is where git commands run and files are edited.
+     */
+    workingDirectory: string;
+    /**
+     * Current git branch name.
+     * Example: "master", "feature/branch-name", "research/foo"
+     */
+    currentBranch: string;
     triggeringEvent: NDKEvent;
     conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher; // Injected by AgentExecutor - shared publisher instance for consistent event ordering

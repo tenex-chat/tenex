@@ -53,7 +53,10 @@ export class DelegationService {
         private conversationCoordinator: ConversationCoordinator,
         private triggeringEvent: NDKEvent,
         private publisher: AgentPublisher,
-        private projectPath: string,
+        /**
+         * Base project directory containing .bare/ and all worktrees.
+         */
+        private projectBasePath: string,
         private currentBranch: string
     ) {}
 
@@ -98,12 +101,12 @@ export class DelegationService {
 
                 try {
                     const worktreePath = await createWorktree(
-                        this.projectPath,
+                        this.projectBasePath,
                         delegation.branch,
                         this.currentBranch
                     );
 
-                    await trackWorktreeCreation(this.projectPath, {
+                    await trackWorktreeCreation(this.projectBasePath, {
                         path: worktreePath,
                         branch: delegation.branch,
                         createdBy: this.agent.pubkey,

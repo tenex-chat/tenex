@@ -104,7 +104,7 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
 export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
             // Determine the file path
-            const dynamicToolsDir = join(context.projectPath, ".tenex/tools");
+            const dynamicToolsDir = join(context.workingDirectory, ".tenex/tools");
             const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
 

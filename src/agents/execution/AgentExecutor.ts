@@ -65,7 +65,8 @@ export class AgentExecutor {
             agent,
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id, // Use event ID as conversation ID for stateless calls
-            projectPath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
         };
 
         // If we have conversation history, prepend it to the messages
