@@ -182,6 +182,9 @@ export class LLMServiceFactory {
             ? context.agentName.toLowerCase().replace(/\s+/g, "-")
             : undefined;
 
+        // Create a logger with agent set if agentSlug is provided
+        const serviceLogger = agentSlug ? llmLogger.withAgent(agentSlug) : llmLogger;
+
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
 
@@ -263,7 +266,7 @@ export class LLMServiceFactory {
             });
 
             return new LLMService(
-                llmLogger,
+                serviceLogger,
                 null,
                 "claudeCode",
                 config.model,
@@ -290,7 +293,7 @@ export class LLMServiceFactory {
         }
 
         return new LLMService(
-            llmLogger,
+            serviceLogger,
             this.registry,
             actualProvider,
             config.model,
