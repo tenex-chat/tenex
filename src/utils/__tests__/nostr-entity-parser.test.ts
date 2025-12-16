@@ -131,6 +131,21 @@ describe("nostr-entity-parser", () => {
             const result = await parseNostrEvent("invalid", mockNdk);
             expect(result).toBe(null);
         });
+
+        it("should skip malformed short bech32 event IDs without calling NDK", async () => {
+            let fetchCalled = false;
+            const malformedNaddr = "naddr1qvzqqqruh5";
+            const mockNdk = {
+                fetchEvent: async () => {
+                    fetchCalled = true;
+                    return null;
+                },
+            } as any;
+
+            const result = await parseNostrEvent(malformedNaddr, mockNdk);
+            expect(result).toBe(null);
+            expect(fetchCalled).toBe(false);
+        });
     });
 
     describe("isHexPrefix", () => {

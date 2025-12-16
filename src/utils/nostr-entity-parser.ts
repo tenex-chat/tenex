@@ -85,6 +85,18 @@ export async function parseNostrEvent(
             cleaned = cleaned.substring(6);
         }
 
+        // Guard against truncated bech32 IDs before handing them to NDK.
+        // Short malformed inputs have triggered crashes in older NDK paths.
+        if (
+            (cleaned.startsWith("nevent1") ||
+                cleaned.startsWith("note1") ||
+                cleaned.startsWith("naddr1")) &&
+            cleaned.length < 60
+        ) {
+            console.debug(`Skipping malformed Nostr event identifier (too short): ${cleaned}`);
+            return null;
+        }
+
         // Try to fetch directly - NDK handles various formats
         if (
             cleaned.startsWith("nevent1") ||
