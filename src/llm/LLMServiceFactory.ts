@@ -253,6 +253,7 @@ export class LLMServiceFactory {
                 verbose: true,
                 cwd: context?.workingDirectory,
                 mcpServers: mcpServersConfig,
+                disallowedTools: [],
                 logger: {
                     warn: (message: string) => logger.warn("[ClaudeCode]", message),
                     error: (message: string) => logger.error("[ClaudeCode]", message),
