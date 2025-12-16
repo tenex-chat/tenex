@@ -155,6 +155,14 @@ export async function resolveNostrEntitiesToSystemMessages(
     for (const entity of entities) {
         try {
             const bech32Id = entity.replace("nostr:", "");
+
+            // Validate minimum length to prevent malformed/truncated entities from crashing NDK
+            // Valid bech32 entities are minimum 60 characters (npub/note are 63, nevent/naddr are longer)
+            if (bech32Id.length < 60) {
+                console.debug(`Skipping malformed nostr entity (too short): ${bech32Id.substring(0, 20)}...`);
+                continue;
+            }
+
             const event = await ndk.fetchEvent(bech32Id);
 
             if (event) {
