@@ -54,15 +54,19 @@ export class NostrSpanProcessor implements SpanProcessor {
         // Fix parentSpanId based on event.reply_to
         const replyTo = span.attributes["event.reply_to"];
         if (typeof replyTo === "string" && replyTo) {
+            // This is a reply - set parent to the event being replied to
             const derivedParentSpanId = nostrIdToSpanId(replyTo);
 
             // Modify the parent span context
             if (spanAny._parentSpanContext) {
                 spanAny._parentSpanContext.spanId = derivedParentSpanId;
             } else if (spanAny.parentSpanContext) {
-                // Some versions store it differently
                 spanAny.parentSpanContext.spanId = derivedParentSpanId;
             }
+        } else {
+            // This is a root message - clear parent context so it becomes a true root span
+            spanAny._parentSpanContext = undefined;
+            spanAny.parentSpanContext = undefined;
         }
     }
 }
@@ -80,15 +84,19 @@ export function transformSpanForExport(span: ReadableSpan): ReadableSpan {
     const derivedSpanId = nostrIdToSpanId(eventId);
     const originalContext = span.spanContext();
 
-    // Determine parent span ID
-    let parentSpanContext = span.parentSpanContext;
+    // Determine parent span context
     const replyTo = span.attributes["event.reply_to"];
-    if (typeof replyTo === "string" && replyTo && parentSpanContext) {
+    let parentSpanContext: typeof span.parentSpanContext;
+
+    if (typeof replyTo === "string" && replyTo) {
+        // This is a reply - set parent to the event being replied to
         const derivedParentSpanId = nostrIdToSpanId(replyTo);
-        parentSpanContext = {
-            ...parentSpanContext,
-            spanId: derivedParentSpanId,
-        };
+        parentSpanContext = span.parentSpanContext
+            ? { ...span.parentSpanContext, spanId: derivedParentSpanId }
+            : undefined;
+    } else {
+        // Root message - no parent
+        parentSpanContext = undefined;
     }
 
     // Return a proxy that overrides spanContext
