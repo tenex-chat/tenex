@@ -181,7 +181,7 @@ export async function createWorktree(
 export async function getWorktreeMetadataPath(projectPath: string): Promise<string> {
   // Extract dTag from project path (last segment of path)
   const dTag = path.basename(projectPath);
-  const metadataDir = path.join(config.getProjectsBase(), dTag);
+  const metadataDir = path.join(config.getConfigPath("projects"), dTag);
 
   // Ensure the metadata directory exists
   await fs.mkdir(metadataDir, { recursive: true });

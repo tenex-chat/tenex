@@ -355,6 +355,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
+                alphaMode: context.alphaMode,
             });
 
             for (const systemMsg of systemMessages) {

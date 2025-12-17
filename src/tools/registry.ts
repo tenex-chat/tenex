@@ -48,6 +48,11 @@ import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createWriteFileTool } from "./implementations/write_file";
 
+// Alpha mode bug reporting tools
+import { createBugListTool } from "./implementations/bug_list";
+import { createBugReportAddTool } from "./implementations/bug_report_add";
+import { createBugReportCreateTool } from "./implementations/bug_report_create";
+
 /**
  * Registry of tool factories
  */
@@ -118,6 +123,11 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     rag_subscription_list: createRAGSubscriptionListTool,
     rag_subscription_get: createRAGSubscriptionGetTool,
     rag_subscription_delete: createRAGSubscriptionDeleteTool,
+
+    // Alpha mode bug reporting tools
+    bug_list: createBugListTool,
+    bug_report_create: createBugReportCreateTool,
+    bug_report_add: createBugReportAddTool,
 };
 
 /**
@@ -170,6 +180,9 @@ export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
 
+/** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
+const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];
+
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
@@ -194,6 +207,15 @@ export function getToolsObject(
             regularTools.push(name as ToolName);
         } else if (dynamicToolService.isDynamicTool(name)) {
             dynamicToolNames.push(name);
+        }
+    }
+
+    // Auto-inject alpha tools when in alpha mode
+    if (context.alphaMode) {
+        for (const alphaToolName of ALPHA_TOOLS) {
+            if (!regularTools.includes(alphaToolName)) {
+                regularTools.push(alphaToolName);
+            }
         }
     }
 

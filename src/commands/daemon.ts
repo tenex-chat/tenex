@@ -12,6 +12,15 @@ import chalk from "chalk";
 import { Command } from "commander";
 
 /**
+ * Alpha mode state - when true, agents get bug reporting tools and alpha warnings
+ */
+let _alphaMode = false;
+
+export function isAlphaMode(): boolean {
+    return _alphaMode;
+}
+
+/**
  * Daemon command - runs all projects in a single process
  */
 export const daemonCommand = new Command("daemon")
@@ -19,11 +28,15 @@ export const daemonCommand = new Command("daemon")
     .option("-w, --whitelist <pubkeys>", "Comma-separated list of whitelisted pubkeys")
     .option("-c, --config <path>", "Path to config file")
     .option("-v, --verbose", "Enable verbose logging")
+    .option("-a, --alpha", "Enable alpha mode with bug reporting tools")
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
             process.env.LOG_LEVEL = "debug";
         }
+
+        // Set alpha mode state
+        _alphaMode = options.alpha || false;
 
         // Load configuration
         const { config: globalConfig, llms: globalLLMs } = await config.loadConfig(
@@ -64,6 +77,9 @@ export const daemonCommand = new Command("daemon")
         console.log(chalk.cyan("╔════════════════════════════════════════╗"));
         console.log(chalk.cyan("║       TENEX Daemon Starting            ║"));
         console.log(chalk.cyan("╚════════════════════════════════════════╝"));
+        if (_alphaMode) {
+            console.log(chalk.yellow("⚠️  ALPHA MODE ENABLED - Bug reporting tools active"));
+        }
         console.log();
 
         // Initialize services that the daemon needs
