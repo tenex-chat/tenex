@@ -77,3 +77,4 @@ __snapshots__/.repomix-output.txt
 
 # Git worktrees
 .worktrees/
+.devtools

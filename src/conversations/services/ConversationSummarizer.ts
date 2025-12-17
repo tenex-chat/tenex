@@ -84,7 +84,6 @@ Focus on what was accomplished or discussed, not on the process.`,
                 event.tags.push(["summary", result.summary]);
             }
             event.tags.push(["a", this.context.project.tagId()]); // Project reference
-            event.tags.push(["generated-at", Date.now().toString()]);
             event.tags.push(["model", metadataConfig.model]);
 
             // Sign and publish

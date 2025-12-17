@@ -5,7 +5,6 @@ export interface AggregatedMetadata {
     conversationId: string;
     title?: string;
     summary?: string;
-    generatedAt?: number;
     model?: string;
 }
 
@@ -64,14 +63,6 @@ export function aggregateConversationMetadata(events: NDKEvent[]): Map<string, A
                 }
             }
 
-            // Generated-at tag (use most recent)
-            if (!aggregated.generatedAt) {
-                const generatedAt = event.tagValue("generated-at");
-                if (generatedAt) {
-                    aggregated.generatedAt = Number.parseInt(generatedAt);
-                }
-            }
-
             // Model tag (use most recent)
             if (!aggregated.model) {
                 const model = event.tagValue("model");
@@ -81,12 +72,7 @@ export function aggregateConversationMetadata(events: NDKEvent[]): Map<string, A
             }
 
             // If we have all fields, we can stop
-            if (
-                aggregated.title &&
-                aggregated.summary &&
-                aggregated.generatedAt &&
-                aggregated.model
-            ) {
+            if (aggregated.title && aggregated.summary && aggregated.model) {
                 break;
             }
         }
