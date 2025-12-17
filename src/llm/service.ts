@@ -24,6 +24,7 @@ import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
 import type { z } from "zod";
+import { shouldIgnoreChunk } from "./chunk-validators";
 import { providerSupportsStreaming } from "./provider-configs";
 import { isAISdkProvider } from "./type-guards";
 import type { LanguageModelUsageWithCostUsd } from "./types";
@@ -31,6 +32,7 @@ import {
     compileMessagesForClaudeCode,
     convertSystemMessagesForResume,
 } from "./utils/claudeCodePromptCompiler";
+import chalk from "chalk";
 
 /**
  * Content delta event
@@ -525,7 +527,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // Smooth streaming with 15ms delay and line-based chunking
             experimental_transform: smoothStream({
                 delayInMs: 15,
-                chunking: 'word'
+                chunking: 'line'
             }),
 
             providerOptions: {
@@ -554,10 +556,16 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private handleChunk(event: { chunk: TextStreamPart<Record<string, AISdkTool>> }): void {
         const chunk = event.chunk;
 
+        // Validate chunk before any processing - some LLMs send chunks that should be ignored
+        if (shouldIgnoreChunk(chunk)) {
+            return;
+        }
+
         // Emit chunk-type-change event BEFORE processing the new chunk
         // This allows listeners to flush buffers before new content of a different type arrives
         if (this.previousChunkType !== undefined && this.previousChunkType !== chunk.type) {
-            console.log("Chunk type changed from", this.previousChunkType, "to", chunk.type);
+            console.log(chalk.green("Chunk type changed from"), this.previousChunkType, chalk.green("to"), chunk.type);
+            console.log(chalk.white(JSON.stringify(chunk, null, 4)));
             this.emit("chunk-type-change", {
                 from: this.previousChunkType,
                 to: chunk.type,

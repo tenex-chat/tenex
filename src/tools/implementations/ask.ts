@@ -73,7 +73,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
 export function createAskTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Ask a question to the project owner and wait for their response. Supports open-ended questions (no suggestions), yes/no questions (suggestions=['Yes', 'No']), or multiple choice questions (custom suggestions list).",
+            "Ask a question to the project owner and wait for their response. Supports open-ended questions (no suggestions), yes/no questions (suggestions=['Yes', 'No']), or multiple choice questions (custom suggestions list). Use criteria: ONLY use this tool when you need clarification or help FROM A HUMAN, do not use this to ask questions to other agents.",
         inputSchema: askSchema,
         execute: async (input: AskInput) => {
             return await executeAsk(input, context);

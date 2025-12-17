@@ -9,6 +9,8 @@ export type ToolName =
     | "read_path"
     | "write_file"
     | "codebase_search"
+    | "conversation_get"
+    | "conversation_list"
     | "lesson_learn"
     | "lesson_get"
     | "shell"
@@ -44,7 +46,7 @@ export type ToolName =
     | "rag_subscription_list"
     | "rag_subscription_get"
     | "rag_subscription_delete"
-    // Alpha mode bug reporting tools
+    | "search_conversations"
     | "bug_list"
     | "bug_report_create"
     | "bug_report_add";
