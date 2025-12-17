@@ -491,6 +491,7 @@ export class AgentSupervisor {
                 agentLessons: agentLessonsMap,
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
+                alphaMode: this.context.alphaMode,
             });
 
             // Combine all system messages into one

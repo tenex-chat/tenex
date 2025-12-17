@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import { isAlphaMode } from "@/commands/daemon";
 import type { ConversationCoordinator } from "@/conversations";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -92,6 +93,7 @@ export async function createExecutionContext(params: {
         isDelegationCompletion: params.isDelegationCompletion,
         additionalSystemMessage: params.additionalSystemMessage,
         debug: params.debug,
+        alphaMode: isAlphaMode(),
         getConversation: () => params.conversationCoordinator.getConversation(params.conversationId),
     };
 }
