@@ -9,6 +9,7 @@ import {
     SEMRESATTRS_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { ToolCallSpanProcessor } from "./ToolCallSpanProcessor.js";
+import { NostrSpanProcessor } from "./NostrSpanProcessor.js";
 
 const resource = resourceFromAttributes({
     [SEMRESATTRS_SERVICE_NAME]: "tenex-daemon",
@@ -55,12 +56,15 @@ class ErrorHandlingExporterWrapper implements SpanExporter {
 
 const wrappedExporter = new ErrorHandlingExporterWrapper();
 
-// Create a wrapper processor that enriches span names before exporting
+// Create a wrapper processor that enriches span names and fixes Nostr IDs before exporting
 class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
     private enricher = new ToolCallSpanProcessor();
+    private nostrProcessor = new NostrSpanProcessor();
 
     onEnd(span: ReadableSpan): void {
-        // First enrich the span name
+        // First fix Nostr span IDs (must happen before export)
+        this.nostrProcessor.onEnd(span);
+        // Then enrich the span name
         this.enricher.onEnd(span);
         // Then pass to batch processor
         super.onEnd(span);
