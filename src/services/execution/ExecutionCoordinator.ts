@@ -13,6 +13,7 @@
  */
 
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { EventEmitter } from "tseep";
 import { logger } from "@/utils/logger";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -25,6 +26,8 @@ import {
     DEFAULT_ROUTING_POLICY,
     ClawbackAbortError,
 } from "./types";
+
+const tracer = trace.getTracer("tenex.execution-coordinator");
 
 export class ExecutionCoordinator extends EventEmitter {
     private static instance: ExecutionCoordinator;
@@ -41,9 +44,16 @@ export class ExecutionCoordinator extends EventEmitter {
     /** Clawback check intervals */
     private clawbackTimers = new Map<string, NodeJS.Timeout>();
 
+    /** Stale operation cleanup interval */
+    private staleCleanupInterval: NodeJS.Timeout | null = null;
+
+    /** Threshold for considering an operation stale (5 minutes) */
+    private readonly STALE_OPERATION_THRESHOLD_MS = 5 * 60 * 1000;
+
     private constructor(policy?: Partial<RoutingPolicy>) {
         super();
         this.policy = { ...DEFAULT_ROUTING_POLICY, ...policy };
+        this.startStaleCleanupTimer();
     }
 
     static getInstance(policy?: Partial<RoutingPolicy>): ExecutionCoordinator {
@@ -67,6 +77,14 @@ export class ExecutionCoordinator extends EventEmitter {
      * Main entry point: Route a message for an agent
      *
      * Decides whether to inject into existing execution, start new, or handle specially.
+     * This is the core routing logic that determines:
+     * - `inject`: Message should be injected into active agent execution
+     * - `start-new`: No active execution, start fresh
+     * - `clawback`: Message waited too long or step running too long with interruptible tool
+     * - `start-concurrent`: Step running too long with uninterruptible tool (not yet implemented)
+     *
+     * @param context - Routing context containing agent, event, and conversation
+     * @returns A RouteDecision indicating how to handle the message
      */
     async routeMessage(context: RouteContext): Promise<RouteDecision> {
         const { agent, event, conversation } = context;
@@ -151,6 +169,13 @@ export class ExecutionCoordinator extends EventEmitter {
 
     /**
      * Register a new operation with the coordinator
+     *
+     * Called when an agent execution starts to track its lifecycle.
+     *
+     * @param operationId - Unique identifier for this operation
+     * @param agentPubkey - Public key of the agent executing
+     * @param agentSlug - Slug name of the agent
+     * @param conversationId - ID of the conversation being processed
      */
     registerOperation(
         operationId: string,
@@ -414,25 +439,68 @@ export class ExecutionCoordinator extends EventEmitter {
 
     /**
      * Execute clawback: abort operation and signal restart
+     *
+     * Creates an OpenTelemetry span to track the clawback execution for observability.
+     *
+     * @param operationId - The operation to clawback
+     * @param reason - The reason for the clawback
+     * @throws ClawbackAbortError to signal the abort to the stream
      */
     async executeClawback(operationId: string, reason: string): Promise<void> {
         const state = this.operationStates.get(operationId);
         if (!state) return;
 
-        logger.info("[ExecutionCoordinator] Executing clawback", {
-            operationId: operationId.substring(0, 8),
-            agent: state.agentSlug,
-            reason,
+        const span = tracer.startSpan("tenex.execution.clawback", {
+            attributes: {
+                "operation.id": operationId,
+                "agent.slug": state.agentSlug,
+                "agent.pubkey": state.agentPubkey,
+                "conversation.id": state.conversationId,
+                "clawback.reason": reason,
+                "operation.age_ms": Date.now() - state.registeredAt,
+                "operation.step_count": state.stepCount,
+                "injection_queue.size": state.injectionQueue.length,
+            },
         });
 
-        // Abort via LLMOperationsRegistry
-        llmOpsRegistry.stopByEventId(state.conversationId);
+        try {
+            logger.info("[ExecutionCoordinator] Executing clawback", {
+                operationId: operationId.substring(0, 8),
+                agent: state.agentSlug,
+                reason,
+            });
 
-        // Clean up our state
-        this.unregisterOperation(operationId);
+            span.addEvent("clawback.started", {
+                "operation.id": operationId,
+                reason,
+            });
 
-        // Throw to signal the abort in the stream
-        throw new ClawbackAbortError(operationId, reason);
+            // Abort via LLMOperationsRegistry
+            llmOpsRegistry.stopByEventId(state.conversationId);
+
+            span.addEvent("clawback.operation_stopped");
+
+            // Clean up our state
+            this.unregisterOperation(operationId);
+
+            span.addEvent("clawback.state_cleaned");
+            span.setStatus({ code: SpanStatusCode.OK });
+
+            // Throw to signal the abort in the stream
+            throw new ClawbackAbortError(operationId, reason);
+        } catch (error) {
+            // Only record as error if it's not the ClawbackAbortError we're throwing
+            if (!(error instanceof ClawbackAbortError)) {
+                span.recordException(error as Error);
+                span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: (error as Error).message,
+                });
+            }
+            throw error;
+        } finally {
+            span.end();
+        }
     }
 
     /**
@@ -527,6 +595,57 @@ export class ExecutionCoordinator extends EventEmitter {
     }
 
     /**
+     * Start periodic cleanup of stale operations
+     */
+    private startStaleCleanupTimer(): void {
+        // Run cleanup every 2 minutes
+        this.staleCleanupInterval = setInterval(() => {
+            this.cleanupStaleOperations();
+        }, 2 * 60 * 1000);
+    }
+
+    /**
+     * Clean up operations that have been idle for too long
+     *
+     * An operation is considered stale if:
+     * - It's been registered for longer than the threshold (5 minutes)
+     * - It has no current step running (currentStepStartedAt is null)
+     *
+     * This prevents memory leaks from operations that failed or crashed
+     * without proper cleanup.
+     */
+    private cleanupStaleOperations(): void {
+        const now = Date.now();
+
+        for (const [operationId, state] of this.operationStates.entries()) {
+            const age = now - state.registeredAt;
+
+            // Only clean up if:
+            // 1. Operation is older than threshold
+            // 2. No step is currently running
+            if (age > this.STALE_OPERATION_THRESHOLD_MS && !state.currentStepStartedAt) {
+                logger.warn("[ExecutionCoordinator] Cleaning up stale operation", {
+                    operationId: operationId.substring(0, 8),
+                    agent: state.agentSlug,
+                    ageMs: age,
+                    ageMinutes: Math.round(age / 60000),
+                    lastStepCompletedAt: state.lastStepCompletedAt
+                        ? new Date(state.lastStepCompletedAt).toISOString()
+                        : "never",
+                });
+
+                this.emit("stale-operation-cleaned", {
+                    operationId,
+                    agentSlug: state.agentSlug,
+                    ageMs: age,
+                });
+
+                this.unregisterOperation(operationId);
+            }
+        }
+    }
+
+    /**
      * Cleanup all timers and state
      */
     private cleanup(): void {
@@ -534,6 +653,12 @@ export class ExecutionCoordinator extends EventEmitter {
             clearTimeout(timer);
         }
         this.clawbackTimers.clear();
+
+        if (this.staleCleanupInterval) {
+            clearInterval(this.staleCleanupInterval);
+            this.staleCleanupInterval = null;
+        }
+
         this.operationStates.clear();
         this.operationsByAgent.clear();
     }

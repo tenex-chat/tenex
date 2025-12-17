@@ -90,6 +90,15 @@ export const handleChatMessage = async (
 /**
  * Execute the agent with proper error handling
  * Handles ClawbackAbortError by re-executing the agent
+ *
+ * @param executionContext - The execution context for the agent
+ * @param agentExecutor - The agent executor instance
+ * @param conversation - The conversation being processed
+ * @param event - The triggering event
+ * @param conversationCoordinator - The conversation coordinator
+ * @param projectBasePath - The project base path
+ * @param recursionDepth - Current recursion depth for clawback retries (default: 0)
+ * @throws Error if maximum clawback recursion depth is exceeded
  */
 async function executeAgent(
     executionContext: ExecutionContext,
@@ -97,8 +106,20 @@ async function executeAgent(
     conversation: Conversation,
     event: NDKEvent,
     conversationCoordinator: ConversationCoordinator,
-    projectBasePath: string
+    projectBasePath: string,
+    recursionDepth = 0
 ): Promise<void> {
+    const MAX_CLAWBACK_RECURSION = 5;
+
+    if (recursionDepth >= MAX_CLAWBACK_RECURSION) {
+        const errorMsg = `Maximum clawback recursion depth (${MAX_CLAWBACK_RECURSION}) exceeded`;
+        logger.error("[executeAgent] Max recursion depth exceeded", {
+            agent: executionContext.agent.slug,
+            conversationId: conversation.id.substring(0, 8),
+            depth: recursionDepth,
+        });
+        throw new Error(errorMsg);
+    }
     try {
         await agentExecutor.execute(executionContext);
     } catch (error) {
@@ -120,14 +141,15 @@ async function executeAgent(
                 conversationCoordinator,
             });
 
-            // Re-execute with fresh context
+            // Re-execute with fresh context and incremented recursion depth
             return executeAgent(
                 freshContext,
                 agentExecutor,
                 conversation,
                 event,
                 conversationCoordinator,
-                projectBasePath
+                projectBasePath,
+                recursionDepth + 1
             );
         }
 
@@ -171,6 +193,16 @@ async function executeAgent(
 
 /**
  * Main reply handling logic - orchestrates all the helper functions
+ *
+ * This function is the core of the event processing pipeline:
+ * 1. Resolves the conversation for the incoming event
+ * 2. Adds the event to conversation history
+ * 3. Determines target agents using AgentRouter
+ * 4. Uses ExecutionCoordinator for intelligent routing decisions
+ * 5. Executes agents in parallel (either by injection or new execution)
+ *
+ * @param event - The incoming event to handle
+ * @param context - Handler context containing conversation coordinator and agent executor
  */
 async function handleReplyLogic(
     event: NDKEvent,

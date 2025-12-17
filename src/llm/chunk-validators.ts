@@ -1,12 +1,20 @@
 import { trace } from "@opentelemetry/api";
 import type { TextStreamPart } from "ai";
 import type { AISdkTool } from "@/tools/types";
+import { logger } from "@/utils/logger";
 
 type StreamChunk = TextStreamPart<Record<string, AISdkTool>>;
 
 interface ChunkValidator {
     name: string;
     shouldIgnore: (chunk: StreamChunk) => boolean;
+}
+
+/**
+ * Type guard to check if a chunk has text or delta properties
+ */
+function hasReasoningContent(chunk: StreamChunk): chunk is StreamChunk & { text?: string; delta?: string } {
+    return "text" in chunk || "delta" in chunk;
 }
 
 /**
@@ -21,9 +29,23 @@ const redactedReasoningValidator: ChunkValidator = {
             return false;
         }
 
+        // Type guard for better safety
+        if (!hasReasoningContent(chunk)) {
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.addEvent("chunk_validator.unexpected_structure", {
+                "chunk.type": chunk.type,
+                "chunk.keys": Object.keys(chunk).join(","),
+                "validator.name": "redacted-reasoning",
+            });
+            logger.warn("[ChunkValidator] Unexpected reasoning-delta chunk structure", {
+                chunkType: chunk.type,
+                chunkKeys: Object.keys(chunk),
+            });
+            return false;
+        }
+
         // The chunk may have 'text' or 'delta' property depending on how AI SDK processes it
-        const content = (chunk as { text?: string; delta?: string }).text
-            ?? (chunk as { text?: string; delta?: string }).delta;
+        const content = chunk.text ?? chunk.delta;
 
         return content === "[REDACTED]";
     },
