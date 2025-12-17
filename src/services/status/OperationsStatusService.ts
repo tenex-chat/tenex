@@ -32,6 +32,12 @@ export class OperationsStatusService {
     ) {}
 
     start(): void {
+        // Guard against multiple start() calls
+        if (this.unsubscribe) {
+            logger.warn("[OperationsStatusPublisher] Already started, ignoring duplicate start()");
+            return;
+        }
+
         // Subscribe to registry changes
         this.unsubscribe = this.registry.onChange(() => {
             this.schedulePublish();
