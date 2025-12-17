@@ -124,33 +124,33 @@ async function executeBugList(_context: ExecutionContext): Promise<BugListOutput
         return { bugs: [], count: 0 };
     }
 
-    // For each bug, fetch its replies and generate summary
-    const bugs: BugSummary[] = [];
+    // Process all bugs in parallel for better performance
+    const bugs = await Promise.all(
+        Array.from(bugEvents).map(async (bugEvent) => {
+            // Fetch replies (kind:1111) for this bug
+            const replies = await ndk.fetchEvents({
+                kinds: [1111],
+                "#e": [bugEvent.id],
+                "#a": [TENEX_BACKEND_PROJECT_ATAG],
+            });
 
-    for (const bugEvent of Array.from(bugEvents)) {
-        // Fetch replies (kind:1111) for this bug
-        const replies = await ndk.fetchEvents({
-            kinds: [1111],
-            "#e": [bugEvent.id],
-            "#a": [TENEX_BACKEND_PROJECT_ATAG],
-        });
+            // Get title from tag or content
+            const title =
+                bugEvent.tagValue("title") || bugEvent.content.substring(0, 50).split("\n")[0] || "Untitled Bug";
 
-        // Get title from tag or content
-        const title =
-            bugEvent.tagValue("title") || bugEvent.content.substring(0, 50).split("\n")[0] || "Untitled Bug";
+            // Generate AI summary
+            const { summary, status } = await summarizeBugConversation(bugEvent, Array.from(replies));
 
-        // Generate AI summary
-        const { summary, status } = await summarizeBugConversation(bugEvent, Array.from(replies));
-
-        bugs.push({
-            id: bugEvent.id,
-            title,
-            summary,
-            status,
-            createdAt: bugEvent.created_at || 0,
-            replyCount: replies.size,
-        });
-    }
+            return {
+                id: bugEvent.id,
+                title,
+                summary,
+                status,
+                createdAt: bugEvent.created_at || 0,
+                replyCount: replies.size,
+            };
+        })
+    );
 
     // Sort by creation time (newest first)
     bugs.sort((a, b) => b.createdAt - a.createdAt);
