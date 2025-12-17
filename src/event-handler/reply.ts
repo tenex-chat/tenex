@@ -12,6 +12,7 @@ import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services/ProjectContext";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
+import { executionCoordinator, ClawbackAbortError } from "../services/execution";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
@@ -88,16 +89,48 @@ export const handleChatMessage = async (
 
 /**
  * Execute the agent with proper error handling
+ * Handles ClawbackAbortError by re-executing the agent
  */
 async function executeAgent(
     executionContext: ExecutionContext,
     agentExecutor: AgentExecutor,
     conversation: Conversation,
-    event: NDKEvent
+    event: NDKEvent,
+    conversationCoordinator: ConversationCoordinator,
+    projectBasePath: string
 ): Promise<void> {
     try {
         await agentExecutor.execute(executionContext);
     } catch (error) {
+        // Handle ClawbackAbortError - re-execute the agent
+        // The message is already in conversation history, so a fresh execution will pick it up
+        if (error instanceof ClawbackAbortError) {
+            logger.info("[executeAgent] Clawback triggered, re-executing agent", {
+                agent: executionContext.agent.slug,
+                reason: error.reason,
+                conversationId: conversation.id.substring(0, 8),
+            });
+
+            // Create a fresh execution context
+            const freshContext = await createExecutionContext({
+                agent: executionContext.agent,
+                conversationId: conversation.id,
+                projectBasePath,
+                triggeringEvent: event,
+                conversationCoordinator,
+            });
+
+            // Re-execute with fresh context
+            return executeAgent(
+                freshContext,
+                agentExecutor,
+                conversation,
+                event,
+                conversationCoordinator,
+                projectBasePath
+            );
+        }
+
         const errorMessage = formatAnyError(error);
 
         // Check if it's an insufficient credits error
@@ -187,60 +220,99 @@ async function handleReplyLogic(
         return;
     }
 
-    // 3.5. Check for active operations and inject message instead of starting new execution
-    const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
-    const activeOperations = operationsByEvent.get(conversation.id) || [];
+    // 3.5. Use ExecutionCoordinator for intelligent routing decisions
+    const agentsToInject: AgentInstance[] = [];
+    const agentsToStartNew: AgentInstance[] = [];
+    const agentsToStartConcurrent: Array<{ agent: AgentInstance; backgroundOp: unknown }> = [];
 
-    logger.debug("[MessageInjection] Checking for active operations", {
-        conversationId: conversation.id.substring(0, 8),
-        targetAgents: targetAgents.map((a) => ({ name: a.name, pubkey: a.pubkey.substring(0, 8) })),
-        activeOperations: activeOperations.map((op) => ({
-            agentPubkey: op.agentPubkey.substring(0, 8),
-            eventId: op.eventId.substring(0, 8),
-        })),
-    });
+    for (const targetAgent of targetAgents) {
+        const decision = await executionCoordinator.routeMessage({
+            agent: targetAgent,
+            event,
+            conversation,
+        });
 
-    // Filter target agents to only those with active operations
-    const agentsToInject = targetAgents.filter((targetAgent) => {
-        return activeOperations.some((op) => op.agentPubkey === targetAgent.pubkey);
-    });
+        logger.debug("[ExecutionCoordinator] Routing decision", {
+            agent: targetAgent.name,
+            decision: decision.type,
+            reason: decision.reason,
+        });
 
-    logger.debug("[MessageInjection] Injection decision", {
-        agentsToInject: agentsToInject.map((a) => a.name),
-        willInject: agentsToInject.length > 0,
-        willStartNew: targetAgents.length - agentsToInject.length,
-    });
+        switch (decision.type) {
+            case "inject": {
+                // Inject message into active execution via LLMOpsRegistry
+                const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
+                const activeOperations = operationsByEvent.get(conversation.id) || [];
+                const activeOp = activeOperations.find((op) => op.agentPubkey === targetAgent.pubkey);
 
-    // Inject message into active executions
-    for (const targetAgent of agentsToInject) {
-        const activeOp = activeOperations.find((op) => op.agentPubkey === targetAgent.pubkey);
-        if (activeOp) {
-            const span = tracer.startSpan("tenex.message_injection.emit", {
-                attributes: {
-                    "agent.name": targetAgent.name,
-                    "agent.pubkey": targetAgent.pubkey,
-                    "conversation.id": conversation.id,
-                    "event.id": event.id || "",
-                    "event.kind": event.kind || 0,
-                    "operation.id": activeOp.id,
-                },
-            });
+                if (activeOp) {
+                    const span = tracer.startSpan("tenex.message_injection.emit", {
+                        attributes: {
+                            "agent.name": targetAgent.name,
+                            "agent.pubkey": targetAgent.pubkey,
+                            "conversation.id": conversation.id,
+                            "event.id": event.id || "",
+                            "event.kind": event.kind || 0,
+                            "operation.id": activeOp.id,
+                        },
+                    });
 
-            otelContext.with(trace.setSpan(otelContext.active(), span), () => {
-                logger.info("[MessageInjection] Injecting message into active execution", {
-                    agent: targetAgent.name,
-                    conversationId: conversation.id.substring(0, 8),
-                    eventId: event.id?.substring(0, 8),
+                    otelContext.with(trace.setSpan(otelContext.active(), span), () => {
+                        logger.info("[MessageInjection] Injecting message into active execution", {
+                            agent: targetAgent.name,
+                            conversationId: conversation.id.substring(0, 8),
+                            eventId: event.id?.substring(0, 8),
+                        });
+                        activeOp.eventEmitter.emit("inject-message", event);
+                        span.addEvent("message.injected");
+                        span.end();
+                    });
+
+                    agentsToInject.push(targetAgent);
+                }
+                break;
+            }
+
+            case "start-new":
+                agentsToStartNew.push(targetAgent);
+                break;
+
+            case "clawback":
+                // Clawback will be handled by the agent execution itself via ClawbackAbortError
+                // For now, we treat this as start-new since the agent will restart
+                agentsToStartNew.push(targetAgent);
+                break;
+
+            case "start-concurrent":
+                // TODO: Implement concurrent execution with special tools
+                // For now, fall back to injection
+                agentsToStartConcurrent.push({
+                    agent: targetAgent,
+                    backgroundOp: decision.backgroundOperation,
                 });
-                activeOp.eventEmitter.emit("inject-message", event);
-                span.addEvent("message.injected");
-                span.end();
-            });
+                logger.warn("[ExecutionCoordinator] Concurrent execution not yet implemented, falling back to injection", {
+                    agent: targetAgent.name,
+                });
+                // Inject instead
+                const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
+                const activeOps = operationsByEvent.get(conversation.id) || [];
+                const bgOp = activeOps.find((op) => op.agentPubkey === targetAgent.pubkey);
+                if (bgOp) {
+                    bgOp.eventEmitter.emit("inject-message", event);
+                    agentsToInject.push(targetAgent);
+                }
+                break;
         }
     }
 
-    // Remove agents that had active operations from the list to execute
-    targetAgents = targetAgents.filter((agent) => !agentsToInject.includes(agent));
+    logger.debug("[ExecutionCoordinator] Routing summary", {
+        toInject: agentsToInject.map((a) => a.name),
+        toStartNew: agentsToStartNew.map((a) => a.name),
+        toConcurrent: agentsToStartConcurrent.map((a) => a.agent.name),
+    });
+
+    // Update targetAgents to only those that need new execution
+    targetAgents = agentsToStartNew;
 
     // 4. Filter out self-replies (except for agents with phases - they can self-delegate for phase transitions)
     const nonSelfReplyAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
@@ -294,19 +366,27 @@ async function handleReplyLogic(
     targetAgents = finalTargetAgents;
 
     // 5. Execute each target agent in parallel
+    const projectBasePath = projectCtx.agentRegistry.getBasePath();
     const executionPromises = targetAgents.map(async (targetAgent) => {
         // Create execution context with environment resolution from event
         // The factory extracts branch tags and resolves worktrees internally
         const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
-            projectBasePath: projectCtx.agentRegistry.getBasePath(),
+            projectBasePath,
             triggeringEvent: event,
             conversationCoordinator,
         });
 
-        // Execute agent
-        await executeAgent(executionContext, agentExecutor, conversation, event);
+        // Execute agent (handles ClawbackAbortError internally by re-executing)
+        await executeAgent(
+            executionContext,
+            agentExecutor,
+            conversation,
+            event,
+            conversationCoordinator,
+            projectBasePath
+        );
     });
 
     // Wait for all agents to complete

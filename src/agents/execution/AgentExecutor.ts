@@ -15,6 +15,7 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { executionCoordinator, ClawbackAbortError } from "@/services/execution";
 import { PairModeController } from "@/services/delegation/PairModeController";
 import { PairModeRegistry } from "@/services/delegation/PairModeRegistry";
 import { getToolsObject } from "@/tools/registry";
@@ -345,51 +346,55 @@ export class AgentExecutor {
         // This must happen before we try to find it for message injection
         const abortSignal = llmOpsRegistry.registerOperation(context);
 
-        // Setup message injection system
-        const injectedEvents: NDKEvent[] = [];
-
-        // Find this operation in the registry and listen for injected messages
+        // Find this operation in the registry
         const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
         const activeOperations = operationsByEvent.get(context.conversationId) || [];
         const thisOperation = activeOperations.find(
             (op) => op.agentPubkey === context.agent.pubkey
         );
 
+        // Also register with ExecutionCoordinator for enhanced tracking
         if (thisOperation) {
-            logger.debug("[AgentExecutor] Setting up message injection listener", {
+            executionCoordinator.registerOperation(
+                thisOperation.id,
+                context.agent.pubkey,
+                context.agent.slug,
+                context.conversationId
+            );
+
+            logger.debug("[AgentExecutor] Registered with ExecutionCoordinator", {
                 agent: context.agent.slug,
                 conversationId: context.conversationId.substring(0, 8),
                 operationId: thisOperation.id.substring(0, 8),
             });
 
-            // Add trace event for listener setup
+            // Add trace event for registration
             const activeSpan = trace.getActiveSpan();
             if (activeSpan) {
-                activeSpan.addEvent("message_injection.listener_setup", {
+                activeSpan.addEvent("execution_coordinator.registered", {
                     "agent.slug": context.agent.slug,
                     "conversation.id": context.conversationId,
                     "operation.id": thisOperation.id,
                 });
             }
 
+            // Listen for inject-message events and queue them with the coordinator
             thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
-                logger.info("[AgentExecutor] Received injected message", {
+                logger.info("[AgentExecutor] Queueing injected message with coordinator", {
                     agent: context.agent.slug,
                     eventId: event.id?.substring(0, 8),
-                    currentQueueSize: injectedEvents.length,
                 });
+
+                executionCoordinator.queueMessageForInjection(thisOperation.id, event);
 
                 // Add trace event for received injection
                 const activeSpan = trace.getActiveSpan();
                 if (activeSpan) {
-                    activeSpan.addEvent("message_injection.received", {
+                    activeSpan.addEvent("message_injection.queued", {
                         "event.id": event.id || "",
-                        "queue.size": injectedEvents.length + 1,
                         "agent.slug": context.agent.slug,
                     });
                 }
-
-                injectedEvents.push(event);
             });
         } else {
             logger.error(
@@ -405,6 +410,9 @@ export class AgentExecutor {
                 }
             );
         }
+
+        // Store operation ID for use in callbacks
+        const operationId = thisOperation?.id;
 
         // Add continuation message from supervisor as user message
         // Using "user" role ensures the LLM treats it as a request to act on,
@@ -611,6 +619,11 @@ export class AgentExecutor {
                 )
             );
 
+            // Notify ExecutionCoordinator of tool start
+            if (operationId) {
+                executionCoordinator.onToolStart(operationId, event.toolName);
+            }
+
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
@@ -622,6 +635,11 @@ export class AgentExecutor {
         });
 
         llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
+            // Notify ExecutionCoordinator of tool completion
+            if (operationId) {
+                executionCoordinator.onToolComplete(operationId, event.toolName);
+            }
+
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
@@ -638,11 +656,40 @@ export class AgentExecutor {
             // prepareStep is called synchronously by AI SDK and may not have access to OTel context
             const executionSpan = trace.getActiveSpan();
 
-            // Create prepareStep callback for message injection and pair mode corrections (SYNC)
+            // Create prepareStep callback for message injection, pair mode corrections, and clawback (SYNC)
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
             ): { messages?: ModelMessage[] } | undefined => {
                 let result: { messages?: ModelMessage[] } | undefined;
+
+                // Notify ExecutionCoordinator of step start
+                if (operationId) {
+                    executionCoordinator.onStepStart(operationId, step.stepNumber);
+
+                    // Check for clawback condition - if a message has been waiting too long,
+                    // throw ClawbackAbortError to abort and restart
+                    const opState = executionCoordinator.getOperationState(operationId);
+                    if (opState && opState.injectionQueue.length > 0) {
+                        const oldestMessage = opState.injectionQueue[0];
+                        const waitTime = Date.now() - oldestMessage.queuedAt;
+                        const policy = executionCoordinator.getPolicy();
+
+                        if (waitTime > policy.maxInjectionWaitMs) {
+                            logger.warn("[prepareStep] Clawback triggered - message waited too long", {
+                                agent: context.agent.slug,
+                                waitTimeMs: waitTime,
+                                threshold: policy.maxInjectionWaitMs,
+                            });
+
+                            // Throw to abort - the message is already in conversation history
+                            // so it will be picked up on restart
+                            throw new ClawbackAbortError(
+                                operationId,
+                                `Message waited ${Math.round(waitTime / 1000)}s (threshold: ${policy.maxInjectionWaitMs / 1000}s)`
+                            );
+                        }
+                    }
+                }
 
                 // Handle pair mode corrections (sync - corrections queued by onStopCheck)
                 if (pairModeController) {
@@ -682,54 +729,54 @@ export class AgentExecutor {
                     }
                 }
 
-                // Handle existing message injection
-                if (injectedEvents.length > 0) {
-                    // Add trace event for message injection processing
-                    // Use captured span instead of getActiveSpan() which may be null
-                    if (executionSpan) {
-                        executionSpan.addEvent("message_injection.process", {
-                            "injection.message_count": injectedEvents.length,
-                            "injection.step_number": step.stepNumber,
-                            "injection.event_ids": injectedEvents.map((e) => e.id || "").join(","),
-                            "agent.slug": context.agent.slug,
-                        });
-                    }
+                // Handle message injection from ExecutionCoordinator's queue
+                if (operationId) {
+                    const injectedMessages = executionCoordinator.drainInjectionQueue(operationId);
 
-                    logger.info(
-                        `[prepareStep] Injecting ${injectedEvents.length} new user message(s)`,
-                        {
-                            agent: context.agent.slug,
-                            stepNumber: step.stepNumber,
+                    if (injectedMessages.length > 0) {
+                        // Add trace event for message injection processing
+                        if (executionSpan) {
+                            executionSpan.addEvent("message_injection.process", {
+                                "injection.message_count": injectedMessages.length,
+                                "injection.step_number": step.stepNumber,
+                                "injection.event_ids": injectedMessages.map((m) => m.event.id || "").join(","),
+                                "agent.slug": context.agent.slug,
+                            });
                         }
-                    );
 
-                    const newMessages: ModelMessage[] = [];
-                    for (const injectedEvent of injectedEvents) {
-                        // Add a system message to signal the injection
-                        newMessages.push({
-                            role: "system",
-                            content:
-                                "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.",
-                        });
-                        // Add the actual user message
-                        newMessages.push({
-                            role: "user",
-                            content: injectedEvent.content,
-                        });
+                        logger.info(
+                            `[prepareStep] Injecting ${injectedMessages.length} new user message(s)`,
+                            {
+                                agent: context.agent.slug,
+                                stepNumber: step.stepNumber,
+                            }
+                        );
+
+                        const newMessages: ModelMessage[] = [];
+                        for (const injectedMessage of injectedMessages) {
+                            // Add a system message to signal the injection
+                            newMessages.push({
+                                role: "system",
+                                content:
+                                    "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.",
+                            });
+                            // Add the actual user message
+                            newMessages.push({
+                                role: "user",
+                                content: injectedMessage.event.content,
+                            });
+                        }
+
+                        // Combine with any pair mode messages
+                        const baseMessages = result?.messages || step.messages;
+                        result = {
+                            messages: [
+                                baseMessages[0],
+                                ...newMessages,
+                                ...baseMessages.slice(1),
+                            ],
+                        };
                     }
-
-                    // Clear the queue after preparing them
-                    injectedEvents.length = 0;
-
-                    // Combine with any pair mode messages
-                    const baseMessages = result?.messages || step.messages;
-                    result = {
-                        messages: [
-                            baseMessages[0],
-                            ...newMessages,
-                            ...baseMessages.slice(1),
-                        ],
-                    };
                 }
 
                 return result;
@@ -762,7 +809,28 @@ export class AgentExecutor {
                 }
             }
         } catch (streamError) {
-            // Clean up pair mode state on any error
+            // Handle ClawbackAbortError specially - this is intentional, not an error
+            if (streamError instanceof ClawbackAbortError) {
+                logger.info("[AgentExecutor] Clawback abort - operation will restart", {
+                    agent: context.agent.slug,
+                    operationId: streamError.operationId.substring(0, 8),
+                    reason: streamError.reason,
+                });
+
+                // Clean up pair mode state
+                if (pairModeController) {
+                    const pairRegistry = PairModeRegistry.getInstance();
+                    pairRegistry.abortDelegation(
+                        pairModeController.getBatchId(),
+                        `Clawback: ${streamError.reason}`
+                    );
+                }
+
+                // Re-throw to let parent handle restart
+                throw streamError;
+            }
+
+            // Clean up pair mode state on any other error
             if (pairModeController) {
                 const pairRegistry = PairModeRegistry.getInstance();
                 pairRegistry.abortDelegation(
@@ -798,6 +866,11 @@ export class AgentExecutor {
         } finally {
             // Complete the operation (handles both success and abort cases)
             llmOpsRegistry.completeOperation(context);
+
+            // Unregister from ExecutionCoordinator
+            if (operationId) {
+                executionCoordinator.unregisterOperation(operationId);
+            }
 
             // Clean up event listeners
             llmService.removeAllListeners();
