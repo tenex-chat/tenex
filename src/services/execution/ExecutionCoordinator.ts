@@ -9,11 +9,40 @@
  * - Inject messages into an existing agent loop
  * - Start a new execution
  * - Trigger clawback and restart
- * - Start concurrent execution with special tools
+ * - Start concurrent execution with special tools (not yet implemented)
+ *
+ * ## Dual State Management Architecture
+ *
+ * Operations are tracked in TWO registries that serve complementary purposes:
+ *
+ * 1. **LLMOperationsRegistry** (src/services/LLMOperationsRegistry.ts)
+ *    - Owns the AbortController and EventEmitter for each operation
+ *    - Provides abort/cancellation capabilities
+ *    - Enables message injection into running streams via EventEmitter
+ *    - Indexed by conversationId for event routing
+ *
+ * 2. **ExecutionCoordinator** (this service)
+ *    - Tracks enhanced execution state (step timing, tool info, injection queue)
+ *    - Makes routing decisions (inject vs start-new vs clawback)
+ *    - Manages clawback timeouts and stale operation cleanup
+ *    - Provides observability via events
+ *
+ * Both registries MUST stay synchronized:
+ * - AgentExecutor registers with BOTH on operation start
+ * - AgentExecutor unregisters from BOTH in finally block (always runs)
+ * - Clawback in reply.ts cleans up BOTH before restarting
+ *
+ * The separation exists because:
+ * - LLMOperationsRegistry handles the low-level stream control (abort, inject)
+ * - ExecutionCoordinator handles the high-level routing decisions
+ * - Keeping them separate avoids circular dependencies and maintains SRP
+ *
+ * @see LLMOperationsRegistry for abort/inject capabilities
+ * @see AgentExecutor.executeStreaming for registration flow
+ * @see reply.ts handleReplyLogic for routing flow
  */
 
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { EventEmitter } from "tseep";
 import { logger } from "@/utils/logger";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -24,10 +53,7 @@ import {
     type RouteDecision,
     type RoutingPolicy,
     DEFAULT_ROUTING_POLICY,
-    ClawbackAbortError,
 } from "./types";
-
-const tracer = trace.getTracer("tenex.execution-coordinator");
 
 export class ExecutionCoordinator extends EventEmitter {
     private static instance: ExecutionCoordinator;
@@ -141,20 +167,15 @@ export class ExecutionCoordinator extends EventEmitter {
                 };
             }
 
-            // Cannot interrupt - consider concurrent execution
-            if (this.policy.allowConcurrentExecution) {
-                logger.info("[ExecutionCoordinator] Starting concurrent execution", {
-                    agent: agent.slug,
-                    backgroundOp: activeOp.operationId.substring(0, 8),
-                    currentTool: activeOp.currentTool?.name,
-                });
-
-                return {
-                    type: "start-concurrent",
-                    backgroundOperation: activeOp,
-                    reason: `Step running for ${Math.round(stepDuration / 1000)}s with uninterruptible tool: ${activeOp.currentTool?.name}`,
-                };
-            }
+            // Cannot interrupt - concurrent execution would be ideal but isn't implemented yet
+            // Fall back to injection and log a warning
+            logger.warn("[ExecutionCoordinator] Step running too long with uninterruptible tool, queueing for injection", {
+                agent: agent.slug,
+                operationId: activeOp.operationId.substring(0, 8),
+                currentTool: activeOp.currentTool?.name,
+                stepDurationMs: stepDuration,
+                note: "Concurrent execution not yet implemented",
+            });
         }
 
         // Default: inject into existing operation
@@ -435,72 +456,6 @@ export class ExecutionCoordinator extends EventEmitter {
         }
 
         return undefined;
-    }
-
-    /**
-     * Execute clawback: abort operation and signal restart
-     *
-     * Creates an OpenTelemetry span to track the clawback execution for observability.
-     *
-     * @param operationId - The operation to clawback
-     * @param reason - The reason for the clawback
-     * @throws ClawbackAbortError to signal the abort to the stream
-     */
-    async executeClawback(operationId: string, reason: string): Promise<void> {
-        const state = this.operationStates.get(operationId);
-        if (!state) return;
-
-        const span = tracer.startSpan("tenex.execution.clawback", {
-            attributes: {
-                "operation.id": operationId,
-                "agent.slug": state.agentSlug,
-                "agent.pubkey": state.agentPubkey,
-                "conversation.id": state.conversationId,
-                "clawback.reason": reason,
-                "operation.age_ms": Date.now() - state.registeredAt,
-                "operation.step_count": state.stepCount,
-                "injection_queue.size": state.injectionQueue.length,
-            },
-        });
-
-        try {
-            logger.info("[ExecutionCoordinator] Executing clawback", {
-                operationId: operationId.substring(0, 8),
-                agent: state.agentSlug,
-                reason,
-            });
-
-            span.addEvent("clawback.started", {
-                "operation.id": operationId,
-                reason,
-            });
-
-            // Abort via LLMOperationsRegistry
-            llmOpsRegistry.stopByEventId(state.conversationId);
-
-            span.addEvent("clawback.operation_stopped");
-
-            // Clean up our state
-            this.unregisterOperation(operationId);
-
-            span.addEvent("clawback.state_cleaned");
-            span.setStatus({ code: SpanStatusCode.OK });
-
-            // Throw to signal the abort in the stream
-            throw new ClawbackAbortError(operationId, reason);
-        } catch (error) {
-            // Only record as error if it's not the ClawbackAbortError we're throwing
-            if (!(error instanceof ClawbackAbortError)) {
-                span.recordException(error as Error);
-                span.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: (error as Error).message,
-                });
-            }
-            throw error;
-        } finally {
-            span.end();
-        }
     }
 
     /**

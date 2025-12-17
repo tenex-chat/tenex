@@ -342,77 +342,53 @@ export class AgentExecutor {
             eventFilter
         );
 
-        // Register operation with the LLM Operations Registry FIRST
-        // This must happen before we try to find it for message injection
-        const abortSignal = llmOpsRegistry.registerOperation(context);
+        // Register operation with both registries atomically to prevent race conditions
+        // The operation is returned directly to avoid lookup races
+        const { operation: thisOperation, signal: abortSignal } = llmOpsRegistry.registerOperation(context);
+        const operationId = thisOperation.id;
 
-        // Find this operation in the registry
-        const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
-        const activeOperations = operationsByEvent.get(context.conversationId) || [];
-        const thisOperation = activeOperations.find(
-            (op) => op.agentPubkey === context.agent.pubkey
+        // Immediately register with ExecutionCoordinator (no lookup needed)
+        executionCoordinator.registerOperation(
+            operationId,
+            context.agent.pubkey,
+            context.agent.slug,
+            context.conversationId
         );
 
-        // Also register with ExecutionCoordinator for enhanced tracking
-        if (thisOperation) {
-            executionCoordinator.registerOperation(
-                thisOperation.id,
-                context.agent.pubkey,
-                context.agent.slug,
-                context.conversationId
-            );
+        logger.debug("[AgentExecutor] Registered with both registries", {
+            agent: context.agent.slug,
+            conversationId: context.conversationId.substring(0, 8),
+            operationId: operationId.substring(0, 8),
+        });
 
-            logger.debug("[AgentExecutor] Registered with ExecutionCoordinator", {
-                agent: context.agent.slug,
-                conversationId: context.conversationId.substring(0, 8),
-                operationId: thisOperation.id.substring(0, 8),
+        // Add trace event for registration
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            activeSpan.addEvent("execution_coordinator.registered", {
+                "agent.slug": context.agent.slug,
+                "conversation.id": context.conversationId,
+                "operation.id": operationId,
             });
-
-            // Add trace event for registration
-            const activeSpan = trace.getActiveSpan();
-            if (activeSpan) {
-                activeSpan.addEvent("execution_coordinator.registered", {
-                    "agent.slug": context.agent.slug,
-                    "conversation.id": context.conversationId,
-                    "operation.id": thisOperation.id,
-                });
-            }
-
-            // Listen for inject-message events and queue them with the coordinator
-            thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
-                logger.info("[AgentExecutor] Queueing injected message with coordinator", {
-                    agent: context.agent.slug,
-                    eventId: event.id?.substring(0, 8),
-                });
-
-                executionCoordinator.queueMessageForInjection(thisOperation.id, event);
-
-                // Add trace event for received injection
-                const activeSpan = trace.getActiveSpan();
-                if (activeSpan) {
-                    activeSpan.addEvent("message_injection.queued", {
-                        "event.id": event.id || "",
-                        "agent.slug": context.agent.slug,
-                    });
-                }
-            });
-        } else {
-            logger.error(
-                "[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!",
-                {
-                    agent: context.agent.slug,
-                    agentPubkey: context.agent.pubkey.substring(0, 8),
-                    conversationId: context.conversationId.substring(0, 8),
-                    availableOperations: activeOperations.map((op) => ({
-                        agentPubkey: op.agentPubkey.substring(0, 8),
-                        operationId: op.id.substring(0, 8),
-                    })),
-                }
-            );
         }
 
-        // Store operation ID for use in callbacks
-        const operationId = thisOperation?.id;
+        // Listen for inject-message events and queue them with the coordinator
+        thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
+            logger.info("[AgentExecutor] Queueing injected message with coordinator", {
+                agent: context.agent.slug,
+                eventId: event.id?.substring(0, 8),
+            });
+
+            executionCoordinator.queueMessageForInjection(operationId, event);
+
+            // Add trace event for received injection
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan) {
+                activeSpan.addEvent("message_injection.queued", {
+                    "event.id": event.id || "",
+                    "agent.slug": context.agent.slug,
+                });
+            }
+        });
 
         // Add continuation message from supervisor as user message
         // Using "user" role ensures the LLM treats it as a request to act on,
@@ -620,9 +596,7 @@ export class AgentExecutor {
             );
 
             // Notify ExecutionCoordinator of tool start
-            if (operationId) {
-                executionCoordinator.onToolStart(operationId, event.toolName);
-            }
+            executionCoordinator.onToolStart(operationId, event.toolName);
 
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
@@ -636,9 +610,7 @@ export class AgentExecutor {
 
         llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
             // Notify ExecutionCoordinator of tool completion
-            if (operationId) {
-                executionCoordinator.onToolComplete(operationId, event.toolName);
-            }
+            executionCoordinator.onToolComplete(operationId, event.toolName);
 
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
@@ -656,38 +628,43 @@ export class AgentExecutor {
             // prepareStep is called synchronously by AI SDK and may not have access to OTel context
             const executionSpan = trace.getActiveSpan();
 
+            // Track the current step number for onStepFinish callback
+            // (onStepFinish doesn't receive stepNumber, so we track it from prepareStep)
+            let currentStepNumber = 0;
+
             // Create prepareStep callback for message injection, pair mode corrections, and clawback (SYNC)
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
             ): { messages?: ModelMessage[] } | undefined => {
                 let result: { messages?: ModelMessage[] } | undefined;
 
+                // Track current step for onStepFinish
+                currentStepNumber = step.stepNumber;
+
                 // Notify ExecutionCoordinator of step start
-                if (operationId) {
-                    executionCoordinator.onStepStart(operationId, step.stepNumber);
+                executionCoordinator.onStepStart(operationId, step.stepNumber);
 
-                    // Check for clawback condition - if a message has been waiting too long,
-                    // throw ClawbackAbortError to abort and restart
-                    const opState = executionCoordinator.getOperationState(operationId);
-                    if (opState && opState.injectionQueue.length > 0) {
-                        const oldestMessage = opState.injectionQueue[0];
-                        const waitTime = Date.now() - oldestMessage.queuedAt;
-                        const policy = executionCoordinator.getPolicy();
+                // Check for clawback condition - if a message has been waiting too long,
+                // throw ClawbackAbortError to abort and restart
+                const opState = executionCoordinator.getOperationState(operationId);
+                if (opState && opState.injectionQueue.length > 0) {
+                    const oldestMessage = opState.injectionQueue[0];
+                    const waitTime = Date.now() - oldestMessage.queuedAt;
+                    const policy = executionCoordinator.getPolicy();
 
-                        if (waitTime > policy.maxInjectionWaitMs) {
-                            logger.warn("[prepareStep] Clawback triggered - message waited too long", {
-                                agent: context.agent.slug,
-                                waitTimeMs: waitTime,
-                                threshold: policy.maxInjectionWaitMs,
-                            });
+                    if (waitTime > policy.maxInjectionWaitMs) {
+                        logger.warn("[prepareStep] Clawback triggered - message waited too long", {
+                            agent: context.agent.slug,
+                            waitTimeMs: waitTime,
+                            threshold: policy.maxInjectionWaitMs,
+                        });
 
-                            // Throw to abort - the message is already in conversation history
-                            // so it will be picked up on restart
-                            throw new ClawbackAbortError(
-                                operationId,
-                                `Message waited ${Math.round(waitTime / 1000)}s (threshold: ${policy.maxInjectionWaitMs / 1000}s)`
-                            );
-                        }
+                        // Throw to abort - the message is already in conversation history
+                        // so it will be picked up on restart
+                        throw new ClawbackAbortError(
+                            operationId,
+                            `Message waited ${Math.round(waitTime / 1000)}s (threshold: ${policy.maxInjectionWaitMs / 1000}s)`
+                        );
                     }
                 }
 
@@ -730,53 +707,51 @@ export class AgentExecutor {
                 }
 
                 // Handle message injection from ExecutionCoordinator's queue
-                if (operationId) {
-                    const injectedMessages = executionCoordinator.drainInjectionQueue(operationId);
+                const injectedMessages = executionCoordinator.drainInjectionQueue(operationId);
 
-                    if (injectedMessages.length > 0) {
-                        // Add trace event for message injection processing
-                        if (executionSpan) {
-                            executionSpan.addEvent("message_injection.process", {
-                                "injection.message_count": injectedMessages.length,
-                                "injection.step_number": step.stepNumber,
-                                "injection.event_ids": injectedMessages.map((m) => m.event.id || "").join(","),
-                                "agent.slug": context.agent.slug,
-                            });
-                        }
-
-                        logger.info(
-                            `[prepareStep] Injecting ${injectedMessages.length} new user message(s)`,
-                            {
-                                agent: context.agent.slug,
-                                stepNumber: step.stepNumber,
-                            }
-                        );
-
-                        const newMessages: ModelMessage[] = [];
-                        for (const injectedMessage of injectedMessages) {
-                            // Add a system message to signal the injection
-                            newMessages.push({
-                                role: "system",
-                                content:
-                                    "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.",
-                            });
-                            // Add the actual user message
-                            newMessages.push({
-                                role: "user",
-                                content: injectedMessage.event.content,
-                            });
-                        }
-
-                        // Combine with any pair mode messages
-                        const baseMessages = result?.messages || step.messages;
-                        result = {
-                            messages: [
-                                baseMessages[0],
-                                ...newMessages,
-                                ...baseMessages.slice(1),
-                            ],
-                        };
+                if (injectedMessages.length > 0) {
+                    // Add trace event for message injection processing
+                    if (executionSpan) {
+                        executionSpan.addEvent("message_injection.process", {
+                            "injection.message_count": injectedMessages.length,
+                            "injection.step_number": step.stepNumber,
+                            "injection.event_ids": injectedMessages.map((m) => m.event.id || "").join(","),
+                            "agent.slug": context.agent.slug,
+                        });
                     }
+
+                    logger.info(
+                        `[prepareStep] Injecting ${injectedMessages.length} new user message(s)`,
+                        {
+                            agent: context.agent.slug,
+                            stepNumber: step.stepNumber,
+                        }
+                    );
+
+                    const newMessages: ModelMessage[] = [];
+                    for (const injectedMessage of injectedMessages) {
+                        // Add a system message to signal the injection
+                        newMessages.push({
+                            role: "system",
+                            content:
+                                "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.",
+                        });
+                        // Add the actual user message
+                        newMessages.push({
+                            role: "user",
+                            content: injectedMessage.event.content,
+                        });
+                    }
+
+                    // Combine with any pair mode messages
+                    const baseMessages = result?.messages || step.messages;
+                    result = {
+                        messages: [
+                            baseMessages[0],
+                            ...newMessages,
+                            ...baseMessages.slice(1),
+                        ],
+                    };
                 }
 
                 return result;
@@ -785,10 +760,15 @@ export class AgentExecutor {
             // Create onStopCheck for pair mode (async - handles check-ins)
             const onStopCheck = pairModeController?.createStopCheck();
 
+            // Create onStepFinish callback to notify ExecutionCoordinator of step completion
+            const onStepFinish = (): void => {
+                executionCoordinator.onStepComplete(operationId, currentStepNumber);
+            };
+
             // Publish empty 21111 to signal execution start (implicit typing indicator)
             await agentPublisher.publishStreamingDelta("", eventContext, false);
 
-            await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
+            await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck, onStepFinish });
 
             // If pair mode, check if we were aborted or completed
             if (pairModeController) {
@@ -868,9 +848,7 @@ export class AgentExecutor {
             llmOpsRegistry.completeOperation(context);
 
             // Unregister from ExecutionCoordinator
-            if (operationId) {
-                executionCoordinator.unregisterOperation(operationId);
-            }
+            executionCoordinator.unregisterOperation(operationId);
 
             // Clean up event listeners
             llmService.removeAllListeners();

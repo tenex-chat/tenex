@@ -255,7 +255,6 @@ async function handleReplyLogic(
     // 3.5. Use ExecutionCoordinator for intelligent routing decisions
     const agentsToInject: AgentInstance[] = [];
     const agentsToStartNew: AgentInstance[] = [];
-    const agentsToStartConcurrent: Array<{ agent: AgentInstance; backgroundOp: unknown }> = [];
 
     for (const targetAgent of targetAgents) {
         const decision = await executionCoordinator.routeMessage({
@@ -310,29 +309,25 @@ async function handleReplyLogic(
                 break;
 
             case "clawback":
-                // Clawback will be handled by the agent execution itself via ClawbackAbortError
-                // For now, we treat this as start-new since the agent will restart
+                // Abort the existing operation explicitly before starting a new one
+                // This prevents race conditions where the old operation continues running
+                llmOpsRegistry.stopByEventId(conversation.id);
+                executionCoordinator.unregisterOperation(decision.operationId);
+                logger.info("[ExecutionCoordinator] Clawback: aborted old operation, starting fresh", {
+                    agent: targetAgent.name,
+                    abortedOperationId: decision.operationId.substring(0, 8),
+                    reason: decision.reason,
+                });
                 agentsToStartNew.push(targetAgent);
                 break;
 
             case "start-concurrent":
-                // TODO: Implement concurrent execution with special tools
-                // For now, fall back to injection
-                agentsToStartConcurrent.push({
-                    agent: targetAgent,
-                    backgroundOp: decision.backgroundOperation,
-                });
-                logger.warn("[ExecutionCoordinator] Concurrent execution not yet implemented, falling back to injection", {
+                // NOTE: Concurrent execution is not yet implemented.
+                // The ExecutionCoordinator now falls back to inject internally,
+                // so this case should not be reached. If it is, treat as inject.
+                logger.error("[ExecutionCoordinator] Unexpected start-concurrent decision - should not reach here", {
                     agent: targetAgent.name,
                 });
-                // Inject instead
-                const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
-                const activeOps = operationsByEvent.get(conversation.id) || [];
-                const bgOp = activeOps.find((op) => op.agentPubkey === targetAgent.pubkey);
-                if (bgOp) {
-                    bgOp.eventEmitter.emit("inject-message", event);
-                    agentsToInject.push(targetAgent);
-                }
                 break;
         }
     }
@@ -340,7 +335,6 @@ async function handleReplyLogic(
     logger.debug("[ExecutionCoordinator] Routing summary", {
         toInject: agentsToInject.map((a) => a.name),
         toStartNew: agentsToStartNew.map((a) => a.name),
-        toConcurrent: agentsToStartConcurrent.map((a) => a.agent.name),
     });
 
     // Update targetAgents to only those that need new execution

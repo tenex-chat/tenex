@@ -27,7 +27,13 @@ export class LLMOperationsRegistry {
         return LLMOperationsRegistry.instance;
     }
 
-    registerOperation(context: ExecutionContext): AbortSignal {
+    /**
+     * Register a new operation and return it along with its abort signal.
+     *
+     * Returns the full operation object to avoid race conditions where
+     * callers need to look up the operation immediately after registration.
+     */
+    registerOperation(context: ExecutionContext): { operation: LLMOperation; signal: AbortSignal } {
         const operationId = crypto.randomUUID();
         const conversation = context.getConversation();
         const rootEventId = conversation?.history[0]?.id || context.triggeringEvent.id;
@@ -71,7 +77,7 @@ export class LLMOperationsRegistry {
         // Notify listeners of new operation
         this.notifyChange();
 
-        return operation.abortController.signal;
+        return { operation, signal: operation.abortController.signal };
     }
 
     completeOperation(context: ExecutionContext): void {

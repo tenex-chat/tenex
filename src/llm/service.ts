@@ -454,6 +454,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
+            /** Called when a step completes - useful for tracking step lifecycle */
+            onStepFinish?: (step: StepResult<Record<string, AISdkTool>>) => void;
         }
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
@@ -538,6 +540,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(startTime),
+            onStepFinish: options?.onStepFinish,
         });
 
         // Consume the stream (this is what triggers everything!)
