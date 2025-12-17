@@ -49,7 +49,8 @@ export type ToolName =
     | "search_conversations"
     | "bug_list"
     | "bug_report_create"
-    | "bug_report_add";
+    | "bug_report_add"
+    | "restart_tenex_backend";
 
 /**
  * AI SDK tool with optional human-readable formatter.
