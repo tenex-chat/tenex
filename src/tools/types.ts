@@ -43,7 +43,11 @@ export type ToolName =
     | "rag_subscription_create"
     | "rag_subscription_list"
     | "rag_subscription_get"
-    | "rag_subscription_delete";
+    | "rag_subscription_delete"
+    // Alpha mode bug reporting tools
+    | "bug_list"
+    | "bug_report_create"
+    | "bug_report_add";
 
 /**
  * AI SDK tool with optional human-readable formatter.

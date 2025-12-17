@@ -18,6 +18,7 @@ import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
 import { worktreeContextFragment } from "./30-worktree-context";
+import { alphaModeFragment } from "./alpha-mode";
 import { debugModeFragment } from "./debug-mode";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -31,6 +32,7 @@ export function registerAllFragments(): void {
     // Core identity and context
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentPhasesFragment);
+    fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(delegatedTaskContextFragment);
     fragmentRegistry.register(debugModeFragment);
     fragmentRegistry.register(delegationCompletionFragment);

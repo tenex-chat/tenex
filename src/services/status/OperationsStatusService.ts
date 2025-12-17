@@ -201,7 +201,7 @@ export class OperationsStatusService {
         // Sign with project signer and publish if available
         if (projectCtx.signer) {
             await event.sign(projectCtx.signer, { pTags: false });
-            event.publish();
+            await event.publish();
         } else {
             logger.warn("No project signer available, cannot publish operations status event");
             return;

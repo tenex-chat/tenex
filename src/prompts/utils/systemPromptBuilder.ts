@@ -40,6 +40,7 @@ export interface BuildSystemPromptOptions {
     agentLessons?: Map<string, NDKAgentLesson[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
+    alphaMode?: boolean; // True when running in alpha mode
 }
 
 export interface BuildStandalonePromptOptions {
@@ -51,6 +52,7 @@ export interface BuildStandalonePromptOptions {
     conversation?: Conversation;
     agentLessons?: Map<string, NDKAgentLesson[]>;
     projectManagerPubkey?: string; // Pubkey of the project manager
+    alphaMode?: boolean; // True when running in alpha mode
 }
 
 export interface SystemMessage {
@@ -170,6 +172,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         availableAgents = [],
         conversation,
         agentLessons,
+        alphaMode,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
@@ -181,6 +184,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         projectOwnerPubkey: project.pubkey,
         workingDirectory,
     });
+
+    // Add alpha mode warning and bug reporting tools guidance
+    systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
@@ -231,7 +237,7 @@ export async function buildStandaloneSystemPromptMessages(
  * Builds the main system prompt for standalone agents
  */
 async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): Promise<string> {
-    const { agent, availableAgents = [], conversation, agentLessons } = options;
+    const { agent, availableAgents = [], conversation, agentLessons, alphaMode } = options;
 
     const systemPromptBuilder = new PromptBuilder();
 
@@ -241,6 +247,9 @@ async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions):
         projectTitle: "Standalone Mode",
         projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
     });
+
+    // Add alpha mode warning and bug reporting tools guidance
+    systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
     // Add core agent fragments using shared composition
     await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons);
