@@ -37,8 +37,6 @@ export interface RALState {
   pendingDelegations: PendingDelegation[];
   completedDelegations: CompletedDelegation[];
   queuedInjections: QueuedInjection[];
-  /** Injections that persist across RAL iterations until execution completes */
-  persistedInjections: QueuedInjection[];
   status: RALStatus;
   currentTool?: string;
   toolStartedAt?: number;

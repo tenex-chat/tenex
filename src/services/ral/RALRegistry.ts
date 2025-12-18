@@ -39,7 +39,6 @@ export class RALRegistry {
       pendingDelegations: [],
       completedDelegations: [],
       queuedInjections: [],
-      persistedInjections: [],
       status: "executing",
       createdAt: now,
       lastActivityAt: now,
@@ -288,9 +287,6 @@ export class RALRegistry {
       });
     }
 
-    // Track in persisted for debugging/inspection
-    state.persistedInjections.push(...newInjections);
-
     // Add trace event
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {
@@ -312,12 +308,6 @@ export class RALRegistry {
     return newInjections;
   }
 
-  /**
-   * @deprecated Use getAndPersistInjections instead
-   */
-  getAndClearQueued(agentPubkey: string): QueuedInjection[] {
-    return this.getAndPersistInjections(agentPubkey);
-  }
 
   /**
    * Swap a queued user event with a system message

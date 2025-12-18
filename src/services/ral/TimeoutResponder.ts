@@ -57,26 +57,6 @@ export class TimeoutResponder {
     });
   }
 
-  /**
-   * @deprecated Use processImmediately instead. Kept for backwards compatibility.
-   */
-  schedule(
-    agentPubkey: string,
-    event: NDKEvent,
-    agent: AgentInstance,
-    publisher: AgentPublisher,
-    _timeoutMs: number = 5000
-  ): void {
-    // No more scheduling - process immediately
-    this.processImmediately(agentPubkey, event, agent, publisher);
-  }
-
-  /**
-   * @deprecated No longer needed - responses are immediate
-   */
-  cancel(_agentPubkey: string, _eventId: string): void {
-    // No-op - no more timeouts to cancel
-  }
 
   private async generateResponse(
     agentPubkey: string,
