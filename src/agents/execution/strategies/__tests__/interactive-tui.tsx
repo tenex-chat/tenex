@@ -1,7 +1,6 @@
 /* @ts-nocheck */
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistryService } from "@/services/delegation";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { Box, Text, render, useApp, useInput } from "ink";
 import type React from "react";
@@ -31,7 +30,6 @@ function InteractiveTUI() {
     // Initialize and generate scenarios
     useEffect(() => {
         (async () => {
-            await DelegationRegistryService.initialize();
             const generator = new SignedEventGenerator();
             const scenarios = await generator.generateAllScenarios();
 

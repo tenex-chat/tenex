@@ -8,7 +8,6 @@ import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/ProjectContext";
-// import { DelegationRegistryService } from "@/services/delegation"; // Removed - migrating to RAL
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
@@ -37,10 +36,6 @@ export class EventHandler {
     ) {}
 
     async initialize(): Promise<void> {
-        // Initialize DelegationRegistryService singleton first
-        // await DelegationRegistryService.initialize(); // Removed - migrating to RAL
-
-        // Initialize components directly
         this.agentExecutor = new AgentExecutor();
     }
 
@@ -111,34 +106,6 @@ export class EventHandler {
         logger.info(
             `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.id})`
         );
-
-        // Check if this is a delegation response BEFORE routing
-        // const delegationRegistry = DelegationRegistryService.getInstance(); // Removed - migrating to RAL
-        // Temporarily disabled delegation response handling during RAL migration
-        const isDelegationResponse = false; // delegationRegistry.isDelegationResponse(event);
-        if (isDelegationResponse) {
-            // await delegationRegistry.handleDelegationResponse(event);
-
-            // Add the delegation response to conversation history for context
-            const { ConversationResolver } = await import(
-                "@/conversations/services/ConversationResolver"
-            );
-            const resolver = new ConversationResolver(this.conversationCoordinator);
-            const result = await resolver.resolveConversationForEvent(event);
-
-            if (result.conversation) {
-                await this.conversationCoordinator.addEvent(result.conversation.id, event);
-                logger.debug(
-                    `Added delegation response to conversation history: ${result.conversation.id.substring(0, 8)}`
-                );
-            } else {
-                logger.warn(
-                    `Could not find conversation for delegation response: ${event.id?.substring(0, 8)}`
-                );
-            }
-
-            return; // Done - this was a delegation response
-        }
 
         switch (event.kind) {
             case NDKKind.GenericReply: // kind 1111

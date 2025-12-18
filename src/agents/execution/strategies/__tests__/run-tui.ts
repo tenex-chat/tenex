@@ -11,15 +11,12 @@
 
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistryService } from "@/services/delegation";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 import { SignedEventGenerator } from "./generate-signed-events";
 
 async function main() {
     console.log("🔧 Generating signed Nostr events...\n");
-
-    await DelegationRegistryService.initialize();
 
     const generator = new SignedEventGenerator();
     const scenarios = await generator.generateAllScenarios();

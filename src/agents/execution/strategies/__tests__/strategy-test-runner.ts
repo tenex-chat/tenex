@@ -10,7 +10,6 @@ import * as path from "node:path";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistryService } from "@/services/delegation";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
 import { MOCK_AGENTS, MockEventGenerator } from "./mock-event-generator";
@@ -28,8 +27,6 @@ interface VisualizationData {
 }
 
 async function generateVisualizationData(): Promise<Record<string, VisualizationData>> {
-    await DelegationRegistryService.initialize();
-
     const strategy = new FlattenedChronologicalStrategy();
     const generator = new MockEventGenerator();
     const scenarios = generator.generateAllScenarios();

@@ -1,7 +1,5 @@
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
-import { isProjectContextInitialized } from "@/services/ProjectContext";
-// import { DelegationRegistryService } from "@/services/delegation"; // Removed - migrating to RAL
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -101,57 +99,15 @@ export class EventToModelMessage {
 
     /**
      * Check if this is a delegation response and format accordingly
+     * Note: Delegation response formatting is handled by RAL now
      */
     private static async checkDelegationResponse(
         _event: NDKEvent,
         _processedContent: string,
         _targetAgentPubkey: string,
-        conversationId?: string
+        _conversationId?: string
     ): Promise<ModelMessage | null> {
-        if (!conversationId || !isProjectContextInitialized()) {
-            return null;
-        }
-
-        try {
-            // Temporarily disabled during RAL migration
-            return null;
-            /*
-            const registry = DelegationRegistryService.getInstance();
-
-            // Check if there's a delegation record for this conversation
-            const delegationContext = registry.getDelegationByConversationKey(
-                conversationId,
-                targetAgentPubkey,
-                event.pubkey
-            );
-
-            if (delegationContext && delegationContext.status === "pending") {
-                // This is a response to an external delegation
-                const nameRepo = getPubkeyService();
-                const responderName = await nameRepo.getName(event.pubkey);
-                const targetAgentName = await nameRepo.getName(targetAgentPubkey);
-
-                logger.info("[EventToModelMessage] Formatting external delegation response", {
-                    conversationId: conversationId.substring(0, 8),
-                    delegatingAgent: targetAgentName,
-                    respondingAgent: responderName,
-                    delegationEventId: delegationContext.delegationEventId.substring(0, 8),
-                });
-
-                // Format as a delegation response with clear context
-                return {
-                    role: "user",
-                    content: `[DELEGATION RESPONSE from ${responderName}]:\n${processedContent}\n[END DELEGATION RESPONSE]`,
-                };
-            }
-            */
-        } catch (error) {
-            // If registry is not initialized, continue with normal processing
-            logger.debug("[EventToModelMessage] Could not check for external delegation context", {
-                error,
-            });
-        }
-
+        // Delegation response formatting is handled by RAL
         return null;
     }
 
