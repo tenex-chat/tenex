@@ -1,5 +1,6 @@
 import type { CoreMessage } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import type {
   RALState,
@@ -141,7 +142,13 @@ export class RALRegistry {
    */
   queueEvent(agentPubkey: string, event: NDKEvent): void {
     const state = this.states.get(agentPubkey);
-    if (!state) return;
+    if (!state) {
+      logger.warn("[RALRegistry] Cannot queue event - no RAL state", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        eventId: event.id?.substring(0, 8),
+      });
+      return;
+    }
 
     state.queuedInjections.push({
       type: "user",
@@ -150,9 +157,23 @@ export class RALRegistry {
       queuedAt: Date.now(),
     });
 
+    // Add trace event for queuing
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent("ral.event_queued", {
+        "ral.id": state.id,
+        "ral.status": state.status,
+        "event.id": event.id || "",
+        "queue.size": state.queuedInjections.length,
+        "agent.pubkey": agentPubkey,
+      });
+    }
+
     logger.debug("[RALRegistry] Queued event for injection", {
       ralId: state.id.substring(0, 8),
       eventId: event.id?.substring(0, 8),
+      queueSize: state.queuedInjections.length,
+      ralStatus: state.status,
     });
   }
 
@@ -161,12 +182,36 @@ export class RALRegistry {
    */
   queueSystemMessage(agentPubkey: string, content: string): void {
     const state = this.states.get(agentPubkey);
-    if (!state) return;
+    if (!state) {
+      logger.warn("[RALRegistry] Cannot queue system message - no RAL state", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        contentLength: content.length,
+      });
+      return;
+    }
 
     state.queuedInjections.push({
       type: "system",
       content,
       queuedAt: Date.now(),
+    });
+
+    // Add trace event for queuing
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent("ral.system_message_queued", {
+        "ral.id": state.id,
+        "ral.status": state.status,
+        "message.length": content.length,
+        "queue.size": state.queuedInjections.length,
+        "agent.pubkey": agentPubkey,
+      });
+    }
+
+    logger.debug("[RALRegistry] Queued system message for injection", {
+      ralId: state.id.substring(0, 8),
+      contentLength: content.length,
+      queueSize: state.queuedInjections.length,
     });
   }
 
@@ -187,6 +232,28 @@ export class RALRegistry {
     if (!state) return [];
 
     const injections = [...state.queuedInjections];
+
+    if (injections.length > 0) {
+      // Add trace event for retrieval
+      const activeSpan = trace.getActiveSpan();
+      if (activeSpan) {
+        activeSpan.addEvent("ral.queued_injections_retrieved", {
+          "ral.id": state.id,
+          "injection.count": injections.length,
+          "injection.types": injections.map((i) => i.type).join(","),
+          "injection.system_count": injections.filter((i) => i.type === "system").length,
+          "injection.user_count": injections.filter((i) => i.type === "user").length,
+          "agent.pubkey": agentPubkey,
+        });
+      }
+
+      logger.debug("[RALRegistry] Retrieved and cleared queued injections", {
+        ralId: state.id.substring(0, 8),
+        count: injections.length,
+        types: injections.map((i) => i.type),
+      });
+    }
+
     state.queuedInjections = [];
     return injections;
   }
@@ -200,7 +267,15 @@ export class RALRegistry {
     systemContent: string
   ): void {
     const state = this.states.get(agentPubkey);
-    if (!state) return;
+    if (!state) {
+      logger.warn("[RALRegistry] Cannot swap event - no RAL state", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        eventId: eventId.substring(0, 8),
+      });
+      return;
+    }
+
+    const beforeCount = state.queuedInjections.length;
 
     // Remove the user event
     state.queuedInjections = state.queuedInjections.filter(
@@ -212,6 +287,25 @@ export class RALRegistry {
       type: "system",
       content: systemContent,
       queuedAt: Date.now(),
+    });
+
+    // Add trace event for swap
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent("ral.event_swapped_to_system", {
+        "ral.id": state.id,
+        "event.id": eventId,
+        "system_message.length": systemContent.length,
+        "queue.before_count": beforeCount,
+        "queue.after_count": state.queuedInjections.length,
+        "agent.pubkey": agentPubkey,
+      });
+    }
+
+    logger.debug("[RALRegistry] Swapped user event with system message", {
+      ralId: state.id.substring(0, 8),
+      eventId: eventId.substring(0, 8),
+      systemContentLength: systemContent.length,
     });
   }
 
