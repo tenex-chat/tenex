@@ -281,7 +281,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             // Check if this is a delegation response (do this FIRST, before other filtering)
             // Delegation responses are special because they should be formatted differently
-            if (!isFromAgent && event.kind === 1111) {
+            // NOTE: delegationRegistry is null during RAL migration - skip delegation tracking for now
+            if (!isFromAgent && event.kind === 1111 && delegationRegistry) {
                 const isDelegationResponse = await this.checkIfDelegationResponse(
                     event,
                     agentPubkey,
@@ -334,7 +335,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             }
 
             // Check if this is a delegation request from this agent
-            if (isFromAgent && event.kind === 1111) {
+            // NOTE: delegationRegistry is null during RAL migration - skip delegation tracking for now
+            if (isFromAgent && event.kind === 1111 && delegationRegistry) {
                 // Check for delegation event (has phase tag)
                 const phaseTag = event.tagValue("phase");
 
@@ -372,7 +374,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             }
 
             // Check if this is a response to a delegation from this agent
-            if (!isFromAgent && event.kind === 1111) {
+            // NOTE: delegationRegistry is null during RAL migration - skip delegation tracking for now
+            if (!isFromAgent && event.kind === 1111 && delegationRegistry) {
                 const delegationRecord = delegationRegistry.getDelegationByConversationKey(
                     context.conversationId,
                     agentPubkey,
@@ -496,10 +499,11 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const delegationResponseEventIds = new Set<string>();
 
         // Identify delegations and responses
+        // NOTE: delegationRegistry is null during RAL migration - skip delegation tracking for now
         for (const eventContext of events) {
             const { event } = eventContext;
 
-            if (eventContext.isDelegationRequest && eventContext.delegationId) {
+            if (eventContext.isDelegationRequest && eventContext.delegationId && delegationRegistry) {
                 const record = delegationRegistry.getDelegationByConversationKey(
                     conversationId,
                     agentPubkey,
@@ -547,7 +551,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 }
             }
 
-            if (eventContext.isDelegationResponse && eventContext.delegationId) {
+            if (eventContext.isDelegationResponse && eventContext.delegationId && delegationRegistry) {
                 const delegation = delegationMap.get(eventContext.delegationId);
                 if (delegation) {
                     // Look up the delegation record to get the responder's slug
