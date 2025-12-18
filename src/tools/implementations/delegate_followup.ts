@@ -74,11 +74,11 @@ async function executeDelegateFollowup(
     __stopExecution: true,
     pendingDelegations: [
       {
+        type: "followup" as const,
         eventId,
         recipientPubkey,
         recipientSlug: recipient,
         prompt: message,
-        isFollowup: true,
       },
     ],
   };
