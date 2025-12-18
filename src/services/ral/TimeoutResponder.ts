@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { z } from "zod";
@@ -146,15 +146,18 @@ export class TimeoutResponder {
       }
       const systemPrompt = systemPromptParts.join("\n\n");
 
-      const response = await generateObject({
-        model,
-        schema: BusyResponseSchema,
-        system: systemPrompt,
-        messages: [
-          ...state.messages,
-          {
-            role: "system" as const,
-            content: `
+      let response: { object: z.infer<typeof BusyResponseSchema> };
+
+      try {
+        response = await generateObject({
+          model,
+          schema: BusyResponseSchema,
+          system: systemPrompt,
+          messages: [
+            ...state.messages,
+            {
+              role: "system" as const,
+              content: `
 EXECUTION CONTEXT:
 You are mid-execution and cannot immediately process new messages.
 ${summary}
@@ -163,14 +166,57 @@ A user message just arrived but you're busy. Generate:
 1. A brief acknowledgment for the user
 2. A context note for when you resume
 3. Whether to abort current work (true) or let it finish (false)
-            `.trim(),
+              `.trim(),
+            },
+            {
+              role: "user" as const,
+              content: event.content,
+            },
+          ],
+        });
+      } catch (generateObjectError) {
+        // generateObject can fail for models that don't support structured output
+        // Fall back to generateText and manually construct the response
+        logger.warn("[TimeoutResponder] generateObject failed, falling back to text generation", {
+          error: generateObjectError instanceof Error ? generateObjectError.message : String(generateObjectError),
+          agentPubkey: agentPubkey.substring(0, 8),
+        });
+
+        span.addEvent("generateObject_failed_fallback", {
+          error: generateObjectError instanceof Error ? generateObjectError.message : String(generateObjectError),
+        });
+
+        const textResult = await generateText({
+          model,
+          system: systemPrompt,
+          messages: [
+            ...state.messages,
+            {
+              role: "system" as const,
+              content: `
+EXECUTION CONTEXT:
+You are mid-execution and cannot immediately process new messages.
+${summary}
+
+A user message just arrived but you're busy. Respond with a brief acknowledgment.
+              `.trim(),
+            },
+            {
+              role: "user" as const,
+              content: event.content,
+            },
+          ],
+        });
+
+        // Construct a default response from the text
+        response = {
+          object: {
+            message_for_user: textResult.text || "I'm currently processing a task. I'll address your message shortly.",
+            system_message_for_active_ral: `[New user message received]: ${event.content}`,
+            stop_current_step: false,
           },
-          {
-            role: "user" as const,
-            content: event.content,
-          },
-        ],
-      });
+        };
+      }
 
       span.addEvent("response_generated", {
         "response.stop_current_step": response.object.stop_current_step,

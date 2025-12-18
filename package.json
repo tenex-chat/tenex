@@ -29,7 +29,7 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "postinstall": "[ -f patches/ai+5.0.106.patch ] && (cd node_modules/ai && patch -p1) < patches/ai+5.0.106.patch || true",
+    "postinstall": "[ -f patches/ai@5.0.108.patch ] && (cd node_modules/ai && patch -p1) < patches/ai@5.0.108.patch || true",
     "start": "bun run ./src/tenex.ts",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
