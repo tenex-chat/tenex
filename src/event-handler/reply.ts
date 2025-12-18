@@ -17,9 +17,34 @@ import { AgentPublisher } from "../nostr/AgentPublisher";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
-import { DelegationCompletionHandler } from "./DelegationCompletionHandler";
+import { DelegationCompletionHandler, type DelegationStatus } from "./DelegationCompletionHandler";
 
 const tracer = trace.getTracer("tenex.event-handler");
+
+/**
+ * Format a system message describing the current delegation status
+ */
+function formatDelegationStatusMessage(status: DelegationStatus): string {
+    const parts: string[] = [];
+
+    if (status.completedCount > 0) {
+        parts.push(`Delegation responses received (${status.completedCount}/${status.completedCount + status.pendingCount}):`);
+        for (const completed of status.completedDelegations) {
+            const agentName = completed.recipientSlug || completed.recipientPubkey.substring(0, 8);
+            parts.push(`\n- ${agentName}: ${completed.response}`);
+        }
+    }
+
+    if (status.pendingCount > 0) {
+        parts.push(`\n\nStill waiting for responses from:`);
+        for (const pending of status.pendingDelegations) {
+            const agentName = pending.recipientSlug || pending.recipientPubkey.substring(0, 8);
+            parts.push(`\n- ${agentName}`);
+        }
+    }
+
+    return parts.join("");
+}
 
 interface EventHandlerContext {
     conversationCoordinator: ConversationCoordinator;
@@ -176,24 +201,43 @@ async function handleReplyLogic(
     );
 
     if (delegationResult.shouldReactivate && delegationResult.isResumption && delegationResult.targetAgent) {
+        const { delegationStatus } = delegationResult;
+        const isPartialCompletion = delegationStatus && delegationStatus.pendingCount > 0;
+
         const resumptionSpan = tracer.startSpan("tenex.delegation.resumption", {
             attributes: {
                 "agent.slug": delegationResult.targetAgent.slug,
                 "agent.pubkey": delegationResult.targetAgent.pubkey,
                 "conversation.id": conversation.id,
                 "event.id": event.id || "",
+                "delegation.is_partial": isPartialCompletion || false,
+                "delegation.completed_count": delegationStatus?.completedCount || 0,
+                "delegation.pending_count": delegationStatus?.pendingCount || 0,
             },
         });
 
-        logger.info("[handleReplyLogic] Delegation complete - resuming paused agent", {
+        const statusLabel = isPartialCompletion ? "partial completion" : "all complete";
+        logger.info(`[handleReplyLogic] Delegation ${statusLabel} - resuming paused agent`, {
             agent: delegationResult.targetAgent.slug,
             eventId: event.id?.substring(0, 8),
+            completedCount: delegationStatus?.completedCount,
+            pendingCount: delegationStatus?.pendingCount,
         });
 
-        console.log(chalk.green(`\n▶️  Resuming ${delegationResult.targetAgent.slug} after delegation completion`));
+        console.log(chalk.green(`\n▶️  Resuming ${delegationResult.targetAgent.slug} after delegation ${statusLabel}`));
 
         // Mark RAL as resuming before execution
         const ralRegistry = RALRegistry.getInstance();
+
+        // Inject system message about delegation status
+        if (delegationStatus) {
+            const statusMessage = formatDelegationStatusMessage(delegationStatus);
+            ralRegistry.queueSystemMessage(delegationResult.targetAgent.pubkey, statusMessage);
+            resumptionSpan.addEvent("delegation_status_injected", {
+                "message.length": statusMessage.length,
+            });
+        }
+
         ralRegistry.markResuming(delegationResult.targetAgent.pubkey);
 
         resumptionSpan.addEvent("ral.marked_resuming");
