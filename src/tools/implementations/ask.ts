@@ -55,10 +55,10 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
     __stopExecution: true,
     pendingDelegations: [
       {
+        type: "ask" as const,
         eventId,
         recipientPubkey: ownerPubkey,
         prompt: content,
-        isAsk: true,
         suggestions,
       },
     ],
