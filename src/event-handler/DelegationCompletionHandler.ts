@@ -1,10 +1,10 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
-// import { TagExtractor } from "@/nostr/TagExtractor"; // Unused after RAL migration
-// import { getProjectContext } from "@/services/ProjectContext"; // Unused after RAL migration
+import { TagExtractor } from "@/nostr/TagExtractor";
+import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-// import chalk from "chalk"; // Unused after RAL migration
+import { RALRegistry } from "@/services/ral";
 
 export interface DelegationCompletionResult {
     shouldReactivate: boolean;
@@ -14,23 +14,102 @@ export interface DelegationCompletionResult {
 
 /**
  * DelegationCompletionHandler encapsulates all logic for processing delegation completion events.
- * This includes updating the DelegationRegistry, determining if all delegations in a batch
- * are complete, and preparing the context for agent reactivation.
+ * This includes updating the RALRegistry, recording the completion, and queuing the event
+ * for injection into the paused agent execution.
  */
 
 // biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
 export class DelegationCompletionHandler {
     /**
-     * Process a delegation completion event using the DelegationRegistry
-     * TODO: This needs to be updated to use RALRegistry (see Task 11 in implementation plan)
+     * Process a delegation completion event using RALRegistry
+     *
+     * Flow:
+     * 1. Find which delegation this responds to (via e-tag)
+     * 2. Look up which RAL this belongs to
+     * 3. Record the completion
+     * 4. Queue the event for injection
+     * 5. Let the normal event handler flow handle the resume (via injection or new execution)
      */
     static async handleDelegationCompletion(
-        _event: NDKEvent,
+        event: NDKEvent,
         _conversation: Conversation,
         _conversationCoordinator: ConversationCoordinator
     ): Promise<DelegationCompletionResult> {
-        // Temporarily disabled - needs RAL migration
-        logger.warn("[DelegationCompletionHandler] Not yet migrated to RAL system. See Task 11 in experimental-delegation-implementation.md");
+        const ralRegistry = RALRegistry.getInstance();
+
+        // Find which delegation this responds to (via e-tag)
+        const delegationEventId = TagExtractor.getFirstETag(event);
+        if (!delegationEventId) {
+            logger.debug("[DelegationCompletionHandler] No e-tag found in completion event", {
+                eventId: event.id?.substring(0, 8),
+            });
+            return { shouldReactivate: false };
+        }
+
+        // Look up which RAL this belongs to
+        const ralId = ralRegistry.getRalIdForDelegation(delegationEventId);
+        if (!ralId) {
+            logger.debug("[DelegationCompletionHandler] Not a tracked delegation", {
+                delegationEventId: delegationEventId.substring(0, 8),
+                eventId: event.id?.substring(0, 8),
+            });
+            return { shouldReactivate: false };
+        }
+
+        // Get the RAL state to find the agent pubkey
+        // We need to find which agent this RAL belongs to
+        // The ralId is the state.id, but we need to find the agentPubkey
+        // We can search through all states to find the one with this ralId
+        const projectCtx = getProjectContext();
+        const agents = Array.from(projectCtx.agents.values());
+
+        let agentPubkey: string | undefined;
+        let targetAgent: AgentInstance | undefined;
+
+        for (const agent of agents) {
+            const state = ralRegistry.getStateByAgent(agent.pubkey);
+            if (state && state.id === ralId) {
+                agentPubkey = agent.pubkey;
+                targetAgent = agent;
+                break;
+            }
+        }
+
+        if (!agentPubkey || !targetAgent) {
+            logger.warn("[DelegationCompletionHandler] Could not find agent for RAL", {
+                ralId: ralId.substring(0, 8),
+                delegationEventId: delegationEventId.substring(0, 8),
+            });
+            return { shouldReactivate: false };
+        }
+
+        logger.info("[DelegationCompletionHandler] Processing delegation completion", {
+            ralId: ralId.substring(0, 8),
+            delegationEventId: delegationEventId.substring(0, 8),
+            agentSlug: targetAgent.slug,
+            completionEventId: event.id?.substring(0, 8),
+        });
+
+        // Record the completion
+        ralRegistry.recordCompletion(agentPubkey, {
+            eventId: delegationEventId,
+            recipientPubkey: event.pubkey,
+            response: event.content,
+            responseEventId: event.id,
+            completedAt: Date.now(),
+        });
+
+        // Queue the event for injection
+        ralRegistry.queueEvent(agentPubkey, event);
+
+        logger.info("[DelegationCompletionHandler] Queued completion event for injection", {
+            agentSlug: targetAgent.slug,
+            agentPubkey: agentPubkey.substring(0, 8),
+            completionEventId: event.id?.substring(0, 8),
+        });
+
+        // Return that this should NOT trigger reactivation
+        // The normal event handler flow will handle the resume via injection
         return { shouldReactivate: false };
 
         /* Original code commented out until RAL migration
