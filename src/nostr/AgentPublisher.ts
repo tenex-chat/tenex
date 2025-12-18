@@ -103,6 +103,9 @@ export class AgentPublisher {
             event.tags.push(["P", context.rootEvent.pubkey]);
         }
 
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
+
         // Add phase tags if present
         if (params.phase) {
             event.tags.push(["phase", params.phase]);
@@ -151,6 +154,9 @@ export class AgentPublisher {
             event.tags.push(["P", context.rootEvent.pubkey]);
         }
 
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
+
         // Add ask marker
         event.tags.push(["ask", "true"]);
 
@@ -197,6 +203,9 @@ export class AgentPublisher {
             event.tags.push(["K", String(context.rootEvent.kind)]);
             event.tags.push(["P", context.rootEvent.pubkey]);
         }
+
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
 
         // Reply to specific event if provided
         if (params.replyToEventId) {
