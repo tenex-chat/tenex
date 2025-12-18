@@ -802,8 +802,24 @@ export class AgentExecutor {
                 const lastStep = steps[steps.length - 1];
                 const toolResults = lastStep.toolResults ?? [];
 
+                logger.debug("[AgentExecutor] onStopCheck called", {
+                    stepCount: steps.length,
+                    toolResultCount: toolResults.length,
+                    toolNames: toolResults.map((r: any) => r.toolName),
+                });
+
                 for (const toolResult of toolResults) {
-                    if (isStopExecutionSignal(toolResult.result)) {
+                    const hasStopSignal = isStopExecutionSignal(toolResult.result);
+                    logger.debug("[AgentExecutor] Checking tool result", {
+                        toolName: toolResult.toolName,
+                        hasStopSignal,
+                        resultType: typeof toolResult.result,
+                        resultKeys: toolResult.result && typeof toolResult.result === "object"
+                            ? Object.keys(toolResult.result)
+                            : [],
+                    });
+
+                    if (hasStopSignal) {
                         logger.info("[AgentExecutor] Detected delegation stop signal", {
                             agent: context.agent.slug,
                             delegationCount: toolResult.result.pendingDelegations.length,

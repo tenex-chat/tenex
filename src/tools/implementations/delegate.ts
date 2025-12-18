@@ -127,14 +127,18 @@ async function executeDelegate(
     throw new Error("No valid recipients provided.");
   }
 
-  logger.info("[delegate] Published delegations, returning stop signal", {
-    count: pendingDelegations.length,
-  });
-
-  return {
-    __stopExecution: true,
+  const stopSignal = {
+    __stopExecution: true as const,
     pendingDelegations,
   };
+
+  logger.info("[delegate] Published delegations, returning stop signal", {
+    count: pendingDelegations.length,
+    signalKeys: Object.keys(stopSignal),
+    hasStopExecution: stopSignal.__stopExecution,
+  });
+
+  return stopSignal;
 }
 
 export function createDelegateTool(context: ExecutionContext): AISdkTool {
