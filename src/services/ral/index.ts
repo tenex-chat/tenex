@@ -1,3 +1,3 @@
 export { RALRegistry } from "./RALRegistry";
-export { TimeoutResponder } from "./TimeoutResponder";
+export { BusyResponder } from "./BusyResponder";
 export * from "./types";

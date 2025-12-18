@@ -1,7 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
-// import { getProjectContext } from "@/services/ProjectContext"; // Unused after RAL migration
 import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
@@ -15,7 +14,7 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { RALRegistry, TimeoutResponder, isStopExecutionSignal } from "@/services/ral";
+import { RALRegistry, BusyResponder, isStopExecutionSignal } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
@@ -137,7 +136,7 @@ export class AgentExecutor {
 
                     // Immediately generate acknowledgment for user
                     const agentPublisher = new AgentPublisher(context.agent);
-                    const busyResponder = TimeoutResponder.getInstance();
+                    const busyResponder = BusyResponder.getInstance();
                     busyResponder.processImmediately(
                         context.agent.pubkey,
                         context.triggeringEvent,
@@ -754,12 +753,12 @@ export class AgentExecutor {
                 logger.info(`[prepareStep] Injecting ${newInjections.length} message(s) from RAL queue`, {
                     agent: context.agent.slug,
                     stepNumber: step.stepNumber,
-                    messageTypes: newInjections.map((q) => q.type),
+                    messageRoles: newInjections.map((q) => q.role),
                 });
 
                 // Convert to model messages
                 const injectedMessages: ModelMessage[] = newInjections.map((q) => ({
-                    role: q.type as "user" | "system",
+                    role: q.role,
                     content: q.content,
                 }));
 
@@ -768,7 +767,7 @@ export class AgentExecutor {
                     executionSpan.addEvent("ral_injection.process", {
                         "injection.message_count": newInjections.length,
                         "injection.step_number": step.stepNumber,
-                        "injection.types": newInjections.map((q) => q.type).join(","),
+                        "injection.roles": newInjections.map((q) => q.role).join(","),
                         "agent.slug": context.agent.slug,
                     });
                 }

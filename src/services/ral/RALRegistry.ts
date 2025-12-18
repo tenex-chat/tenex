@@ -259,7 +259,7 @@ export class RALRegistry {
     }
 
     state.queuedInjections.push({
-      type: "user",
+      role: "user",
       content: event.content,
       eventId: event.id,
       queuedAt: Date.now(),
@@ -309,7 +309,7 @@ export class RALRegistry {
     }
 
     state.queuedInjections.push({
-      type: "system",
+      role: "system",
       content,
       queuedAt: Date.now(),
     });
@@ -362,7 +362,7 @@ export class RALRegistry {
     // Append to messages so they're included on recursion via getMessages()
     for (const injection of newInjections) {
       state.messages.push({
-        role: injection.type as "user" | "system",
+        role: injection.role,
         content: injection.content,
       });
     }
@@ -373,7 +373,7 @@ export class RALRegistry {
       activeSpan.addEvent("ral.injections_persisted", {
         "ral.id": state.id,
         "injection.count": newInjections.length,
-        "injection.types": newInjections.map((i) => i.type).join(","),
+        "injection.roles": newInjections.map((i) => i.role).join(","),
         "total_messages": state.messages.length,
         "agent.pubkey": agentPubkey,
       });
@@ -415,7 +415,7 @@ export class RALRegistry {
 
     // Add system message
     state.queuedInjections.push({
-      type: "system",
+      role: "system",
       content: systemContent,
       queuedAt: Date.now(),
     });
