@@ -298,7 +298,14 @@ export class AgentEventEncoder {
 
             event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
-            this.addConversationTags(event, context);
+            // Add root conversation tags (E, K, P)
+            this.tagConversation(event, context.rootEvent);
+
+            // Always e-tag the triggering event for delegations
+            // This is critical for threading - the delegated agent needs to know which event triggered the delegation
+            if (context.triggeringEvent.id) {
+                event.tag(["e", context.triggeringEvent.id]);
+            }
 
             // Add recipient as p-tag
             event.tag(["p", delegation.recipient]);

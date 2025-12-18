@@ -23,22 +23,62 @@ interface ConversationGetOutput {
 }
 
 /**
+ * Safely copy data while handling circular references
+ * Uses JSON.stringify with a replacer function that tracks seen objects
+ * and replaces circular references with '[Circular]'
+ */
+function safeCopy<T>(data: T): T {
+    const seen = new WeakSet();
+
+    const replacer = (_key: string, value: any) => {
+        if (typeof value === "object" && value !== null) {
+            if (seen.has(value)) {
+                return "[Circular]";
+            }
+            seen.add(value);
+        }
+        return value;
+    };
+
+    try {
+        return JSON.parse(JSON.stringify(data, replacer));
+    } catch (error) {
+        // If JSON.stringify still fails, return a safe fallback
+        return data;
+    }
+}
+
+/**
  * Serialize a Conversation object to a JSON-safe plain object
- * Handles circular references in NDKEvent objects and converts Map to plain object
+ * Explicitly constructs result field-by-field to avoid copying cyclic properties
+ * that may be runtime-attached to the conversation object.
+ * Uses safeCopy for nested objects to handle any remaining circular references.
  */
 function serializeConversation(conversation: Conversation): Record<string, any> {
+    // Convert agentStates Map to object first, then safeCopy
+    const agentStatesObj = conversation.agentStates
+        ? Object.fromEntries(conversation.agentStates.entries())
+        : {};
+
     return {
-        ...conversation,
-        agentStates: conversation.agentStates
-            ? Object.fromEntries(conversation.agentStates.entries())
-            : {},
+        id: conversation.id,
+        title: conversation.title,
+        phase: conversation.phase,
+        phaseStartedAt: conversation.phaseStartedAt,
+        metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
+        executionTime: conversation.executionTime ? safeCopy(conversation.executionTime) : {
+            totalSeconds: 0,
+            isActive: false,
+            lastUpdated: Date.now()
+        },
+        agentStates: safeCopy(agentStatesObj),
         history: conversation.history.map(event => ({
             id: event.id,
             kind: event.kind,
             pubkey: event.pubkey,
             content: event.content,
             created_at: event.created_at,
-            tags: event.tags,
+            tags: safeCopy(event.tags),
             sig: event.sig
         }))
     };
