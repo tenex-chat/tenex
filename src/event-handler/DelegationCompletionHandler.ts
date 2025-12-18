@@ -1,12 +1,10 @@
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
-import { TagExtractor } from "@/nostr/TagExtractor";
-import { getProjectContext } from "@/services/ProjectContext";
-import type { DelegationRecord } from "@/services/delegation";
-import { DelegationRegistryService } from "@/services/delegation";
+// import { TagExtractor } from "@/nostr/TagExtractor"; // Unused after RAL migration
+// import { getProjectContext } from "@/services/ProjectContext"; // Unused after RAL migration
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
+// import chalk from "chalk"; // Unused after RAL migration
 
 export interface DelegationCompletionResult {
     shouldReactivate: boolean;
@@ -24,16 +22,18 @@ export interface DelegationCompletionResult {
 export class DelegationCompletionHandler {
     /**
      * Process a delegation completion event using the DelegationRegistry
-     * Updated to use conversation key lookups instead of synthetic IDs
+     * TODO: This needs to be updated to use RALRegistry (see Task 11 in implementation plan)
      */
     static async handleDelegationCompletion(
-        event: NDKEvent,
-        conversation: Conversation,
-        conversationCoordinator: ConversationCoordinator
+        _event: NDKEvent,
+        _conversation: Conversation,
+        _conversationCoordinator: ConversationCoordinator
     ): Promise<DelegationCompletionResult> {
-        const registry = DelegationRegistryService.getInstance();
-        let delegationContext: DelegationRecord | undefined;
+        // Temporarily disabled - needs RAL migration
+        logger.warn("[DelegationCompletionHandler] Not yet migrated to RAL system. See Task 11 in experimental-delegation-implementation.md");
+        return { shouldReactivate: false };
 
+        /* Original code commented out until RAL migration
         logger.info("🔍 [DelegationCompletionHandler] Processing potential delegation completion", {
             eventId: event.id?.substring(0, 8),
             from: event.pubkey.substring(0, 16),
@@ -236,5 +236,6 @@ export class DelegationCompletionHandler {
             });
             return { shouldReactivate: false };
         }
+        */
     }
 }

@@ -1,7 +1,7 @@
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isProjectContextInitialized } from "@/services/ProjectContext";
-import { DelegationRegistryService } from "@/services/delegation";
+// import { DelegationRegistryService } from "@/services/delegation"; // Removed - migrating to RAL
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -103,16 +103,19 @@ export class EventToModelMessage {
      * Check if this is a delegation response and format accordingly
      */
     private static async checkDelegationResponse(
-        event: NDKEvent,
-        processedContent: string,
-        targetAgentPubkey: string,
+        _event: NDKEvent,
+        _processedContent: string,
+        _targetAgentPubkey: string,
         conversationId?: string
     ): Promise<ModelMessage | null> {
-        if (!conversationId || isEventFromUser(event) || !isProjectContextInitialized()) {
+        if (!conversationId || !isProjectContextInitialized()) {
             return null;
         }
 
         try {
+            // Temporarily disabled during RAL migration
+            return null;
+            /*
             const registry = DelegationRegistryService.getInstance();
 
             // Check if there's a delegation record for this conversation
@@ -141,6 +144,7 @@ export class EventToModelMessage {
                     content: `[DELEGATION RESPONSE from ${responderName}]:\n${processedContent}\n[END DELEGATION RESPONSE]`,
                 };
             }
+            */
         } catch (error) {
             // If registry is not initialized, continue with normal processing
             logger.debug("[EventToModelMessage] Could not check for external delegation context", {

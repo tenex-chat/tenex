@@ -1,7 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { providerSupportsStreaming } from "@/llm/provider-configs";
-import { getProjectContext } from "@/services/ProjectContext";
+// import { getProjectContext } from "@/services/ProjectContext"; // Unused after RAL migration
 import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
@@ -15,8 +15,6 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { PairModeController } from "@/services/delegation/PairModeController";
-import { PairModeRegistry } from "@/services/delegation/PairModeRegistry";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -630,9 +628,6 @@ export class AgentExecutor {
             });
         });
 
-        // Check if this is a pair mode delegation and create controller if so
-        const pairModeController = this.createPairModeController(context);
-
         try {
             // Capture the current span for use in prepareStep callback
             // prepareStep is called synchronously by AI SDK and may not have access to OTel context
@@ -643,44 +638,6 @@ export class AgentExecutor {
                 step: { messages: ModelMessage[]; stepNumber: number }
             ): { messages?: ModelMessage[] } | undefined => {
                 let result: { messages?: ModelMessage[] } | undefined;
-
-                // Handle pair mode corrections (sync - corrections queued by onStopCheck)
-                if (pairModeController) {
-                    const corrections = pairModeController.getPendingCorrections();
-                    if (corrections.length > 0) {
-                        // Get delegator's slug for the correction message
-                        const pairRegistry = PairModeRegistry.getInstance();
-                        const pairState = pairRegistry.getState(pairModeController.getBatchId());
-                        const delegatorPubkey = pairState?.delegatorPubkey;
-                        const delegator = delegatorPubkey
-                            ? getProjectContext().getAgentByPubkey(delegatorPubkey)
-                            : undefined;
-                        const delegatorSlug = delegator?.slug || "delegator";
-
-                        const correctionMessages: ModelMessage[] = corrections.map((msg) => ({
-                            role: "user" as const,
-                            content: `[PAIR MODE CORRECTION from ${delegatorSlug}]: ${msg}`,
-                        }));
-
-                        // Add trace event for pair mode correction injection
-                        if (executionSpan) {
-                            executionSpan.addEvent("pair_mode.correction_injected", {
-                                "correction.count": corrections.length,
-                                "correction.step_number": step.stepNumber,
-                                "agent.slug": context.agent.slug,
-                            });
-                        }
-
-                        logger.info("[prepareStep] Injecting pair mode corrections", {
-                            agent: context.agent.slug,
-                            correctionCount: corrections.length,
-                        });
-
-                        result = {
-                            messages: [...step.messages, ...correctionMessages],
-                        };
-                    }
-                }
 
                 // Handle existing message injection
                 if (injectedEvents.length > 0) {
@@ -736,40 +693,14 @@ export class AgentExecutor {
             };
 
             // Create onStopCheck for pair mode (async - handles check-ins)
-            const onStopCheck = pairModeController?.createStopCheck();
+            // const onStopCheck = pairModeController?.createStopCheck(); // Removed during RAL migration
+            const onStopCheck = undefined;
 
             // Publish empty 21111 to signal execution start (implicit typing indicator)
             await agentPublisher.publishStreamingDelta("", eventContext, false);
 
             await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
-
-            // If pair mode, check if we were aborted or completed
-            if (pairModeController) {
-                const pairRegistry = PairModeRegistry.getInstance();
-                if (pairModeController.isAborted()) {
-                    // Handle abort
-                    logger.info("[AgentExecutor] Pair mode delegation was aborted", {
-                        agent: context.agent.slug,
-                        reason: pairModeController.getAbortReason(),
-                    });
-                    pairRegistry.abortDelegation(
-                        pairModeController.getBatchId(),
-                        pairModeController.getAbortReason()
-                    );
-                } else {
-                    // Mark as complete
-                    pairRegistry.completeDelegation(pairModeController.getBatchId());
-                }
-            }
         } catch (streamError) {
-            // Clean up pair mode state on any error
-            if (pairModeController) {
-                const pairRegistry = PairModeRegistry.getInstance();
-                pairRegistry.abortDelegation(
-                    pairModeController.getBatchId(),
-                    streamError instanceof Error ? streamError.message : "Stream error"
-                );
-            }
             // Publish error event for stream errors
             try {
                 const { message: errorMessage, errorType } = formatStreamError(streamError);
@@ -825,42 +756,4 @@ export class AgentExecutor {
         return completionEvent;
     }
 
-    /**
-     * Create a PairModeController if this execution is part of a pair mode delegation.
-     * Returns undefined if not in pair mode.
-     *
-     * The PairModeRegistry is the single source of truth for active pair delegations.
-     * It's populated by the DelegationService when a pair mode delegation is started.
-     */
-    private createPairModeController(context: ExecutionContext): PairModeController | undefined {
-        try {
-            // PairModeRegistry is the single source of truth for active pair delegations
-            const pairRegistry = PairModeRegistry.getInstance();
-
-            // Look for an active pair delegation that this agent might be part of
-            const state = pairRegistry.findDelegationByAgent(context.agent.pubkey);
-
-            if (state) {
-                logger.info("[AgentExecutor] Creating PairModeController for pair delegation", {
-                    agent: context.agent.slug,
-                    batchId: state.batchId,
-                    stepThreshold: state.config.stepThreshold,
-                });
-
-                return new PairModeController(
-                    state.batchId,
-                    context.agent.pubkey,
-                    context.agent.slug,
-                    state.config
-                );
-            }
-        } catch (error) {
-            logger.warn("[AgentExecutor] Error checking for pair mode delegation", {
-                agent: context.agent.slug,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-
-        return undefined;
-    }
 }
