@@ -9,7 +9,7 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
-import { DelegationRegistryService } from "@/services/delegation";
+// import { DelegationRegistryService } from "@/services/delegation"; // Removed - migrating to RAL
 import { NudgeService } from "@/services/NudgeService";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
@@ -169,7 +169,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
     ): Promise<EventWithContext[]> {
         const agentPubkey = context.agent.pubkey;
         const relevantEvents: EventWithContext[] = [];
-        const delegationRegistry = DelegationRegistryService.getInstance();
+        // const delegationRegistry = DelegationRegistryService.getInstance(); // Removed - migrating to RAL
+        const delegationRegistry: any = null; // Stub for now
 
         // Track delegations this agent has made
         const outgoingDelegations = new Map<string, { content: string; targets: string[] }>();
@@ -422,7 +423,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         event: NDKEvent,
         agentPubkey: string,
         conversationId: string,
-        registry: DelegationRegistryService
+        registry: any // DelegationRegistryService - Removed during RAL migration
     ): Promise<boolean> {
         if (event.kind !== 1111) {
             return false;
@@ -472,7 +473,8 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const messages: ModelMessage[] = [];
         const nameRepo = getPubkeyService();
         const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
-        const delegationRegistry = DelegationRegistryService.getInstance();
+        // const delegationRegistry = DelegationRegistryService.getInstance(); // Removed - migrating to RAL
+        const delegationRegistry: any = null; // Stub for now
 
         // First pass: Collect all delegations and their responses
         interface DelegationData {

@@ -1,8 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { getProjectContext } from "@/services/ProjectContext";
-import { type DelegationResponses, DelegationService } from "@/services/delegation";
+// import { getProjectContext } from "@/services/ProjectContext"; // Unused after RAL migration
 import type { AISdkTool } from "@/tools/types";
-import { logger } from "@/utils/logger";
+// import { logger } from "@/utils/logger"; // Unused after RAL migration
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -17,56 +16,11 @@ const askSchema = z.object({
 });
 
 type AskInput = z.infer<typeof askSchema>;
-type AskOutput = DelegationResponses;
 
 // Core implementation
-async function executeAsk(input: AskInput, context: ExecutionContext): Promise<AskOutput> {
-    const { content, suggestions } = input;
-
-    // Get project owner pubkey - this is who we'll ask
-    const projectCtx = getProjectContext();
-    const ownerPubkey = projectCtx?.project?.pubkey;
-
-    if (!ownerPubkey) {
-        throw new Error("No project owner configured - cannot determine who to ask");
-    }
-
-    logger.info("[ask() tool] 🤔 Asking question to project manager/human", {
-        fromAgent: context.agent.slug,
-        content,
-        hassuggestions: !!suggestions,
-        suggestionCount: suggestions?.length,
-    });
-
-    // Use DelegationService to execute the ask operation
-    // This ensures we wait for a response just like other delegation tools
-    const delegationService = new DelegationService(
-        context.agent,
-        context.conversationId,
-        context.conversationCoordinator,
-        context.triggeringEvent,
-        context.agentPublisher!,
-        context.projectBasePath,
-        context.currentBranch
-    );
-
-    // Execute as an Ask intent (will be encoded specially)
-    const responses = await delegationService.execute({
-        type: "ask",
-        delegations: [
-            {
-                recipient: ownerPubkey,
-                request: content,
-            },
-        ],
-        suggestions,
-    });
-
-    logger.info("[ask() tool] ✅ Received response", {
-        responseCount: responses.responses.length,
-    });
-
-    return responses;
+// TODO: This needs to be updated to use RALRegistry (see Task 5 in implementation plan)
+async function executeAsk(_input: AskInput, _context: ExecutionContext): Promise<any> {
+    throw new Error("Ask tool not yet migrated to RAL system. See Task 5 in experimental-delegation-implementation.md");
 }
 
 // AI SDK tool factory

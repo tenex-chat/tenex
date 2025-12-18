@@ -8,7 +8,7 @@ import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/ProjectContext";
-import { DelegationRegistryService } from "@/services/delegation";
+// import { DelegationRegistryService } from "@/services/delegation"; // Removed - migrating to RAL
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
@@ -38,7 +38,7 @@ export class EventHandler {
 
     async initialize(): Promise<void> {
         // Initialize DelegationRegistryService singleton first
-        await DelegationRegistryService.initialize();
+        // await DelegationRegistryService.initialize(); // Removed - migrating to RAL
 
         // Initialize components directly
         this.agentExecutor = new AgentExecutor();
@@ -113,9 +113,11 @@ export class EventHandler {
         );
 
         // Check if this is a delegation response BEFORE routing
-        const delegationRegistry = DelegationRegistryService.getInstance();
-        if (delegationRegistry.isDelegationResponse(event)) {
-            await delegationRegistry.handleDelegationResponse(event);
+        // const delegationRegistry = DelegationRegistryService.getInstance(); // Removed - migrating to RAL
+        // Temporarily disabled delegation response handling during RAL migration
+        const isDelegationResponse = false; // delegationRegistry.isDelegationResponse(event);
+        if (isDelegationResponse) {
+            // await delegationRegistry.handleDelegationResponse(event);
 
             // Add the delegation response to conversation history for context
             const { ConversationResolver } = await import(

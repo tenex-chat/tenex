@@ -1,9 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { type DelegationResponses, DelegationService } from "@/services/delegation";
-import type { DelegationMode } from "@/services/delegation/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
-import { logger } from "@/utils/logger";
+// import { resolveRecipientToPubkey } from "@/utils/agent-resolution"; // Unused after RAL migration
+// import { logger } from "@/utils/logger"; // Unused after RAL migration
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -42,123 +40,15 @@ interface DelegateInput {
     mode: "wait" | "pair";
 }
 
-type DelegateOutput = DelegationResponses;
-
 /**
  * Execute delegation with unified logic
+ * TODO: This needs to be updated to use RALRegistry (see Task 4 in implementation plan)
  */
 async function executeDelegate(
-    input: DelegateInput,
-    context: ExecutionContext
-): Promise<DelegateOutput> {
-    const { delegations, mode } = input;
-
-    if (!Array.isArray(delegations) || delegations.length === 0) {
-        throw new Error("At least one delegation is required");
-    }
-
-    // Resolve all recipients and build delegation intent
-    const resolvedDelegations: Array<{
-        recipient: string;
-        request: string;
-        branch?: string;
-        phase?: string;
-        phaseInstructions?: string;
-    }> = [];
-    const failedRecipients: string[] = [];
-
-    for (const delegation of delegations) {
-        const pubkey = resolveRecipientToPubkey(delegation.recipient);
-        if (!pubkey) {
-            failedRecipients.push(delegation.recipient);
-            continue;
-        }
-
-        // Check for phase if it exists on this delegation item
-        const phase = "phase" in delegation ? delegation.phase : undefined;
-        let phaseInstructions: string | undefined;
-
-        // Look up phase instructions if phase is specified
-        if (phase) {
-            if (!context.agent.phases) {
-                throw new Error(
-                    `Agent ${context.agent.name} does not have any phases defined. Cannot use phase '${phase}'.`
-                );
-            }
-
-            const normalizedPhase = phase.toLowerCase();
-            const phaseEntry = Object.entries(context.agent.phases).find(
-                ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
-            );
-
-            if (!phaseEntry) {
-                const availablePhases = Object.keys(context.agent.phases).join(", ");
-                throw new Error(
-                    `Phase '${phase}' not defined for agent ${context.agent.name}. Available phases: ${availablePhases}`
-                );
-            }
-
-            phaseInstructions = phaseEntry[1];
-        }
-
-        // Check for self-delegation
-        if (pubkey === context.agent.pubkey && !phase) {
-            throw new Error(
-                `Self-delegation is not permitted without a phase. Agent "${context.agent.slug}" cannot delegate to itself without specifying a phase.`
-            );
-        }
-
-        resolvedDelegations.push({
-            recipient: pubkey,
-            request: delegation.prompt,
-            branch: delegation.branch,
-            phase,
-            phaseInstructions,
-        });
-    }
-
-    if (failedRecipients.length > 0) {
-        logger.warn("Some recipients could not be resolved", {
-            failed: failedRecipients,
-            resolved: resolvedDelegations.length,
-        });
-    }
-
-    if (resolvedDelegations.length === 0) {
-        throw new Error("No valid recipients provided.");
-    }
-
-    // Use DelegationService to execute
-    if (!context.agentPublisher) {
-        throw new Error("AgentPublisher not available in execution context");
-    }
-
-    const delegationService = new DelegationService(
-        context.agent,
-        context.conversationId,
-        context.conversationCoordinator,
-        context.triggeringEvent,
-        context.agentPublisher,
-        context.projectBasePath,
-        context.currentBranch
-    );
-
-    // Map "wait" to "blocking" for internal DelegationMode
-    const internalMode: DelegationMode = mode === "wait" ? "blocking" : "pair";
-
-    const responses = await delegationService.execute(
-        { delegations: resolvedDelegations },
-        { mode: internalMode }
-    );
-
-    logger.info("[delegate() tool] ✅ COMPLETE: Received responses", {
-        delegationCount: resolvedDelegations.length,
-        responseCount: responses.responses.length,
-        worktreeCount: responses.worktrees?.length ?? 0,
-        mode,
-    });
-
-    return responses;
+    _input: DelegateInput,
+    _context: ExecutionContext
+): Promise<any> {
+    throw new Error("Delegation tool not yet migrated to RAL system. See Task 4 in experimental-delegation-implementation.md");
 }
 
 /**
