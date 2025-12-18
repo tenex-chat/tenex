@@ -9,12 +9,28 @@ import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.delegation");
 
+export interface DelegationStatus {
+    completedCount: number;
+    pendingCount: number;
+    completedDelegations: Array<{
+        recipientSlug?: string;
+        recipientPubkey: string;
+        response: string;
+    }>;
+    pendingDelegations: Array<{
+        recipientSlug?: string;
+        recipientPubkey: string;
+    }>;
+}
+
 export interface DelegationCompletionResult {
     shouldReactivate: boolean;
     targetAgent?: AgentInstance;
     replyTarget?: NDKEvent;
     /** If true, this is a RAL resumption (not a fresh execution) */
     isResumption?: boolean;
+    /** Status of delegations - provided when shouldReactivate is true */
+    delegationStatus?: DelegationStatus;
 }
 
 /**
@@ -128,6 +144,24 @@ export class DelegationCompletionHandler {
                 "delegation.completed_count": state?.completedDelegations.length || 0,
             });
 
+            // Build delegation status for the agent
+            const delegationStatus: DelegationStatus = {
+                completedCount: state?.completedDelegations.length || 0,
+                pendingCount: state?.pendingDelegations.length || 0,
+                completedDelegations: (state?.completedDelegations || []).map(d => ({
+                    recipientSlug: d.recipientSlug,
+                    recipientPubkey: d.recipientPubkey,
+                    response: d.response,
+                })),
+                pendingDelegations: (state?.pendingDelegations || []).map(d => ({
+                    recipientSlug: d.recipientSlug,
+                    recipientPubkey: d.recipientPubkey,
+                })),
+            };
+
+            // Find the original triggering event to use as reply target
+            const replyTarget = conversation.history?.[0];
+
             if (allComplete) {
                 span.addEvent("all_delegations_complete", {
                     "action": "trigger_resumption",
@@ -139,30 +173,35 @@ export class DelegationCompletionHandler {
                     agentPubkey: agentPubkey.substring(0, 8),
                 });
 
-                // Find the original triggering event to use as reply target
-                const replyTarget = conversation.history?.[0];
-
                 return {
                     shouldReactivate: true,
                     targetAgent,
                     replyTarget,
                     isResumption: true,
+                    delegationStatus,
                 };
             }
 
-            // Still waiting for more delegations
-            span.addEvent("waiting_for_more", {
+            // Partial completion - still reactivate so agent can decide what to do
+            span.addEvent("partial_completion", {
+                "completed": state?.completedDelegations.length || 0,
                 "remaining": state?.pendingDelegations.length || 0,
             });
             span.setStatus({ code: SpanStatusCode.OK });
 
-            logger.info("[DelegationCompletionHandler] Waiting for more delegations", {
+            logger.info("[DelegationCompletionHandler] Partial delegation completion, reactivating agent", {
                 agentSlug: targetAgent.slug,
-                remainingPending: state?.pendingDelegations.length || 0,
                 completedCount: state?.completedDelegations.length || 0,
+                remainingPending: state?.pendingDelegations.length || 0,
             });
 
-            return { shouldReactivate: false };
+            return {
+                shouldReactivate: true,
+                targetAgent,
+                replyTarget,
+                isResumption: true,
+                delegationStatus,
+            };
         } catch (error) {
             span.recordException(error as Error);
             span.setStatus({ code: SpanStatusCode.ERROR });
