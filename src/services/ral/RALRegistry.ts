@@ -1,4 +1,4 @@
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
@@ -142,7 +142,7 @@ export class RALRegistry {
   /**
    * Save/update messages for the current execution (RAL is single source of truth)
    */
-  saveMessages(agentPubkey: string, messages: CoreMessage[]): void {
+  saveMessages(agentPubkey: string, messages: ModelMessage[]): void {
     const state = this.states.get(agentPubkey);
     if (!state) {
       logger.warn("[RALRegistry] No RAL found to save messages", {
@@ -163,7 +163,7 @@ export class RALRegistry {
   /**
    * Get messages for the current execution (returns empty if no RAL or no messages saved)
    */
-  getMessages(agentPubkey: string): CoreMessage[] {
+  getMessages(agentPubkey: string): ModelMessage[] {
     const state = this.states.get(agentPubkey);
     if (!state || state.messages.length === 0) return [];
     return [...state.messages];
@@ -182,7 +182,7 @@ export class RALRegistry {
    */
   saveState(
     agentPubkey: string,
-    messages: CoreMessage[],
+    messages: ModelMessage[],
     pendingDelegations: PendingDelegation[]
   ): void {
     const state = this.states.get(agentPubkey);

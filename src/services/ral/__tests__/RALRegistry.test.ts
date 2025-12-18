@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -116,7 +116,7 @@ describe("RALRegistry", () => {
     it("should save messages and pending delegations", () => {
       registry.create(agentPubkey);
 
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         { role: "user", content: "Hello" },
         { role: "assistant", content: "Hi there" },
       ];
@@ -167,7 +167,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle saveState for non-existent agent gracefully", () => {
-      const messages: CoreMessage[] = [{ role: "user", content: "Test" }];
+      const messages: ModelMessage[] = [{ role: "user", content: "Test" }];
       const delegations: PendingDelegation[] = [];
 
       expect(() => {
@@ -621,7 +621,7 @@ describe("RALRegistry", () => {
     it("should return summary when between tool calls", () => {
       registry.create(agentPubkey);
 
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         { role: "user", content: "What is the weather?" },
         { role: "assistant", content: "Let me check that for you." },
       ];
@@ -646,7 +646,7 @@ describe("RALRegistry", () => {
     it("should include recent messages in summary", () => {
       registry.create(agentPubkey);
 
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         { role: "user", content: "Message 1" },
         { role: "assistant", content: "Message 2" },
         { role: "user", content: "Message 3" },
@@ -667,7 +667,7 @@ describe("RALRegistry", () => {
       registry.create(agentPubkey);
 
       const longContent = "a".repeat(200);
-      const messages: CoreMessage[] = [{ role: "user", content: longContent }];
+      const messages: ModelMessage[] = [{ role: "user", content: longContent }];
 
       registry.saveState(agentPubkey, messages, []);
 
@@ -734,7 +734,7 @@ describe("RALRegistry", () => {
     it("should handle messages with complex content", () => {
       registry.create(agentPubkey);
 
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         {
           role: "user",
           content: [

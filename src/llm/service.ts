@@ -270,7 +270,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             temperature?: number;
             maxTokens?: number;
         }
-    ): Promise<GenerateTextResult<Record<string, AISdkTool>, string>> {
+    ): Promise<GenerateTextResult<Record<string, AISdkTool>, any>> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();
 
@@ -289,7 +289,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
-                messages,
+                messages: messages as any,
                 tools: Object.keys(tools).map((name) => ({ name })),
                 startTime,
             })
@@ -473,7 +473,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
-                messages,
+                messages: messages as any,
                 tools: Object.keys(tools).map((name) => ({ name })),
                 startTime: Date.now(),
             })
@@ -537,7 +537,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             },
 
             onChunk: this.handleChunk.bind(this),
-            onFinish: this.createFinishHandler(startTime),
+            onFinish: this.createFinishHandler(startTime) as any,
         });
 
         // Consume the stream (this is what triggers everything!)
@@ -948,7 +948,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     private async logGenerationRequest(messages: ModelMessage[], startTime: number): Promise<void> {
         await this.llmLogger.logLLMRequest({
-            messages,
+            messages: messages as any,
             model: this.model,
             provider: this.provider,
             configKey: `${this.provider}:${this.model}`,

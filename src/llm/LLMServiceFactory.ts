@@ -6,7 +6,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createProviderRegistry } from "ai";
-import type { ProviderV2 } from "@ai-sdk/provider";
+// Using 'any' for provider types due to version mismatch between different provider packages
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createOllama } from "ollama-ai-provider-v2";
@@ -18,7 +18,7 @@ import { config as configService } from "@/services/ConfigService";
  * Factory for creating LLM services with proper provider initialization
  */
 export class LLMServiceFactory {
-    private providers: Map<string, ProviderV2> = new Map();
+    private providers: Map<string, any> = new Map();
     private registry: ReturnType<typeof createProviderRegistry> | null = null;
     private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
     private initialized = false;
@@ -109,7 +109,7 @@ export class LLMServiceFactory {
                         // Create Ollama provider with custom base URL if provided
                         const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
 
-                        this.providers.set(name, ollamaProvider as ProviderV2);
+                        this.providers.set(name, ollamaProvider as any);
                         logger.debug(
                             `[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || "default (http://localhost:11434)"}`
                         );
@@ -119,7 +119,7 @@ export class LLMServiceFactory {
                     case "gemini-cli": {
                         this.providers.set(
                             name,
-                            createGeminiProvider({ authType: "oauth-personal" }) as ProviderV2
+                            createGeminiProvider({ authType: "oauth-personal" }) as any
                         );
                         logger.debug("[LLMServiceFactory] Initialized Gemini CLI provider");
                         break;
@@ -273,7 +273,7 @@ export class LLMServiceFactory {
                 config.model,
                 config.temperature,
                 config.maxTokens,
-                providerFunction,
+                providerFunction as any,
                 context?.sessionId,
                 agentSlug
             );
