@@ -15,7 +15,6 @@ import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry, BusyResponder, isStopExecutionSignal } from "@/services/ral";
-import type { PendingDelegation } from "@/services/ral/types";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -40,7 +39,6 @@ export interface LLMCompletionRequest {
 
 export class AgentExecutor {
     private messageStrategy: MessageGenerationStrategy;
-    private pendingDelegations: PendingDelegation[] = [];
 
     constructor(
         private standaloneContext?: StandaloneAgentContext,
@@ -373,17 +371,19 @@ export class AgentExecutor {
         }
 
         // Check if we paused for delegation - if so, return without publishing completion
-        if (this.pendingDelegations.length > 0) {
+        // RAL is the single source of truth for delegation state
+        const ralRegistry = RALRegistry.getInstance();
+        const ralState = ralRegistry.getStateByAgent(context.agent.pubkey);
+
+        if (ralState?.status === "paused" && ralState.pendingDelegations.length > 0) {
             logger.info("[AgentExecutor] 🛑 Pausing for delegation, not publishing completion", {
                 agent: context.agent.slug,
-                pendingCount: this.pendingDelegations.length,
+                pendingCount: ralState.pendingDelegations.length,
             });
 
             // Display pause in console
-            console.log(chalk.yellow(`\n⏸️  ${context.agent.slug} paused - awaiting ${this.pendingDelegations.length} delegation(s)`));
+            console.log(chalk.yellow(`\n⏸️  ${context.agent.slug} paused - awaiting ${ralState.pendingDelegations.length} delegation(s)`));
 
-            // Clear pending delegations now that we've handled the pause
-            this.pendingDelegations = [];
             return undefined;
         }
 
@@ -803,21 +803,21 @@ export class AgentExecutor {
                     });
 
                     if (hasStopSignal) {
+                        const pendingDelegations = toolResult.output.pendingDelegations;
+
                         logger.info("[AgentExecutor] Detected delegation stop signal", {
                             agent: context.agent.slug,
-                            delegationCount: toolResult.output.pendingDelegations.length,
+                            delegationCount: pendingDelegations.length,
                         });
-
-                        // Store pending delegations for later handling
-                        this.pendingDelegations = toolResult.output.pendingDelegations;
 
                         // CRITICAL: Save RAL state immediately to avoid race condition
                         // The delegation completion might arrive before streaming fully completes,
                         // so we must register as "paused" NOW, not after streaming ends
-                        ralRegistry.saveState(context.agent.pubkey, messages, this.pendingDelegations);
+                        // RAL is the single source of truth - no instance field duplication
+                        ralRegistry.saveState(context.agent.pubkey, messages, pendingDelegations);
                         logger.info("[AgentExecutor] Saved RAL state immediately on stop signal", {
                             agent: context.agent.slug,
-                            pendingCount: this.pendingDelegations.length,
+                            pendingCount: pendingDelegations.length,
                             messageCount: messages.length,
                         });
 
@@ -885,13 +885,15 @@ export class AgentExecutor {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
-        // Handle RAL state based on finish reason and pending delegations
-        if (this.pendingDelegations.length > 0) {
+        // Handle RAL state based on finish reason
+        // Check RAL state directly - it's the single source of truth
+        const finalRalState = ralRegistry.getStateByAgent(context.agent.pubkey);
+
+        if (finalRalState?.status === "paused") {
             // Stopped for delegation - state already saved in onStopCheck to avoid race condition
-            // NOTE: Don't clear pendingDelegations here - executeWithSupervisor needs to check it
             logger.debug("[AgentExecutor] Delegation pause already saved in onStopCheck", {
                 agent: context.agent.slug,
-                pendingCount: this.pendingDelegations.length,
+                pendingCount: finalRalState.pendingDelegations.length,
             });
         } else if (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end") {
             // Normal completion - clear RAL state
