@@ -15,6 +15,8 @@ export interface DelegationCompletionResult {
     replyTarget?: NDKEvent;
     /** If true, this is a RAL resumption (not a fresh execution) */
     isResumption?: boolean;
+    /** If true, this event was recognized as completing a delegation (even if not all complete yet) */
+    wasDelegationCompletion?: boolean;
 }
 
 /**
@@ -162,7 +164,8 @@ export class DelegationCompletionHandler {
                 completedCount: state?.completedDelegations.length || 0,
             });
 
-            return { shouldReactivate: false };
+            // Return wasDelegationCompletion so the event handler knows to skip routing to this agent
+            return { shouldReactivate: false, targetAgent, wasDelegationCompletion: true };
         } catch (error) {
             span.recordException(error as Error);
             span.setStatus({ code: SpanStatusCode.ERROR });
