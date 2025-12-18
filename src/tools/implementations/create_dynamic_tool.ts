@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/ProjectContext";
@@ -103,8 +104,8 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
 // Export the factory function as default
 export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
-            // Determine the file path
-            const dynamicToolsDir = join(context.workingDirectory, ".tenex/tools");
+            // Determine the file path - must match DynamicToolService's watched path
+            const dynamicToolsDir = join(homedir(), ".tenex", "tools");
             const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
 
