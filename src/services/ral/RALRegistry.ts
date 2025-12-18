@@ -197,9 +197,9 @@ export class RALRegistry {
       queuedAt: Date.now(),
     });
 
-    // Add trace event for queuing
+    // Add trace event for queuing (only if span is still recording)
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.addEvent("ral.event_queued", {
         "ral.id": state.id,
         "ral.status": state.status,
@@ -236,9 +236,9 @@ export class RALRegistry {
       queuedAt: Date.now(),
     });
 
-    // Add trace event for queuing
+    // Add trace event for queuing (only if span is still recording)
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.addEvent("ral.system_message_queued", {
         "ral.id": state.id,
         "ral.status": state.status,
@@ -289,9 +289,9 @@ export class RALRegistry {
       });
     }
 
-    // Add trace event
+    // Add trace event (only if span is still recording)
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.addEvent("ral.injections_persisted", {
         "ral.id": state.id,
         "injection.count": newInjections.length,
@@ -342,9 +342,9 @@ export class RALRegistry {
       queuedAt: Date.now(),
     });
 
-    // Add trace event for swap
+    // Add trace event for swap (only if span is still recording)
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.addEvent("ral.event_swapped_to_system", {
         "ral.id": state.id,
         "event.id": eventId,
