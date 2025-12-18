@@ -146,8 +146,7 @@ export class AgentExecutor {
                     );
 
                     span.setStatus({ code: SpanStatusCode.OK });
-                    span.end();
-                    return; // Don't start new execution
+                    return; // Don't start new execution (span.end() called in finally)
                 }
 
                 if (existingRal?.status === "paused") {
@@ -223,8 +222,7 @@ export class AgentExecutor {
                         // Just return without starting execution
 
                         span.setStatus({ code: SpanStatusCode.OK });
-                        span.end();
-                        return; // Don't start new execution - wait for all delegations to complete
+                        return; // Don't start new execution - wait for all delegations (span.end() called in finally)
                     }
                 }
 
