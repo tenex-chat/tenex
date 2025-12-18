@@ -157,8 +157,8 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
   });
 
   const description = hasPhases
-    ? "Delegate tasks to one or more agents. Each delegation can have its own prompt, branch, and phase. Provide complete context - agents have no visibility into your conversation."
-    : "Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. Provide complete context - agents have no visibility into your conversation.";
+    ? "Delegate tasks to one or more agents. Each delegation can have its own prompt, branch, and phase. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt."
+    : "Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.";
 
   const aiTool = tool({
     description,

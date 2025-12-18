@@ -36,10 +36,231 @@ interface EventWithContext {
 }
 
 /**
+ * Represents a previous subthread this agent participated in
+ */
+interface PreviousSubthread {
+    delegationEventId: string;
+    delegatorSlug: string;
+    delegatorPubkey: string;
+    prompt: string;
+    response?: string;
+    timestamp: number;
+}
+
+/**
  * Message generation strategy that provides a flattened, chronological view
  * of all threads the agent has participated in, with delegation markers
  */
 export class FlattenedChronologicalStrategy implements MessageGenerationStrategy {
+    /**
+     * Detect if this is a delegated execution (this agent was delegated to by another agent)
+     */
+    private isDelegatedExecution(context: ExecutionContext): boolean {
+        const triggeringEvent = context.triggeringEvent;
+        const agentPubkey = context.agent.pubkey;
+
+        // Check if triggering event is from another agent and targets this agent
+        if (triggeringEvent.pubkey === agentPubkey) {
+            return false; // Self-triggered, not a delegation
+        }
+
+        // Check if this agent is in the p-tags (delegation target)
+        const pTags = triggeringEvent.getMatchingTags("p");
+        const isTargeted = pTags.some((tag) => tag[1] === agentPubkey);
+
+        if (!isTargeted) {
+            return false;
+        }
+
+        // Check if the sender is an agent (not a user)
+        const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
+        if (projectCtx) {
+            const senderAgent = projectCtx.getAgentByPubkey(triggeringEvent.pubkey);
+            if (senderAgent) {
+                return true; // Triggered by another agent targeting this agent = delegation
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Find previous subthreads this agent participated in (for re-invocation context)
+     */
+    private async gatherPreviousSubthreads(
+        agentPubkey: string,
+        currentDelegationEventId: string,
+        allEvents: NDKEvent[]
+    ): Promise<PreviousSubthread[]> {
+        const subthreads: PreviousSubthread[] = [];
+        const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
+        const nameRepo = getPubkeyService();
+
+        // Find all delegation events TO this agent (excluding current one)
+        for (const event of allEvents) {
+            if (event.id === currentDelegationEventId) continue;
+            if (event.pubkey === agentPubkey) continue; // Skip events FROM this agent
+
+            // Check if this is a delegation to this agent
+            const pTags = event.getMatchingTags("p");
+            const targetsThisAgent = pTags.some((tag) => tag[1] === agentPubkey);
+
+            if (!targetsThisAgent) continue;
+
+            // Check if sender is an agent
+            const senderAgent = projectCtx?.getAgentByPubkey(event.pubkey);
+            if (!senderAgent) continue;
+
+            // Find this agent's response to this delegation
+            const response = allEvents.find(
+                (e) =>
+                    e.pubkey === agentPubkey &&
+                    e.getMatchingTags("e").some((tag) => tag[1] === event.id)
+            );
+
+            const delegatorSlug = senderAgent?.slug || (await nameRepo.getName(event.pubkey));
+
+            subthreads.push({
+                delegationEventId: event.id,
+                delegatorSlug,
+                delegatorPubkey: event.pubkey,
+                prompt: event.content,
+                response: response?.content,
+                timestamp: event.created_at || 0,
+            });
+        }
+
+        // Sort by timestamp
+        subthreads.sort((a, b) => a.timestamp - b.timestamp);
+
+        return subthreads;
+    }
+
+    /**
+     * Format previous subthreads as context message
+     */
+    private formatPreviousSubthreadsContext(subthreads: PreviousSubthread[]): string | null {
+        if (subthreads.length === 0) return null;
+
+        const parts = [
+            "## Previous Tasks in This Conversation",
+            "",
+            "You were previously delegated other tasks in this conversation. Here's a summary for context:",
+            "",
+        ];
+
+        for (const subthread of subthreads) {
+            parts.push(`### Task from ${subthread.delegatorSlug}`);
+            parts.push(`**Request:** ${subthread.prompt.substring(0, 500)}${subthread.prompt.length > 500 ? "..." : ""}`);
+            if (subthread.response) {
+                parts.push(`**Your response:** ${subthread.response.substring(0, 300)}${subthread.response.length > 300 ? "..." : ""}`);
+            }
+            parts.push("");
+        }
+
+        parts.push("---");
+        parts.push("Focus on your current task. The above is just context.");
+
+        return parts.join("\n");
+    }
+
+    /**
+     * Gather events for a delegated execution - ISOLATED VIEW
+     * Only includes the delegation request and events in this subthread
+     */
+    private async gatherDelegationSubthread(
+        context: ExecutionContext,
+        allEvents: NDKEvent[],
+        eventFilter?: (event: NDKEvent) => boolean
+    ): Promise<EventWithContext[]> {
+        const triggeringEvent = context.triggeringEvent;
+        const relevantEvents: EventWithContext[] = [];
+        const activeSpan = trace.getActiveSpan();
+
+        // The triggering event is the delegation request - it becomes our "root"
+        const delegationEventId = triggeringEvent.id;
+
+        // Build set of events in this subthread:
+        // - The delegation request itself
+        // - Any events that reply to it (directly or transitively)
+        const subthreadEventIds = new Set<string>([delegationEventId]);
+
+        // Find all transitive replies to the delegation event
+        let foundNew = true;
+        while (foundNew) {
+            foundNew = false;
+            for (const event of allEvents) {
+                if (subthreadEventIds.has(event.id)) continue;
+
+                const eTags = event.getMatchingTags("e");
+                for (const eTag of eTags) {
+                    if (subthreadEventIds.has(eTag[1])) {
+                        subthreadEventIds.add(event.id);
+                        foundNew = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (activeSpan) {
+            activeSpan.addEvent("delegation_subthread_computed", {
+                "subthread.event_count": subthreadEventIds.size,
+                "subthread.root_id": delegationEventId?.substring(0, 8),
+            });
+        }
+
+        // Filter events to only those in the subthread
+        for (const event of allEvents) {
+            // Apply external filter if provided
+            if (eventFilter && !eventFilter(event)) {
+                continue;
+            }
+
+            // Skip reasoning events
+            if (hasReasoningTag(event)) {
+                continue;
+            }
+
+            // Only include events in the subthread
+            if (!subthreadEventIds.has(event.id)) {
+                if (activeSpan) {
+                    activeSpan.addEvent("event.filtered_delegation_isolation", {
+                        "event.id": event.id?.substring(0, 8),
+                        "event.content": event.content?.substring(0, 50),
+                        "filter.reason": "not_in_delegation_subthread",
+                    });
+                }
+                continue;
+            }
+
+            const eventWithContext: EventWithContext = {
+                event,
+                timestamp: event.created_at || Date.now() / 1000,
+            };
+
+            if (activeSpan) {
+                activeSpan.addEvent("event.included_delegation", {
+                    "event.id": event.id?.substring(0, 8),
+                    "event.content": event.content?.substring(0, 50),
+                    "event.pubkey": event.pubkey.substring(0, 8),
+                    "inclusion.reason": "in_delegation_subthread",
+                });
+            }
+
+            relevantEvents.push(eventWithContext);
+        }
+
+        logger.debug("[FlattenedChronologicalStrategy] Gathered delegation subthread", {
+            delegationEventId: delegationEventId?.substring(0, 8),
+            subthreadSize: subthreadEventIds.size,
+            relevantEventCount: relevantEvents.length,
+            totalEventCount: allEvents.length,
+        });
+
+        return relevantEvents;
+    }
+
     /**
      * Build messages with flattened chronological context (telemetry wrapper)
      */
@@ -96,6 +317,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         const messages: ModelMessage[] = [];
 
+        // Check if this is a delegated execution (isolated view)
+        const isDelegated = this.isDelegatedExecution(context);
+        span.setAttribute("execution.is_delegated", isDelegated);
+
         // Add system prompt
         await this.addSystemPrompt(messages, context, span);
 
@@ -113,16 +338,41 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             });
         }
 
+        // For delegated executions, add context about previous subthreads
+        if (isDelegated) {
+            const previousSubthreads = await this.gatherPreviousSubthreads(
+                context.agent.pubkey,
+                context.triggeringEvent.id,
+                conversation.history
+            );
+
+            if (previousSubthreads.length > 0) {
+                const subthreadContext = this.formatPreviousSubthreadsContext(previousSubthreads);
+                if (subthreadContext) {
+                    messages.push({
+                        role: "system",
+                        content: subthreadContext,
+                    });
+                    span.addEvent("previous_subthreads_added", {
+                        count: previousSubthreads.length,
+                    });
+                }
+            }
+        }
+
         // Get all events that involve this agent
+        // For delegated executions, this will return only the delegation subthread
         const relevantEvents = await this.gatherRelevantEvents(
             context,
             conversation.history,
-            eventFilter
+            eventFilter,
+            isDelegated
         );
 
         span.addEvent("events_gathered", {
             relevant_event_count: relevantEvents.length,
             total_event_count: conversation.history.length,
+            is_delegated: isDelegated,
         });
 
         // Sort events chronologically
@@ -160,14 +410,27 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
     /**
      * Gather all events relevant to this agent
+     * @param isDelegated If true, only include events in the delegation subthread (isolated view)
      */
     private async gatherRelevantEvents(
         context: ExecutionContext,
         allEvents: NDKEvent[],
-        eventFilter?: (event: NDKEvent) => boolean
+        eventFilter?: (event: NDKEvent) => boolean,
+        isDelegated = false
     ): Promise<EventWithContext[]> {
         const agentPubkey = context.agent.pubkey;
         const relevantEvents: EventWithContext[] = [];
+        const triggeringEvent = context.triggeringEvent;
+        const activeSpan = trace.getActiveSpan();
+
+        // DELEGATION ISOLATION: If this is a delegated execution, only show the delegation subthread
+        if (isDelegated) {
+            return this.gatherDelegationSubthread(
+                context,
+                allEvents,
+                eventFilter
+            );
+        }
 
         // Build index of delegation requests from this agent for response matching
         // Delegation request = kind 1111 from agent with phase tag
@@ -184,7 +447,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         // STEP 1: Build thread path set for inclusion
         // Build the parent chain from triggering event to root
-        const triggeringEvent = context.triggeringEvent;
         const eventMap = new Map(allEvents.map((e) => [e.id, e]));
 
         // Build parent chain
@@ -233,7 +495,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         const threadPathIds = new Set(threadPath.map((e) => e.id));
 
-        const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
             activeSpan.addEvent("thread_path_computed", {
                 "thread_path.event_count": threadPath.length,
@@ -336,15 +597,18 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             }
 
             // Check if this is a delegation request from this agent
-            // Delegation request = kind 1111 from agent with phase tag
+            // Delegation request = kind 1111 from agent with p-tag pointing to another agent
+            // Phase tag is optional (only required for self-delegation)
             if (isFromAgent && event.kind === 1111) {
-                const phaseTag = event.tagValue("phase");
+                const pTags = event.getMatchingTags("p");
+                if (pTags.length > 0) {
+                    const recipientPubkey = pTags[0][1];
+                    // This is a delegation if it's pointing to another agent (or same agent with phase)
+                    const phaseTag = event.tagValue("phase");
+                    const isSelfDelegation = recipientPubkey === agentPubkey;
 
-                if (phaseTag) {
-                    // This is a delegation event - get recipient from p-tags
-                    const pTags = event.getMatchingTags("p");
-                    if (pTags.length > 0) {
-                        const recipientPubkey = pTags[0][1];
+                    // Detect as delegation if: delegating to another agent, OR self-delegation with phase
+                    if (!isSelfDelegation || phaseTag) {
                         eventWithContext.isDelegationRequest = true;
                         eventWithContext.delegationId = event.id.substring(0, 8);
                         eventWithContext.delegationContent = event.content;
