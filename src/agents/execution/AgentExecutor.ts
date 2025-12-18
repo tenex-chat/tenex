@@ -292,6 +292,14 @@ export class AgentExecutor {
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
+
+                // Clean up RAL state on error to prevent stale states
+                RALRegistry.getInstance().clear(context.agent.pubkey);
+                logger.debug("[AgentExecutor] Cleared RAL state after error", {
+                    agent: context.agent.slug,
+                    error: formatAnyError(error),
+                });
+
                 throw error;
             } finally {
                 span.end();

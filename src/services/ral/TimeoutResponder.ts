@@ -64,11 +64,21 @@ export class TimeoutResponder {
     agent: AgentInstance,
     publisher: AgentPublisher
   ): Promise<void> {
+    // Early return if event has no ID (required for queuing/tracking)
+    if (!event.id) {
+      logger.warn("[TimeoutResponder] Cannot process event without ID", {
+        agentPubkey: agentPubkey.substring(0, 8),
+      });
+      return;
+    }
+
+    const eventId = event.id; // Now guaranteed to be defined
+
     const span = tracer.startSpan("tenex.busy_responder.generate", {
       attributes: {
         "agent.pubkey": agentPubkey,
         "agent.slug": agent.slug,
-        "event.id": event.id || "",
+        "event.id": eventId,
         "event.content_length": event.content?.length || 0,
       },
     });
@@ -77,11 +87,11 @@ export class TimeoutResponder {
       const registry = RALRegistry.getInstance();
 
       // Check if RAL already picked up the message
-      if (!registry.eventStillQueued(agentPubkey, event.id!)) {
+      if (!registry.eventStillQueued(agentPubkey, eventId)) {
         span.addEvent("event_already_processed");
         span.setStatus({ code: SpanStatusCode.OK });
         logger.debug("[TimeoutResponder] Event already picked up, skipping", {
-          eventId: event.id?.substring(0, 8),
+          eventId: eventId.substring(0, 8),
         });
         return;
       }
@@ -205,11 +215,11 @@ A user message just arrived but you're busy. Respond with a brief acknowledgment
       });
 
       // Check again - RAL might have picked it up while we were generating
-      if (!registry.eventStillQueued(agentPubkey, event.id!)) {
+      if (!registry.eventStillQueued(agentPubkey, eventId)) {
         span.addEvent("event_picked_up_during_generation");
         span.setStatus({ code: SpanStatusCode.OK });
         logger.debug("[TimeoutResponder] Event picked up during generation", {
-          eventId: event.id?.substring(0, 8),
+          eventId: eventId.substring(0, 8),
         });
         return;
       }
@@ -220,7 +230,7 @@ A user message just arrived but you're busy. Respond with a brief acknowledgment
         {
           triggeringEvent: event,
           rootEvent: event,
-          conversationId: event.id!,
+          conversationId: eventId,
         }
       );
 
@@ -229,7 +239,7 @@ A user message just arrived but you're busy. Respond with a brief acknowledgment
       // Swap queued user message -> system message
       registry.swapQueuedEvent(
         agentPubkey,
-        event.id!,
+        eventId,
         response.object.system_message_for_active_ral
       );
 
