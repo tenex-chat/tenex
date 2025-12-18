@@ -1,5 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { context as otelContext, trace } from "@opentelemetry/api";
+import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
@@ -12,9 +12,11 @@ import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services/ProjectContext";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
+import { RALRegistry } from "../services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
+import { DelegationCompletionHandler } from "./DelegationCompletionHandler";
 
 const tracer = trace.getTracer("tenex.event-handler");
 
@@ -162,6 +164,60 @@ async function handleReplyLogic(
     // This ensures message persistence even if we inject it into a running execution
     if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
         await conversationCoordinator.addEvent(conversation.id, event);
+    }
+
+    // 2.5. Check if this is a delegation completion event
+    // If an agent is paused waiting for this delegation, resume it instead of fresh execution
+    const delegationResult = await DelegationCompletionHandler.handleDelegationCompletion(
+        event,
+        conversation,
+        conversationCoordinator
+    );
+
+    if (delegationResult.shouldReactivate && delegationResult.isResumption && delegationResult.targetAgent) {
+        const resumptionSpan = tracer.startSpan("tenex.delegation.resumption", {
+            attributes: {
+                "agent.slug": delegationResult.targetAgent.slug,
+                "agent.pubkey": delegationResult.targetAgent.pubkey,
+                "conversation.id": conversation.id,
+                "event.id": event.id || "",
+            },
+        });
+
+        logger.info("[handleReplyLogic] Delegation complete - resuming paused agent", {
+            agent: delegationResult.targetAgent.slug,
+            eventId: event.id?.substring(0, 8),
+        });
+
+        console.log(chalk.green(`\n▶️  Resuming ${delegationResult.targetAgent.slug} after delegation completion`));
+
+        // Mark RAL as resuming before execution
+        const ralRegistry = RALRegistry.getInstance();
+        ralRegistry.markResuming(delegationResult.targetAgent.pubkey);
+
+        resumptionSpan.addEvent("ral.marked_resuming");
+
+        // Create execution context for the paused agent, using the original conversation
+        const executionContext = await createExecutionContext({
+            agent: delegationResult.targetAgent,
+            conversationId: conversation.id,
+            projectBasePath: projectCtx.agentRegistry.getBasePath(),
+            triggeringEvent: delegationResult.replyTarget || event,
+            conversationCoordinator,
+        });
+
+        // Execute agent (will detect paused RAL and resume)
+        try {
+            await executeAgent(executionContext, agentExecutor, conversation, event);
+            resumptionSpan.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+            resumptionSpan.recordException(error as Error);
+            resumptionSpan.setStatus({ code: SpanStatusCode.ERROR });
+            throw error;
+        } finally {
+            resumptionSpan.end();
+        }
+        return; // Don't proceed with normal execution
     }
 
     // 3. Determine target agents
