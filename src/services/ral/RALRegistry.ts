@@ -14,9 +14,59 @@ export class RALRegistry {
   private static instance: RALRegistry;
   private states: Map<string, RALState> = new Map();
   private delegationToRal: Map<string, string> = new Map();
+  private ralIdToAgent: Map<string, string> = new Map(); // Reverse lookup for O(1) agent resolution
   private abortControllers: Map<string, AbortController> = new Map();
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
-  private constructor() {}
+  /** Maximum age for RAL states before cleanup (default: 24 hours) */
+  private static readonly STATE_TTL_MS = 24 * 60 * 60 * 1000;
+  /** Cleanup interval (default: 1 hour) */
+  private static readonly CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+  /** Maximum queue size for injections (prevents DoS) */
+  private static readonly MAX_QUEUE_SIZE = 100;
+
+  private constructor() {
+    this.startCleanupInterval();
+  }
+
+  /**
+   * Start periodic cleanup of expired RAL states
+   */
+  private startCleanupInterval(): void {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupExpiredStates();
+    }, RALRegistry.CLEANUP_INTERVAL_MS);
+
+    // Don't prevent process from exiting
+    this.cleanupInterval.unref();
+  }
+
+  /**
+   * Clean up RAL states that have been inactive for too long
+   */
+  private cleanupExpiredStates(): void {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [agentPubkey, state] of this.states.entries()) {
+      if (now - state.lastActivityAt > RALRegistry.STATE_TTL_MS) {
+        this.clear(agentPubkey);
+        cleanedCount++;
+        logger.info("[RALRegistry] Cleaned up expired RAL state", {
+          agentPubkey: agentPubkey.substring(0, 8),
+          ralId: state.id.substring(0, 8),
+          ageHours: Math.round((now - state.lastActivityAt) / (60 * 60 * 1000)),
+        });
+      }
+    }
+
+    if (cleanedCount > 0) {
+      logger.info("[RALRegistry] Cleanup complete", {
+        cleanedCount,
+        remainingStates: this.states.size,
+      });
+    }
+  }
 
   static getInstance(): RALRegistry {
     if (!RALRegistry.instance) {
@@ -46,6 +96,7 @@ export class RALRegistry {
     };
 
     this.states.set(agentPubkey, state);
+    this.ralIdToAgent.set(id, agentPubkey); // Reverse lookup
 
     logger.debug("[RALRegistry] Created RAL", {
       ralId: id.substring(0, 8),
@@ -61,6 +112,13 @@ export class RALRegistry {
    */
   getStateByAgent(agentPubkey: string): RALState | undefined {
     return this.states.get(agentPubkey);
+  }
+
+  /**
+   * Get agent pubkey by RAL ID (O(1) reverse lookup)
+   */
+  getAgentByRalId(ralId: string): string | undefined {
+    return this.ralIdToAgent.get(ralId);
   }
 
   /**
@@ -190,6 +248,16 @@ export class RALRegistry {
       return;
     }
 
+    // Enforce queue size limit (drop oldest if full)
+    if (state.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
+      const dropped = state.queuedInjections.shift();
+      logger.warn("[RALRegistry] Queue full, dropping oldest event", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        droppedEventId: dropped?.eventId?.substring(0, 8),
+        queueSize: state.queuedInjections.length,
+      });
+    }
+
     state.queuedInjections.push({
       type: "user",
       content: event.content,
@@ -228,6 +296,16 @@ export class RALRegistry {
         contentLength: content.length,
       });
       return;
+    }
+
+    // Enforce queue size limit (drop oldest if full)
+    if (state.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
+      const dropped = state.queuedInjections.shift();
+      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        droppedEventId: dropped?.eventId?.substring(0, 8),
+        queueSize: state.queuedInjections.length,
+      });
     }
 
     state.queuedInjections.push({
@@ -371,6 +449,11 @@ export class RALRegistry {
 
     state.currentTool = toolName;
     state.toolStartedAt = toolName ? Date.now() : undefined;
+
+    // Clean up AbortController when tool completes (toolName undefined)
+    if (!toolName) {
+      this.abortControllers.delete(agentPubkey);
+    }
   }
 
   /**
@@ -410,6 +493,8 @@ export class RALRegistry {
       for (const d of state.completedDelegations) {
         this.delegationToRal.delete(d.eventId);
       }
+      // Clean up reverse lookup
+      this.ralIdToAgent.delete(state.id);
     }
 
     this.states.delete(agentPubkey);
@@ -441,21 +526,26 @@ export class RALRegistry {
 
   /**
    * Find the agent pubkey that is waiting for a delegation response
+   * Uses O(1) lookup via delegationToRal and ralIdToAgent maps
    * @param delegationEventId The event ID of the delegation
    * @returns The agent pubkey waiting for this delegation, or undefined
    */
   findAgentWaitingForDelegation(delegationEventId: string): string | undefined {
-    for (const [agentPubkey, state] of this.states.entries()) {
-      if (state.status === "paused") {
-        const hasPending = state.pendingDelegations.some(
-          (d) => d.eventId === delegationEventId
-        );
-        if (hasPending) {
-          return agentPubkey;
-        }
-      }
-    }
-    return undefined;
+    // O(1) lookup: delegationEventId -> ralId -> agentPubkey
+    const ralId = this.delegationToRal.get(delegationEventId);
+    if (!ralId) return undefined;
+
+    const agentPubkey = this.ralIdToAgent.get(ralId);
+    if (!agentPubkey) return undefined;
+
+    // Verify the agent is still paused and waiting for this delegation
+    const state = this.states.get(agentPubkey);
+    if (!state || state.status !== "paused") return undefined;
+
+    const hasPending = state.pendingDelegations.some(
+      (d) => d.eventId === delegationEventId
+    );
+    return hasPending ? agentPubkey : undefined;
   }
 
   /**
