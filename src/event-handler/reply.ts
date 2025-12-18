@@ -12,7 +12,8 @@ import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services/ProjectContext";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
-import { RALRegistry } from "../services/ral";
+import { RALRegistry, TimeoutResponder } from "../services/ral";
+import { AgentPublisher } from "../nostr/AgentPublisher";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
@@ -288,8 +289,27 @@ async function handleReplyLogic(
                     conversationId: conversation.id.substring(0, 8),
                     eventId: event.id?.substring(0, 8),
                 });
+
+                // Queue in RAL first (required for BusyResponder to work)
+                const ralRegistry = RALRegistry.getInstance();
+                ralRegistry.queueEvent(targetAgent.pubkey, event);
+                span.addEvent("event.queued_in_ral");
+
+                // Inject into the ongoing LLM execution
                 activeOp.eventEmitter.emit("inject-message", event);
                 span.addEvent("message.injected");
+
+                // Generate immediate acknowledgment for the user
+                const agentPublisher = new AgentPublisher(targetAgent);
+                const busyResponder = TimeoutResponder.getInstance();
+                busyResponder.processImmediately(
+                    targetAgent.pubkey,
+                    event,
+                    targetAgent,
+                    agentPublisher
+                );
+                span.addEvent("acknowledgment.scheduled");
+
                 span.end();
             });
         }

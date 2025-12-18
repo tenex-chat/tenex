@@ -188,15 +188,14 @@ export class AgentExecutor {
 
                         ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
 
-                        // Schedule timeout responder
+                        // Immediately generate acknowledgment for user
                         const agentPublisher = new AgentPublisher(context.agent);
-                        const timeoutResponder = TimeoutResponder.getInstance();
-                        timeoutResponder.schedule(
+                        const busyResponder = TimeoutResponder.getInstance();
+                        busyResponder.processImmediately(
                             context.agent.pubkey,
                             context.triggeringEvent,
                             context.agent,
-                            agentPublisher,
-                            5000
+                            agentPublisher
                         );
 
                         span.setStatus({ code: SpanStatusCode.OK });
@@ -212,7 +211,7 @@ export class AgentExecutor {
                         "ral.status": "paused",
                         "ral.pending_count": existingRal.pendingDelegations.length,
                         "event.id": context.triggeringEvent.id || "",
-                        "action": "queue_and_timeout",
+                        "action": "queue_and_acknowledge",
                     });
 
                     logger.info("[AgentExecutor] RAL paused for delegation, queueing event", {
@@ -223,15 +222,14 @@ export class AgentExecutor {
 
                     ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
 
-                    // Schedule timeout responder to acknowledge user
+                    // Immediately generate acknowledgment for user
                     const agentPublisher = new AgentPublisher(context.agent);
-                    const timeoutResponder = TimeoutResponder.getInstance();
-                    timeoutResponder.schedule(
+                    const busyResponder = TimeoutResponder.getInstance();
+                    busyResponder.processImmediately(
                         context.agent.pubkey,
                         context.triggeringEvent,
                         context.agent,
-                        agentPublisher,
-                        5000
+                        agentPublisher
                     );
 
                     span.setStatus({ code: SpanStatusCode.OK });
@@ -850,12 +848,33 @@ export class AgentExecutor {
                     logger.info(`[prepareStep] Injecting ${ralQueued.length} RAL queued message(s)`, {
                         agent: context.agent.slug,
                         stepNumber: step.stepNumber,
+                        messageTypes: ralQueued.map((q) => q.type),
                     });
 
-                    const ralMessages: ModelMessage[] = ralQueued.map((q) => ({
+                    // Sort messages: system messages first (delegation results), then user messages
+                    // This ensures the LLM has context before processing user follow-ups
+                    const sortedQueued = [...ralQueued].sort((a, b) => {
+                        if (a.type === "system" && b.type === "user") return -1;
+                        if (a.type === "user" && b.type === "system") return 1;
+                        return 0;
+                    });
+
+                    const ralMessages: ModelMessage[] = sortedQueued.map((q) => ({
                         role: q.type as "user" | "system",
                         content: q.content,
                     }));
+
+                    // Add trace event for RAL injection
+                    if (executionSpan) {
+                        executionSpan.addEvent("ral_injection.process", {
+                            "injection.message_count": ralQueued.length,
+                            "injection.step_number": step.stepNumber,
+                            "injection.types": ralQueued.map((q) => q.type).join(","),
+                            "injection.system_count": ralQueued.filter((q) => q.type === "system").length,
+                            "injection.user_count": ralQueued.filter((q) => q.type === "user").length,
+                            "agent.slug": context.agent.slug,
+                        });
+                    }
 
                     const baseMessages = result?.messages || step.messages;
                     result = {
