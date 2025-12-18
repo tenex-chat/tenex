@@ -2,7 +2,6 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistryService } from "@/services/delegation";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,
@@ -10,13 +9,10 @@ import {
     type NDKProject,
     type NDKTask,
 } from "@nostr-dev-kit/ndk";
-import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import {
     AgentEventEncoder,
-    type AskIntent,
     type CompletionIntent,
     type ConversationIntent,
-    type DelegationIntent,
     type ErrorIntent,
     type EventContext,
     type LessonIntent,
@@ -80,195 +76,142 @@ export class AgentPublisher {
     }
 
     /**
-     * Publish delegation request events.
-     * Creates and publishes N kind:1111 conversation events, one per delegation.
+     * Publish a delegation event
      */
     async delegate(
-        intent: DelegationIntent,
+        params: {
+            recipient: string;
+            content: string;
+            phase?: string;
+            phaseInstructions?: string;
+            branch?: string;
+        },
         context: EventContext
-    ): Promise<{
-        events: NDKEvent[];
-        batchId: string;
-    }> {
-        const events = this.encoder.encodeDelegation(intent, context);
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
 
-        // CRITICAL: Inject trace context into delegation events for distributed tracing
-        // This allows the delegated agents to link their execution back to this delegation
-        const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
-            const carrier: Record<string, string> = {};
-            propagation.inject(otelContext.active(), carrier);
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
 
-            // Add trace context as a tag on each Nostr event
-            for (const event of events) {
-                if (carrier.traceparent) {
-                    event.tags.push(["trace_context", carrier.traceparent]);
-                    logger.debug("[AgentPublisher] Injected trace context into delegation event", {
-                        eventId: event.id?.substring(0, 8),
-                        traceparent: `${carrier.traceparent.substring(0, 32)}...`,
-                    });
-                }
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
+        }
+
+        // Add phase tags if present
+        if (params.phase) {
+            event.tags.push(["phase", params.phase]);
+        }
+        if (params.phaseInstructions) {
+            event.tags.push(["phase-instructions", params.phaseInstructions]);
+        }
+        if (params.branch) {
+            event.tags.push(["branch", params.branch]);
+        }
+
+        await this.agent.sign(event);
+        await event.publish();
+
+        logger.debug("[AgentPublisher] Published delegation event", {
+            eventId: event.id?.substring(0, 8),
+            recipient: params.recipient.substring(0, 8),
+        });
+
+        return event.id;
+    }
+
+    /**
+     * Publish an ask event
+     */
+    async ask(
+        params: {
+            recipient: string;
+            content: string;
+            suggestions?: string[];
+        },
+        context: EventContext
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
+
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
+
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
+        }
+
+        // Add ask marker
+        event.tags.push(["ask", "true"]);
+
+        // Add suggestions
+        if (params.suggestions) {
+            for (const suggestion of params.suggestions) {
+                event.tags.push(["suggestion", suggestion]);
             }
         }
 
-        // Sign all events first (to get IDs)
-        for (const event of events) {
-            await this.agent.sign(event);
-        }
-
-        // Register delegation with per-delegation event IDs
-        const registry = DelegationRegistryService.getInstance();
-
-        const batchId = await registry.registerDelegation({
-            delegations: intent.delegations.map((delegation, i) => ({
-                eventId: events[i].id,
-                pubkey: delegation.recipient,
-                request: delegation.request,
-                phase: delegation.phase,
-            })),
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
-        });
-
-        // Publish all events
-        for (const [index, event] of events.entries()) {
-            await this.safePublish(event, "delegation request");
-            logger.debug("Published delegation request", {
-                index,
-                eventId: event.id,
-                eventIdTruncated: event.id?.substring(0, 8),
-                kind: event.kind,
-                assignedTo: event.tagValue("p")?.substring(0, 16),
-            });
-        }
-
-        // Add telemetry for delegation
-        if (activeSpan) {
-            activeSpan.addEvent("delegation_published", {
-                "delegation.batch_id": batchId,
-                "delegation.count": intent.delegations.length,
-                "delegation.recipients": intent.delegations
-                    .map((d) => d.recipient.substring(0, 8))
-                    .join(", "),
-            });
-        }
-
-        logger.debug("Delegation batch published", {
-            batchId,
-            eventCount: events.length,
-        });
-
-        return { events, batchId };
-    }
-
-    /**
-     * Publish delegation follow-up request event.
-     * Creates and publishes a follow-up event as a reply to a previous delegation response.
-     */
-    async delegateFollowUp(
-        intent: DelegationIntent,
-        context: EventContext
-    ): Promise<{
-        events: NDKEvent[];
-        batchId: string;
-    }> {
-        // For follow-ups, triggeringEvent should be the response event we're replying to
-        const responseEvent = context.triggeringEvent;
-        const delegation = intent.delegations[0]; // Follow-ups are always to single recipient
-
-        logger.debug("[AgentPublisher] Creating follow-up event", {
-            agent: this.agent.slug,
-            recipientPubkey: delegation.recipient.substring(0, 8),
-            responseEventId: responseEvent.id?.substring(0, 8),
-        });
-
-        // Use encoder to create the follow-up event
-        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, delegation.request, context);
-
-        // Sign the event
-        await this.agent.sign(followUpEvent);
-
-        // Register with DelegationRegistry for tracking
-        const registry = DelegationRegistryService.getInstance();
-        const batchId = await registry.registerDelegation({
-            delegations: [
-                {
-                    eventId: followUpEvent.id,
-                    pubkey: delegation.recipient,
-                    request: delegation.request,
-                    phase: delegation.phase,
-                },
-            ],
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
-        });
-
-        // Publish the follow-up event
-        await this.safePublish(followUpEvent, "follow-up event");
-
-        logger.debug("Follow-up event published", {
-            eventId: followUpEvent.id?.substring(0, 8),
-            replyingTo: responseEvent.id?.substring(0, 8),
-            batchId,
-        });
-
-        return { events: [followUpEvent], batchId };
-    }
-
-    /**
-     * Publish an ask event.
-     * Creates and publishes an event asking a question to the project manager/human user.
-     */
-    async ask(
-        intent: AskIntent,
-        context: EventContext
-    ): Promise<{
-        event: NDKEvent;
-        batchId: string;
-    }> {
-        logger.debug("[AgentPublisher] Publishing ask event", {
-            agent: this.agent.slug,
-            content: intent.content,
-            hasSuggestions: !!intent.suggestions,
-            suggestionCount: intent.suggestions?.length,
-        });
-
-        const event = this.encoder.encodeAsk(intent, context);
-
-        // Sign the event
         await this.agent.sign(event);
+        await event.publish();
 
-        // Get project owner pubkey for registration
-        const projectCtx = await import("@/services/ProjectContext").then((m) => m.getProjectContext());
-        const ownerPubkey = projectCtx?.project?.pubkey;
+        logger.debug("[AgentPublisher] Published ask event", {
+            eventId: event.id?.substring(0, 8),
+            recipient: params.recipient.substring(0, 8),
+        });
 
-        if (!ownerPubkey) {
-            throw new Error("No project owner configured - cannot determine who to ask");
+        return event.id;
+    }
+
+    /**
+     * Publish a delegation follow-up event
+     */
+    async delegateFollowup(
+        params: {
+            recipient: string;
+            content: string;
+            replyToEventId?: string;
+        },
+        context: EventContext
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
+
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
+
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
         }
 
-        // Register with DelegationRegistry for tracking (ask uses delegation infrastructure)
-        const registry = DelegationRegistryService.getInstance();
-        const batchId = await registry.registerDelegation({
-            delegations: [
-                {
-                    eventId: event.id,
-                    pubkey: ownerPubkey,
-                    request: intent.content,
-                },
-            ],
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
-        });
+        // Reply to specific event if provided
+        if (params.replyToEventId) {
+            event.tags.push(["e", params.replyToEventId]);
+        }
 
-        // Publish the event
-        await this.safePublish(event, "ask event");
+        await this.agent.sign(event);
+        await event.publish();
 
-        logger.debug("Ask event published", {
+        logger.debug("[AgentPublisher] Published delegation follow-up", {
             eventId: event.id?.substring(0, 8),
-            batchId,
+            recipient: params.recipient.substring(0, 8),
         });
 
-        return { event, batchId };
+        return event.id;
     }
 
     /**
@@ -761,4 +704,5 @@ export class AgentPublisher {
             // Don't throw - contact list is not critical
         }
     }
+
 }
