@@ -12,12 +12,12 @@ import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services/ProjectContext";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
-import { RALRegistry, TimeoutResponder } from "../services/ral";
+import { RALRegistry, BusyResponder } from "../services/ral";
 import { AgentPublisher } from "../nostr/AgentPublisher";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
-import { DelegationCompletionHandler } from "./DelegationCompletionHandler";
+import { handleDelegationCompletion } from "./DelegationCompletionHandler";
 
 const tracer = trace.getTracer("tenex.event-handler");
 
@@ -170,7 +170,7 @@ async function handleReplyLogic(
     // 2.5. Record any delegation completion (side effect only)
     // This records the completion in RALRegistry so AgentExecutor can detect resumption
     // Routing is handled normally below - the agent will be resolved via p-tags
-    await DelegationCompletionHandler.handleDelegationCompletion(
+    await handleDelegationCompletion(
         event,
         conversation,
         conversationCoordinator
@@ -256,7 +256,7 @@ async function handleReplyLogic(
 
                 // Generate immediate acknowledgment for the user
                 const agentPublisher = new AgentPublisher(targetAgent);
-                const busyResponder = TimeoutResponder.getInstance();
+                const busyResponder = BusyResponder.getInstance();
                 busyResponder.processImmediately(
                     targetAgent.pubkey,
                     event,

@@ -296,7 +296,7 @@ describe("RALRegistry", () => {
 
       const state = registry.getStateByAgent(agentPubkey);
       expect(state?.queuedInjections).toHaveLength(1);
-      expect(state?.queuedInjections[0].type).toBe("user");
+      expect(state?.queuedInjections[0].role).toBe("user");
       expect(state?.queuedInjections[0].content).toBe("Test event content");
       expect(state?.queuedInjections[0].eventId).toBe("event-123");
       expect(state?.queuedInjections[0].queuedAt).toBeDefined();
@@ -341,7 +341,7 @@ describe("RALRegistry", () => {
 
       const state = registry.getStateByAgent(agentPubkey);
       expect(state?.queuedInjections).toHaveLength(1);
-      expect(state?.queuedInjections[0].type).toBe("system");
+      expect(state?.queuedInjections[0].role).toBe("system");
       expect(state?.queuedInjections[0].content).toBe("System message content");
       expect(state?.queuedInjections[0].eventId).toBeUndefined();
       expect(state?.queuedInjections[0].queuedAt).toBeDefined();
@@ -410,9 +410,9 @@ describe("RALRegistry", () => {
       const injections = registry.getAndPersistInjections(agentPubkey);
 
       expect(injections).toHaveLength(2);
-      expect(injections[0].type).toBe("user");
+      expect(injections[0].role).toBe("user");
       expect(injections[0].content).toBe("User event");
-      expect(injections[1].type).toBe("system");
+      expect(injections[1].role).toBe("system");
       expect(injections[1].content).toBe("System message");
 
       const state = registry.getStateByAgent(agentPubkey);
@@ -447,7 +447,7 @@ describe("RALRegistry", () => {
 
       const state = registry.getStateByAgent(agentPubkey);
       expect(state?.queuedInjections).toHaveLength(1);
-      expect(state?.queuedInjections[0].type).toBe("system");
+      expect(state?.queuedInjections[0].role).toBe("system");
       expect(state?.queuedInjections[0].content).toBe("System message instead");
       expect(state?.queuedInjections[0].eventId).toBeUndefined();
     });
@@ -477,7 +477,7 @@ describe("RALRegistry", () => {
       const state = registry.getStateByAgent(agentPubkey);
       expect(state?.queuedInjections).toHaveLength(2);
       expect(state?.queuedInjections.some((i) => i.eventId === "event-2")).toBe(true);
-      expect(state?.queuedInjections.some((i) => i.type === "system")).toBe(true);
+      expect(state?.queuedInjections.some((i) => i.role === "system")).toBe(true);
     });
   });
 

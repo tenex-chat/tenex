@@ -2,17 +2,41 @@ import type { ModelMessage } from "ai";
 
 export type RALStatus = "executing" | "paused" | "done";
 
-export interface PendingDelegation {
+/** Role types that can be used for message injection */
+export type InjectionRole = "user" | "system";
+
+export type DelegationType = "standard" | "followup" | "external" | "ask";
+
+interface BasePendingDelegation {
   eventId: string;
   recipientPubkey: string;
   recipientSlug?: string;
   prompt: string;
-  isFollowup?: boolean;
-  isExternal?: boolean;
-  isAsk?: boolean;
+}
+
+interface StandardDelegation extends BasePendingDelegation {
+  type?: "standard";
+}
+
+interface FollowupDelegation extends BasePendingDelegation {
+  type: "followup";
+}
+
+interface ExternalDelegation extends BasePendingDelegation {
+  type: "external";
   projectId?: string;
+}
+
+interface AskDelegation extends BasePendingDelegation {
+  type: "ask";
   suggestions?: string[];
 }
+
+export type PendingDelegation =
+  | StandardDelegation
+  | FollowupDelegation
+  | ExternalDelegation
+  | AskDelegation;
 
 export interface CompletedDelegation {
   eventId: string;
@@ -24,7 +48,7 @@ export interface CompletedDelegation {
 }
 
 export interface QueuedInjection {
-  type: "user" | "system";
+  role: InjectionRole;
   content: string;
   eventId?: string;
   queuedAt: number;

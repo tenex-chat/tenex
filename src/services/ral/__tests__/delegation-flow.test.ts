@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
-import { DelegationCompletionHandler } from "@/event-handler/DelegationCompletionHandler";
+import { handleDelegationCompletion } from "@/event-handler/DelegationCompletionHandler";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 
@@ -289,7 +289,7 @@ describe("RAL Delegation Flow", () => {
             const mockCoordinator = {} as ConversationCoordinator;
 
             // Execute handler - now just records completion, routing is via p-tags
-            const result = await DelegationCompletionHandler.handleDelegationCompletion(
+            const result = await handleDelegationCompletion(
                 completionEvent,
                 mockConversation,
                 mockCoordinator
@@ -336,7 +336,7 @@ describe("RAL Delegation Flow", () => {
                 lastActivityAt: Date.now(),
             };
 
-            const result = await DelegationCompletionHandler.handleDelegationCompletion(
+            const result = await handleDelegationCompletion(
                 unrelatedEvent,
                 mockConversation,
                 {} as ConversationCoordinator
@@ -398,7 +398,7 @@ describe("RAL Delegation Flow", () => {
                 lastActivityAt: Date.now(),
             };
 
-            const result1 = await DelegationCompletionHandler.handleDelegationCompletion(
+            const result1 = await handleDelegationCompletion(
                 firstCompletion,
                 mockConversation,
                 {} as ConversationCoordinator
@@ -434,7 +434,7 @@ describe("RAL Delegation Flow", () => {
                 },
             } as unknown as NDKEvent;
 
-            const result2 = await DelegationCompletionHandler.handleDelegationCompletion(
+            const result2 = await handleDelegationCompletion(
                 secondCompletion,
                 mockConversation,
                 {} as ConversationCoordinator
@@ -511,7 +511,7 @@ describe("RAL Delegation Flow", () => {
 
             // 5. DelegationCompletionHandler records the completion
             // (routing happens via p-tags separately)
-            const result = await DelegationCompletionHandler.handleDelegationCompletion(
+            const result = await handleDelegationCompletion(
                 completionEvent,
                 mockConversation,
                 {} as ConversationCoordinator

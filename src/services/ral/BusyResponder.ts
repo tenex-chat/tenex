@@ -23,18 +23,17 @@ const BusyResponseSchema = z.object({
 
 /**
  * Generates immediate acknowledgments when messages arrive during active/paused execution.
- * Renamed from TimeoutResponder - no longer uses timeouts, responds immediately.
  */
-export class TimeoutResponder {
-  private static instance: TimeoutResponder;
+export class BusyResponder {
+  private static instance: BusyResponder;
 
   private constructor() {}
 
-  static getInstance(): TimeoutResponder {
-    if (!TimeoutResponder.instance) {
-      TimeoutResponder.instance = new TimeoutResponder();
+  static getInstance(): BusyResponder {
+    if (!BusyResponder.instance) {
+      BusyResponder.instance = new BusyResponder();
     }
-    return TimeoutResponder.instance;
+    return BusyResponder.instance;
   }
 
   /**
@@ -49,7 +48,7 @@ export class TimeoutResponder {
   ): void {
     // Fire and forget - don't await
     this.generateResponse(agentPubkey, event, agent, publisher).catch((error) => {
-      logger.error("[TimeoutResponder] Failed to generate busy response", {
+      logger.error("[BusyResponder] Failed to generate busy response", {
         error,
         agentPubkey: agentPubkey.substring(0, 8),
         eventId: event.id?.substring(0, 8),
@@ -66,7 +65,7 @@ export class TimeoutResponder {
   ): Promise<void> {
     // Early return if event has no ID (required for queuing/tracking)
     if (!event.id) {
-      logger.warn("[TimeoutResponder] Cannot process event without ID", {
+      logger.warn("[BusyResponder] Cannot process event without ID", {
         agentPubkey: agentPubkey.substring(0, 8),
       });
       return;
@@ -90,7 +89,7 @@ export class TimeoutResponder {
       if (!registry.eventStillQueued(agentPubkey, eventId)) {
         span.addEvent("event_already_processed");
         span.setStatus({ code: SpanStatusCode.OK });
-        logger.debug("[TimeoutResponder] Event already picked up, skipping", {
+        logger.debug("[BusyResponder] Event already picked up, skipping", {
           eventId: eventId.substring(0, 8),
         });
         return;
@@ -109,7 +108,7 @@ export class TimeoutResponder {
         "ral.pending_delegations": state.pendingDelegations.length,
       });
 
-      logger.info("[TimeoutResponder] Generating busy response", {
+      logger.info("[BusyResponder] Generating busy response", {
         agentPubkey: agentPubkey.substring(0, 8),
         eventId: event.id?.substring(0, 8),
         ralStatus: state.status,
@@ -167,7 +166,7 @@ A user message just arrived but you're busy. Generate:
       } catch (generateObjectError) {
         // generateObject can fail for models that don't support structured output
         // Fall back to generateText and manually construct the response
-        logger.warn("[TimeoutResponder] generateObject failed, falling back to text generation", {
+        logger.warn("[BusyResponder] generateObject failed, falling back to text generation", {
           error: generateObjectError instanceof Error ? generateObjectError.message : String(generateObjectError),
           agentPubkey: agentPubkey.substring(0, 8),
         });
@@ -218,7 +217,7 @@ A user message just arrived but you're busy. Respond with a brief acknowledgment
       if (!registry.eventStillQueued(agentPubkey, eventId)) {
         span.addEvent("event_picked_up_during_generation");
         span.setStatus({ code: SpanStatusCode.OK });
-        logger.debug("[TimeoutResponder] Event picked up during generation", {
+        logger.debug("[BusyResponder] Event picked up during generation", {
           eventId: eventId.substring(0, 8),
         });
         return;
@@ -252,14 +251,14 @@ A user message just arrived but you're busy. Respond with a brief acknowledgment
       }
 
       span.setStatus({ code: SpanStatusCode.OK });
-      logger.info("[TimeoutResponder] Sent busy response", {
+      logger.info("[BusyResponder] Sent busy response", {
         agentPubkey: agentPubkey.substring(0, 8),
         stopCurrentStep: response.object.stop_current_step,
       });
     } catch (error) {
       span.recordException(error as Error);
       span.setStatus({ code: SpanStatusCode.ERROR });
-      logger.error("[TimeoutResponder] Failed to generate response", {
+      logger.error("[BusyResponder] Failed to generate response", {
         error,
         agentPubkey: agentPubkey.substring(0, 8),
       });
