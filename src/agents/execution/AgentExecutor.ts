@@ -51,33 +51,6 @@ export class AgentExecutor {
     }
 
     /**
-     * Build a status message for delegation results
-     */
-    private buildDelegationStatusMessage(ralState: any): string {
-        const parts: string[] = [];
-
-        if (ralState.completedDelegations.length > 0) {
-            parts.push("Delegation Results:");
-            for (const completion of ralState.completedDelegations) {
-                parts.push(
-                    `- ${completion.recipientSlug || completion.recipientPubkey.substring(0, 8)}: ${completion.response}`
-                );
-            }
-        }
-
-        if (ralState.pendingDelegations.length > 0) {
-            parts.push("\nStill Pending:");
-            for (const pending of ralState.pendingDelegations) {
-                parts.push(
-                    `- ${pending.recipientSlug || pending.recipientPubkey.substring(0, 8)}: ${pending.prompt.substring(0, 80)}...`
-                );
-            }
-        }
-
-        return parts.join("\n");
-    }
-
-    /**
      * Prepare an LLM request without executing it.
      * This method builds the messages and determines the tools/configuration
      * but doesn't actually call the LLM.
@@ -148,76 +121,16 @@ export class AgentExecutor {
                 const existingRal = ralRegistry.getStateByAgent(context.agent.pubkey);
 
                 if (existingRal?.status === "executing") {
-                    // Check if this is a resumption after delegation completion
-                    // (has completed delegations waiting for injection)
-                    const isResumption = existingRal.completedDelegations.length > 0;
-
-                    if (isResumption) {
-                        // This is resumption after delegation - inject results and continue
-                        span.addEvent("ral.resumption_after_delegation", {
-                            "ral.status": "executing",
-                            "ral.completed_count": existingRal.completedDelegations.length,
-                            "action": "inject_results_and_continue",
-                        });
-
-                        logger.info("[AgentExecutor] Resuming after delegation completion", {
-                            agent: context.agent.slug,
-                            completedCount: existingRal.completedDelegations.length,
-                        });
-
-                        // Build status injection message with delegation results
-                        const statusMessage = this.buildDelegationStatusMessage(existingRal);
-                        ralRegistry.queueSystemMessage(context.agent.pubkey, statusMessage);
-
-                        // Clear completed delegations after queuing
-                        ralRegistry.clearCompletedDelegations(context.agent.pubkey);
-
-                        // Fall through to continue with execution
-                    } else {
-                        // RAL is currently executing (not resumption) - queue for injection
-                        span.addEvent("ral.already_executing", {
-                            "ral.status": "executing",
-                            "event.id": context.triggeringEvent.id || "",
-                            "action": "queue_and_timeout",
-                        });
-
-                        logger.info("[AgentExecutor] RAL already executing, queueing event", {
-                            agent: context.agent.slug,
-                            eventId: context.triggeringEvent.id?.substring(0, 8),
-                        });
-
-                        ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
-
-                        // Immediately generate acknowledgment for user
-                        const agentPublisher = new AgentPublisher(context.agent);
-                        const busyResponder = TimeoutResponder.getInstance();
-                        busyResponder.processImmediately(
-                            context.agent.pubkey,
-                            context.triggeringEvent,
-                            context.agent,
-                            agentPublisher
-                        );
-
-                        span.setStatus({ code: SpanStatusCode.OK });
-                        span.end();
-                        return; // Don't start new execution
-                    }
-                }
-
-                if (existingRal?.status === "paused") {
-                    // RAL is paused waiting for delegation - queue message for when it resumes
-                    // Don't start new execution - let the delegation completion trigger resumption
-                    span.addEvent("ral.paused_for_delegation", {
-                        "ral.status": "paused",
-                        "ral.pending_count": existingRal.pendingDelegations.length,
+                    // RAL is currently executing - queue for injection
+                    span.addEvent("ral.already_executing", {
+                        "ral.status": "executing",
                         "event.id": context.triggeringEvent.id || "",
-                        "action": "queue_and_acknowledge",
+                        "action": "queue_and_timeout",
                     });
 
-                    logger.info("[AgentExecutor] RAL paused for delegation, queueing event", {
+                    logger.info("[AgentExecutor] RAL already executing, queueing event", {
                         agent: context.agent.slug,
                         eventId: context.triggeringEvent.id?.substring(0, 8),
-                        pendingCount: existingRal.pendingDelegations.length,
                     });
 
                     ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
@@ -234,17 +147,97 @@ export class AgentExecutor {
 
                     span.setStatus({ code: SpanStatusCode.OK });
                     span.end();
-                    return; // Don't start new execution - wait for delegation to complete
+                    return; // Don't start new execution
+                }
+
+                if (existingRal?.status === "paused") {
+                    // Only resume when ALL delegations are complete
+                    const allComplete = existingRal.completedDelegations.length > 0 &&
+                                       existingRal.pendingDelegations.length === 0;
+
+                    if (allComplete) {
+                        // All delegations complete: RESUME
+                        span.addEvent("ral.resumption_all_complete", {
+                            "ral.status": "paused",
+                            "ral.completed_count": existingRal.completedDelegations.length,
+                            "action": "inject_and_resume",
+                        });
+
+                        logger.info("[AgentExecutor] All delegations complete, resuming", {
+                            agent: context.agent.slug,
+                            completedCount: existingRal.completedDelegations.length,
+                        });
+
+                        // Add completed responses as USER messages (so LLM acts on them, not the original request)
+                        for (const completion of existingRal.completedDelegations) {
+                            const agentName = completion.recipientSlug || completion.recipientPubkey.substring(0, 8);
+                            existingRal.messages.push({
+                                role: "user",
+                                content: `[Response from ${agentName}]: ${completion.response}`,
+                            });
+                        }
+
+                        // Add status context as system message
+                        existingRal.messages.push({
+                            role: "system",
+                            content: `All ${existingRal.completedDelegations.length} delegation(s) complete. Continue with your task.`,
+                        });
+
+                        // Mark as executing and clear completed delegations
+                        ralRegistry.markResuming(context.agent.pubkey);
+                        ralRegistry.clearCompletedDelegations(context.agent.pubkey);
+
+                        // Override triggering event with original (for proper response tagging)
+                        if (existingRal.originalTriggeringEventId) {
+                            const conversation = context.conversationCoordinator?.getConversation(context.conversationId);
+                            const originalEvent = conversation?.history.find(
+                                (e) => e.id === existingRal.originalTriggeringEventId
+                            );
+                            if (originalEvent) {
+                                context.triggeringEvent = originalEvent;
+                                logger.debug("[AgentExecutor] Restored original triggering event for resumption", {
+                                    agent: context.agent.slug,
+                                    originalEventId: originalEvent.id?.substring(0, 8),
+                                });
+                            }
+                        }
+
+                        // Fall through to continue with execution
+                    } else {
+                        // Still waiting for delegations - completion already recorded by DelegationCompletionHandler
+                        span.addEvent("ral.still_waiting_for_delegations", {
+                            "ral.status": "paused",
+                            "ral.pending_count": existingRal.pendingDelegations.length,
+                            "ral.completed_count": existingRal.completedDelegations.length,
+                            "event.id": context.triggeringEvent.id || "",
+                            "action": "wait_for_all",
+                        });
+
+                        logger.info("[AgentExecutor] RAL still waiting for delegations", {
+                            agent: context.agent.slug,
+                            pendingCount: existingRal.pendingDelegations.length,
+                            completedCount: existingRal.completedDelegations.length,
+                        });
+
+                        // Don't queue this event - it's a delegation response, already handled
+                        // Just return without starting execution
+
+                        span.setStatus({ code: SpanStatusCode.OK });
+                        span.end();
+                        return; // Don't start new execution - wait for all delegations to complete
+                    }
                 }
 
                 // Create new RAL entry if none exists
                 if (!existingRal) {
-                    ralRegistry.create(context.agent.pubkey);
+                    ralRegistry.create(context.agent.pubkey, context.triggeringEvent.id);
                     span.addEvent("ral.created", {
                         "action": "fresh_execution",
+                        "original_triggering_event_id": context.triggeringEvent.id || "",
                     });
                     logger.debug("[AgentExecutor] Created new RAL entry", {
                         agent: context.agent.slug,
+                        originalTriggeringEventId: context.triggeringEvent.id?.substring(0, 8),
                     });
                 }
 

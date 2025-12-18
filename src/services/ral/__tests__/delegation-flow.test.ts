@@ -288,18 +288,16 @@ describe("RAL Delegation Flow", () => {
 
             const mockCoordinator = {} as ConversationCoordinator;
 
-            // Execute handler
+            // Execute handler - now just records completion, routing is via p-tags
             const result = await DelegationCompletionHandler.handleDelegationCompletion(
                 completionEvent,
                 mockConversation,
                 mockCoordinator
             );
 
-            // Verify result
-            expect(result.shouldReactivate).toBe(true);
-            expect(result.isResumption).toBe(true);
-            expect(result.targetAgent).toBeDefined();
-            expect(result.targetAgent?.pubkey).toBe(mockAgent.pubkey);
+            // Verify completion was recorded
+            expect(result.recorded).toBe(true);
+            expect(result.agentSlug).toBe("transparent");
 
             // Verify RAL state was updated
             const state = registry.getStateByAgent(mockAgent.pubkey);
@@ -307,7 +305,7 @@ describe("RAL Delegation Flow", () => {
             expect(state?.completedDelegations).toHaveLength(1);
         });
 
-        it("should not trigger resumption for unrelated events", async () => {
+        it("should not record completion for unrelated events", async () => {
             // Setup: Create RAL with pending delegation
             registry.create(mockAgent.pubkey);
             registry.saveState(mockAgent.pubkey, [], [
@@ -344,11 +342,17 @@ describe("RAL Delegation Flow", () => {
                 {} as ConversationCoordinator
             );
 
-            expect(result.shouldReactivate).toBe(false);
-            expect(result.isResumption).toBeUndefined();
+            // Should not record anything for unrelated events
+            expect(result.recorded).toBe(false);
+            expect(result.agentSlug).toBeUndefined();
+
+            // RAL state should be unchanged
+            const state = registry.getStateByAgent(mockAgent.pubkey);
+            expect(state?.pendingDelegations).toHaveLength(1);
+            expect(state?.completedDelegations).toHaveLength(0);
         });
 
-        it("should wait for all delegations before triggering resumption", async () => {
+        it("should record each completion independently (routing via p-tags)", async () => {
             // Setup: Create RAL with multiple pending delegations
             registry.create(mockAgent.pubkey);
             registry.saveState(mockAgent.pubkey, [], [
@@ -400,8 +404,14 @@ describe("RAL Delegation Flow", () => {
                 {} as ConversationCoordinator
             );
 
-            // First completion should NOT trigger resumption
-            expect(result1.shouldReactivate).toBe(false);
+            // First completion should be recorded
+            expect(result1.recorded).toBe(true);
+            expect(result1.agentSlug).toBe("transparent");
+
+            // Verify partial completion state
+            const stateAfterFirst = registry.getStateByAgent(mockAgent.pubkey);
+            expect(stateAfterFirst?.pendingDelegations).toHaveLength(1);
+            expect(stateAfterFirst?.completedDelegations).toHaveLength(1);
 
             // Second completion
             const secondCompletion = {
@@ -430,16 +440,20 @@ describe("RAL Delegation Flow", () => {
                 {} as ConversationCoordinator
             );
 
-            // Second completion SHOULD trigger resumption
-            expect(result2.shouldReactivate).toBe(true);
-            expect(result2.isResumption).toBe(true);
+            // Second completion should also be recorded
+            expect(result2.recorded).toBe(true);
+
+            // Verify all complete state
+            const stateAfterSecond = registry.getStateByAgent(mockAgent.pubkey);
+            expect(stateAfterSecond?.pendingDelegations).toHaveLength(0);
+            expect(stateAfterSecond?.completedDelegations).toHaveLength(2);
         });
     });
 
     describe("Full Delegation Flow", () => {
         it("should handle complete delegation lifecycle", async () => {
             // 1. Agent starts execution
-            const ralId = registry.create(mockAgent.pubkey);
+            registry.create(mockAgent.pubkey);
             expect(registry.getStateByAgent(mockAgent.pubkey)?.status).toBe("executing");
 
             // 2. Agent calls delegate tool, which saves state and pauses
@@ -495,37 +509,53 @@ describe("RAL Delegation Flow", () => {
                 lastActivityAt: Date.now(),
             };
 
-            // 5. DelegationCompletionHandler processes the completion
+            // 5. DelegationCompletionHandler records the completion
+            // (routing happens via p-tags separately)
             const result = await DelegationCompletionHandler.handleDelegationCompletion(
                 completionEvent,
                 mockConversation,
                 {} as ConversationCoordinator
             );
 
-            // 6. Verify resumption is triggered
-            expect(result.shouldReactivate).toBe(true);
-            expect(result.isResumption).toBe(true);
-            expect(result.targetAgent?.slug).toBe("transparent");
+            // 6. Verify completion was recorded
+            expect(result.recorded).toBe(true);
+            expect(result.agentSlug).toBe("transparent");
 
             // 7. Verify RAL state has completion recorded
-            const finalState = registry.getStateByAgent(mockAgent.pubkey);
-            expect(finalState?.pendingDelegations).toHaveLength(0);
-            expect(finalState?.completedDelegations).toHaveLength(1);
-            expect(finalState?.completedDelegations[0].response).toBe(
+            const stateAfterCompletion = registry.getStateByAgent(mockAgent.pubkey);
+            expect(stateAfterCompletion?.pendingDelegations).toHaveLength(0);
+            expect(stateAfterCompletion?.completedDelegations).toHaveLength(1);
+            expect(stateAfterCompletion?.completedDelegations[0].response).toBe(
                 "I have completed the subtask. Here are the results."
             );
 
-            // 8. Mark as resuming (what reply.ts would do)
+            // 8. AgentExecutor detects paused RAL with completions and resumes
+            // (simulating what AgentExecutor does)
+            const ralState = registry.getStateByAgent(mockAgent.pubkey)!;
+            expect(ralState.status).toBe("paused");
+            expect(ralState.completedDelegations.length).toBeGreaterThan(0);
+
+            // Add completed responses as user messages (what AgentExecutor does)
+            for (const completion of ralState.completedDelegations) {
+                const agentName = completion.recipientSlug || completion.recipientPubkey.substring(0, 8);
+                ralState.messages.push({
+                    role: "user",
+                    content: `[Response from ${agentName}]: ${completion.response}`,
+                });
+            }
+
+            // Mark as resuming and clear completed delegations
             registry.markResuming(mockAgent.pubkey);
             expect(registry.getStateByAgent(mockAgent.pubkey)?.status).toBe("executing");
 
-            // 9. Get completed delegations for injection
-            const completedForInjection = registry.getCompletedDelegationsForInjection(mockAgent.pubkey);
-            expect(completedForInjection).toHaveLength(1);
-
-            // 10. Clear after injection
             registry.clearCompletedDelegations(mockAgent.pubkey);
             expect(registry.getCompletedDelegationsForInjection(mockAgent.pubkey)).toHaveLength(0);
+
+            // Verify messages include the response as user message
+            const finalState = registry.getStateByAgent(mockAgent.pubkey);
+            expect(finalState?.messages).toHaveLength(3); // original 2 + response
+            expect(finalState?.messages[2].role).toBe("user");
+            expect(finalState?.messages[2].content).toContain("Response from agent2");
         });
     });
 });

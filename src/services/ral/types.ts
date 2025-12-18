@@ -42,6 +42,8 @@ export interface RALState {
   toolStartedAt?: number;
   createdAt: number;
   lastActivityAt: number;
+  /** The original event that triggered this RAL - used for proper tagging on resumption */
+  originalTriggeringEventId?: string;
 }
 
 export interface StopExecutionSignal {

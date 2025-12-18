@@ -1,4 +1,3 @@
-import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { getProjectContext } from "@/services/ProjectContext";
@@ -9,51 +8,32 @@ import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.delegation");
 
-export interface DelegationStatus {
-    completedCount: number;
-    pendingCount: number;
-    completedDelegations: Array<{
-        recipientSlug?: string;
-        recipientPubkey: string;
-        response: string;
-    }>;
-    pendingDelegations: Array<{
-        recipientSlug?: string;
-        recipientPubkey: string;
-    }>;
-}
-
 export interface DelegationCompletionResult {
-    shouldReactivate: boolean;
-    targetAgent?: AgentInstance;
-    replyTarget?: NDKEvent;
-    /** If true, this is a RAL resumption (not a fresh execution) */
-    isResumption?: boolean;
-    /** Status of delegations - provided when shouldReactivate is true */
-    delegationStatus?: DelegationStatus;
+    /** Whether a completion was recorded */
+    recorded: boolean;
+    /** The agent slug that's waiting for this delegation (if any) */
+    agentSlug?: string;
 }
 
 /**
- * DelegationCompletionHandler encapsulates all logic for processing delegation completion events.
- * This includes updating the RALRegistry, recording the completion, and queuing the event
- * for injection into the paused agent execution.
+ * DelegationCompletionHandler records delegation completions in the RALRegistry.
+ * It does NOT handle routing or resumption - that's handled by normal routing + AgentExecutor.
  */
-
 // biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
 export class DelegationCompletionHandler {
     /**
-     * Process a delegation completion event using RALRegistry
+     * Record a delegation completion event in RALRegistry
      *
      * Flow:
      * 1. Find which delegation this responds to (via e-tag)
      * 2. Look up which RAL is waiting for this delegation
      * 3. Record the completion
-     * 4. Check if all delegations are complete
-     * 5. If all complete, trigger RAL resumption
+     *
+     * Routing and resumption are handled separately by normal routing + AgentExecutor.
      */
     static async handleDelegationCompletion(
         event: NDKEvent,
-        conversation: Conversation,
+        _conversation: Conversation,
         _conversationCoordinator: ConversationCoordinator
     ): Promise<DelegationCompletionResult> {
         const span = tracer.startSpan("tenex.delegation.completion_check", {
@@ -61,7 +41,6 @@ export class DelegationCompletionHandler {
                 "event.id": event.id || "",
                 "event.pubkey": event.pubkey,
                 "event.kind": event.kind || 0,
-                "conversation.id": conversation.id,
             },
         });
 
@@ -73,10 +52,7 @@ export class DelegationCompletionHandler {
             if (!delegationEventId) {
                 span.addEvent("no_e_tag");
                 span.setStatus({ code: SpanStatusCode.OK });
-                logger.debug("[DelegationCompletionHandler] No e-tag found in completion event", {
-                    eventId: event.id?.substring(0, 8),
-                });
-                return { shouldReactivate: false };
+                return { recorded: false };
             }
 
             span.setAttribute("delegation.event_id", delegationEventId);
@@ -88,120 +64,51 @@ export class DelegationCompletionHandler {
                     "delegation.event_id": delegationEventId,
                 });
                 span.setStatus({ code: SpanStatusCode.OK });
-                logger.debug("[DelegationCompletionHandler] No agent waiting for this delegation", {
-                    delegationEventId: delegationEventId.substring(0, 8),
-                    eventId: event.id?.substring(0, 8),
-                });
-                return { shouldReactivate: false };
+                return { recorded: false };
             }
 
-            span.setAttribute("agent.pubkey", agentPubkey);
-
-            // Get the target agent
+            // Get the target agent for logging
             const projectCtx = getProjectContext();
             const targetAgent = projectCtx.getAgentByPubkey(agentPubkey);
-            if (!targetAgent) {
-                span.addEvent("agent_not_found");
-                span.setStatus({ code: SpanStatusCode.ERROR });
-                logger.warn("[DelegationCompletionHandler] Could not find agent by pubkey", {
-                    agentPubkey: agentPubkey.substring(0, 8),
-                    delegationEventId: delegationEventId.substring(0, 8),
-                });
-                return { shouldReactivate: false };
-            }
+            const agentSlug = targetAgent?.slug;
 
-            span.setAttribute("agent.slug", targetAgent.slug);
-
-            logger.info("[DelegationCompletionHandler] Processing delegation completion", {
-                delegationEventId: delegationEventId.substring(0, 8),
-                agentSlug: targetAgent.slug,
-                completionEventId: event.id?.substring(0, 8),
-                responderPubkey: event.pubkey.substring(0, 8),
-            });
-
-            span.addEvent("completion_detected", {
-                "delegation.event_id": delegationEventId,
-                "responder.pubkey": event.pubkey,
-                "response.length": event.content?.length || 0,
+            span.setAttributes({
+                "agent.pubkey": agentPubkey,
+                "agent.slug": agentSlug || "unknown",
             });
 
             // Record the completion
             ralRegistry.recordCompletion(agentPubkey, {
                 eventId: delegationEventId,
                 recipientPubkey: event.pubkey,
+                recipientSlug: projectCtx.getAgentByPubkey(event.pubkey)?.slug,
                 response: event.content,
                 responseEventId: event.id,
                 completedAt: Date.now(),
             });
 
-            // Check if all delegations are now complete
-            const allComplete = ralRegistry.allDelegationsComplete(agentPubkey);
             const state = ralRegistry.getStateByAgent(agentPubkey);
-
             span.setAttributes({
-                "delegation.all_complete": allComplete,
                 "delegation.pending_count": state?.pendingDelegations.length || 0,
                 "delegation.completed_count": state?.completedDelegations.length || 0,
             });
 
-            // Build delegation status for the agent
-            const delegationStatus: DelegationStatus = {
-                completedCount: state?.completedDelegations.length || 0,
-                pendingCount: state?.pendingDelegations.length || 0,
-                completedDelegations: (state?.completedDelegations || []).map(d => ({
-                    recipientSlug: d.recipientSlug,
-                    recipientPubkey: d.recipientPubkey,
-                    response: d.response,
-                })),
-                pendingDelegations: (state?.pendingDelegations || []).map(d => ({
-                    recipientSlug: d.recipientSlug,
-                    recipientPubkey: d.recipientPubkey,
-                })),
-            };
-
-            // Find the original triggering event to use as reply target
-            const replyTarget = conversation.history?.[0];
-
-            if (allComplete) {
-                span.addEvent("all_delegations_complete", {
-                    "action": "trigger_resumption",
-                });
-                span.setStatus({ code: SpanStatusCode.OK });
-
-                logger.info("[DelegationCompletionHandler] All delegations complete, triggering resumption", {
-                    agentSlug: targetAgent.slug,
-                    agentPubkey: agentPubkey.substring(0, 8),
-                });
-
-                return {
-                    shouldReactivate: true,
-                    targetAgent,
-                    replyTarget,
-                    isResumption: true,
-                    delegationStatus,
-                };
-            }
-
-            // Partial completion - still reactivate so agent can decide what to do
-            span.addEvent("partial_completion", {
-                "completed": state?.completedDelegations.length || 0,
-                "remaining": state?.pendingDelegations.length || 0,
+            span.addEvent("completion_recorded", {
+                "delegation.event_id": delegationEventId,
+                "responder.pubkey": event.pubkey,
+                "response.length": event.content?.length || 0,
             });
             span.setStatus({ code: SpanStatusCode.OK });
 
-            logger.info("[DelegationCompletionHandler] Partial delegation completion, reactivating agent", {
-                agentSlug: targetAgent.slug,
+            logger.info("[DelegationCompletionHandler] Recorded delegation completion", {
+                delegationEventId: delegationEventId.substring(0, 8),
+                agentSlug,
+                completionEventId: event.id?.substring(0, 8),
                 completedCount: state?.completedDelegations.length || 0,
-                remainingPending: state?.pendingDelegations.length || 0,
+                pendingCount: state?.pendingDelegations.length || 0,
             });
 
-            return {
-                shouldReactivate: true,
-                targetAgent,
-                replyTarget,
-                isResumption: true,
-                delegationStatus,
-            };
+            return { recorded: true, agentSlug };
         } catch (error) {
             span.recordException(error as Error);
             span.setStatus({ code: SpanStatusCode.ERROR });
