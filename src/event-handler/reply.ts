@@ -224,21 +224,6 @@ async function handleReplyLogic(
     // 3. Determine target agents
     let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
 
-    // 3.1 Filter out the waiting agent if this was a delegation completion but not all are complete yet
-    // This prevents the waiting agent from starting a fresh execution when it should stay paused
-    if (delegationResult.wasDelegationCompletion && !delegationResult.shouldReactivate && delegationResult.targetAgent) {
-        const waitingAgentPubkey = delegationResult.targetAgent.pubkey;
-        const beforeCount = targetAgents.length;
-        targetAgents = targetAgents.filter(agent => agent.pubkey !== waitingAgentPubkey);
-
-        if (targetAgents.length < beforeCount) {
-            logger.info("[handleReplyLogic] Filtered out waiting agent from routing (partial delegation completion)", {
-                agent: delegationResult.targetAgent.slug,
-                eventId: event.id?.substring(0, 8),
-            });
-        }
-    }
-
     // Add telemetry for routing decision
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {
