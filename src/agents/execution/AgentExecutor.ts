@@ -812,6 +812,17 @@ export class AgentExecutor {
 
                         // Store pending delegations for later handling
                         this.pendingDelegations = toolResult.output.pendingDelegations;
+
+                        // CRITICAL: Save RAL state immediately to avoid race condition
+                        // The delegation completion might arrive before streaming fully completes,
+                        // so we must register as "paused" NOW, not after streaming ends
+                        ralRegistry.saveState(context.agent.pubkey, messages, this.pendingDelegations);
+                        logger.info("[AgentExecutor] Saved RAL state immediately on stop signal", {
+                            agent: context.agent.slug,
+                            pendingCount: this.pendingDelegations.length,
+                            messageCount: messages.length,
+                        });
+
                         return true; // Stop execution
                     }
                 }
@@ -878,15 +889,12 @@ export class AgentExecutor {
 
         // Handle RAL state based on finish reason and pending delegations
         if (this.pendingDelegations.length > 0) {
-            // Stopped for delegation - save state and pause
+            // Stopped for delegation - state already saved in onStopCheck to avoid race condition
             // NOTE: Don't clear pendingDelegations here - executeWithSupervisor needs to check it
-            logger.info("[AgentExecutor] Saving RAL state for delegation pause", {
+            logger.debug("[AgentExecutor] Delegation pause already saved in onStopCheck", {
                 agent: context.agent.slug,
                 pendingCount: this.pendingDelegations.length,
-                messageCount: messages.length,
             });
-
-            ralRegistry.saveState(context.agent.pubkey, messages, this.pendingDelegations);
         } else if (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end") {
             // Normal completion - clear RAL state
             logger.info("[AgentExecutor] Clearing RAL state after normal completion", {
