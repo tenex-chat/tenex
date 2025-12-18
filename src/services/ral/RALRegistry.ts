@@ -28,7 +28,7 @@ export class RALRegistry {
   /**
    * Create a new RAL entry for an agent
    */
-  create(agentPubkey: string): string {
+  create(agentPubkey: string, originalTriggeringEventId?: string): string {
     const id = crypto.randomUUID();
     const now = Date.now();
 
@@ -42,6 +42,7 @@ export class RALRegistry {
       status: "executing",
       createdAt: now,
       lastActivityAt: now,
+      originalTriggeringEventId,
     };
 
     this.states.set(agentPubkey, state);
@@ -49,6 +50,7 @@ export class RALRegistry {
     logger.debug("[RALRegistry] Created RAL", {
       ralId: id.substring(0, 8),
       agentPubkey: agentPubkey.substring(0, 8),
+      originalTriggeringEventId: originalTriggeringEventId?.substring(0, 8),
     });
 
     return id;
