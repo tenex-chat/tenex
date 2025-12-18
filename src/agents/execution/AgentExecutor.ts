@@ -809,24 +809,25 @@ export class AgentExecutor {
                 });
 
                 for (const toolResult of toolResults) {
-                    const hasStopSignal = isStopExecutionSignal(toolResult.result);
+                    // AI SDK uses `output` for tool results, not `result`
+                    const hasStopSignal = isStopExecutionSignal(toolResult.output);
                     logger.debug("[AgentExecutor] Checking tool result", {
                         toolName: toolResult.toolName,
                         hasStopSignal,
-                        resultType: typeof toolResult.result,
-                        resultKeys: toolResult.result && typeof toolResult.result === "object"
-                            ? Object.keys(toolResult.result)
+                        resultType: typeof toolResult.output,
+                        resultKeys: toolResult.output && typeof toolResult.output === "object"
+                            ? Object.keys(toolResult.output)
                             : [],
                     });
 
                     if (hasStopSignal) {
                         logger.info("[AgentExecutor] Detected delegation stop signal", {
                             agent: context.agent.slug,
-                            delegationCount: toolResult.result.pendingDelegations.length,
+                            delegationCount: toolResult.output.pendingDelegations.length,
                         });
 
                         // Store pending delegations for later handling
-                        this.pendingDelegations = toolResult.result.pendingDelegations;
+                        this.pendingDelegations = toolResult.output.pendingDelegations;
                         return true; // Stop execution
                     }
                 }
