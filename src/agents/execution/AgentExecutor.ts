@@ -148,15 +148,82 @@ export class AgentExecutor {
                 const existingRal = ralRegistry.getStateByAgent(context.agent.pubkey);
 
                 if (existingRal?.status === "executing") {
-                    // RAL is currently executing - queue for injection
-                    logger.info("[AgentExecutor] RAL already executing, queueing event", {
+                    // Check if this is a resumption after delegation completion
+                    // (has completed delegations waiting for injection)
+                    const isResumption = existingRal.completedDelegations.length > 0;
+
+                    if (isResumption) {
+                        // This is resumption after delegation - inject results and continue
+                        span.addEvent("ral.resumption_after_delegation", {
+                            "ral.status": "executing",
+                            "ral.completed_count": existingRal.completedDelegations.length,
+                            "action": "inject_results_and_continue",
+                        });
+
+                        logger.info("[AgentExecutor] Resuming after delegation completion", {
+                            agent: context.agent.slug,
+                            completedCount: existingRal.completedDelegations.length,
+                        });
+
+                        // Build status injection message with delegation results
+                        const statusMessage = this.buildDelegationStatusMessage(existingRal);
+                        ralRegistry.queueSystemMessage(context.agent.pubkey, statusMessage);
+
+                        // Clear completed delegations after queuing
+                        ralRegistry.clearCompletedDelegations(context.agent.pubkey);
+
+                        // Fall through to continue with execution
+                    } else {
+                        // RAL is currently executing (not resumption) - queue for injection
+                        span.addEvent("ral.already_executing", {
+                            "ral.status": "executing",
+                            "event.id": context.triggeringEvent.id || "",
+                            "action": "queue_and_timeout",
+                        });
+
+                        logger.info("[AgentExecutor] RAL already executing, queueing event", {
+                            agent: context.agent.slug,
+                            eventId: context.triggeringEvent.id?.substring(0, 8),
+                        });
+
+                        ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
+
+                        // Schedule timeout responder
+                        const agentPublisher = new AgentPublisher(context.agent);
+                        const timeoutResponder = TimeoutResponder.getInstance();
+                        timeoutResponder.schedule(
+                            context.agent.pubkey,
+                            context.triggeringEvent,
+                            context.agent,
+                            agentPublisher,
+                            5000
+                        );
+
+                        span.setStatus({ code: SpanStatusCode.OK });
+                        span.end();
+                        return; // Don't start new execution
+                    }
+                }
+
+                if (existingRal?.status === "paused") {
+                    // RAL is paused waiting for delegation - queue message for when it resumes
+                    // Don't start new execution - let the delegation completion trigger resumption
+                    span.addEvent("ral.paused_for_delegation", {
+                        "ral.status": "paused",
+                        "ral.pending_count": existingRal.pendingDelegations.length,
+                        "event.id": context.triggeringEvent.id || "",
+                        "action": "queue_and_timeout",
+                    });
+
+                    logger.info("[AgentExecutor] RAL paused for delegation, queueing event", {
                         agent: context.agent.slug,
                         eventId: context.triggeringEvent.id?.substring(0, 8),
+                        pendingCount: existingRal.pendingDelegations.length,
                     });
 
                     ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
 
-                    // Schedule timeout responder
+                    // Schedule timeout responder to acknowledge user
                     const agentPublisher = new AgentPublisher(context.agent);
                     const timeoutResponder = TimeoutResponder.getInstance();
                     timeoutResponder.schedule(
@@ -167,28 +234,17 @@ export class AgentExecutor {
                         5000
                     );
 
-                    return; // Don't start new execution
-                }
-
-                if (existingRal?.status === "paused") {
-                    // RAL is paused (waiting on delegation) - restore and resume
-                    logger.info("[AgentExecutor] RAL paused, resuming with delegation results", {
-                        agent: context.agent.slug,
-                        pendingCount: existingRal.pendingDelegations.length,
-                        completedCount: existingRal.completedDelegations.length,
-                    });
-
-                    // Build status injection message
-                    const statusMessage = this.buildDelegationStatusMessage(existingRal);
-                    ralRegistry.queueSystemMessage(context.agent.pubkey, statusMessage);
-
-                    // Resume with status set back to executing
-                    ralRegistry.setStatus(context.agent.pubkey, "executing");
+                    span.setStatus({ code: SpanStatusCode.OK });
+                    span.end();
+                    return; // Don't start new execution - wait for delegation to complete
                 }
 
                 // Create new RAL entry if none exists
                 if (!existingRal) {
                     ralRegistry.create(context.agent.pubkey);
+                    span.addEvent("ral.created", {
+                        "action": "fresh_execution",
+                    });
                     logger.debug("[AgentExecutor] Created new RAL entry", {
                         agent: context.agent.slug,
                     });

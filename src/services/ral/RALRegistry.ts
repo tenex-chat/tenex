@@ -291,4 +291,90 @@ export class RALRegistry {
 
     return `${toolInfo}\n\nRecent context:\n${recentMessages}`;
   }
+
+  /**
+   * Find the agent pubkey that is waiting for a delegation response
+   * @param delegationEventId The event ID of the delegation
+   * @returns The agent pubkey waiting for this delegation, or undefined
+   */
+  findAgentWaitingForDelegation(delegationEventId: string): string | undefined {
+    for (const [agentPubkey, state] of this.states.entries()) {
+      if (state.status === "paused") {
+        const hasPending = state.pendingDelegations.some(
+          (d) => d.eventId === delegationEventId
+        );
+        if (hasPending) {
+          return agentPubkey;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Check if an agent has a paused RAL waiting for delegations
+   */
+  hasPausedRal(agentPubkey: string): boolean {
+    const state = this.states.get(agentPubkey);
+    return state?.status === "paused" && state.pendingDelegations.length > 0;
+  }
+
+  /**
+   * Check if all pending delegations are complete for an agent
+   */
+  allDelegationsComplete(agentPubkey: string): boolean {
+    const state = this.states.get(agentPubkey);
+    if (!state) return false;
+    return state.pendingDelegations.length === 0 && state.completedDelegations.length > 0;
+  }
+
+  /**
+   * Get the paused RAL state for resumption
+   * Returns the state only if it's paused and ready to resume
+   */
+  getStateForResumption(agentPubkey: string): RALState | undefined {
+    const state = this.states.get(agentPubkey);
+    if (!state || state.status !== "paused") return undefined;
+    if (state.pendingDelegations.length > 0) return undefined; // Still waiting
+    return state;
+  }
+
+  /**
+   * Mark RAL as resuming (transitioning from paused to executing)
+   */
+  markResuming(agentPubkey: string): void {
+    const state = this.states.get(agentPubkey);
+    if (state) {
+      state.status = "executing";
+      state.lastActivityAt = Date.now();
+      logger.info("[RALRegistry] RAL resuming after delegation completion", {
+        ralId: state.id.substring(0, 8),
+        agentPubkey: agentPubkey.substring(0, 8),
+        completedCount: state.completedDelegations.length,
+      });
+    }
+  }
+
+  /**
+   * Get completed delegations for injection into resumed conversation
+   */
+  getCompletedDelegationsForInjection(agentPubkey: string): CompletedDelegation[] {
+    const state = this.states.get(agentPubkey);
+    if (!state) return [];
+    return [...state.completedDelegations];
+  }
+
+  /**
+   * Clear completed delegations after they've been injected
+   */
+  clearCompletedDelegations(agentPubkey: string): void {
+    const state = this.states.get(agentPubkey);
+    if (state) {
+      // Clean up delegation mappings
+      for (const d of state.completedDelegations) {
+        this.delegationToRal.delete(d.eventId);
+      }
+      state.completedDelegations = [];
+    }
+  }
 }
