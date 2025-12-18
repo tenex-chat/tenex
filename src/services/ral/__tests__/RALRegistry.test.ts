@@ -386,18 +386,18 @@ describe("RALRegistry", () => {
       registry.queueEvent(agentPubkey, event);
       expect(registry.eventStillQueued(agentPubkey, "event-123")).toBe(true);
 
-      registry.getAndClearQueued(agentPubkey);
+      registry.getAndPersistInjections(agentPubkey);
       expect(registry.eventStillQueued(agentPubkey, "event-123")).toBe(false);
     });
   });
 
-  describe("getAndClearQueued", () => {
+  describe("getAndPersistInjections", () => {
     it("should return empty array for non-existent agent", () => {
-      const injections = registry.getAndClearQueued("nonexistent");
+      const injections = registry.getAndPersistInjections("nonexistent");
       expect(injections).toEqual([]);
     });
 
-    it("should return and clear queued injections", () => {
+    it("should return and persist queued injections to messages", () => {
       registry.create(agentPubkey);
 
       const event = new NDKEvent();
@@ -407,7 +407,7 @@ describe("RALRegistry", () => {
       registry.queueEvent(agentPubkey, event);
       registry.queueSystemMessage(agentPubkey, "System message");
 
-      const injections = registry.getAndClearQueued(agentPubkey);
+      const injections = registry.getAndPersistInjections(agentPubkey);
 
       expect(injections).toHaveLength(2);
       expect(injections[0].type).toBe("user");
@@ -417,6 +417,7 @@ describe("RALRegistry", () => {
 
       const state = registry.getStateByAgent(agentPubkey);
       expect(state?.queuedInjections).toEqual([]);
+      expect(state?.messages).toHaveLength(2);
     });
 
     it("should return copy of injections, not original array", () => {
@@ -424,8 +425,8 @@ describe("RALRegistry", () => {
 
       registry.queueSystemMessage(agentPubkey, "Test");
 
-      const injections1 = registry.getAndClearQueued(agentPubkey);
-      const injections2 = registry.getAndClearQueued(agentPubkey);
+      const injections1 = registry.getAndPersistInjections(agentPubkey);
+      const injections2 = registry.getAndPersistInjections(agentPubkey);
 
       expect(injections1).toHaveLength(1);
       expect(injections2).toEqual([]);
