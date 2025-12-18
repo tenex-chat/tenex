@@ -103,6 +103,11 @@ export class AgentPublisher {
             event.tags.push(["P", context.rootEvent.pubkey]);
         }
 
+        // Add e-tag for triggering event (reply threading)
+        if (context.triggeringEvent?.id) {
+            event.tags.push(["e", context.triggeringEvent.id]);
+        }
+
         // Add project a-tag (required for event routing)
         this.encoder.aTagProject(event);
 
@@ -152,6 +157,11 @@ export class AgentPublisher {
             event.tags.push(["E", context.rootEvent.id]);
             event.tags.push(["K", String(context.rootEvent.kind)]);
             event.tags.push(["P", context.rootEvent.pubkey]);
+        }
+
+        // Add e-tag for triggering event (reply threading)
+        if (context.triggeringEvent?.id) {
+            event.tags.push(["e", context.triggeringEvent.id]);
         }
 
         // Add project a-tag (required for event routing)
