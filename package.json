@@ -29,7 +29,6 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "postinstall": "[ -f patches/ai@5.0.108.patch ] && (cd node_modules/ai && patch -p1) < patches/ai@5.0.108.patch || true",
     "start": "bun run ./src/tenex.ts",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
@@ -58,12 +57,13 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.44",
+    "@ai-sdk/devtools": "^0.0.1-beta.2",
     "@ai-sdk/mcp": "^1.0.0-beta.15",
     "@ai-sdk/openai": "^2.0.67",
     "@inquirer/search": "^3.2.2",
     "@lancedb/lancedb": "^0.22.3",
     "@nostr-dev-kit/ndk": "^3.0.0-beta.64",
-    "@openrouter/ai-sdk-provider": "^1.3.0",
+    "@openrouter/ai-sdk-provider": "github:pablof7z/ai-sdk-provider",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.67.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.208.0",
@@ -73,7 +73,7 @@
     "@opentelemetry/sdk-trace-node": "^2.2.0",
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "@huggingface/transformers": "^3.3.0",
-    "ai": "^5.0.106",
+    "ai": "^6.0.0-beta.1",
     "ai-sdk-provider-claude-code": "^2.2.3",
     "ai-sdk-provider-gemini-cli": "^1.2.0",
     "chalk": "^5.6.2",
@@ -83,7 +83,7 @@
     "lodash": "^4.17.21",
     "node-cron": "^4.2.1",
     "nostr-tools": "^2.15.0",
-    "ollama-ai-provider-v2": "^1.5.5",
+    "ollama-ai-provider-v2": "github:pablof7z/ollama-ai-provider-v2",
     "tseep": "^1.3.1",
     "zod": "^4.1.12"
   },

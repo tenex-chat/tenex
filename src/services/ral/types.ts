@@ -1,4 +1,4 @@
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 export type RALStatus = "executing" | "paused" | "done";
 
@@ -33,7 +33,7 @@ export interface QueuedInjection {
 export interface RALState {
   id: string;
   agentPubkey: string;
-  messages: CoreMessage[];
+  messages: ModelMessage[];
   pendingDelegations: PendingDelegation[];
   completedDelegations: CompletedDelegation[];
   queuedInjections: QueuedInjection[];

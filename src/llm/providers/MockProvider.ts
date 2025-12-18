@@ -1,34 +1,26 @@
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
-import type {
-    LanguageModelV2,
-    LanguageModelV2CallOptions,
-    LanguageModelV2CallWarning,
-    LanguageModelV2Content,
-    LanguageModelV2FinishReason,
-    LanguageModelV2Message,
-    LanguageModelV2StreamPart,
-    ProviderV2,
-} from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
+
+// Using any types for the mock provider since V2/V3 types are in transition in AI SDK v6 beta
 
 /**
  * Creates a mock provider that integrates MockLLMService with AI SDK
  * This allows us to use the mock service through the standard LLMServiceFactory
  */
-export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
+export function createMockProvider(config?: MockLLMConfig): any {
     const mockService = new MockLLMService(config);
 
     // Create a factory function that returns a language model
-    const createLanguageModel = (modelId: string): LanguageModelV2 => {
+    const createLanguageModel = (modelId: string): any => {
         logger.info(`[MockProvider] Creating language model for: ${modelId}`);
 
-        return new MockLanguageModelV2({
+        return new MockLanguageModelV3({
             provider: "mock",
             modelId: modelId || "mock-model",
 
-            doGenerate: (async (options: LanguageModelV2CallOptions) => {
+            doGenerate: (async (options: any) => {
                 // Extract messages from prompt
                 const messages = options.prompt;
 
@@ -41,9 +33,9 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                     logger.warn("[MockProvider] doGenerate called with no messages");
                     return {
                         content: [{ type: "text" as const, text: "Mock response: no messages provided" }],
-                        finishReason: "stop" as LanguageModelV2FinishReason,
+                        finishReason: "stop" as any,
                         usage: { inputTokens: 0, outputTokens: 0 },
-                        warnings: [] as LanguageModelV2CallWarning[],
+                        warnings: [] as any[],
                         response: {
                             id: `mock-${Date.now()}`,
                             timestamp: new Date(),
@@ -53,11 +45,11 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 }
 
                 // Convert AI SDK messages to our Message format
-                const convertedMessages = messages.map((msg: LanguageModelV2Message) => {
+                const convertedMessages = messages.map((msg: any) => {
                     let textContent = "";
                     if (Array.isArray(msg.content)) {
                         textContent = msg.content
-                            .map((part) => {
+                            .map((part: any) => {
                                 if (part.type === "text") return part.text;
                                 return "[non-text content]";
                             })
@@ -80,7 +72,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 });
 
                 // Convert response to AI SDK v2 format with content array
-                const content: LanguageModelV2Content[] = [];
+                const content: any[] = [];
 
                 // Add text content if present
                 if (response.content) {
@@ -101,21 +93,21 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
 
                 return {
                     content,
-                    finishReason: "stop" as LanguageModelV2FinishReason,
+                    finishReason: "stop" as any,
                     usage: {
                         inputTokens: response.usage?.prompt_tokens || 100,
                         outputTokens: response.usage?.completion_tokens || 50,
                     },
-                    warnings: [] as LanguageModelV2CallWarning[],
+                    warnings: [] as any[],
                     response: {
                         id: `mock-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
                     },
                 };
-            }) as unknown as LanguageModelV2['doGenerate'],
+            }) as unknown as any,
 
-            doStream: (async (options: LanguageModelV2CallOptions) => {
+            doStream: (async (options: any) => {
                 // Extract messages from prompt
                 const messages = options.prompt;
 
@@ -142,8 +134,8 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                         },
                     });
                     return {
-                        stream: stream as ReadableStream<LanguageModelV2StreamPart>,
-                        warnings: [] as LanguageModelV2CallWarning[],
+                        stream: stream as ReadableStream<any>,
+                        warnings: [] as any[],
                         response: {
                             id: `mock-stream-${Date.now()}`,
                             timestamp: new Date(),
@@ -153,11 +145,11 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 }
 
                 // Convert messages
-                const convertedMessages = messages.map((msg: LanguageModelV2Message) => {
+                const convertedMessages = messages.map((msg: any) => {
                     let textContent = "";
                     if (Array.isArray(msg.content)) {
                         textContent = msg.content
-                            .map((part) => {
+                            .map((part: any) => {
                                 if (part.type === "text") return part.text;
                                 return "[non-text content]";
                             })
@@ -251,20 +243,20 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV2 {
                 });
 
                 return {
-                    stream: stream as ReadableStream<LanguageModelV2StreamPart>,
-                    warnings: [] as LanguageModelV2CallWarning[],
+                    stream: stream as ReadableStream<any>,
+                    warnings: [] as any[],
                     response: {
                         id: `mock-stream-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
                     },
                 };
-            }) as LanguageModelV2['doStream'],
+            }) as any,
         });
     };
 
     // Create a custom provider that can handle any model ID
-    const provider: ProviderV2 = {
+    const provider: any = {
         languageModel: (modelId: string) => {
             return createLanguageModel(modelId);
         },

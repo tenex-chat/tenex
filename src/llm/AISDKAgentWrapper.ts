@@ -59,7 +59,7 @@ export class AISDKAgentWrapper extends EventEmitter<Record<string, any>> {
         // Create the AI SDK Agent with TENEX configuration
         this.agent = new Agent({
             model: config.model,
-            system: systemPrompt,
+            instructions: systemPrompt,
             tools: config.tools as Record<string, CoreTool>,
             temperature: config.temperature,
             maxOutputTokens: config.maxTokens,
@@ -146,8 +146,8 @@ export class AISDKAgentWrapper extends EventEmitter<Record<string, any>> {
         try {
             // Use the Agent's generate method
             const result = await this.agent.generate({
-                messages,
-            });
+                prompt: messages,
+            } as any);
 
             const duration = Date.now() - startTime;
 
@@ -201,8 +201,8 @@ export class AISDKAgentWrapper extends EventEmitter<Record<string, any>> {
         try {
             // Use the Agent's stream method
             const { textStream, steps, usage, finishReason } = await this.agent.stream({
-                messages,
-            });
+                prompt: messages,
+            } as any);
 
             // Consume the stream and emit events
             for await (const chunk of textStream) {
