@@ -479,80 +479,38 @@ export class AgentExecutor {
         const sessionManager = new SessionManager(context.agent, context.conversationId);
         const { sessionId } = sessionManager.getSession();
 
-        // Create event filter for resumed sessions
-        const eventFilter = sessionManager.createEventFilter();
+        // RAL is the single source of truth for messages during execution
+        // On first iteration: build from conversation history and save to RAL
+        // On subsequent iterations (recursion): use RAL messages directly
+        const ralRegistry = RALRegistry.getInstance();
+        let messages: ModelMessage[];
 
-        // Build messages using the strategy, with optional filter for resumed sessions
-        let messages = await this.messageStrategy.buildMessages(
-            context,
-            context.triggeringEvent,
-            eventFilter
-        );
-
-        // Register operation with the LLM Operations Registry FIRST
-        // This must happen before we try to find it for message injection
-        const abortSignal = llmOpsRegistry.registerOperation(context);
-
-        // Setup message injection system
-        const injectedEvents: NDKEvent[] = [];
-
-        // Find this operation in the registry and listen for injected messages
-        const operationsByEvent = llmOpsRegistry.getOperationsByEvent();
-        const activeOperations = operationsByEvent.get(context.conversationId) || [];
-        const thisOperation = activeOperations.find(
-            (op) => op.agentPubkey === context.agent.pubkey
-        );
-
-        if (thisOperation) {
-            logger.debug("[AgentExecutor] Setting up message injection listener", {
+        if (ralRegistry.hasMessages(context.agent.pubkey)) {
+            // Recursion: use RAL messages (includes any mid-execution injections)
+            messages = ralRegistry.getMessages(context.agent.pubkey) as ModelMessage[];
+            logger.info("[AgentExecutor] Using RAL messages for recursion", {
                 agent: context.agent.slug,
-                conversationId: context.conversationId.substring(0, 8),
-                operationId: thisOperation.id.substring(0, 8),
-            });
-
-            // Add trace event for listener setup
-            const activeSpan = trace.getActiveSpan();
-            if (activeSpan) {
-                activeSpan.addEvent("message_injection.listener_setup", {
-                    "agent.slug": context.agent.slug,
-                    "conversation.id": context.conversationId,
-                    "operation.id": thisOperation.id,
-                });
-            }
-
-            thisOperation.eventEmitter.on("inject-message", (event: NDKEvent) => {
-                logger.info("[AgentExecutor] Received injected message", {
-                    agent: context.agent.slug,
-                    eventId: event.id?.substring(0, 8),
-                    currentQueueSize: injectedEvents.length,
-                });
-
-                // Add trace event for received injection
-                const activeSpan = trace.getActiveSpan();
-                if (activeSpan) {
-                    activeSpan.addEvent("message_injection.received", {
-                        "event.id": event.id || "",
-                        "queue.size": injectedEvents.length + 1,
-                        "agent.slug": context.agent.slug,
-                    });
-                }
-
-                injectedEvents.push(event);
+                messageCount: messages.length,
             });
         } else {
-            logger.error(
-                "[AgentExecutor] CRITICAL: Could not find operation for message injection after registration!",
-                {
-                    agent: context.agent.slug,
-                    agentPubkey: context.agent.pubkey.substring(0, 8),
-                    conversationId: context.conversationId.substring(0, 8),
-                    availableOperations: activeOperations.map((op) => ({
-                        agentPubkey: op.agentPubkey.substring(0, 8),
-                        operationId: op.id.substring(0, 8),
-                    })),
-                }
+            // First iteration: build from conversation history
+            const eventFilter = sessionManager.createEventFilter();
+            messages = await this.messageStrategy.buildMessages(
+                context,
+                context.triggeringEvent,
+                eventFilter
             );
+            // Save to RAL as single source of truth
+            ralRegistry.saveMessages(context.agent.pubkey, messages);
+            logger.info("[AgentExecutor] Built and saved initial messages to RAL", {
+                agent: context.agent.slug,
+                messageCount: messages.length,
+            });
         }
+
+        // Register operation with the LLM Operations Registry
+        // Message injection now uses RAL as the single source of truth
+        const abortSignal = llmOpsRegistry.registerOperation(context);
 
         // Add continuation message from supervisor as user message
         // Using "user" role ensures the LLM treats it as a request to act on,
@@ -570,9 +528,8 @@ export class AgentExecutor {
             context.additionalSystemMessage = undefined;
         }
 
-        logger.debug("[AgentExecutor] 📝 Built messages for execution", {
+        logger.debug("[AgentExecutor] 📝 Messages ready for execution", {
             messageCount: messages.length,
-            hasFilter: !!eventFilter,
             sessionId: sessionId || "NONE",
             hasSession: !!sessionId,
             messageTypes: messages.map((msg, i) => {
@@ -672,9 +629,6 @@ export class AgentExecutor {
         });
 
         llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
-            console.log('chunk-type-change event:');
-            console.log(event);
-            
             logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
                 agentName: context.agent.slug,
                 hasReasoningBuffer: reasoningBuffer.length > 0,
@@ -783,106 +737,46 @@ export class AgentExecutor {
             // prepareStep is called synchronously by AI SDK and may not have access to OTel context
             const executionSpan = trace.getActiveSpan();
 
-            // Create prepareStep callback for message injection and RAL queue processing (SYNC)
+            // Create prepareStep callback for message injection from RAL queue (SYNC)
+            // RAL is the single source of truth - injections are persisted to RAL.messages
+            // and also returned here for the current step
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
             ): { messages?: ModelMessage[] } | undefined => {
-                let result: { messages?: ModelMessage[] } | undefined;
                 const ralRegistry = RALRegistry.getInstance();
 
-                // Get RAL queued injections
-                const ralQueued = ralRegistry.getAndClearQueued(context.agent.pubkey);
+                // Get newly queued injections - they're also persisted to RAL.messages for recursion
+                const newInjections = ralRegistry.getAndPersistInjections(context.agent.pubkey);
 
-                // Handle existing message injection (legacy system)
-                if (injectedEvents.length > 0) {
-                    // Add trace event for message injection processing
-                    // Use captured span instead of getActiveSpan() which may be null
-                    if (executionSpan) {
-                        executionSpan.addEvent("message_injection.process", {
-                            "injection.message_count": injectedEvents.length,
-                            "injection.step_number": step.stepNumber,
-                            "injection.event_ids": injectedEvents.map((e) => e.id || "").join(","),
-                            "agent.slug": context.agent.slug,
-                        });
-                    }
-
-                    logger.info(
-                        `[prepareStep] Injecting ${injectedEvents.length} new user message(s)`,
-                        {
-                            agent: context.agent.slug,
-                            stepNumber: step.stepNumber,
-                        }
-                    );
-
-                    const newMessages: ModelMessage[] = [];
-                    for (const injectedEvent of injectedEvents) {
-                        // Add a system message to signal the injection
-                        newMessages.push({
-                            role: "system",
-                            content:
-                                "[INJECTED USER MESSAGE]: A new message has arrived while you were working. Prioritize this instruction.",
-                        });
-                        // Add the actual user message
-                        newMessages.push({
-                            role: "user",
-                            content: injectedEvent.content,
-                        });
-                    }
-
-                    // Clear the queue after preparing them
-                    injectedEvents.length = 0;
-
-                    // Combine with any pair mode messages
-                    const baseMessages = result?.messages || step.messages;
-                    result = {
-                        messages: [
-                            baseMessages[0],
-                            ...newMessages,
-                            ...baseMessages.slice(1),
-                        ],
-                    };
+                if (newInjections.length === 0) {
+                    return undefined;
                 }
 
-                // Handle RAL queued injections (new system)
-                if (ralQueued.length > 0) {
-                    logger.info(`[prepareStep] Injecting ${ralQueued.length} RAL queued message(s)`, {
-                        agent: context.agent.slug,
-                        stepNumber: step.stepNumber,
-                        messageTypes: ralQueued.map((q) => q.type),
+                logger.info(`[prepareStep] Injecting ${newInjections.length} message(s) from RAL queue`, {
+                    agent: context.agent.slug,
+                    stepNumber: step.stepNumber,
+                    messageTypes: newInjections.map((q) => q.type),
+                });
+
+                // Convert to model messages
+                const injectedMessages: ModelMessage[] = newInjections.map((q) => ({
+                    role: q.type as "user" | "system",
+                    content: q.content,
+                }));
+
+                // Add trace event
+                if (executionSpan) {
+                    executionSpan.addEvent("ral_injection.process", {
+                        "injection.message_count": newInjections.length,
+                        "injection.step_number": step.stepNumber,
+                        "injection.types": newInjections.map((q) => q.type).join(","),
+                        "agent.slug": context.agent.slug,
                     });
-
-                    // Sort messages: system messages first (delegation results), then user messages
-                    // This ensures the LLM has context before processing user follow-ups
-                    const sortedQueued = [...ralQueued].sort((a, b) => {
-                        if (a.type === "system" && b.type === "user") return -1;
-                        if (a.type === "user" && b.type === "system") return 1;
-                        return 0;
-                    });
-
-                    const ralMessages: ModelMessage[] = sortedQueued.map((q) => ({
-                        role: q.type as "user" | "system",
-                        content: q.content,
-                    }));
-
-                    // Add trace event for RAL injection
-                    if (executionSpan) {
-                        executionSpan.addEvent("ral_injection.process", {
-                            "injection.message_count": ralQueued.length,
-                            "injection.step_number": step.stepNumber,
-                            "injection.types": ralQueued.map((q) => q.type).join(","),
-                            "injection.system_count": ralQueued.filter((q) => q.type === "system").length,
-                            "injection.user_count": ralQueued.filter((q) => q.type === "user").length,
-                            "agent.slug": context.agent.slug,
-                        });
-                    }
-
-                    const baseMessages = result?.messages || step.messages;
-                    result = {
-                        messages: [...baseMessages, ...ralMessages],
-                    };
                 }
 
-                return result;
+                return {
+                    messages: [...step.messages, ...injectedMessages],
+                };
             };
 
             // Create onStopCheck to detect delegation stop signals
@@ -983,8 +877,6 @@ export class AgentExecutor {
         }
 
         // Handle RAL state based on finish reason and pending delegations
-        const ralRegistry = RALRegistry.getInstance();
-
         if (this.pendingDelegations.length > 0) {
             // Stopped for delegation - save state and pause
             // NOTE: Don't clear pendingDelegations here - executeWithSupervisor needs to check it

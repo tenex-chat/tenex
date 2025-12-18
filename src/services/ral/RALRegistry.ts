@@ -39,6 +39,7 @@ export class RALRegistry {
       pendingDelegations: [],
       completedDelegations: [],
       queuedInjections: [],
+      persistedInjections: [],
       status: "executing",
       createdAt: now,
       lastActivityAt: now,
@@ -77,6 +78,44 @@ export class RALRegistry {
       state.status = status;
       state.lastActivityAt = Date.now();
     }
+  }
+
+  /**
+   * Save/update messages for the current execution (RAL is single source of truth)
+   */
+  saveMessages(agentPubkey: string, messages: CoreMessage[]): void {
+    const state = this.states.get(agentPubkey);
+    if (!state) {
+      logger.warn("[RALRegistry] No RAL found to save messages", {
+        agentPubkey: agentPubkey.substring(0, 8),
+      });
+      return;
+    }
+
+    state.messages = messages;
+    state.lastActivityAt = Date.now();
+
+    logger.debug("[RALRegistry] Saved RAL messages", {
+      ralId: state.id.substring(0, 8),
+      messageCount: messages.length,
+    });
+  }
+
+  /**
+   * Get messages for the current execution (returns empty if no RAL or no messages saved)
+   */
+  getMessages(agentPubkey: string): CoreMessage[] {
+    const state = this.states.get(agentPubkey);
+    if (!state || state.messages.length === 0) return [];
+    return [...state.messages];
+  }
+
+  /**
+   * Check if RAL has saved messages (for determining whether to rebuild or reuse)
+   */
+  hasMessages(agentPubkey: string): boolean {
+    const state = this.states.get(agentPubkey);
+    return !!state && state.messages.length > 0;
   }
 
   /**
@@ -225,37 +264,59 @@ export class RALRegistry {
   }
 
   /**
-   * Get and clear queued injections
+   * Get newly queued injections and persist them to state.messages.
+   * Only returns items that were just moved from queue - already-persisted items
+   * are already in state.messages and will be included on recursion via getMessages().
    */
-  getAndClearQueued(agentPubkey: string): QueuedInjection[] {
+  getAndPersistInjections(agentPubkey: string): QueuedInjection[] {
     const state = this.states.get(agentPubkey);
     if (!state) return [];
 
-    const injections = [...state.queuedInjections];
+    // Only process newly queued items
+    if (state.queuedInjections.length === 0) {
+      return [];
+    }
 
-    if (injections.length > 0) {
-      // Add trace event for retrieval
-      const activeSpan = trace.getActiveSpan();
-      if (activeSpan) {
-        activeSpan.addEvent("ral.queued_injections_retrieved", {
-          "ral.id": state.id,
-          "injection.count": injections.length,
-          "injection.types": injections.map((i) => i.type).join(","),
-          "injection.system_count": injections.filter((i) => i.type === "system").length,
-          "injection.user_count": injections.filter((i) => i.type === "user").length,
-          "agent.pubkey": agentPubkey,
-        });
-      }
+    const newInjections = [...state.queuedInjections];
+    state.queuedInjections = [];
 
-      logger.debug("[RALRegistry] Retrieved and cleared queued injections", {
-        ralId: state.id.substring(0, 8),
-        count: injections.length,
-        types: injections.map((i) => i.type),
+    // Append to messages so they're included on recursion via getMessages()
+    for (const injection of newInjections) {
+      state.messages.push({
+        role: injection.type as "user" | "system",
+        content: injection.content,
       });
     }
 
-    state.queuedInjections = [];
-    return injections;
+    // Track in persisted for debugging/inspection
+    state.persistedInjections.push(...newInjections);
+
+    // Add trace event
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent("ral.injections_persisted", {
+        "ral.id": state.id,
+        "injection.count": newInjections.length,
+        "injection.types": newInjections.map((i) => i.type).join(","),
+        "total_messages": state.messages.length,
+        "agent.pubkey": agentPubkey,
+      });
+    }
+
+    logger.debug("[RALRegistry] Persisted injections to messages", {
+      ralId: state.id.substring(0, 8),
+      newCount: newInjections.length,
+      totalMessages: state.messages.length,
+    });
+
+    return newInjections;
+  }
+
+  /**
+   * @deprecated Use getAndPersistInjections instead
+   */
+  getAndClearQueued(agentPubkey: string): QueuedInjection[] {
+    return this.getAndPersistInjections(agentPubkey);
   }
 
   /**
