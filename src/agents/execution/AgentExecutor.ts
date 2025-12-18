@@ -15,6 +15,8 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { RALRegistry, TimeoutResponder, isStopExecutionSignal } from "@/services/ral";
+import type { PendingDelegation } from "@/services/ral/types";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -39,12 +41,40 @@ export interface LLMCompletionRequest {
 
 export class AgentExecutor {
     private messageStrategy: MessageGenerationStrategy;
+    private pendingDelegations: PendingDelegation[] = [];
 
     constructor(
         private standaloneContext?: StandaloneAgentContext,
         messageStrategy?: MessageGenerationStrategy
     ) {
         this.messageStrategy = messageStrategy || new FlattenedChronologicalStrategy();
+    }
+
+    /**
+     * Build a status message for delegation results
+     */
+    private buildDelegationStatusMessage(ralState: any): string {
+        const parts: string[] = [];
+
+        if (ralState.completedDelegations.length > 0) {
+            parts.push("Delegation Results:");
+            for (const completion of ralState.completedDelegations) {
+                parts.push(
+                    `- ${completion.recipientSlug || completion.recipientPubkey.substring(0, 8)}: ${completion.response}`
+                );
+            }
+        }
+
+        if (ralState.pendingDelegations.length > 0) {
+            parts.push("\nStill Pending:");
+            for (const pending of ralState.pendingDelegations) {
+                parts.push(
+                    `- ${pending.recipientSlug || pending.recipientPubkey.substring(0, 8)}: ${pending.prompt.substring(0, 80)}...`
+                );
+            }
+        }
+
+        return parts.join("\n");
     }
 
     /**
@@ -113,6 +143,57 @@ export class AgentExecutor {
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
+                // Check RAL state before starting execution
+                const ralRegistry = RALRegistry.getInstance();
+                const existingRal = ralRegistry.getStateByAgent(context.agent.pubkey);
+
+                if (existingRal?.status === "executing") {
+                    // RAL is currently executing - queue for injection
+                    logger.info("[AgentExecutor] RAL already executing, queueing event", {
+                        agent: context.agent.slug,
+                        eventId: context.triggeringEvent.id?.substring(0, 8),
+                    });
+
+                    ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
+
+                    // Schedule timeout responder
+                    const agentPublisher = new AgentPublisher(context.agent);
+                    const timeoutResponder = TimeoutResponder.getInstance();
+                    timeoutResponder.schedule(
+                        context.agent.pubkey,
+                        context.triggeringEvent,
+                        context.agent,
+                        agentPublisher,
+                        5000
+                    );
+
+                    return; // Don't start new execution
+                }
+
+                if (existingRal?.status === "paused") {
+                    // RAL is paused (waiting on delegation) - restore and resume
+                    logger.info("[AgentExecutor] RAL paused, resuming with delegation results", {
+                        agent: context.agent.slug,
+                        pendingCount: existingRal.pendingDelegations.length,
+                        completedCount: existingRal.completedDelegations.length,
+                    });
+
+                    // Build status injection message
+                    const statusMessage = this.buildDelegationStatusMessage(existingRal);
+                    ralRegistry.queueSystemMessage(context.agent.pubkey, statusMessage);
+
+                    // Resume with status set back to executing
+                    ralRegistry.setStatus(context.agent.pubkey, "executing");
+                }
+
+                // Create new RAL entry if none exists
+                if (!existingRal) {
+                    ralRegistry.create(context.agent.pubkey);
+                    logger.debug("[AgentExecutor] Created new RAL entry", {
+                        agent: context.agent.slug,
+                    });
+                }
+
                 // Prepare execution context with all necessary components
                 const { fullContext, supervisor, toolTracker, agentPublisher, cleanup } =
                     this.prepareExecution(context);
@@ -633,13 +714,17 @@ export class AgentExecutor {
             // prepareStep is called synchronously by AI SDK and may not have access to OTel context
             const executionSpan = trace.getActiveSpan();
 
-            // Create prepareStep callback for message injection and pair mode corrections (SYNC)
+            // Create prepareStep callback for message injection and RAL queue processing (SYNC)
             const prepareStep = (
                 step: { messages: ModelMessage[]; stepNumber: number }
             ): { messages?: ModelMessage[] } | undefined => {
                 let result: { messages?: ModelMessage[] } | undefined;
+                const ralRegistry = RALRegistry.getInstance();
 
-                // Handle existing message injection
+                // Get RAL queued injections
+                const ralQueued = ralRegistry.getAndClearQueued(context.agent.pubkey);
+
+                // Handle existing message injection (legacy system)
                 if (injectedEvents.length > 0) {
                     // Add trace event for message injection processing
                     // Use captured span instead of getActiveSpan() which may be null
@@ -689,12 +774,49 @@ export class AgentExecutor {
                     };
                 }
 
+                // Handle RAL queued injections (new system)
+                if (ralQueued.length > 0) {
+                    logger.info(`[prepareStep] Injecting ${ralQueued.length} RAL queued message(s)`, {
+                        agent: context.agent.slug,
+                        stepNumber: step.stepNumber,
+                    });
+
+                    const ralMessages: ModelMessage[] = ralQueued.map((q) => ({
+                        role: q.type as "user" | "system",
+                        content: q.content,
+                    }));
+
+                    const baseMessages = result?.messages || step.messages;
+                    result = {
+                        messages: [...baseMessages, ...ralMessages],
+                    };
+                }
+
                 return result;
             };
 
-            // Create onStopCheck for pair mode (async - handles check-ins)
-            // const onStopCheck = pairModeController?.createStopCheck(); // Removed during RAL migration
-            const onStopCheck = undefined;
+            // Create onStopCheck to detect delegation stop signals
+            const onStopCheck = async (steps: any[]): Promise<boolean> => {
+                if (steps.length === 0) return false;
+
+                const lastStep = steps[steps.length - 1];
+                const toolResults = lastStep.toolResults ?? [];
+
+                for (const toolResult of toolResults) {
+                    if (isStopExecutionSignal(toolResult.result)) {
+                        logger.info("[AgentExecutor] Detected delegation stop signal", {
+                            agent: context.agent.slug,
+                            delegationCount: toolResult.result.pendingDelegations.length,
+                        });
+
+                        // Store pending delegations for later handling
+                        this.pendingDelegations = toolResult.result.pendingDelegations;
+                        return true; // Stop execution
+                    }
+                }
+
+                return false;
+            };
 
             // Publish empty 21111 to signal execution start (implicit typing indicator)
             await agentPublisher.publishStreamingDelta("", eventContext, false);
@@ -751,6 +873,31 @@ export class AgentExecutor {
         // Store lastSentEventId for new Claude Code sessions (without session ID yet)
         if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
+        }
+
+        // Handle RAL state based on finish reason and pending delegations
+        const ralRegistry = RALRegistry.getInstance();
+
+        if (this.pendingDelegations.length > 0) {
+            // Stopped for delegation - save state and pause
+            logger.info("[AgentExecutor] Saving RAL state for delegation pause", {
+                agent: context.agent.slug,
+                pendingCount: this.pendingDelegations.length,
+                messageCount: messages.length,
+            });
+
+            ralRegistry.saveState(context.agent.pubkey, messages, this.pendingDelegations);
+
+            // Clear pending delegations for next execution
+            this.pendingDelegations = [];
+        } else if (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end") {
+            // Normal completion - clear RAL state
+            logger.info("[AgentExecutor] Clearing RAL state after normal completion", {
+                agent: context.agent.slug,
+                finishReason: completionEvent.finishReason,
+            });
+
+            ralRegistry.clear(context.agent.pubkey);
         }
 
         return completionEvent;
