@@ -2,7 +2,6 @@ import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import type { JSONValue } from "@ai-sdk/provider";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
     type GenerateTextResult,
@@ -11,6 +10,7 @@ import {
     type LanguageModelUsage,
     type ProviderRegistryProvider,
     type StepResult,
+    type StreamTextOnFinishCallback,
     type TelemetrySettings,
     type TextStreamPart,
     extractReasoningMiddleware,
@@ -99,11 +99,6 @@ export interface SessionCapturedEvent {
 export interface ReasoningEvent {
     delta: string;
 }
-
-/**
- * Provider metadata structure from AI SDK
- */
-type ProviderMetadata = Record<string, Record<string, JSONValue>>;
 
 /**
  * LLM Service for runtime execution with AI SDK providers
@@ -224,8 +219,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         );
 
         // Wrap with middlewares
+        // Note: Type assertion needed because AI SDK v6 beta uses LanguageModelV3 internally
+        // but stable providers export LanguageModel (union type). This is a beta compatibility issue.
         const wrappedModel = wrapLanguageModel({
-            model: baseModel as any,
+            model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
             middleware: middlewares,
         });
 
@@ -289,7 +286,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
-                messages: messages as any,
+                messages,
                 tools: Object.keys(tools).map((name) => ({ name })),
                 startTime,
             })
@@ -301,7 +298,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             const result = await generateText({
                 model,
                 messages: processedMessages,
-                tools: tools as any,
+                tools,
                 temperature: options?.temperature ?? this.temperature,
                 maxOutputTokens: options?.maxTokens ?? this.maxTokens,
 
@@ -473,7 +470,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 configKey: `${this.provider}:${this.model}`,
                 provider: this.provider,
                 model: this.model,
-                messages: messages as any,
+                messages,
                 tools: Object.keys(tools).map((name) => ({ name })),
                 startTime: Date.now(),
             })
@@ -537,7 +534,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             },
 
             onChunk: this.handleChunk.bind(this),
-            onFinish: this.createFinishHandler(startTime) as any,
+            onFinish: this.createFinishHandler(startTime),
         });
 
         // Consume the stream (this is what triggers everything!)
@@ -650,14 +647,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         }
     }
 
-    private createFinishHandler(startTime: number) {
-        return async (
-            e: StepResult<Record<string, AISdkTool>> & {
-                readonly steps: StepResult<Record<string, AISdkTool>>[];
-                readonly totalUsage: LanguageModelUsage;
-                providerMetadata?: ProviderMetadata;
-            }
-        ): Promise<void> => {
+    private createFinishHandler(
+        startTime: number
+    ): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
+        return async (e) => {
             try {
                 // Check for invalid tool calls and mark span as error
                 const activeSpan = trace.getActiveSpan();
@@ -948,7 +941,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     private async logGenerationRequest(messages: ModelMessage[], startTime: number): Promise<void> {
         await this.llmLogger.logLLMRequest({
-            messages: messages as any,
+            messages,
             model: this.model,
             provider: this.provider,
             configKey: `${this.provider}:${this.model}`,
