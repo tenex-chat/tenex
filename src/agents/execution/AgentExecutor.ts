@@ -320,6 +320,21 @@ export class AgentExecutor {
             throw streamError;
         }
 
+        // Check if we paused for delegation - if so, return without publishing completion
+        if (this.pendingDelegations.length > 0) {
+            logger.info("[AgentExecutor] 🛑 Pausing for delegation, not publishing completion", {
+                agent: context.agent.slug,
+                pendingCount: this.pendingDelegations.length,
+            });
+
+            // Display pause in console
+            console.log(chalk.yellow(`\n⏸️  ${context.agent.slug} paused - awaiting ${this.pendingDelegations.length} delegation(s)`));
+
+            // Clear pending delegations now that we've handled the pause
+            this.pendingDelegations = [];
+            return undefined;
+        }
+
         if (!completionEvent) {
             throw new Error("LLM execution completed without producing a completion event");
         }
@@ -897,6 +912,7 @@ export class AgentExecutor {
 
         if (this.pendingDelegations.length > 0) {
             // Stopped for delegation - save state and pause
+            // NOTE: Don't clear pendingDelegations here - executeWithSupervisor needs to check it
             logger.info("[AgentExecutor] Saving RAL state for delegation pause", {
                 agent: context.agent.slug,
                 pendingCount: this.pendingDelegations.length,
@@ -904,9 +920,6 @@ export class AgentExecutor {
             });
 
             ralRegistry.saveState(context.agent.pubkey, messages, this.pendingDelegations);
-
-            // Clear pending delegations for next execution
-            this.pendingDelegations = [];
         } else if (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end") {
             // Normal completion - clear RAL state
             logger.info("[AgentExecutor] Clearing RAL state after normal completion", {
