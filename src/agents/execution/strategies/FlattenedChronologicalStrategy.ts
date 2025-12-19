@@ -927,8 +927,45 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             const agentLessonsMap = new Map();
             const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
 
+            // Add lesson tracing to understand lesson state at prompt build time
+            span.addEvent("tenex.lesson.context_state", {
+                "agent.name": context.agent.name,
+                "agent.slug": context.agent.slug,
+                "agent.pubkey": context.agent.pubkey.substring(0, 16),
+                "agent.event_id": context.agent.eventId?.substring(0, 16) || "none",
+                "lessons.for_this_agent_count": currentAgentLessons.length,
+                "lessons.total_in_context": projectCtx.agentLessons.size,
+                "lessons.all_agent_pubkeys_with_lessons": JSON.stringify(
+                    Array.from(projectCtx.agentLessons.keys()).map((k) => k.substring(0, 16))
+                ),
+            });
+
+            // Log all lessons in context for debugging
+            if (projectCtx.agentLessons.size > 0) {
+                const allLessonsDebug: Array<{ pubkey: string; count: number; titles: string[] }> = [];
+                for (const [pubkey, lessons] of projectCtx.agentLessons) {
+                    allLessonsDebug.push({
+                        pubkey: pubkey.substring(0, 16),
+                        count: lessons.length,
+                        titles: lessons.slice(0, 3).map((l) => l.title || "untitled"),
+                    });
+                }
+                span.setAttribute("lessons.all_in_context", JSON.stringify(allLessonsDebug));
+            }
+
             if (currentAgentLessons.length > 0) {
                 agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
+                span.addEvent("lessons_found_for_agent", {
+                    "lessons.count": currentAgentLessons.length,
+                    "lessons.titles": JSON.stringify(
+                        currentAgentLessons.slice(0, 5).map((l) => l.title || "untitled")
+                    ),
+                });
+            } else {
+                span.addEvent("no_lessons_for_agent", {
+                    "agent.pubkey": context.agent.pubkey.substring(0, 16),
+                    "agent.event_id": context.agent.eventId?.substring(0, 16) || "none",
+                });
             }
 
             const isProjectManager = context.agent.pubkey === projectCtx.getProjectManager().pubkey;
