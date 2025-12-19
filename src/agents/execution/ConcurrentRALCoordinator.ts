@@ -74,7 +74,7 @@ function formatMessageForContext(msg: ModelMessage): string {
             : part.text;
           parts.push(`[assistant] ${text}`);
         } else if (part.type === "tool-call") {
-          const inputStr = JSON.stringify(part.input);
+          const inputStr = part.input !== undefined ? JSON.stringify(part.input) : "";
           const inputPreview = inputStr.substring(0, 100);
           parts.push(`[tool-call] ${part.toolName}(${inputPreview}${inputStr.length > 100 ? "..." : ""})`);
         }
