@@ -1,9 +1,11 @@
+import { buildMultimodalContent } from "@/conversations/utils/content-utils";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ModelMessage } from "ai";
+import { trace } from "@opentelemetry/api";
+import type { ModelMessage, UserContent } from "ai";
 
 /**
  * Transforms NDKEvents into model messages for LLM consumption
@@ -150,6 +152,7 @@ export class EventToModelMessage {
                 );
 
                 // Format as a system message showing it was directed to other agents
+                // System messages don't support multimodal content
                 return {
                     role: "system",
                     content: `[User (${userName}) → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
@@ -167,7 +170,12 @@ export class EventToModelMessage {
                 messageType: "user",
             });
 
-            return { role: "user", content: processedContent };
+            // Build multimodal content for user messages (fetches images if present)
+            const content = await EventToModelMessage.buildUserContent(
+                processedContent,
+                event.id
+            );
+            return { role: "user", content };
         }
 
         // Another agent's message - check if it's targeted to specific agents
@@ -191,10 +199,12 @@ export class EventToModelMessage {
                 });
 
                 // Use 'user' role so the agent knows to respond, with clear sender → recipient format
-                return {
-                    role: "user",
-                    content: `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`,
-                };
+                // Build multimodal content for agent-to-agent messages too
+                const content = await EventToModelMessage.buildUserContent(
+                    `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`,
+                    event.id
+                );
+                return { role: "user", content };
             }
             // This agent is NOT targeted - they're just observing
             const targetedAgentNames = await Promise.all(
@@ -213,6 +223,7 @@ export class EventToModelMessage {
             );
 
             // Use 'system' role since this agent is just observing
+            // System messages don't support multimodal content
             return {
                 role: "system",
                 content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
@@ -228,6 +239,46 @@ export class EventToModelMessage {
         });
 
         // Use 'system' role for broadcast messages from other agents
+        // System messages don't support multimodal content
         return { role: "system", content: `[${sendingAgentName}]: ${processedContent}` };
+    }
+
+    /**
+     * Build user content, potentially with images
+     * Fetches images from URLs and builds multimodal content for vision-capable models
+     */
+    private static async buildUserContent(
+        content: string,
+        eventId?: string
+    ): Promise<UserContent> {
+        const tracer = trace.getTracer("EventToModelMessage");
+
+        return tracer.startActiveSpan("buildUserContent", async (span) => {
+            span.setAttribute("event.id", eventId || "unknown");
+            span.setAttribute("content.length", content.length);
+
+            const multimodalContent = await buildMultimodalContent(content);
+
+            if (typeof multimodalContent === "string") {
+                span.setAttribute("content.isMultimodal", false);
+                span.end();
+                return multimodalContent;
+            }
+
+            span.setAttribute("content.isMultimodal", true);
+            span.setAttribute("content.partCount", multimodalContent.length);
+
+            const imageParts = multimodalContent.filter((p) => p.type === "image");
+            span.setAttribute("content.imageCount", imageParts.length);
+
+            logger.debug("[EventToModelMessage] Built multimodal user content", {
+                eventId: eventId?.substring(0, 8),
+                partCount: multimodalContent.length,
+                imageCount: imageParts.length,
+            });
+
+            span.end();
+            return multimodalContent;
+        });
     }
 }
