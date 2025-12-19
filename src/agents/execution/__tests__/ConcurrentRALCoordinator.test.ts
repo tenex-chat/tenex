@@ -118,39 +118,51 @@ describe("ConcurrentRALCoordinator", () => {
       expect(result).toBe(false);
     });
 
-    it("should release when step has tool calls", () => {
+    it("should NOT release when only read-only tools are called (conversation_get)", () => {
       const steps = [{
         stepNumber: 0,
-        toolCalls: [{ toolName: "ral_inject" }],
+        toolCalls: [{ toolName: "conversation_get" }],
         text: "",
         reasoningText: undefined,
       }];
 
       const result = coordinator.shouldReleasePausedRALs(steps);
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
-    it("should release when any step has tool calls", () => {
+    it("should NOT release when only read-only tools are called (read_path)", () => {
+      const steps = [{
+        stepNumber: 0,
+        toolCalls: [{ toolName: "read_path" }],
+        text: "",
+        reasoningText: undefined,
+      }];
+
+      const result = coordinator.shouldReleasePausedRALs(steps);
+      expect(result).toBe(false);
+    });
+
+    it("should NOT release when multiple read-only tools are called", () => {
       const steps = [
         {
           stepNumber: 0,
-          toolCalls: [],
-          text: "Thinking...",
-          reasoningText: "Let me consider...",
+          toolCalls: [{ toolName: "conversation_get" }],
+          text: "",
+          reasoningText: undefined,
         },
         {
           stepNumber: 1,
-          toolCalls: [{ toolName: "write_file" }],
+          toolCalls: [{ toolName: "read_path" }, { toolName: "read_file" }],
           text: "",
           reasoningText: undefined,
         },
       ];
 
       const result = coordinator.shouldReleasePausedRALs(steps);
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
-    it("should release on first step with tool calls (ral_inject)", () => {
+    it("should release when ral_inject is called", () => {
       const steps = [{
         stepNumber: 0,
         toolCalls: [{ toolName: "ral_inject" }],
@@ -162,7 +174,7 @@ describe("ConcurrentRALCoordinator", () => {
       expect(result).toBe(true);
     });
 
-    it("should release on first step with tool calls (ral_abort)", () => {
+    it("should release when ral_abort is called", () => {
       const steps = [{
         stepNumber: 0,
         toolCalls: [{ toolName: "ral_abort" }],
@@ -174,10 +186,51 @@ describe("ConcurrentRALCoordinator", () => {
       expect(result).toBe(true);
     });
 
-    it("should release when agent proceeds with own work (any tool)", () => {
+    it("should release when write_file is called (action tool)", () => {
       const steps = [{
         stepNumber: 0,
         toolCalls: [{ toolName: "write_file" }],
+        text: "",
+        reasoningText: undefined,
+      }];
+
+      const result = coordinator.shouldReleasePausedRALs(steps);
+      expect(result).toBe(true);
+    });
+
+    it("should release when action tool is called after read-only tools", () => {
+      const steps = [
+        {
+          stepNumber: 0,
+          toolCalls: [{ toolName: "conversation_get" }],
+          text: "",
+          reasoningText: undefined,
+        },
+        {
+          stepNumber: 1,
+          toolCalls: [{ toolName: "read_path" }],
+          text: "",
+          reasoningText: undefined,
+        },
+        {
+          stepNumber: 2,
+          toolCalls: [{ toolName: "ral_inject" }],
+          text: "",
+          reasoningText: undefined,
+        },
+      ];
+
+      const result = coordinator.shouldReleasePausedRALs(steps);
+      expect(result).toBe(true);
+    });
+
+    it("should release when action tool is mixed with read-only in same step", () => {
+      const steps = [{
+        stepNumber: 0,
+        toolCalls: [
+          { toolName: "read_path" },
+          { toolName: "write_file" },
+        ],
         text: "",
         reasoningText: undefined,
       }];
@@ -329,7 +382,7 @@ describe("ConcurrentRALCoordinator", () => {
 
       expect(result).toContain("CONFLICTS");
       expect(result).toContain("CHANGES");
-      expect(result).toContain("ral_inject FIRST");
+      expect(result).toContain("Use ral_inject");
     });
 
     it("should show delegation info for RALs with pending delegations", () => {
