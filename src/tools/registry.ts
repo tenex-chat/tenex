@@ -61,6 +61,9 @@ import { createBugReportCreateTool } from "./implementations/bug_report_create";
 // Backend management tools
 import { createRestartTenexBackendTool } from "./implementations/restart_tenex_backend";
 
+// Pairing tools
+import { createStopPairingTool } from "./implementations/stop_pairing";
+
 /**
  * Registry of tool factories
  */
@@ -150,6 +153,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Backend management tools
     restart_tenex_backend: createRestartTenexBackendTool,
+
+    // Pairing tools
+    stop_pairing: createStopPairingTool,
 };
 
 /**
@@ -208,6 +214,9 @@ const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_ad
 /** RAL management tools - auto-injected when hasConcurrentRALs is true */
 const CONCURRENT_RAL_TOOLS: ToolName[] = ["ral_inject", "ral_abort", "delegate_followup"];
 
+/** Pairing tools - auto-injected when hasActivePairings is true */
+const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
+
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
@@ -249,6 +258,15 @@ export function getToolsObject(
         for (const ralToolName of CONCURRENT_RAL_TOOLS) {
             if (!regularTools.includes(ralToolName)) {
                 regularTools.push(ralToolName);
+            }
+        }
+    }
+
+    // Auto-inject pairing tools when there are active pairings
+    if (context.hasActivePairings) {
+        for (const pairingToolName of PAIRING_TOOLS) {
+            if (!regularTools.includes(pairingToolName)) {
+                regularTools.push(pairingToolName);
             }
         }
     }
