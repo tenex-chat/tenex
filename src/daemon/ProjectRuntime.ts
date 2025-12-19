@@ -135,6 +135,13 @@ export class ProjectRuntime {
             // Set conversation coordinator in context
             this.context.conversationCoordinator = this.conversationCoordinator;
 
+            // Initialize pairing manager for real-time delegation supervision
+            const { PairingManager } = await import("@/services/pairing");
+            const pairingManager = new PairingManager(async (agentPubkey, conversationId) => {
+                await this.triggerAgentForCheckpoint(agentPubkey, conversationId);
+            });
+            this.context.pairingManager = pairingManager;
+
             // Initialize event handler with the conversation coordinator
             this.eventHandler = new EventHandler(
                 this.projectBasePath, // Base project path for worktree operations
@@ -251,6 +258,11 @@ export class ProjectRuntime {
             this.conversationCoordinator = null;
         }
 
+        // Stop all active pairings to clean up subscriptions
+        if (this.context?.pairingManager) {
+            this.context.pairingManager.stopAll();
+        }
+
         // Clear context
         this.context = null;
 
@@ -301,6 +313,69 @@ export class ProjectRuntime {
      */
     isActive(): boolean {
         return this.isRunning;
+    }
+
+    /**
+     * Trigger agent execution for a pairing checkpoint.
+     * Used by PairingManager when it queues a checkpoint and needs to resume the supervisor.
+     */
+    async triggerAgentForCheckpoint(agentPubkey: string, conversationId: string): Promise<void> {
+        if (!this.isRunning || !this.context || !this.conversationCoordinator) {
+            logger.warn("[ProjectRuntime] Cannot trigger checkpoint - runtime not ready", {
+                projectId: this.projectId,
+                isRunning: this.isRunning,
+            });
+            return;
+        }
+
+        await projectContextStore.run(this.context, async () => {
+            const agent = this.context!.getAgentByPubkey(agentPubkey);
+            if (!agent) {
+                logger.error("[ProjectRuntime] Agent not found for checkpoint trigger", {
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    projectId: this.projectId,
+                });
+                return;
+            }
+
+            const conversation = await this.conversationCoordinator!.getConversation(conversationId);
+            if (!conversation) {
+                logger.error("[ProjectRuntime] Conversation not found for checkpoint trigger", {
+                    conversationId: conversationId.substring(0, 8),
+                    projectId: this.projectId,
+                });
+                return;
+            }
+
+            // Use root event as triggering context
+            const rootEvent = conversation.history[0];
+            if (!rootEvent) {
+                logger.error("[ProjectRuntime] No root event in conversation", {
+                    conversationId: conversationId.substring(0, 8),
+                });
+                return;
+            }
+
+            logger.info("[ProjectRuntime] Triggering agent for pairing checkpoint", {
+                agentSlug: agent.slug,
+                conversationId: conversationId.substring(0, 8),
+            });
+
+            // Create execution context and execute
+            const { createExecutionContext } = await import("@/agents/execution/ExecutionContextFactory");
+            const { AgentExecutor } = await import("@/agents/execution/AgentExecutor");
+
+            const executionContext = await createExecutionContext({
+                agent,
+                conversationId,
+                projectBasePath: this.projectBasePath,
+                triggeringEvent: rootEvent,
+                conversationCoordinator: this.conversationCoordinator!,
+            });
+
+            const agentExecutor = new AgentExecutor();
+            await agentExecutor.execute(executionContext);
+        });
     }
 
     /**

@@ -17,6 +17,21 @@ export interface StepInfo {
   reasoningText?: string;
 }
 
+/**
+ * Read-only tools that don't indicate a decision to proceed.
+ * These tools are used for gathering context, not taking action.
+ * Paused RALs should NOT be released when only these tools are called.
+ */
+const READ_ONLY_TOOLS = new Set([
+  "conversation_get",
+  "read_path",
+  "read_file",
+  "file_search",
+  "grep_search",
+  "codebase_search",
+  "list_dir",
+]);
+
 export interface RALToolAvailability {
   ralNumber: number;
   canAbort: boolean;
@@ -123,20 +138,24 @@ export class ConcurrentRALCoordinator {
    * Determine if paused RALs should be released based on completed steps
    *
    * Release when:
-   * - At least one step has completed (stepNumber > 0)
-   * - AND that step had tool calls (agent made an actual decision)
+   * - At least one step has a "decision" tool call (coordination or action tool)
    *
    * Don't release when:
    * - No steps completed yet
    * - Only reasoning/thinking was produced (no tool calls)
+   * - Only read-only tools were called (agent is still gathering context)
+   *
+   * This ensures the agent has time to gather context before deciding how to coordinate.
    */
   shouldReleasePausedRALs(steps: StepInfo[]): boolean {
     if (steps.length === 0) {
       return false;
     }
 
-    // Check if any step had tool calls (agent made a decision)
-    return steps.some(step => step.toolCalls.length > 0);
+    // Check if any step had a "decision" tool call (not just read-only tools)
+    return steps.some(step =>
+      step.toolCalls.some(tc => !READ_ONLY_TOOLS.has(tc.toolName))
+    );
   }
 
   /**
@@ -196,6 +215,10 @@ CONCURRENT EXECUTION CONTEXT:
 YOU ARE RAL #${currentRALNumber} - a NEW execution that just started.
 You are NOT any of the other RALs listed below. They are PAUSED waiting for YOUR decision.
 
+IMPORTANT: All RALs in this conversation share the SAME conversation history.
+The paused RALs have already seen all prior messages (including any instructions, constraints, or context from earlier in the conversation).
+Only inject NEW information that occurred AFTER the paused RAL started - do NOT repeat information from the shared conversation history.
+
 Other active executions in this conversation (currently PAUSED):
 
 ${ralDescriptions}
@@ -204,10 +227,11 @@ ${toolInstructions}
 
 CRITICAL: You must coordinate with paused RALs before proceeding:
 
-1. If the user's request CONFLICTS with or CHANGES what a paused RAL is doing:
-   → Use ral_inject FIRST to tell that RAL to change its behavior
+1. If the user's NEW request CONFLICTS with or CHANGES what a paused RAL is doing:
+   → Use ral_inject to tell that RAL about the NEW user instruction only
+   → Do NOT repeat instructions or constraints that were in the original conversation - they already have those
    → Example: User says "write jokes instead" while RAL #1 is writing poems
-   → Call: ral_inject(1, "STOP your current task. The user changed their request to: write jokes instead.")
+   → Call: ral_inject(1, "STOP. User changed request: write jokes instead of poems.")
 
 2. If the user wants to CANCEL a paused RAL entirely:
    → Use ral_abort if available, OR ral_inject with stop instruction if it has delegations
