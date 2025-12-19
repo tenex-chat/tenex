@@ -20,6 +20,7 @@ import {
     streamText,
     wrapLanguageModel,
 } from "ai";
+import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
@@ -208,6 +209,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         // Build middleware chain
         const middlewares: LanguageModelMiddleware[] = [];
+
+        // Flight recorder - records LLM interactions when enabled via 'r' key
+        middlewares.push(createFlightRecorderMiddleware());
 
         // Extract reasoning from thinking tags
         middlewares.push(
@@ -444,7 +448,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
-            prepareStep?: (step: { messages: ModelMessage[]; stepNumber: number }) =>
+            prepareStep?: (step: {
+                messages: ModelMessage[];
+                stepNumber: number;
+                steps: StepResult<Record<string, AISdkTool>>[];
+            }) =>
                 | {
                       messages?: ModelMessage[];
                   }
