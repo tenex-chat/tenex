@@ -8,6 +8,7 @@ import * as path from "node:path";
 import type { MCPServerConfig, TenexMCP } from "@/services/config/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import { config as configService } from "@/services/ConfigService";
 import type { Tool as CoreTool } from "ai";
 import {
@@ -54,7 +55,6 @@ export class MCPManager {
             const loadedConfig = await configService.loadConfig(projectPath);
 
             if (!loadedConfig.mcp || !loadedConfig.mcp.enabled) {
-                logger.info("MCP is disabled");
                 this.isInitialized = true;
                 return;
             }
@@ -65,7 +65,9 @@ export class MCPManager {
             }
             this.isInitialized = true;
 
-            logger.info("MCP manager initialized with resources as tools enabled");
+            trace.getActiveSpan()?.addEvent("mcp.initialized", {
+                "servers.count": this.clients.size,
+            });
         } catch (error) {
             logger.error("Failed to initialize MCP manager:", error);
             // Don't throw - allow the system to continue without MCP
@@ -83,7 +85,7 @@ export class MCPManager {
             })
             .map(([name, config]) =>
                 this.startServer(name, config).catch((error) => {
-                    logger.error(`Failed to start MCP server '${name}':`, error);
+                    logger.error(`Failed to start MCP server '${name}':`, formatAnyError(error));
                     // Continue with other servers
                 })
             );
@@ -132,9 +134,10 @@ export class MCPManager {
             Object.assign(mergedEnv, config.env);
         }
 
-        logger.debug(
-            `Starting MCP server '${name}' with command: ${config.command} ${config.args.join(" ")}`
-        );
+        trace.getActiveSpan()?.addEvent("mcp.server_starting", {
+            "server.name": name,
+            "server.command": config.command,
+        });
 
         const transport = new Experimental_StdioMCPTransport({
             command: config.command,
@@ -169,7 +172,9 @@ export class MCPManager {
                 config,
             });
 
-            logger.info(`Started MCP server '${name}'`);
+            trace.getActiveSpan()?.addEvent("mcp.server_started", {
+                "server.name": name,
+            });
         } catch (error) {
             logger.error(`Failed to create MCP client for '${name}':`, formatAnyError(error));
             try {
@@ -198,20 +203,12 @@ export class MCPManager {
 
                     // Store the tool with type assertion for MCP client compatibility
                     tools[namespacedName] = tool as CoreTool<unknown, unknown>;
-
-                    // Log the tool structure for debugging
-                    logger.debug(`MCP tool '${namespacedName}' registered`, {
-                        hasDescription: !!tool.description,
-                        hasInputSchema: !!tool.inputSchema,
-                        hasExecute: typeof tool.execute === "function",
-                        inputSchemaType: tool.inputSchema ? typeof tool.inputSchema : "undefined",
-                        isResourceTool: toolName.startsWith("resource_"),
-                    });
                 }
 
-                logger.debug(
-                    `Discovered ${Object.keys(serverTools).length} tools from MCP server '${serverName}'`
-                );
+                trace.getActiveSpan()?.addEvent("mcp.tools_discovered", {
+                    "server.name": serverName,
+                    "tools.count": Object.keys(serverTools).length,
+                });
             } catch (error) {
                 logger.error(
                     `Failed to get tools from MCP server '${serverName}':`,
@@ -221,9 +218,10 @@ export class MCPManager {
         }
 
         this.cachedTools = tools;
-        logger.info(
-            `Cached ${Object.keys(tools).length} MCP tools from ${this.clients.size} servers`
-        );
+        trace.getActiveSpan()?.addEvent("mcp.tools_cached", {
+            "tools.total": Object.keys(tools).length,
+            "servers.count": this.clients.size,
+        });
     }
 
     /**
@@ -256,7 +254,9 @@ export class MCPManager {
     private async shutdownServer(name: string, entry: MCPClientEntry): Promise<void> {
         try {
             await entry.transport.close();
-            logger.info(`Shut down MCP server '${name}'`);
+            trace.getActiveSpan()?.addEvent("mcp.server_shutdown", {
+                "server.name": name,
+            });
         } catch (error) {
             logger.error(`Error shutting down MCP server '${name}':`, formatAnyError(error));
         }
@@ -280,7 +280,7 @@ export class MCPManager {
      * Reload MCP service configuration and restart servers
      */
     async reload(projectPath?: string): Promise<void> {
-        logger.info("Reloading MCP manager configuration");
+        trace.getActiveSpan()?.addEvent("mcp.reloading");
 
         // Shutdown existing servers
         await this.shutdown();
@@ -288,9 +288,9 @@ export class MCPManager {
         // Re-initialize with the new configuration
         await this.initialize(projectPath || this.projectPath);
 
-        logger.info("MCP manager reloaded successfully", {
-            runningServers: this.getRunningServers(),
-            availableTools: Object.keys(this.cachedTools).length,
+        trace.getActiveSpan()?.addEvent("mcp.reloaded", {
+            "servers.running": this.getRunningServers().length,
+            "tools.available": Object.keys(this.cachedTools).length,
         });
     }
 
@@ -474,7 +474,10 @@ export class MCPManager {
         try {
             // Type assertion for experimental MCP feature not yet in AI SDK types
             await (entry.client as any).subscribeResource(resourceUri);
-            logger.debug(`Subscribed to resource '${resourceUri}' from server '${serverName}'`);
+            trace.getActiveSpan()?.addEvent("mcp.resource_subscribed", {
+                "server.name": serverName,
+                "resource.uri": resourceUri,
+            });
         } catch (error) {
             logger.error(
                 `Failed to subscribe to resource '${resourceUri}' from '${serverName}':`,
@@ -503,7 +506,10 @@ export class MCPManager {
         try {
             // Type assertion for experimental MCP feature not yet in AI SDK types
             await (entry.client as any).unsubscribeResource(resourceUri);
-            logger.debug(`Unsubscribed from resource '${resourceUri}' from server '${serverName}'`);
+            trace.getActiveSpan()?.addEvent("mcp.resource_unsubscribed", {
+                "server.name": serverName,
+                "resource.uri": resourceUri,
+            });
         } catch (error) {
             logger.error(
                 `Failed to unsubscribe from resource '${resourceUri}' from '${serverName}':`,
@@ -534,7 +540,9 @@ export class MCPManager {
 
         // Type assertion for experimental MCP feature not yet in AI SDK types
         (entry.client as any).onResourceUpdated(handler);
-        logger.debug(`Registered resource update handler for server '${serverName}'`);
+        trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {
+            "server.name": serverName,
+        });
     }
 }
 

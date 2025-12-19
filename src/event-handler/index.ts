@@ -2,7 +2,6 @@ import { NDKKind } from "@/nostr/kinds";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
-import chalk from "chalk";
 import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
@@ -13,6 +12,7 @@ import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
+import { trace } from "@opentelemetry/api";
 
 const IGNORED_EVENT_KINDS = [
     NDKKind.Metadata,
@@ -103,9 +103,12 @@ export class EventHandler {
             }
         }
 
-        logger.info(
-            `event handler, kind: ${event.kind} from ${fromIdentifier} for (${forIdentifiers}) (${event.id})`
-        );
+        trace.getActiveSpan()?.addEvent("event_handler.received", {
+            "event.kind": event.kind,
+            "event.id": event.id,
+            "event.from": fromIdentifier,
+            "event.for": forIdentifiers,
+        });
 
         switch (event.kind) {
             case NDKKind.GenericReply: // kind 1111
@@ -174,9 +177,6 @@ export class EventHandler {
             const title = metadata.title;
             if (title) {
                 this.conversationCoordinator.setTitle(conversationId, title);
-                logger.info(
-                    `Updated conversation title: ${title} for ${conversationId.substring(0, 8)}`
-                );
             }
         }
     }
@@ -210,24 +210,12 @@ export class EventHandler {
             // Check for model configuration change
             const newModel = event.tagValue("model");
             if (newModel) {
-                logger.info("Received agent config update request", {
-                    agentPubkey,
-                    newModel,
-                    eventId: event.id,
-                    from: event.pubkey,
-                });
-
                 // Update in storage then reload into registry
                 const updated = await agentStorage.updateAgentLLMConfig(agentPubkey, newModel);
 
                 if (updated) {
                     // Reload agent to pick up changes
                     await agentRegistry.reloadAgent(agentPubkey);
-                    logger.info("Updated and persisted model configuration for agent", {
-                        agentName: agent.slug,
-                        agentPubkey: agent.pubkey,
-                        newModel,
-                    });
                 } else {
                     logger.warn("Failed to update model configuration", {
                         agentName: agent.slug,
@@ -244,24 +232,12 @@ export class EventHandler {
                 // Extract tool names from tags
                 const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
 
-                logger.debug("Received tools config change request", {
-                    agentPubkey,
-                    agentSlug: agent.slug,
-                    toolCount: newToolNames.length,
-                    eventId: event.id,
-                });
-
                 // Update in storage then reload into registry
                 const updated = await agentStorage.updateAgentTools(agentPubkey, newToolNames);
 
                 if (updated) {
                     // Reload agent to pick up changes
                     await agentRegistry.reloadAgent(agentPubkey);
-                    logger.info("Updated tools configuration", {
-                        agent: agent.slug,
-                        toolCount: newToolNames.length,
-                        newToolNames,
-                    });
                 } else {
                     logger.warn("Failed to update tools configuration", {
                         agent: agent.slug,
@@ -299,21 +275,13 @@ export class EventHandler {
 
         for (const [_, eventId] of eTags) {
             const stopped = llmOpsRegistry.stopByEventId(eventId);
-            if (stopped > 0) {
-                logger.info(
-                    `[EventHandler] Stopped ${stopped} operations for event ${eventId.substring(0, 8)}`
-                );
-                totalStopped += stopped;
-            }
+            totalStopped += stopped;
         }
 
-        if (totalStopped === 0) {
-            logger.info("[EventHandler] No active operations to stop");
-        } else {
-            logger.info(`[EventHandler] Total operations stopped: ${totalStopped}`, {
-                activeRemaining: llmOpsRegistry.getActiveOperationsCount(),
-            });
-        }
+        trace.getActiveSpan()?.addEvent("event_handler.stop_operations", {
+            "operations.stopped": totalStopped,
+            "operations.remaining": llmOpsRegistry.getActiveOperationsCount(),
+        });
     }
 
     private async handleLessonEvent(event: NDKEvent): Promise<void> {
@@ -324,10 +292,6 @@ export class EventHandler {
 
         // Check if we should trust this lesson
         if (!shouldTrustLesson(lesson, event.pubkey)) {
-            logger.debug("Lesson event rejected by trust check", {
-                eventId: event.id?.substring(0, 8),
-                publisher: event.pubkey.substring(0, 8),
-            });
             return;
         }
 
@@ -350,23 +314,12 @@ export class EventHandler {
             );
 
             if (agents.length === 0) {
-                logger.debug("Lesson event for unknown agent definition", {
-                    eventId: event.id?.substring(0, 8),
-                    agentDefinitionId: agentDefinitionId.substring(0, 8),
-                });
                 return;
             }
 
             // Store the lesson for each matching agent
             for (const agent of agents) {
                 projectCtx.addLesson(agent.pubkey, lesson);
-                logger.info("Stored lesson for agent", {
-                    agentSlug: agent.slug,
-                    agentPubkey: agent.pubkey.substring(0, 8),
-                    lessonTitle: lesson.title,
-                    lessonId: event.id?.substring(0, 8),
-                    publisher: event.pubkey.substring(0, 8),
-                });
             }
         } catch (error) {
             logger.error("Failed to handle lesson event", {
@@ -376,24 +329,13 @@ export class EventHandler {
         }
     }
 
-    private handleDefaultEvent(event: NDKEvent): void {
-        if (event.content) {
-            logger.info(
-                chalk.white(
-                    `[handleDefaultEvent ${event.id.substring(0, 6)}] Receivend unhandled event kind ${event.kind}`
-                ) +
-                    chalk.white(`[handleDefaultEvent ${event.id.substring(0, 6)}] Content: `) +
-                    chalk.gray(
-                        event.content.substring(0, 100) + (event.content.length > 100 ? "..." : "")
-                    )
-            );
-        }
+    private handleDefaultEvent(_event: NDKEvent): void {
+        // Unhandled event kinds are ignored silently
     }
 
     async cleanup(): Promise<void> {
         // Save all conversations before shutting down
         await this.conversationCoordinator.cleanup();
-        logger.info("EventHandler cleanup completed");
     }
 
 }

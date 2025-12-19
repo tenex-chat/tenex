@@ -141,8 +141,10 @@ export class ConcurrentRALCoordinator {
 
   /**
    * Build the context message for an agent about other active RALs
+   * @param otherRALs - Summaries of other active RALs
+   * @param currentRALNumber - The RAL number of the agent receiving this context
    */
-  buildContext(otherRALs: RALSummary[]): string {
+  buildContext(otherRALs: RALSummary[], currentRALNumber: number): string {
     if (otherRALs.length === 0) return "";
 
     const toolAvailability = this.getToolAvailability(otherRALs);
@@ -191,26 +193,27 @@ Note: Some RALs cannot be aborted directly:
 
     return `
 CONCURRENT EXECUTION CONTEXT:
-Other RALs are currently PAUSED waiting for your decision. You MUST coordinate before doing anything else.
+YOU ARE RAL #${currentRALNumber} - a NEW execution that just started.
+You are NOT any of the other RALs listed below. They are PAUSED waiting for YOUR decision.
 
-Active executions in this conversation:
+Other active executions in this conversation (currently PAUSED):
 
 ${ralDescriptions}
 
 ${toolInstructions}
 
-IMPORTANT: Analyze the user's request against what each RAL is doing:
+CRITICAL: You must coordinate with paused RALs before proceeding:
 
-1. If the user's request CONFLICTS with or CHANGES what a RAL is doing:
+1. If the user's request CONFLICTS with or CHANGES what a paused RAL is doing:
    → Use ral_inject FIRST to tell that RAL to change its behavior
-   → Example: User says "stop writing poems, write jokes" while RAL #1 writes poems
+   → Example: User says "write jokes instead" while RAL #1 is writing poems
    → Call: ral_inject(1, "STOP your current task. The user changed their request to: write jokes instead.")
 
-2. If the user wants to CANCEL a RAL entirely:
+2. If the user wants to CANCEL a paused RAL entirely:
    → Use ral_abort if available, OR ral_inject with stop instruction if it has delegations
 
-3. If the user's request is UNRELATED to existing RALs:
-   → Proceed with your own work
+3. If the user's request is UNRELATED to the paused RALs:
+   → Proceed with your own work (the paused RALs will resume automatically)
 
 The paused RALs will resume after you make your first tool call. Decide NOW.
 `;

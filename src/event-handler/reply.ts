@@ -1,14 +1,11 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
-import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
 import type { ExecutionContext } from "../agents/execution/types";
-import type { AgentInstance } from "../agents/types";
 import type { Conversation, ConversationCoordinator } from "../conversations";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
-import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "../services/ProjectContext";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
@@ -27,35 +24,25 @@ export const handleChatMessage = async (
     event: NDKEvent,
     context: EventHandlerContext
 ): Promise<void> => {
-    logger.info(
-        chalk.gray("Message: ") +
-            chalk.white(event.content.substring(0, 100) + (event.content.length > 100 ? "..." : ""))
-    );
-
     const projectCtx = getProjectContext();
 
     // Check if this message is directed to the system using centralized decoder
     const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(event, projectCtx.agents);
     const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
 
-    // DEBUG: Log filtering decision for delegation events
-    const pTags = TagExtractor.getPTags(event);
-    const systemPubkeys = Array.from(projectCtx.agents.values()).map((a: AgentInstance) => a.pubkey);
-    logger.debug("[EventFilter] Checking event", {
-        eventId: event.id?.substring(0, 8),
-        eventPubkey: event.pubkey?.substring(0, 8),
-        isDirectedToSystem,
-        isFromAgent,
-        willFilter: !isDirectedToSystem && isFromAgent,
-        pTags: pTags.map((pk) => pk?.substring(0, 8)),
-        systemPubkeys: systemPubkeys.map((pk) => pk.substring(0, 8)),
+    trace.getActiveSpan()?.addEvent("reply.message_received", {
+        "event.id": event.id ?? "",
+        "event.pubkey": event.pubkey?.substring(0, 8) ?? "",
+        "message.preview": event.content.substring(0, 100),
+        "routing.is_directed_to_system": isDirectedToSystem,
+        "routing.is_from_agent": isFromAgent,
     });
 
     if (!isDirectedToSystem && isFromAgent) {
         // Agent event not directed to system - only add to conversation history, don't process
-        logger.debug(
-            `Agent event not directed to system - adding to history only: ${event.id?.substring(0, 8)}`
-        );
+        trace.getActiveSpan()?.addEvent("reply.agent_event_not_directed", {
+            "event.id": event.id ?? "",
+        });
 
         // Try to find and update the conversation this event belongs to
         const resolver = new ConversationResolver(context.conversationCoordinator);
@@ -64,13 +51,13 @@ export const handleChatMessage = async (
         if (result.conversation) {
             // Add the event to conversation history without triggering any agent processing
             await context.conversationCoordinator.addEvent(result.conversation.id, event);
-            logger.debug(
-                `Added agent response to conversation history: ${result.conversation.id.substring(0, 8)}`
-            );
+            trace.getActiveSpan()?.addEvent("reply.added_to_history", {
+                "conversation.id": result.conversation.id,
+            });
         } else {
-            logger.debug(
-                `Could not find conversation for agent event: ${event.id?.substring(0, 8)}`
-            );
+            trace.getActiveSpan()?.addEvent("reply.no_conversation_found", {
+                "event.id": event.id ?? "",
+            });
         }
         return;
     }
@@ -79,7 +66,10 @@ export const handleChatMessage = async (
     try {
         await handleReplyLogic(event, context);
     } catch (error) {
-        logger.info(chalk.red(`❌ Failed to route reply: ${formatAnyError(error)}`));
+        logger.error("Failed to route reply", {
+            error: formatAnyError(error),
+            eventId: event.id,
+        });
     }
 };
 
@@ -186,10 +176,9 @@ async function handleReplyLogic(
     }
 
     if (targetAgents.length === 0) {
-        logger.debug(`No target agents resolved for event: ${event.id?.substring(0, 8)}`);
-        if (activeSpan) {
-            activeSpan.addEvent("agent_routing_failed", { reason: "no_agents_resolved" });
-        }
+        activeSpan?.addEvent("reply.no_target_agents", {
+            "event.id": event.id ?? "",
+        });
         return;
     }
 
@@ -206,16 +195,13 @@ async function handleReplyLogic(
     const finalTargetAgents = [...nonSelfReplyAgents, ...selfReplyAgentsWithPhases];
 
     if (finalTargetAgents.length === 0) {
-        const routingReasons = AgentRouter.getRoutingReasons(event, targetAgents);
-        logger.info(
-            chalk.gray(
-                `Skipping self-reply: all target agents would process their own message (${routingReasons})`
-            )
-        );
+        activeSpan?.addEvent("reply.skipped_self_reply", {
+            "routing.reason": "all_agents_would_process_own_message",
+        });
         return;
     }
 
-    // Log filtering actions
+    // Record filtering decisions in trace
     if (nonSelfReplyAgents.length < targetAgents.length) {
         const filteredAgents = targetAgents.filter((a) => !nonSelfReplyAgents.includes(a));
         const allowedSelfReplies = filteredAgents.filter(
@@ -225,21 +211,10 @@ async function handleReplyLogic(
             (a) => !a.phases || Object.keys(a.phases).length === 0
         );
 
-        if (allowedSelfReplies.length > 0) {
-            logger.info(
-                chalk.gray(
-                    `Allowing self-reply for agents with phases: ${allowedSelfReplies.map((a) => a.name).join(", ")}`
-                )
-            );
-        }
-
-        if (blockedSelfReplies.length > 0) {
-            logger.info(
-                chalk.gray(
-                    `Filtered out self-reply for: ${blockedSelfReplies.map((a) => a.name).join(", ")}`
-                )
-            );
-        }
+        activeSpan?.addEvent("reply.self_reply_filtering", {
+            "filtering.allowed_with_phases": allowedSelfReplies.map((a) => a.name).join(", "),
+            "filtering.blocked": blockedSelfReplies.map((a) => a.name).join(", "),
+        });
     }
 
     targetAgents = finalTargetAgents;

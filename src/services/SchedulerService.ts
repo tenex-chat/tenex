@@ -3,6 +3,7 @@ import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 import * as cron from "node-cron";
 import { logger } from "../utils/logger";
 import { getProjectContext } from "./ProjectContext";
@@ -42,8 +43,6 @@ export class SchedulerService {
     public async initialize(ndk: NDK, _projectPath?: string): Promise<void> {
         this.ndk = ndk;
 
-        logger.debug("Initializing SchedulerService");
-
         // Ensure .tenex directory exists
         const tenexDir = path.dirname(this.taskFilePath);
         await fs.mkdir(tenexDir, { recursive: true });
@@ -56,7 +55,9 @@ export class SchedulerService {
             this.startTask(task);
         }
 
-        logger.debug(`SchedulerService initialized with ${this.taskMetadata.size} tasks`);
+        trace.getActiveSpan()?.addEvent("scheduler.initialized", {
+            "tasks.count": this.taskMetadata.size,
+        });
     }
 
     public async addTask(
@@ -125,11 +126,16 @@ export class SchedulerService {
         );
 
         this.tasks.set(task.id, cronTask);
-        logger.debug(`Started cron task ${task.id} with schedule: ${task.schedule}`);
+        trace.getActiveSpan()?.addEvent("scheduler.task_started", {
+            "task.id": task.id,
+            "task.schedule": task.schedule,
+        });
     }
 
     private async executeTask(task: ScheduledTask): Promise<void> {
-        logger.info(`Executing scheduled task ${task.id}: ${task.prompt}`);
+        trace.getActiveSpan()?.addEvent("scheduler.task_executing", {
+            "task.id": task.id,
+        });
 
         try {
             // Try to get NDK instance if not already set
@@ -154,7 +160,9 @@ export class SchedulerService {
             // Publish kind:11 event to trigger the agent
             await this.publishAgentTriggerEvent(task);
 
-            logger.info(`Successfully triggered scheduled task ${task.id} via kind:11 event`);
+            trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
+                "task.id": task.id,
+            });
         } catch (error: unknown) {
             logger.error(`Failed to execute scheduled task ${task.id}:`, error);
         }
@@ -215,9 +223,11 @@ export class SchedulerService {
         await event.sign(signer);
         await event.publish();
 
-        logger.info(
-            `Published kind:11 event for scheduled task ${task.id} from ${signer.pubkey} to ${task.toPubkey}`
-        );
+        trace.getActiveSpan()?.addEvent("scheduler.event_published", {
+            "task.id": task.id,
+            "event.from": signer.pubkey.substring(0, 8),
+            "event.to": task.toPubkey.substring(0, 8),
+        });
     }
 
     private async loadTasks(): Promise<void> {
@@ -229,10 +239,12 @@ export class SchedulerService {
                 this.taskMetadata.set(task.id, task);
             }
 
-            logger.debug(`Loaded ${tasks.length} scheduled tasks from disk`);
+            trace.getActiveSpan()?.addEvent("scheduler.tasks_loaded", {
+                "tasks.count": tasks.length,
+            });
         } catch (error: unknown) {
             if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-                logger.debug("No existing scheduled tasks file found, starting fresh");
+                // No existing file, starting fresh - this is expected
             } else {
                 logger.error("Failed to load scheduled tasks:", error);
             }
@@ -243,7 +255,6 @@ export class SchedulerService {
         try {
             const tasks = Array.from(this.taskMetadata.values());
             await fs.writeFile(this.taskFilePath, JSON.stringify(tasks, null, 2));
-            logger.debug(`Saved ${tasks.length} scheduled tasks to disk`);
         } catch (error) {
             logger.error("Failed to save scheduled tasks:", error);
         }
@@ -254,17 +265,18 @@ export class SchedulerService {
     }
 
     public shutdown(): void {
-        logger.info("Shutting down SchedulerService");
+        trace.getActiveSpan()?.addEvent("scheduler.shutting_down", {
+            "tasks.count": this.tasks.size,
+        });
 
         // Stop all cron tasks
-        for (const [taskId, cronTask] of this.tasks.entries()) {
+        for (const [, cronTask] of this.tasks.entries()) {
             cronTask.stop();
-            logger.debug(`Stopped cron task ${taskId}`);
         }
 
         this.tasks.clear();
-        this.taskMetadata.clear(); // Also clear metadata
-        logger.info("SchedulerService shutdown complete");
+        this.taskMetadata.clear();
+        trace.getActiveSpan()?.addEvent("scheduler.shutdown_complete");
     }
 
     public async clearAllTasks(): Promise<void> {
