@@ -81,8 +81,9 @@ export class ProjectRuntime {
         const projectTitle = this.project.tagValue("title") || "Untitled";
         console.log(chalk.yellow(`🚀 Starting project: ${chalk.bold(projectTitle)}`));
 
-        logger.info(`Starting project runtime: ${this.projectId}`, {
-            title: this.project.tagValue("title"),
+        trace.getActiveSpan()?.addEvent("project_runtime.starting", {
+            "project.id": this.projectId,
+            "project.title": this.project.tagValue("title") ?? "",
         });
 
         try {
@@ -94,18 +95,20 @@ export class ProjectRuntime {
             const repoUrl = this.project.repo;
 
             if (repoUrl) {
-                logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
+                trace.getActiveSpan()?.addEvent("project_runtime.cloning_repo", {
+                    "repo.url": repoUrl,
+                });
                 const result = await cloneGitRepository(repoUrl, this.projectBasePath);
                 if (!result) {
                     throw new Error(`Failed to clone repository: ${repoUrl}`);
                 }
             } else {
-                logger.info("Initializing new git repository", { projectId: this.projectId });
+                trace.getActiveSpan()?.addEvent("project_runtime.init_repo");
                 await initializeGitRepository(this.projectBasePath);
             }
 
-            logger.info(`Git repository ready`, {
-                projectPath: this.projectBasePath,
+            trace.getActiveSpan()?.addEvent("project_runtime.repo_ready", {
+                "project.path": this.projectBasePath,
             });
 
             // Initialize components
@@ -218,9 +221,10 @@ export class ProjectRuntime {
         const projectTitle = this.project.tagValue("title") || "Untitled";
         console.log(chalk.yellow(`🛑 Stopping project: ${chalk.bold(projectTitle)}`));
 
-        logger.info(`Stopping project runtime: ${this.projectId}`, {
-            uptime: this.startTime ? Date.now() - this.startTime.getTime() : 0,
-            eventsProcessed: this.eventCount,
+        trace.getActiveSpan()?.addEvent("project_runtime.stopping", {
+            "project.id": this.projectId,
+            "uptime_ms": this.startTime ? Date.now() - this.startTime.getTime() : 0,
+            "events.processed": this.eventCount,
         });
 
         // Stop status publisher
@@ -311,18 +315,11 @@ export class ProjectRuntime {
                 .map((tag) => tag[1])
                 .filter((id): id is string => typeof id === "string");
 
-            logger.debug(
-                `[ProjectRuntime] Found ${mcpEventIds.length} MCP tool(s) in project tags`,
-                {
-                    projectId: this.projectId,
-                    mcpEventIds: mcpEventIds.map((id) => id.substring(0, 12)),
-                }
-            );
+            trace.getActiveSpan()?.addEvent("project_runtime.mcp_tools_found", {
+                "mcp.count": mcpEventIds.length,
+            });
 
             if (mcpEventIds.length === 0) {
-                logger.debug(
-                    "[ProjectRuntime] No MCP tools defined in project, skipping MCP initialization"
-                );
                 return;
             }
 
@@ -332,9 +329,9 @@ export class ProjectRuntime {
             // Fetch and install each MCP tool
             for (const eventId of mcpEventIds) {
                 try {
-                    logger.debug(
-                        `[ProjectRuntime] Fetching MCP tool event: ${eventId.substring(0, 12)}...`
-                    );
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_fetching", {
+                        "mcp.event_id": eventId.substring(0, 12),
+                    });
                     const mcpEvent = await ndk.fetchEvent(eventId);
 
                     if (!mcpEvent) {
@@ -346,20 +343,17 @@ export class ProjectRuntime {
                     }
 
                     const mcpTool = NDKMCPTool.from(mcpEvent);
-                    logger.debug(
-                        `[ProjectRuntime] Installing MCP tool: ${mcpTool.name || "unnamed"}`,
-                        {
-                            eventId: eventId.substring(0, 12),
-                            command: mcpTool.command,
-                        }
-                    );
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installing", {
+                        "mcp.name": mcpTool.name ?? "unnamed",
+                        "mcp.event_id": eventId.substring(0, 12),
+                    });
 
                     await installMCPServerFromEvent(this.projectBasePath, mcpTool);
                     installedCount.success++;
 
-                    logger.info(`[ProjectRuntime] Installed MCP tool: ${mcpTool.name}`, {
-                        eventId: eventId.substring(0, 12),
-                        slug: mcpTool.slug,
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installed", {
+                        "mcp.name": mcpTool.name ?? "",
+                        "mcp.slug": mcpTool.slug ?? "",
                     });
                 } catch (error) {
                     logger.error("[ProjectRuntime] Failed to install MCP tool", {
@@ -370,27 +364,22 @@ export class ProjectRuntime {
                 }
             }
 
-            logger.info("[ProjectRuntime] MCP tool installation complete", {
-                total: mcpEventIds.length,
-                success: installedCount.success,
-                failed: installedCount.failed,
+            trace.getActiveSpan()?.addEvent("project_runtime.mcp_installation_complete", {
+                "mcp.total": mcpEventIds.length,
+                "mcp.success": installedCount.success,
+                "mcp.failed": installedCount.failed,
             });
 
             // Initialize MCP service if any tools were installed
             if (installedCount.success > 0) {
-                logger.info(
-                    `[ProjectRuntime] Initializing MCP service with ${installedCount.success} tool(s)`
-                );
                 await mcpService.initialize(this.projectBasePath);
 
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());
 
-                logger.info("[ProjectRuntime] MCP service initialized", {
-                    runningServers: runningServers.length,
-                    runningServerNames: runningServers,
-                    availableTools: availableTools.length,
-                    toolNames: availableTools,
+                trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
+                    "mcp.running_servers": runningServers.length,
+                    "mcp.available_tools": availableTools.length,
                 });
             } else {
                 logger.warn(

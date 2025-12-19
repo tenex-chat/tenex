@@ -30,7 +30,7 @@ import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { FlattenedChronologicalStrategy } from "./strategies/FlattenedChronologicalStrategy";
 import type { MessageGenerationStrategy } from "./strategies/types";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
-import { ConcurrentRALCoordinator } from "./ConcurrentRALCoordinator";
+import { getConcurrentRALCoordinator } from "./ConcurrentRALCoordinator";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -432,11 +432,19 @@ export class AgentExecutor {
 
             // If there are other active RALs, inject context about them
             if (context.otherRALSummaries.length > 0) {
-                const coordinator = new ConcurrentRALCoordinator();
-                const concurrentContext = coordinator.buildContext(context.otherRALSummaries);
+                const concurrentContext = getConcurrentRALCoordinator().buildContext(context.otherRALSummaries, ralNumber);
                 messages.push({
                     role: "system",
                     content: concurrentContext,
+                });
+
+                // Log what context was injected for debugging
+                trace.getActiveSpan()?.addEvent("executor.concurrent_context_injected", {
+                    "ral.number": ralNumber,
+                    "other_ral.count": context.otherRALSummaries.length,
+                    "other_ral.numbers": context.otherRALSummaries.map(r => r.ralNumber).join(","),
+                    "triggering_event.content": context.triggeringEvent.content?.substring(0, 500) || "",
+                    "context.length": concurrentContext.length,
                 });
             }
 
@@ -575,8 +583,6 @@ export class AgentExecutor {
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
 
             // prepareStep: synchronous, handles injections and release of paused RALs
-            const ralCoordinator = new ConcurrentRALCoordinator();
-
             const prepareStep = (
                 step: {
                     messages: ModelMessage[];
@@ -594,8 +600,14 @@ export class AgentExecutor {
                         reasoningText: s.reasoningText,
                     }));
 
-                    if (ralCoordinator.shouldReleasePausedRALs(stepsInfo)) {
+                    if (getConcurrentRALCoordinator().shouldReleasePausedRALs(stepsInfo)) {
                         hasReleasedPausedRALs = true;
+
+                        // Log what tool calls triggered the release
+                        const triggeringToolCalls = stepsInfo
+                            .flatMap(s => s.toolCalls.map(tc => tc.toolName))
+                            .join(", ");
+
                         const releasedCount = ralRegistry.releaseOtherRALs(
                             context.agent.pubkey,
                             context.conversationId,
@@ -607,6 +619,7 @@ export class AgentExecutor {
                                 "ral.releasing_number": ralNumber,
                                 "ral.released_count": releasedCount,
                                 "step.completed_count": step.steps.length,
+                                "step.triggering_tools": triggeringToolCalls,
                             });
                         }
                     }

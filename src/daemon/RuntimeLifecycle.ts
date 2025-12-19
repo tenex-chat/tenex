@@ -1,5 +1,6 @@
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 import { ProjectRuntime } from "./ProjectRuntime";
 
 /**
@@ -48,14 +49,18 @@ export class RuntimeLifecycle {
         // Check if already active
         const existingRuntime = this.activeRuntimes.get(projectId);
         if (existingRuntime) {
-            logger.debug(`Using existing runtime for project ${projectId}`);
+            trace.getActiveSpan()?.addEvent("runtime_lifecycle.using_existing", {
+                "project.id": projectId,
+            });
             return existingRuntime;
         }
 
         // Check if currently being started (prevent duplicate startups)
         const startingPromise = this.startingRuntimes.get(projectId);
         if (startingPromise) {
-            logger.debug(`Waiting for in-progress startup for project ${projectId}`);
+            trace.getActiveSpan()?.addEvent("runtime_lifecycle.waiting_for_startup", {
+                "project.id": projectId,
+            });
             return startingPromise;
         }
 
@@ -81,7 +86,9 @@ export class RuntimeLifecycle {
                 throw new Error(`Runtime already running: ${projectId}`);
             }
             // Runtime exists but is not running - remove it and allow restart
-            logger.info(`Removing stale runtime for ${projectId}`);
+            trace.getActiveSpan()?.addEvent("runtime_lifecycle.removing_stale", {
+                "project.id": projectId,
+            });
             this.activeRuntimes.delete(projectId);
         }
 
@@ -92,8 +99,9 @@ export class RuntimeLifecycle {
         }
 
         const projectTitle = project.tagValue("title") || "Untitled";
-        logger.info(`Starting project runtime: ${projectId}`, {
-            title: projectTitle,
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.starting", {
+            "project.id": projectId,
+            "project.title": projectTitle,
         });
 
         // Create startup promise to prevent concurrent startups
@@ -104,8 +112,9 @@ export class RuntimeLifecycle {
             const runtime = await startupPromise;
             this.activeRuntimes.set(projectId, runtime);
 
-            logger.info(`Project runtime started successfully: ${projectId}`, {
-                title: projectTitle,
+            trace.getActiveSpan()?.addEvent("runtime_lifecycle.started", {
+                "project.id": projectId,
+                "project.title": projectTitle,
             });
 
             return runtime;
@@ -142,12 +151,16 @@ export class RuntimeLifecycle {
             throw new Error(`Runtime not found: ${projectId}`);
         }
 
-        logger.info(`Stopping project runtime: ${projectId}`);
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.stopping", {
+            "project.id": projectId,
+        });
 
         try {
             await runtime.stop();
             this.activeRuntimes.delete(projectId);
-            logger.info(`Project runtime stopped: ${projectId}`);
+            trace.getActiveSpan()?.addEvent("runtime_lifecycle.stopped", {
+                "project.id": projectId,
+            });
         } catch (error) {
             logger.error(`Error stopping project runtime: ${projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -170,7 +183,9 @@ export class RuntimeLifecycle {
             throw new Error(`Runtime not found: ${projectId}`);
         }
 
-        logger.info(`Restarting project runtime: ${projectId}`);
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.restarting", {
+            "project.id": projectId,
+        });
 
         try {
             // Stop the runtime
@@ -212,13 +227,14 @@ export class RuntimeLifecycle {
      * Stop all active runtimes (for shutdown)
      */
     async stopAllRuntimes(): Promise<void> {
-        logger.info(`Stopping all runtimes (${this.activeRuntimes.size} active)`);
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.stopping_all", {
+            "runtimes.active_count": this.activeRuntimes.size,
+        });
 
         const stopPromises = Array.from(this.activeRuntimes.entries()).map(
             async ([projectId, runtime]) => {
                 try {
                     await runtime.stop();
-                    logger.debug(`Stopped runtime: ${projectId}`);
                 } catch (error) {
                     logger.error(`Error stopping runtime during shutdown: ${projectId}`, {
                         error: error instanceof Error ? error.message : String(error),
@@ -230,7 +246,7 @@ export class RuntimeLifecycle {
         await Promise.all(stopPromises);
         this.activeRuntimes.clear();
 
-        logger.info("All runtimes stopped");
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.all_stopped");
     }
 
     /**
@@ -264,7 +280,9 @@ export class RuntimeLifecycle {
             return;
         }
 
-        logger.info(`Waiting for ${this.startingRuntimes.size} starting runtime(s) to complete`);
+        trace.getActiveSpan()?.addEvent("runtime_lifecycle.waiting_for_starting", {
+            "runtimes.starting_count": this.startingRuntimes.size,
+        });
 
         const promises = Array.from(this.startingRuntimes.values());
         await Promise.allSettled(promises);
