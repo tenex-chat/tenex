@@ -4,18 +4,44 @@ import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import type {
   RALState,
-  RALStatus,
   PendingDelegation,
   CompletedDelegation,
   QueuedInjection,
 } from "./types";
 
+export interface RALSummary {
+  ralNumber: number;
+  ralId: string;
+  isStreaming: boolean;
+  currentTool?: string;
+  /** Messages unique to this RAL (starting from triggering event, excludes shared conversation history) */
+  uniqueMessages: ModelMessage[];
+  pendingDelegations: Array<{ recipientSlug?: string; prompt: string; eventId: string }>;
+  createdAt: number;
+  hasPendingDelegations: boolean;
+}
+
 export class RALRegistry {
   private static instance: RALRegistry;
-  private states: Map<string, RALState> = new Map();
-  private delegationToRal: Map<string, string> = new Map();
-  private ralIdToAgent: Map<string, string> = new Map(); // Reverse lookup for O(1) agent resolution
+
+  /**
+   * RAL states keyed by "agentPubkey:conversationId", value is Map of ralNumber -> RALState
+   * This allows multiple concurrent RALs per agent+conversation
+   */
+  private states: Map<string, Map<number, RALState>> = new Map();
+
+  /** Track next RAL number for each conversation */
+  private nextRalNumber: Map<string, number> = new Map();
+
+  /** Maps delegation event ID -> {key, ralNumber} for O(1) lookup */
+  private delegationToRal: Map<string, { key: string; ralNumber: number }> = new Map();
+
+  /** Maps RAL ID -> {key, ralNumber} for O(1) reverse lookup */
+  private ralIdToLocation: Map<string, { key: string; ralNumber: number }> = new Map();
+
+  /** Abort controllers keyed by "key:ralNumber" */
   private abortControllers: Map<string, AbortController> = new Map();
+
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Maximum age for RAL states before cleanup (default: 24 hours) */
@@ -29,41 +55,48 @@ export class RALRegistry {
     this.startCleanupInterval();
   }
 
-  /**
-   * Start periodic cleanup of expired RAL states
-   */
+  private makeKey(agentPubkey: string, conversationId: string): string {
+    return `${agentPubkey}:${conversationId}`;
+  }
+
+  private makeAbortKey(key: string, ralNumber: number): string {
+    return `${key}:${ralNumber}`;
+  }
+
   private startCleanupInterval(): void {
     this.cleanupInterval = setInterval(() => {
       this.cleanupExpiredStates();
     }, RALRegistry.CLEANUP_INTERVAL_MS);
-
-    // Don't prevent process from exiting
     this.cleanupInterval.unref();
   }
 
-  /**
-   * Clean up RAL states that have been inactive for too long
-   */
   private cleanupExpiredStates(): void {
     const now = Date.now();
     let cleanedCount = 0;
 
-    for (const [agentPubkey, state] of this.states.entries()) {
-      if (now - state.lastActivityAt > RALRegistry.STATE_TTL_MS) {
-        this.clear(agentPubkey);
-        cleanedCount++;
-        logger.info("[RALRegistry] Cleaned up expired RAL state", {
-          agentPubkey: agentPubkey.substring(0, 8),
-          ralId: state.id.substring(0, 8),
-          ageHours: Math.round((now - state.lastActivityAt) / (60 * 60 * 1000)),
-        });
+    for (const [key, rals] of this.states.entries()) {
+      for (const [ralNumber, state] of rals.entries()) {
+        if (now - state.lastActivityAt > RALRegistry.STATE_TTL_MS) {
+          this.clearRAL(state.agentPubkey, state.conversationId, ralNumber);
+          cleanedCount++;
+          logger.info("[RALRegistry] Cleaned up expired RAL state", {
+            agentPubkey: state.agentPubkey.substring(0, 8),
+            conversationId: state.conversationId.substring(0, 8),
+            ralNumber,
+            ageHours: Math.round((now - state.lastActivityAt) / (60 * 60 * 1000)),
+          });
+        }
+      }
+      // Clean up empty conversation entries
+      if (rals.size === 0) {
+        this.states.delete(key);
       }
     }
 
     if (cleanedCount > 0) {
       logger.info("[RALRegistry] Cleanup complete", {
         cleanedCount,
-        remainingStates: this.states.size,
+        remainingConversations: this.states.size,
       });
     }
   }
@@ -76,447 +109,570 @@ export class RALRegistry {
   }
 
   /**
-   * Create a new RAL entry for an agent
+   * Create a new RAL entry for an agent+conversation pair.
+   * Returns the RAL number assigned to this execution.
    */
-  create(agentPubkey: string, originalTriggeringEventId?: string): string {
+  create(agentPubkey: string, conversationId: string, originalTriggeringEventId?: string): number {
     const id = crypto.randomUUID();
     const now = Date.now();
+    const key = this.makeKey(agentPubkey, conversationId);
+
+    // Get next RAL number for this conversation
+    const ralNumber = (this.nextRalNumber.get(key) || 0) + 1;
+    this.nextRalNumber.set(key, ralNumber);
 
     const state: RALState = {
       id,
+      ralNumber,
       agentPubkey,
+      conversationId,
       messages: [],
+      uniqueMessagesStartIndex: 0,
       pendingDelegations: [],
       completedDelegations: [],
       queuedInjections: [],
-      status: "executing",
+      isStreaming: false,
       createdAt: now,
       lastActivityAt: now,
       originalTriggeringEventId,
     };
 
-    this.states.set(agentPubkey, state);
-    this.ralIdToAgent.set(id, agentPubkey); // Reverse lookup
+    // Get or create the conversation's RAL map
+    let rals = this.states.get(key);
+    if (!rals) {
+      rals = new Map();
+      this.states.set(key, rals);
+    }
+    rals.set(ralNumber, state);
 
-    logger.debug("[RALRegistry] Created RAL", {
-      ralId: id.substring(0, 8),
-      agentPubkey: agentPubkey.substring(0, 8),
-      originalTriggeringEventId: originalTriggeringEventId?.substring(0, 8),
+    // Track reverse lookup
+    this.ralIdToLocation.set(id, { key, ralNumber });
+
+    trace.getActiveSpan()?.addEvent("ral.created", {
+      "ral.id": id,
+      "ral.number": ralNumber,
+      "agent.pubkey": agentPubkey,
+      "conversation.id": conversationId,
     });
 
-    return id;
+    return ralNumber;
   }
 
   /**
-   * Get RAL state by agent pubkey
+   * Get all active RALs for an agent+conversation
    */
-  getStateByAgent(agentPubkey: string): RALState | undefined {
-    return this.states.get(agentPubkey);
+  getActiveRALs(agentPubkey: string, conversationId: string): RALState[] {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const rals = this.states.get(key);
+    if (!rals) return [];
+    return Array.from(rals.values());
   }
 
   /**
-   * Get agent pubkey by RAL ID (O(1) reverse lookup)
+   * Get summaries of other active RALs (excluding the specified one)
+   * Used to inject context about concurrent executions
    */
-  getAgentByRalId(ralId: string): string | undefined {
-    return this.ralIdToAgent.get(ralId);
+  getOtherRALSummaries(agentPubkey: string, conversationId: string, excludeRalNumber: number): RALSummary[] {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    return rals
+      .filter(r => r.ralNumber !== excludeRalNumber)
+      .map(r => ({
+        ralNumber: r.ralNumber,
+        ralId: r.id,
+        isStreaming: r.isStreaming,
+        currentTool: r.currentTool,
+        // Only include messages unique to this RAL (from triggering event onward)
+        uniqueMessages: r.messages.slice(r.uniqueMessagesStartIndex),
+        pendingDelegations: r.pendingDelegations.map(d => ({
+          recipientSlug: d.recipientSlug,
+          prompt: d.prompt.substring(0, 100) + (d.prompt.length > 100 ? "..." : ""),
+          eventId: d.eventId,
+        })),
+        createdAt: r.createdAt,
+        hasPendingDelegations: r.pendingDelegations.length > 0,
+      }));
   }
 
   /**
-   * Get RAL ID for a delegation event ID
+   * Get a specific RAL by number
    */
-  getRalIdForDelegation(delegationEventId: string): string | undefined {
-    return this.delegationToRal.get(delegationEventId);
+  getRAL(agentPubkey: string, conversationId: string, ralNumber: number): RALState | undefined {
+    const key = this.makeKey(agentPubkey, conversationId);
+    return this.states.get(key)?.get(ralNumber);
   }
 
   /**
-   * Update RAL status
+   * Get RAL state by RAL ID
    */
-  setStatus(agentPubkey: string, status: RALStatus): void {
-    const state = this.states.get(agentPubkey);
-    if (state) {
-      state.status = status;
-      state.lastActivityAt = Date.now();
+  getStateByRalId(ralId: string): RALState | undefined {
+    const location = this.ralIdToLocation.get(ralId);
+    if (!location) return undefined;
+    return this.states.get(location.key)?.get(location.ralNumber);
+  }
+
+  /**
+   * Get the current (most recent) RAL for an agent+conversation
+   * This is for backwards compatibility with code that expects a single RAL
+   */
+  getState(agentPubkey: string, conversationId: string): RALState | undefined {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const rals = this.states.get(key);
+    if (!rals || rals.size === 0) return undefined;
+
+    // Return the RAL with the highest number (most recent)
+    let maxRal: RALState | undefined;
+    for (const ral of rals.values()) {
+      if (!maxRal || ral.ralNumber > maxRal.ralNumber) {
+        maxRal = ral;
+      }
+    }
+    return maxRal;
+  }
+
+  /**
+   * Set whether agent is currently streaming
+   */
+  setStreaming(agentPubkey: string, conversationId: string, ralNumber: number, isStreaming: boolean): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral) {
+      ral.isStreaming = isStreaming;
+      ral.lastActivityAt = Date.now();
     }
   }
 
   /**
-   * Save/update messages for the current execution (RAL is single source of truth)
+   * Check if any RAL for this agent+conversation is streaming
    */
-  saveMessages(agentPubkey: string, messages: ModelMessage[]): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) {
+  isAnyStreaming(agentPubkey: string, conversationId: string): boolean {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    return rals.some(r => r.isStreaming);
+  }
+
+  /**
+   * Save/update messages for a specific RAL
+   * @param uniqueContentStartsAt - Index where this RAL's unique content starts (typically the triggering event).
+   *                                Only needs to be set on first save. Subsequent saves will preserve the original value.
+   */
+  saveMessages(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    messages: ModelMessage[],
+    uniqueContentStartsAt?: number
+  ): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
       logger.warn("[RALRegistry] No RAL found to save messages", {
         agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
       });
       return;
     }
 
-    state.messages = messages;
-    state.lastActivityAt = Date.now();
+    // Only update the start index on first save (when it's still 0 and we have a value)
+    if (ral.uniqueMessagesStartIndex === 0 && uniqueContentStartsAt !== undefined) {
+      ral.uniqueMessagesStartIndex = uniqueContentStartsAt;
+    }
 
-    logger.debug("[RALRegistry] Saved RAL messages", {
-      ralId: state.id.substring(0, 8),
-      messageCount: messages.length,
+    ral.messages = messages;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.messages_saved", {
+      "ral.id": ral.id,
+      "ral.number": ralNumber,
+      "message.count": messages.length,
     });
   }
 
   /**
-   * Get messages for the current execution (returns empty if no RAL or no messages saved)
+   * Get messages for a specific RAL
    */
-  getMessages(agentPubkey: string): ModelMessage[] {
-    const state = this.states.get(agentPubkey);
-    if (!state || state.messages.length === 0) return [];
-    return [...state.messages];
+  getMessages(agentPubkey: string, conversationId: string, ralNumber: number): ModelMessage[] {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral || ral.messages.length === 0) return [];
+    return [...ral.messages];
   }
 
   /**
-   * Check if RAL has saved messages (for determining whether to rebuild or reuse)
+   * Check if RAL has saved messages
    */
-  hasMessages(agentPubkey: string): boolean {
-    const state = this.states.get(agentPubkey);
-    return !!state && state.messages.length > 0;
+  hasMessages(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return !!ral && ral.messages.length > 0;
   }
 
   /**
-   * Save messages and pending delegations (called when RAL pauses)
+   * Save messages and pending delegations for a specific RAL
    */
   saveState(
     agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
     messages: ModelMessage[],
     pendingDelegations: PendingDelegation[]
   ): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
       logger.warn("[RALRegistry] No RAL found to save state", {
         agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
       });
       return;
     }
 
-    state.messages = messages;
-    state.pendingDelegations = pendingDelegations;
-    state.status = "paused";
-    state.lastActivityAt = Date.now();
+    const key = this.makeKey(agentPubkey, conversationId);
+    ral.messages = messages;
+    ral.pendingDelegations = pendingDelegations;
+    ral.lastActivityAt = Date.now();
 
-    // Register delegation event ID -> RAL ID mappings
+    // Register delegation event ID -> RAL mappings
     for (const d of pendingDelegations) {
-      this.delegationToRal.set(d.eventId, state.id);
+      this.delegationToRal.set(d.eventId, { key, ralNumber });
     }
 
-    logger.debug("[RALRegistry] Saved RAL state", {
-      ralId: state.id.substring(0, 8),
-      messageCount: messages.length,
-      pendingCount: pendingDelegations.length,
+    trace.getActiveSpan()?.addEvent("ral.state_saved", {
+      "ral.id": ral.id,
+      "ral.number": ralNumber,
+      "message.count": messages.length,
+      "delegation.pending_count": pendingDelegations.length,
     });
   }
 
   /**
-   * Record a delegation completion
+   * Record a delegation completion (looks up RAL from delegation event ID)
    */
-  recordCompletion(
-    agentPubkey: string,
-    completion: CompletedDelegation
-  ): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) return;
+  recordCompletion(completion: CompletedDelegation): RALState | undefined {
+    const location = this.delegationToRal.get(completion.eventId);
+    if (!location) return undefined;
 
-    state.completedDelegations.push(completion);
-    state.lastActivityAt = Date.now();
+    const ral = this.states.get(location.key)?.get(location.ralNumber);
+    if (!ral) return undefined;
+
+    ral.completedDelegations.push(completion);
+    ral.lastActivityAt = Date.now();
 
     // Remove from pending
-    state.pendingDelegations = state.pendingDelegations.filter(
+    ral.pendingDelegations = ral.pendingDelegations.filter(
       (p) => p.eventId !== completion.eventId
     );
 
-    logger.debug("[RALRegistry] Recorded completion", {
-      ralId: state.id.substring(0, 8),
-      completedEventId: completion.eventId.substring(0, 8),
-      remainingPending: state.pendingDelegations.length,
+    trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
+      "ral.id": ral.id,
+      "ral.number": ral.ralNumber,
+      "delegation.completed_event_id": completion.eventId,
+      "delegation.remaining_pending": ral.pendingDelegations.length,
+    });
+
+    return ral;
+  }
+
+  /**
+   * Inject a system message into a specific RAL
+   * Returns true if successful, false if RAL not found
+   */
+  injectToRAL(
+    agentPubkey: string,
+    conversationId: string,
+    targetRalNumber: number,
+    message: string
+  ): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, targetRalNumber);
+    if (!ral) {
+      logger.warn("[RALRegistry] Cannot inject - RAL not found", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        targetRalNumber,
+      });
+      return false;
+    }
+
+    // Enforce queue size limit
+    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
+      const dropped = ral.queuedInjections.shift();
+      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        droppedEventId: dropped?.eventId?.substring(0, 8),
+      });
+    }
+
+    ral.queuedInjections.push({
+      role: "system",
+      content: message,
+      queuedAt: Date.now(),
+    });
+
+    trace.getActiveSpan()?.addEvent("ral.message_injected", {
+      "ral.number": targetRalNumber,
+      "message.length": message.length,
+    });
+
+    return true;
+  }
+
+  /**
+   * Abort a specific RAL
+   * Returns { success: true } or { success: false, reason: string }
+   */
+  abortRAL(
+    agentPubkey: string,
+    conversationId: string,
+    targetRalNumber: number
+  ): { success: boolean; reason?: string } {
+    const ral = this.getRAL(agentPubkey, conversationId, targetRalNumber);
+    if (!ral) {
+      return { success: false, reason: "RAL not found" };
+    }
+
+    if (ral.pendingDelegations.length > 0) {
+      return {
+        success: false,
+        reason: `RAL has ${ral.pendingDelegations.length} pending delegation(s). Use delegate_followup to communicate with them first.`,
+      };
+    }
+
+    // Abort any running tool
+    const key = this.makeKey(agentPubkey, conversationId);
+    const abortKey = this.makeAbortKey(key, targetRalNumber);
+    const controller = this.abortControllers.get(abortKey);
+    if (controller) {
+      controller.abort();
+      this.abortControllers.delete(abortKey);
+    }
+
+    // Clear the RAL
+    this.clearRAL(agentPubkey, conversationId, targetRalNumber);
+
+    trace.getActiveSpan()?.addEvent("ral.aborted", {
+      "ral.number": targetRalNumber,
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Queue a system message for injection into a specific RAL
+   */
+  queueSystemMessage(agentPubkey: string, conversationId: string, ralNumber: number, message: string): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      logger.warn("[RALRegistry] Cannot queue system message - no RAL state", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
+      });
+      return;
+    }
+
+    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
+      const dropped = ral.queuedInjections.shift();
+      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        droppedEventId: dropped?.eventId?.substring(0, 8),
+      });
+    }
+
+    ral.queuedInjections.push({
+      role: "system",
+      content: message,
+      queuedAt: Date.now(),
     });
   }
 
   /**
-   * Queue an event for injection
+   * Queue an event for injection into a specific RAL
    */
-  queueEvent(agentPubkey: string, event: NDKEvent): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) {
+  queueEvent(agentPubkey: string, conversationId: string, ralNumber: number, event: NDKEvent): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
       logger.warn("[RALRegistry] Cannot queue event - no RAL state", {
         agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
         eventId: event.id?.substring(0, 8),
       });
       return;
     }
 
-    // Enforce queue size limit (drop oldest if full)
-    if (state.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      const dropped = state.queuedInjections.shift();
+    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
+      const dropped = ral.queuedInjections.shift();
       logger.warn("[RALRegistry] Queue full, dropping oldest event", {
         agentPubkey: agentPubkey.substring(0, 8),
         droppedEventId: dropped?.eventId?.substring(0, 8),
-        queueSize: state.queuedInjections.length,
       });
     }
 
-    state.queuedInjections.push({
+    ral.queuedInjections.push({
       role: "user",
       content: event.content,
       eventId: event.id,
       queuedAt: Date.now(),
     });
 
-    // Add trace event for queuing (only if span is still recording)
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan?.isRecording()) {
-      activeSpan.addEvent("ral.event_queued", {
-        "ral.id": state.id,
-        "ral.status": state.status,
-        "event.id": event.id || "",
-        "queue.size": state.queuedInjections.length,
-        "agent.pubkey": agentPubkey,
-      });
-    }
-
-    logger.debug("[RALRegistry] Queued event for injection", {
-      ralId: state.id.substring(0, 8),
-      eventId: event.id?.substring(0, 8),
-      queueSize: state.queuedInjections.length,
-      ralStatus: state.status,
+    trace.getActiveSpan()?.addEvent("ral.event_queued", {
+      "ral.id": ral.id,
+      "ral.number": ralNumber,
+      "event.id": event.id || "",
+      "queue.size": ral.queuedInjections.length,
     });
   }
 
   /**
-   * Queue a system message for injection
+   * Get and persist queued injections for a specific RAL
    */
-  queueSystemMessage(agentPubkey: string, content: string): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) {
-      logger.warn("[RALRegistry] Cannot queue system message - no RAL state", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        contentLength: content.length,
-      });
-      return;
-    }
+  getAndPersistInjections(agentPubkey: string, conversationId: string, ralNumber: number): QueuedInjection[] {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return [];
 
-    // Enforce queue size limit (drop oldest if full)
-    if (state.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      const dropped = state.queuedInjections.shift();
-      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        droppedEventId: dropped?.eventId?.substring(0, 8),
-        queueSize: state.queuedInjections.length,
-      });
-    }
-
-    state.queuedInjections.push({
-      role: "system",
-      content,
-      queuedAt: Date.now(),
-    });
-
-    // Add trace event for queuing (only if span is still recording)
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan?.isRecording()) {
-      activeSpan.addEvent("ral.system_message_queued", {
-        "ral.id": state.id,
-        "ral.status": state.status,
-        "message.length": content.length,
-        "queue.size": state.queuedInjections.length,
-        "agent.pubkey": agentPubkey,
-      });
-    }
-
-    logger.debug("[RALRegistry] Queued system message for injection", {
-      ralId: state.id.substring(0, 8),
-      contentLength: content.length,
-      queueSize: state.queuedInjections.length,
-    });
-  }
-
-  /**
-   * Check if an event is still queued
-   */
-  eventStillQueued(agentPubkey: string, eventId: string): boolean {
-    const state = this.states.get(agentPubkey);
-    if (!state) return false;
-    return state.queuedInjections.some((i) => i.eventId === eventId);
-  }
-
-  /**
-   * Get newly queued injections and persist them to state.messages.
-   * Only returns items that were just moved from queue - already-persisted items
-   * are already in state.messages and will be included on recursion via getMessages().
-   */
-  getAndPersistInjections(agentPubkey: string): QueuedInjection[] {
-    const state = this.states.get(agentPubkey);
-    if (!state) return [];
-
-    // Only process newly queued items
-    if (state.queuedInjections.length === 0) {
+    if (ral.queuedInjections.length === 0) {
       return [];
     }
 
-    const newInjections = [...state.queuedInjections];
-    state.queuedInjections = [];
+    const newInjections = [...ral.queuedInjections];
+    ral.queuedInjections = [];
 
-    // Append to messages so they're included on recursion via getMessages()
     for (const injection of newInjections) {
-      state.messages.push({
+      ral.messages.push({
         role: injection.role,
         content: injection.content,
       });
     }
 
-    // Add trace event (only if span is still recording)
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan?.isRecording()) {
-      activeSpan.addEvent("ral.injections_persisted", {
-        "ral.id": state.id,
-        "injection.count": newInjections.length,
-        "injection.roles": newInjections.map((i) => i.role).join(","),
-        "total_messages": state.messages.length,
-        "agent.pubkey": agentPubkey,
-      });
-    }
-
-    logger.debug("[RALRegistry] Persisted injections to messages", {
-      ralId: state.id.substring(0, 8),
-      newCount: newInjections.length,
-      totalMessages: state.messages.length,
+    trace.getActiveSpan()?.addEvent("ral.injections_persisted", {
+      "ral.id": ral.id,
+      "ral.number": ralNumber,
+      "injection.count": newInjections.length,
+      "total_messages": ral.messages.length,
     });
 
     return newInjections;
   }
 
+  /**
+   * Check if an event is still queued for injection
+   */
+  eventStillQueued(agentPubkey: string, conversationId: string, ralNumber: number, eventId: string): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return false;
+    return ral.queuedInjections.some(i => i.eventId === eventId);
+  }
 
   /**
    * Swap a queued user event with a system message
    */
   swapQueuedEvent(
     agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
     eventId: string,
-    systemContent: string
+    systemMessage: string
   ): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) {
-      logger.warn("[RALRegistry] Cannot swap event - no RAL state", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        eventId: eventId.substring(0, 8),
-      });
-      return;
-    }
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return;
 
-    const beforeCount = state.queuedInjections.length;
+    // Find and remove the event
+    ral.queuedInjections = ral.queuedInjections.filter(i => i.eventId !== eventId);
 
-    // Remove the user event
-    state.queuedInjections = state.queuedInjections.filter(
-      (i) => i.eventId !== eventId
-    );
-
-    // Add system message
-    state.queuedInjections.push({
+    // Add system message instead
+    ral.queuedInjections.push({
       role: "system",
-      content: systemContent,
+      content: systemMessage,
       queuedAt: Date.now(),
     });
-
-    // Add trace event for swap (only if span is still recording)
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan?.isRecording()) {
-      activeSpan.addEvent("ral.event_swapped_to_system", {
-        "ral.id": state.id,
-        "event.id": eventId,
-        "system_message.length": systemContent.length,
-        "queue.before_count": beforeCount,
-        "queue.after_count": state.queuedInjections.length,
-        "agent.pubkey": agentPubkey,
-      });
-    }
-
-    logger.debug("[RALRegistry] Swapped user event with system message", {
-      ralId: state.id.substring(0, 8),
-      eventId: eventId.substring(0, 8),
-      systemContentLength: systemContent.length,
-    });
   }
 
   /**
-   * Set current tool being executed (for timeout responder context)
+   * Set current tool being executed
    */
-  setCurrentTool(agentPubkey: string, toolName: string | undefined): void {
-    const state = this.states.get(agentPubkey);
-    if (!state) return;
+  setCurrentTool(agentPubkey: string, conversationId: string, ralNumber: number, toolName: string | undefined): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return;
 
-    state.currentTool = toolName;
-    state.toolStartedAt = toolName ? Date.now() : undefined;
+    ral.currentTool = toolName;
+    ral.toolStartedAt = toolName ? Date.now() : undefined;
 
-    // Clean up AbortController when tool completes (toolName undefined)
     if (!toolName) {
-      this.abortControllers.delete(agentPubkey);
+      const key = this.makeKey(agentPubkey, conversationId);
+      this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
     }
   }
 
   /**
-   * Register an abort controller for the current tool
+   * Register an abort controller for a specific RAL
    */
   registerAbortController(
     agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
     controller: AbortController
   ): void {
-    this.abortControllers.set(agentPubkey, controller);
+    const key = this.makeKey(agentPubkey, conversationId);
+    this.abortControllers.set(this.makeAbortKey(key, ralNumber), controller);
   }
 
   /**
-   * Abort current tool execution
+   * Clear a specific RAL
    */
-  abortCurrentTool(agentPubkey: string): void {
-    const controller = this.abortControllers.get(agentPubkey);
-    if (controller) {
-      controller.abort();
-      this.abortControllers.delete(agentPubkey);
-      logger.info("[RALRegistry] Aborted current tool", {
-        agentPubkey: agentPubkey.substring(0, 8),
-      });
-    }
-  }
+  clearRAL(agentPubkey: string, conversationId: string, ralNumber: number): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const rals = this.states.get(key);
+    if (!rals) return;
 
-  /**
-   * Clear RAL state (called on finish_reason: done)
-   */
-  clear(agentPubkey: string): void {
-    const state = this.states.get(agentPubkey);
-    if (state) {
+    const ral = rals.get(ralNumber);
+    if (ral) {
       // Clean up delegation mappings
-      for (const d of state.pendingDelegations) {
+      for (const d of ral.pendingDelegations) {
         this.delegationToRal.delete(d.eventId);
       }
-      for (const d of state.completedDelegations) {
+      for (const d of ral.completedDelegations) {
         this.delegationToRal.delete(d.eventId);
       }
       // Clean up reverse lookup
-      this.ralIdToAgent.delete(state.id);
+      this.ralIdToLocation.delete(ral.id);
     }
 
-    this.states.delete(agentPubkey);
-    this.abortControllers.delete(agentPubkey);
+    rals.delete(ralNumber);
+    this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
 
-    logger.debug("[RALRegistry] Cleared RAL state", {
-      agentPubkey: agentPubkey.substring(0, 8),
+    // Clean up empty conversation entries
+    if (rals.size === 0) {
+      this.states.delete(key);
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.cleared", {
+      "ral.number": ralNumber,
     });
   }
 
   /**
-   * Get summary of RAL state for timeout responder
+   * Clear all RALs for an agent+conversation (legacy compatibility)
    */
-  getStateSummary(agentPubkey: string): string {
-    const state = this.states.get(agentPubkey);
-    if (!state) return "No active execution";
+  clear(agentPubkey: string, conversationId: string): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const rals = this.states.get(key);
+    if (rals) {
+      for (const ralNumber of rals.keys()) {
+        this.clearRAL(agentPubkey, conversationId, ralNumber);
+      }
+    }
 
-    const toolInfo = state.currentTool
-      ? `Running tool: ${state.currentTool} for ${Date.now() - (state.toolStartedAt || 0)}ms`
+    // Reset the RAL number counter for this conversation
+    this.nextRalNumber.delete(key);
+  }
+
+  /**
+   * Get summary of a specific RAL for context
+   */
+  getStateSummary(agentPubkey: string, conversationId: string, ralNumber: number): string {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return "No active execution";
+
+    const toolInfo = ral.currentTool
+      ? `Running tool: ${ral.currentTool} for ${Date.now() - (ral.toolStartedAt || 0)}ms`
       : "Between tool calls";
 
-    const recentMessages = state.messages
+    const recentMessages = ral.messages
       .slice(-4)
       .map((m) => `${m.role}: ${String(m.content).substring(0, 80)}...`)
       .join("\n");
@@ -525,93 +681,209 @@ export class RALRegistry {
   }
 
   /**
-   * Find the agent pubkey that is waiting for a delegation response
-   * Uses O(1) lookup via delegationToRal and ralIdToAgent maps
-   * @param delegationEventId The event ID of the delegation
-   * @returns The agent pubkey waiting for this delegation, or undefined
+   * Find the RAL that has a pending delegation
    */
-  findAgentWaitingForDelegation(delegationEventId: string): string | undefined {
-    // O(1) lookup: delegationEventId -> ralId -> agentPubkey
-    const ralId = this.delegationToRal.get(delegationEventId);
-    if (!ralId) return undefined;
+  findStateWaitingForDelegation(delegationEventId: string): RALState | undefined {
+    const location = this.delegationToRal.get(delegationEventId);
+    if (!location) return undefined;
 
-    const agentPubkey = this.ralIdToAgent.get(ralId);
-    if (!agentPubkey) return undefined;
+    const ral = this.states.get(location.key)?.get(location.ralNumber);
+    if (!ral) return undefined;
 
-    // Verify the agent is still paused and waiting for this delegation
-    const state = this.states.get(agentPubkey);
-    if (!state || state.status !== "paused") return undefined;
-
-    const hasPending = state.pendingDelegations.some(
+    const hasPending = ral.pendingDelegations.some(
       (d) => d.eventId === delegationEventId
     );
-    return hasPending ? agentPubkey : undefined;
+    return hasPending ? ral : undefined;
   }
 
   /**
-   * Check if an agent has a paused RAL waiting for delegations
+   * Clear completed delegations for a specific RAL
    */
-  hasPausedRal(agentPubkey: string): boolean {
-    const state = this.states.get(agentPubkey);
-    return state?.status === "paused" && state.pendingDelegations.length > 0;
-  }
-
-  /**
-   * Check if all pending delegations are complete for an agent
-   */
-  allDelegationsComplete(agentPubkey: string): boolean {
-    const state = this.states.get(agentPubkey);
-    if (!state) return false;
-    return state.pendingDelegations.length === 0 && state.completedDelegations.length > 0;
-  }
-
-  /**
-   * Get the paused RAL state for resumption
-   * Returns the state only if it's paused and ready to resume
-   */
-  getStateForResumption(agentPubkey: string): RALState | undefined {
-    const state = this.states.get(agentPubkey);
-    if (!state || state.status !== "paused") return undefined;
-    if (state.pendingDelegations.length > 0) return undefined; // Still waiting
-    return state;
-  }
-
-  /**
-   * Mark RAL as resuming (transitioning from paused to executing)
-   */
-  markResuming(agentPubkey: string): void {
-    const state = this.states.get(agentPubkey);
-    if (state) {
-      state.status = "executing";
-      state.lastActivityAt = Date.now();
-      logger.info("[RALRegistry] RAL resuming after delegation completion", {
-        ralId: state.id.substring(0, 8),
-        agentPubkey: agentPubkey.substring(0, 8),
-        completedCount: state.completedDelegations.length,
-      });
+  clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber: number): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral) {
+      for (const d of ral.completedDelegations) {
+        this.delegationToRal.delete(d.eventId);
+      }
+      ral.completedDelegations = [];
     }
   }
 
   /**
-   * Get completed delegations for injection into resumed conversation
+   * Get the RAL key for a delegation event ID (for routing completions)
    */
-  getCompletedDelegationsForInjection(agentPubkey: string): CompletedDelegation[] {
-    const state = this.states.get(agentPubkey);
-    if (!state) return [];
-    return [...state.completedDelegations];
+  getRalKeyForDelegation(delegationEventId: string): string | undefined {
+    return this.delegationToRal.get(delegationEventId)?.key;
   }
 
   /**
-   * Clear completed delegations after they've been injected
+   * Find a RAL that should be resumed (has completed delegations, no pending ones).
+   * Used when a delegation response arrives to continue the delegator's execution.
    */
-  clearCompletedDelegations(agentPubkey: string): void {
-    const state = this.states.get(agentPubkey);
-    if (state) {
-      // Clean up delegation mappings
-      for (const d of state.completedDelegations) {
-        this.delegationToRal.delete(d.eventId);
+  findResumableRAL(agentPubkey: string, conversationId: string): RALState | undefined {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    return rals.find(ral =>
+      ral.completedDelegations.length > 0 &&
+      ral.pendingDelegations.length === 0 &&
+      ral.messages.length > 0
+    );
+  }
+
+  /**
+   * Build a message containing delegation results for injection into the RAL.
+   */
+  buildDelegationResultsMessage(completions: CompletedDelegation[]): string {
+    if (completions.length === 0) {
+      return "";
+    }
+
+    if (completions.length === 1) {
+      const c = completions[0];
+      const agent = c.recipientSlug || c.recipientPubkey.substring(0, 8);
+      return `Delegation to ${agent} completed. Their response:\n\n${c.response}`;
+    }
+
+    const parts = completions.map(c => {
+      const agent = c.recipientSlug || c.recipientPubkey.substring(0, 8);
+      return `## Response from ${agent}:\n${c.response}`;
+    });
+
+    return `All ${completions.length} delegations completed. Responses:\n\n${parts.join("\n\n")}`;
+  }
+
+  // === RAL Pause/Resume for concurrent execution coordination ===
+
+  /**
+   * Pause all other RALs in this conversation so the new RAL can analyze and decide.
+   * Returns the number of RALs that were paused.
+   */
+  pauseOtherRALs(agentPubkey: string, conversationId: string, pausingRalNumber: number): number {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    let pausedCount = 0;
+    const skippedSelf: number[] = [];
+    const skippedAlreadyPaused: { ralNumber: number; pausedBy: number }[] = [];
+    const paused: number[] = [];
+
+    const span = trace.getActiveSpan();
+
+    for (const ral of rals) {
+      if (ral.ralNumber === pausingRalNumber) {
+        skippedSelf.push(ral.ralNumber);
+        continue;
       }
-      state.completedDelegations = [];
+      if (ral.pausedByRalNumber) {
+        skippedAlreadyPaused.push({
+          ralNumber: ral.ralNumber,
+          pausedBy: ral.pausedByRalNumber,
+        });
+        continue;
+      }
+
+      let resolve: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      ral.pausedByRalNumber = pausingRalNumber;
+      ral.pausePromise = promise;
+      ral.pauseResolver = resolve!;
+      pausedCount++;
+      paused.push(ral.ralNumber);
+    }
+
+    if (span) {
+      span.addEvent("ral.others_paused", {
+        pausing_ral: pausingRalNumber,
+        total_active_rals: rals.length,
+        active_ral_numbers: rals.map(r => r.ralNumber).join(","),
+        skipped_self: skippedSelf.join(","),
+        skipped_already_paused: skippedAlreadyPaused.map(s => `${s.ralNumber}(by:${s.pausedBy})`).join(","),
+        paused_rals: paused.join(","),
+        paused_count: pausedCount,
+      });
+    }
+
+    return pausedCount;
+  }
+
+  /**
+   * Release all RALs that were paused by this RAL.
+   * Returns the number of RALs that were released.
+   */
+  releaseOtherRALs(agentPubkey: string, conversationId: string, releasingRalNumber: number): number {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    let releasedCount = 0;
+
+    for (const ral of rals) {
+      if (ral.pausedByRalNumber !== releasingRalNumber) continue;
+
+      // Resolve the promise to unblock the waiting RAL
+      ral.pauseResolver?.();
+      ral.pausedByRalNumber = undefined;
+      ral.pausePromise = undefined;
+      ral.pauseResolver = undefined;
+      releasedCount++;
+    }
+
+    if (releasedCount > 0) {
+      trace.getActiveSpan()?.addEvent("ral.others_released", {
+        "ral.releasing_number": releasingRalNumber,
+        "ral.released_count": releasedCount,
+      });
+    }
+
+    return releasedCount;
+  }
+
+  /**
+   * Check if a RAL is paused and return the promise to await if so.
+   * Returns undefined if not paused.
+   */
+  getPausePromise(agentPubkey: string, conversationId: string, ralNumber: number): Promise<void> | undefined {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.pausePromise;
+  }
+
+  /**
+   * Check if a RAL is currently paused.
+   */
+  isPaused(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.pausedByRalNumber !== undefined;
+  }
+
+  // === Convenience methods (for backwards compatibility) ===
+
+  /**
+   * Check if any RAL is streaming (convenience wrapper)
+   */
+  isStreaming(agentPubkey: string, conversationId: string): boolean {
+    return this.isAnyStreaming(agentPubkey, conversationId);
+  }
+
+  /**
+   * Get the most recent RAL number for a conversation
+   */
+  private getCurrentRalNumber(agentPubkey: string, conversationId: string): number | undefined {
+    const ral = this.getState(agentPubkey, conversationId);
+    return ral?.ralNumber;
+  }
+
+  /**
+   * Abort current tool on most recent RAL (convenience for tests)
+   */
+  abortCurrentTool(agentPubkey: string, conversationId: string): void {
+    const ralNumber = this.getCurrentRalNumber(agentPubkey, conversationId);
+    if (ralNumber !== undefined) {
+      const key = this.makeKey(agentPubkey, conversationId);
+      const abortKey = this.makeAbortKey(key, ralNumber);
+      const controller = this.abortControllers.get(abortKey);
+      if (controller) {
+        controller.abort();
+        this.abortControllers.delete(abortKey);
+        trace.getActiveSpan()?.addEvent("ral.tool_aborted", {
+          "ral.number": ralNumber,
+        });
+      }
     }
   }
 }

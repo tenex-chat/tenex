@@ -13,6 +13,8 @@ export interface DelegationCompletionResult {
     recorded: boolean;
     /** The agent slug that's waiting for this delegation (if any) */
     agentSlug?: string;
+    /** The conversation ID where the delegation was made */
+    conversationId?: string;
 }
 
 /**
@@ -50,28 +52,11 @@ export async function handleDelegationCompletion(
 
         span.setAttribute("delegation.event_id", delegationEventId);
 
-        // Look up which agent is waiting for this delegation
-        const agentPubkey = ralRegistry.findAgentWaitingForDelegation(delegationEventId);
-        if (!agentPubkey) {
-            span.addEvent("no_waiting_agent", {
-                "delegation.event_id": delegationEventId,
-            });
-            span.setStatus({ code: SpanStatusCode.OK });
-            return { recorded: false };
-        }
-
         // Get the target agent for logging
         const projectCtx = getProjectContext();
-        const targetAgent = projectCtx.getAgentByPubkey(agentPubkey);
-        const agentSlug = targetAgent?.slug;
 
-        span.setAttributes({
-            "agent.pubkey": agentPubkey,
-            "agent.slug": agentSlug || "unknown",
-        });
-
-        // Record the completion
-        ralRegistry.recordCompletion(agentPubkey, {
+        // Record the completion (looks up RAL internally via delegation event ID)
+        const state = ralRegistry.recordCompletion({
             eventId: delegationEventId,
             recipientPubkey: event.pubkey,
             recipientSlug: projectCtx.getAgentByPubkey(event.pubkey)?.slug,
@@ -80,10 +65,23 @@ export async function handleDelegationCompletion(
             completedAt: Date.now(),
         });
 
-        const state = ralRegistry.getStateByAgent(agentPubkey);
+        if (!state) {
+            span.addEvent("no_waiting_ral", {
+                "delegation.event_id": delegationEventId,
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { recorded: false };
+        }
+
+        const targetAgent = projectCtx.getAgentByPubkey(state.agentPubkey);
+        const agentSlug = targetAgent?.slug;
+
         span.setAttributes({
-            "delegation.pending_count": state?.pendingDelegations.length || 0,
-            "delegation.completed_count": state?.completedDelegations.length || 0,
+            "agent.pubkey": state.agentPubkey,
+            "agent.slug": agentSlug || "unknown",
+            "conversation.id": state.conversationId,
+            "delegation.pending_count": state.pendingDelegations.length,
+            "delegation.completed_count": state.completedDelegations.length,
         });
 
         span.addEvent("completion_recorded", {
@@ -96,12 +94,13 @@ export async function handleDelegationCompletion(
         logger.info("[handleDelegationCompletion] Recorded delegation completion", {
             delegationEventId: delegationEventId.substring(0, 8),
             agentSlug,
+            conversationId: state.conversationId.substring(0, 8),
             completionEventId: event.id?.substring(0, 8),
-            completedCount: state?.completedDelegations.length || 0,
-            pendingCount: state?.pendingDelegations.length || 0,
+            completedCount: state.completedDelegations.length,
+            pendingCount: state.pendingDelegations.length,
         });
 
-        return { recorded: true, agentSlug };
+        return { recorded: true, agentSlug, conversationId: state.conversationId };
     } catch (error) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

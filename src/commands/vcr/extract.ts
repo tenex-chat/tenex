@@ -45,6 +45,17 @@ async function extractRecording(
         const recordingContent = await readFile(fullRecordingPath, "utf-8");
         const recording = JSON.parse(recordingContent);
 
+        // Check if this is a stream recording (no response captured)
+        if (!recording.response) {
+            if (recording.type === "stream") {
+                console.error(chalk.red("Cannot extract stream recording - response was not captured."));
+                console.error(chalk.gray("Stream recordings only save the request. Use generateText() instead of streamText() to capture full interactions."));
+            } else {
+                console.error(chalk.red("Recording has no response data."));
+            }
+            process.exit(1);
+        }
+
         // Convert recording to VCR interaction
         const interaction: VCRInteraction = {
             hash: createHash(recording.request.prompt),

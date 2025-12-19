@@ -1,7 +1,5 @@
 import type { ModelMessage } from "ai";
 
-export type RALStatus = "executing" | "paused" | "done";
-
 /** Role types that can be used for message injection */
 export type InjectionRole = "user" | "system";
 
@@ -56,18 +54,31 @@ export interface QueuedInjection {
 
 export interface RALState {
   id: string;
+  /** Sequential number for this RAL within the conversation (1, 2, 3...) */
+  ralNumber: number;
   agentPubkey: string;
+  /** The conversation this RAL belongs to - RAL is scoped per agent+conversation */
+  conversationId: string;
   messages: ModelMessage[];
+  /** Index in messages where this RAL's unique content starts (after shared conversation history) */
+  uniqueMessagesStartIndex: number;
   pendingDelegations: PendingDelegation[];
   completedDelegations: CompletedDelegation[];
   queuedInjections: QueuedInjection[];
-  status: RALStatus;
+  /** Whether the agent is currently streaming a response */
+  isStreaming: boolean;
   currentTool?: string;
   toolStartedAt?: number;
   createdAt: number;
   lastActivityAt: number;
   /** The original event that triggered this RAL - used for proper tagging on resumption */
   originalTriggeringEventId?: string;
+  /** If set, this RAL is paused by the RAL with this number */
+  pausedByRalNumber?: number;
+  /** Promise that resolves when this RAL is unpaused */
+  pausePromise?: Promise<void>;
+  /** Resolver function to unpause this RAL */
+  pauseResolver?: () => void;
 }
 
 export interface StopExecutionSignal {

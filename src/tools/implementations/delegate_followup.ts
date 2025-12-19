@@ -2,16 +2,15 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { RALRegistry } from "@/services/ral";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
 const delegateFollowupSchema = z.object({
-  recipient: z
+  delegation_event_id: z
     .string()
     .describe(
-      "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey of the agent you delegated to"
+      "The event ID of the delegation you want to follow up on (returned in delegationEventIds from the delegate tool)"
     ),
   message: z.string().describe("Your follow-up question or clarification request"),
 });
@@ -23,29 +22,43 @@ async function executeDelegateFollowup(
   input: DelegateFollowupInput,
   context: ExecutionContext
 ): Promise<DelegateFollowupOutput> {
-  const { recipient, message } = input;
+  const { delegation_event_id, message } = input;
 
-  const recipientPubkey = resolveRecipientToPubkey(recipient);
-  if (!recipientPubkey) {
-    throw new Error(`Could not resolve recipient: ${recipient}`);
-  }
-
-  if (recipientPubkey === context.agent.pubkey) {
-    throw new Error(`Self-delegation is not permitted with delegate_followup.`);
-  }
-
-  // Find previous delegation in RAL state
+  // Find the delegation by event ID in RAL state
   const registry = RALRegistry.getInstance();
-  const ralState = registry.getStateByAgent(context.agent.pubkey);
 
-  const previousDelegation = ralState?.completedDelegations.find(
-    (d) => d.recipientPubkey === recipientPubkey
-  );
+  // Search all active RALs for this agent+conversation
+  const activeRALs = registry.getActiveRALs(context.agent.pubkey, context.conversationId);
+
+  let previousDelegation: { recipientPubkey: string; recipientSlug?: string; responseEventId?: string } | undefined;
+
+  for (const ral of activeRALs) {
+    // Check completed delegations
+    const completed = ral.completedDelegations.find(d => d.eventId === delegation_event_id);
+    if (completed) {
+      previousDelegation = completed;
+      break;
+    }
+
+    // Also check pending delegations (for following up before completion)
+    const pending = ral.pendingDelegations.find(d => d.eventId === delegation_event_id);
+    if (pending) {
+      previousDelegation = {
+        recipientPubkey: pending.recipientPubkey,
+        recipientSlug: pending.recipientSlug,
+      };
+      break;
+    }
+  }
 
   if (!previousDelegation) {
     throw new Error(
-      `No previous delegation found to ${recipient}. Use delegate first.`
+      `No delegation found with event ID ${delegation_event_id}. Check the delegationEventIds from your delegate call.`
     );
+  }
+
+  if (previousDelegation.recipientPubkey === context.agent.pubkey) {
+    throw new Error(`Self-delegation is not permitted with delegate_followup.`);
   }
 
   if (!context.agentPublisher) {
@@ -54,12 +67,13 @@ async function executeDelegateFollowup(
 
   logger.info("[delegate_followup] Publishing follow-up", {
     fromAgent: context.agent.slug,
-    toRecipient: recipient,
+    delegationEventId: delegation_event_id,
+    recipientPubkey: previousDelegation.recipientPubkey.substring(0, 8),
   });
 
   const eventId = await context.agentPublisher.delegateFollowup(
     {
-      recipient: recipientPubkey,
+      recipient: previousDelegation.recipientPubkey,
       content: message,
       replyToEventId: previousDelegation.responseEventId,
     },
@@ -76,8 +90,8 @@ async function executeDelegateFollowup(
       {
         type: "followup" as const,
         eventId,
-        recipientPubkey,
-        recipientSlug: recipient,
+        recipientPubkey: previousDelegation.recipientPubkey,
+        recipientSlug: previousDelegation.recipientSlug,
         prompt: message,
       },
     ],

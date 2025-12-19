@@ -32,6 +32,7 @@ export interface ExecutionContext {
     additionalSystemMessage?: string; // Continuation message injected as user role for phase/retry handling (used by AgentSupervisor)
     debug?: boolean; // True when running in debug mode - enables additional output like event IDs
     alphaMode?: boolean; // True when running in alpha mode - enables bug reporting tools
+    hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools
 
     /**
      * Helper method to get the conversation for this context

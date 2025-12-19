@@ -3,6 +3,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
@@ -55,21 +56,15 @@ export class AgentPublisher {
      * Creates and publishes a properly tagged completion event.
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching completion", {
-            agent: this.agent.slug,
-            contentLength: intent.content.length,
-            summary: intent.summary,
-        });
-
         const event = this.encoder.encodeCompletion(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "completion event");
 
-        logger.debug("Completion event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
+        trace.getActiveSpan()?.addEvent("publisher.completion_published", {
+            "event.id": event.id || "",
+            "content.length": intent.content.length,
         });
 
         return event;
@@ -125,9 +120,8 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await event.publish();
 
-        logger.debug("[AgentPublisher] Published delegation event", {
-            eventId: event.id?.substring(0, 8),
-            recipient: params.recipient.substring(0, 8),
+        trace.getActiveSpan()?.addEvent("publisher.delegation_published", {
+            "event.id": event.id || "",
         });
 
         return event.id;
@@ -180,9 +174,8 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await event.publish();
 
-        logger.debug("[AgentPublisher] Published ask event", {
-            eventId: event.id?.substring(0, 8),
-            recipient: params.recipient.substring(0, 8),
+        trace.getActiveSpan()?.addEvent("publisher.ask_published", {
+            "event.id": event.id || "",
         });
 
         return event.id;
@@ -225,9 +218,8 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await event.publish();
 
-        logger.debug("[AgentPublisher] Published delegation follow-up", {
-            eventId: event.id?.substring(0, 8),
-            recipient: params.recipient.substring(0, 8),
+        trace.getActiveSpan()?.addEvent("publisher.followup_published", {
+            "event.id": event.id || "",
         });
 
         return event.id;
@@ -238,11 +230,6 @@ export class AgentPublisher {
      * Creates and publishes a standard response event.
      */
     async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching conversation response", {
-            agent: this.agent.slug,
-            contentLength: intent.content.length,
-        });
-
         const event = this.encoder.encodeConversation(intent, context);
 
         // Sign and publish
@@ -257,21 +244,15 @@ export class AgentPublisher {
      * Creates and publishes an error notification event.
      */
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching error", {
-            agent: this.agent.slug,
-            error: intent.message,
-        });
-
         const event = this.encoder.encodeError(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "error event");
 
-        logger.debug("Error event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
-            error: intent.message,
+        trace.getActiveSpan()?.addEvent("publisher.error_published", {
+            "event.id": event.id || "",
+            "error.message": intent.message.substring(0, 100),
         });
 
         return event;
@@ -288,14 +269,6 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "streaming event");
 
-        logger.debug("[AgentPublisher] Streaming event published", {
-            eventId: event.id?.substring(0, 8),
-            kind: event.kind,
-            contentLength: intent.content.length,
-            isReasoning: intent.isReasoning,
-            sequence: intent.sequence,
-        });
-
         return event;
     }
 
@@ -303,19 +276,14 @@ export class AgentPublisher {
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching lesson", {
-            agent: this.agent.slug,
-        });
-
         const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
         // Sign and publish
         await this.agent.sign(lessonEvent);
         await this.safePublish(lessonEvent, "lesson event");
 
-        logger.debug("Lesson event published", {
-            eventId: lessonEvent.id,
-            agent: this.agent.slug,
+        trace.getActiveSpan()?.addEvent("publisher.lesson_published", {
+            "event.id": lessonEvent.id || "",
         });
 
         return lessonEvent;
@@ -326,22 +294,15 @@ export class AgentPublisher {
      * Creates and publishes an event with tool name and output tags.
      */
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching tool usage", {
-            agent: this.agent.slug,
-            tool: intent.toolName,
-            contentLength: intent.content.length,
-        });
-
         const event = this.encoder.encodeToolUse(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "tool use event");
 
-        logger.debug("Tool usage event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
-            tool: intent.toolName,
+        trace.getActiveSpan()?.addEvent("publisher.tool_published", {
+            "event.id": event.id || "",
+            "tool.name": intent.toolName,
         });
 
         return event;
@@ -363,14 +324,6 @@ export class AgentPublisher {
             sequence: ++this.streamSequence,
             isReasoning,
         };
-
-        logger.debug("[AgentPublisher] Publishing streaming event for pre-buffered content", {
-            contentLength: delta.length,
-            sequence: streamingIntent.sequence,
-            isReasoning,
-            contentPreview: delta.substring(0, 50) + (delta.length > 50 ? "..." : ""),
-            agentName: this.agent.slug,
-        });
 
         await this.streaming(streamingIntent, context);
     }
@@ -400,13 +353,6 @@ export class AgentPublisher {
         await this.agent.sign(task);
         await this.safePublish(task, "task event");
 
-        logger.debug("Created task", {
-            taskId: task.id,
-            title,
-            agent: this.agent.slug,
-            sessionId: claudeSessionId,
-        });
-
         return task;
     }
 
@@ -432,12 +378,6 @@ export class AgentPublisher {
         update.tag(["status", status]);
         await this.agent.sign(update);
         await this.safePublish(update, "task update");
-
-        logger.debug("Published task update", {
-            taskId: task.id,
-            contentLength: content.length,
-            agent: this.agent.slug,
-        });
 
         return update;
     }
@@ -475,12 +415,6 @@ export class AgentPublisher {
 
         await ev.sign(signer);
         ev.publish();
-
-        logger.debug("Published project agent snapshot (kind:14199)", {
-            projectTag,
-            agentCount: agents.length,
-            whitelistedCount: whitelisted.length,
-        });
     }
 
     /**
@@ -656,11 +590,6 @@ export class AgentPublisher {
 
             try {
                 await requestEvent.publish();
-                logger.debug("Published agent request", {
-                    agentName: agentConfig.name,
-                    pubkey: signer.pubkey,
-                    hasNDKAgentDefinitionEvent: !!ndkAgentEventId,
-                });
             } catch (publishError) {
                 logger.warn("Failed to publish agent request (may already exist)", {
                     error: publishError,

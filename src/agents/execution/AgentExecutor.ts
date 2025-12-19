@@ -14,7 +14,8 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { RALRegistry, BusyResponder, isStopExecutionSignal } from "@/services/ral";
+import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
+import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -29,6 +30,7 @@ import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { FlattenedChronologicalStrategy } from "./strategies/FlattenedChronologicalStrategy";
 import type { MessageGenerationStrategy } from "./strategies/types";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
+import { ConcurrentRALCoordinator } from "./ConcurrentRALCoordinator";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -49,8 +51,6 @@ export class AgentExecutor {
 
     /**
      * Prepare an LLM request without executing it.
-     * This method builds the messages and determines the tools/configuration
-     * but doesn't actually call the LLM.
      */
     async prepareLLMRequest(
         agent: AgentInstance,
@@ -59,24 +59,20 @@ export class AgentExecutor {
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
-        // Build a minimal execution context for message generation
         const context: Partial<ExecutionContext> = {
             agent,
             triggeringEvent: originalEvent,
-            conversationId: originalEvent.id, // Use event ID as conversation ID for stateless calls
+            conversationId: originalEvent.id,
             projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
-            currentBranch: "main", // Default to main for stateless calls
+            currentBranch: "main",
         };
 
-        // If we have conversation history, prepend it to the messages
         let messages: ModelMessage[] = [];
 
         if (conversationHistory.length > 0) {
             messages = [...conversationHistory];
         } else {
-            // Build messages using the strategy if no history provided
-            // Note: This requires a full ExecutionContext with conversationCoordinator
             messages = [
                 {
                     role: "user",
@@ -85,15 +81,10 @@ export class AgentExecutor {
             ];
         }
 
-        // Get tools for the agent
         const toolNames = agent.tools || [];
-        const tools =
-            toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
+        const tools = toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
 
-        return {
-            messages,
-            tools,
-        };
+        return { messages, tools };
     }
 
     /**
@@ -113,132 +104,112 @@ export class AgentExecutor {
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
-                // Check RAL state before starting execution
                 const ralRegistry = RALRegistry.getInstance();
-                const existingRal = ralRegistry.getStateByAgent(context.agent.pubkey);
 
-                if (existingRal?.status === "executing") {
-                    // RAL is currently executing - queue for injection
-                    span.addEvent("ral.already_executing", {
-                        "ral.status": "executing",
-                        "event.id": context.triggeringEvent.id || "",
-                        "action": "queue_and_timeout",
-                    });
+                // Check for a resumable RAL (one with completed delegations ready to continue)
+                const resumableRal = ralRegistry.findResumableRAL(
+                    context.agent.pubkey,
+                    context.conversationId
+                );
 
-                    logger.info("[AgentExecutor] RAL already executing, queueing event", {
-                        agent: context.agent.slug,
-                        eventId: context.triggeringEvent.id?.substring(0, 8),
-                    });
+                let ralNumber: number;
+                let isResumption = false;
 
-                    ralRegistry.queueEvent(context.agent.pubkey, context.triggeringEvent);
+                if (resumableRal) {
+                    // Resume existing RAL instead of creating a new one
+                    ralNumber = resumableRal.ralNumber;
+                    isResumption = true;
 
-                    // Immediately generate acknowledgment for user
-                    const agentPublisher = new AgentPublisher(context.agent);
-                    const busyResponder = BusyResponder.getInstance();
-                    busyResponder.processImmediately(
+                    // Inject delegation results into the RAL
+                    const resultsMessage = ralRegistry.buildDelegationResultsMessage(
+                        resumableRal.completedDelegations
+                    );
+                    if (resultsMessage) {
+                        ralRegistry.queueSystemMessage(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            resultsMessage
+                        );
+                    }
+
+                    // Clear completed delegations now that we've queued them for processing
+                    ralRegistry.clearCompletedDelegations(
                         context.agent.pubkey,
-                        context.triggeringEvent,
-                        context.agent,
-                        agentPublisher
+                        context.conversationId,
+                        ralNumber
                     );
 
-                    span.setStatus({ code: SpanStatusCode.OK });
-                    return; // Don't start new execution (span.end() called in finally)
-                }
-
-                if (existingRal?.status === "paused") {
-                    // Only resume when ALL delegations are complete
-                    const allComplete = existingRal.completedDelegations.length > 0 &&
-                                       existingRal.pendingDelegations.length === 0;
-
-                    if (allComplete) {
-                        // All delegations complete: RESUME
-                        span.addEvent("ral.resumption_all_complete", {
-                            "ral.status": "paused",
-                            "ral.completed_count": existingRal.completedDelegations.length,
-                            "action": "inject_and_resume",
-                        });
-
-                        logger.info("[AgentExecutor] All delegations complete, resuming", {
-                            agent: context.agent.slug,
-                            completedCount: existingRal.completedDelegations.length,
-                        });
-
-                        // Add completed responses as USER messages (so LLM acts on them, not the original request)
-                        for (const completion of existingRal.completedDelegations) {
-                            const agentName = completion.recipientSlug || completion.recipientPubkey.substring(0, 8);
-                            existingRal.messages.push({
-                                role: "user",
-                                content: `[Response from ${agentName}]: ${completion.response}`,
-                            });
-                        }
-
-                        // Add status context as system message
-                        existingRal.messages.push({
-                            role: "system",
-                            content: `All ${existingRal.completedDelegations.length} delegation(s) complete. Continue with your task.`,
-                        });
-
-                        // Mark as executing and clear completed delegations
-                        ralRegistry.markResuming(context.agent.pubkey);
-                        ralRegistry.clearCompletedDelegations(context.agent.pubkey);
-
-                        // Override triggering event with original (for proper response tagging)
-                        if (existingRal.originalTriggeringEventId) {
-                            const conversation = context.conversationCoordinator?.getConversation(context.conversationId);
-                            const originalEvent = conversation?.history.find(
-                                (e) => e.id === existingRal.originalTriggeringEventId
-                            );
-                            if (originalEvent) {
-                                context.triggeringEvent = originalEvent;
-                                logger.debug("[AgentExecutor] Restored original triggering event for resumption", {
-                                    agent: context.agent.slug,
-                                    originalEventId: originalEvent.id?.substring(0, 8),
-                                });
-                            }
-                        }
-
-                        // Fall through to continue with execution
-                    } else {
-                        // Still waiting for delegations - completion already recorded by DelegationCompletionHandler
-                        span.addEvent("ral.still_waiting_for_delegations", {
-                            "ral.status": "paused",
-                            "ral.pending_count": existingRal.pendingDelegations.length,
-                            "ral.completed_count": existingRal.completedDelegations.length,
-                            "event.id": context.triggeringEvent.id || "",
-                            "action": "wait_for_all",
-                        });
-
-                        logger.info("[AgentExecutor] RAL still waiting for delegations", {
-                            agent: context.agent.slug,
-                            pendingCount: existingRal.pendingDelegations.length,
-                            completedCount: existingRal.completedDelegations.length,
-                        });
-
-                        // Don't queue this event - it's a delegation response, already handled
-                        // Just return without starting execution
-
-                        span.setStatus({ code: SpanStatusCode.OK });
-                        return; // Don't start new execution - wait for all delegations (span.end() called in finally)
-                    }
-                }
-
-                // Create new RAL entry if none exists
-                if (!existingRal) {
-                    ralRegistry.create(context.agent.pubkey, context.triggeringEvent.id);
-                    span.addEvent("ral.created", {
-                        "action": "fresh_execution",
-                        "original_triggering_event_id": context.triggeringEvent.id || "",
+                    span.addEvent("executor.ral_resumed", {
+                        "ral.number": ralNumber,
+                        "delegation.completed_count": resumableRal.completedDelegations.length,
                     });
-                    logger.debug("[AgentExecutor] Created new RAL entry", {
-                        agent: context.agent.slug,
-                        originalTriggeringEventId: context.triggeringEvent.id?.substring(0, 8),
+                } else {
+                    // Create a new RAL for this execution
+                    ralNumber = ralRegistry.create(
+                        context.agent.pubkey,
+                        context.conversationId,
+                        context.triggeringEvent.id
+                    );
+                }
+
+                // Check for other active RALs in this conversation
+                const existingRALs = ralRegistry.getActiveRALs(context.agent.pubkey, context.conversationId);
+
+                span.setAttributes({
+                    "ral.number": ralNumber,
+                    "ral.is_resumption": isResumption,
+                    "ral.other_active_count": existingRALs.length - 1, // Exclude self
+                });
+
+                // Get summaries of other RALs to inject as context
+                const otherRALSummaries = ralRegistry.getOtherRALSummaries(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                if (otherRALSummaries.length > 0) {
+                    span.addEvent("executor.concurrent_rals", {
+                        "ral.count": otherRALSummaries.length,
+                        "ral.numbers": otherRALSummaries.map(r => r.ralNumber).join(","),
+                    });
+
+                    // Pause other RALs to give this new RAL time to analyze and decide
+                    const activeRalsBeforePause = ralRegistry.getActiveRALs(
+                        context.agent.pubkey,
+                        context.conversationId
+                    );
+
+                    span.addEvent("rals_pause_attempt", {
+                        pausing_ral: ralNumber,
+                        active_ral_count: activeRalsBeforePause.length,
+                        active_ral_numbers: activeRalsBeforePause.map(r => r.ralNumber).join(","),
+                        other_ral_summary_count: otherRALSummaries.length,
+                    });
+
+                    const pausedCount = ralRegistry.pauseOtherRALs(
+                        context.agent.pubkey,
+                        context.conversationId,
+                        ralNumber
+                    );
+
+                    span.addEvent("executor.rals_paused", {
+                        "ral.pausing_number": ralNumber,
+                        "ral.paused_count": pausedCount,
                     });
                 }
+
+                // Store ralNumber in context for use throughout execution
+                const contextWithRal = {
+                    ...context,
+                    ralNumber,
+                    otherRALSummaries,
+                };
 
                 // Prepare execution context with all necessary components
                 const { fullContext, supervisor, toolTracker, agentPublisher, cleanup } =
-                    this.prepareExecution(context);
+                    this.prepareExecution(contextWithRal);
 
                 // Add execution context to span
                 const conversation = fullContext.getConversation();
@@ -254,45 +225,39 @@ export class AgentExecutor {
                 const modelInfo = llmService.model || "unknown";
 
                 // Display execution start in console
-                console.log(chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}] ━━━`));
+                const ralLabel = isResumption
+                    ? ` (RAL #${ralNumber} resuming)`
+                    : existingRALs.length > 1 ? ` (RAL #${ralNumber})` : "";
+                console.log(chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}]${ralLabel} ━━━`));
 
-                logger.info("[AgentExecutor] 🎬 Starting supervised execution", {
-                    agent: context.agent.slug,
-                    conversationId: context.conversationId.substring(0, 8),
-                    hasPhases: !!context.agent.phases,
-                    phaseCount: context.agent.phases ? Object.keys(context.agent.phases).length : 0,
-                });
-
-                span.addEvent("execution.start", {
+                span.addEvent("executor.started", {
+                    ral_number: ralNumber,
+                    is_resumption: isResumption,
                     has_phases: !!context.agent.phases,
-                    phase_count: context.agent.phases
-                        ? Object.keys(context.agent.phases).length
-                        : 0,
+                    concurrent_rals: existingRALs.length - 1,
                 });
 
                 try {
-                    // Start execution with supervision
                     const result = await this.executeWithSupervisor(
                         fullContext,
                         supervisor,
                         toolTracker,
-                        agentPublisher
+                        agentPublisher,
+                        ralNumber
                     );
 
-                    span.addEvent("execution.complete");
                     span.setStatus({ code: SpanStatusCode.OK });
                     return result;
                 } finally {
-                    // Always cleanup
                     await cleanup();
                 }
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
 
-                // Clean up RAL state on error to prevent stale states
-                RALRegistry.getInstance().clear(context.agent.pubkey);
-                logger.debug("[AgentExecutor] Cleared RAL state after error", {
+                // Clean up this RAL on error (not all RALs)
+                // Note: We don't have ralNumber here if creation failed
+                logger.debug("[AgentExecutor] Error during execution", {
                     agent: context.agent.slug,
                     error: formatAnyError(error),
                 });
@@ -307,37 +272,32 @@ export class AgentExecutor {
     /**
      * Prepare execution context with all necessary components
      */
-    private prepareExecution(context: ExecutionContext): {
-        fullContext: ExecutionContext;
+    private prepareExecution(context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] }): {
+        fullContext: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] };
         supervisor: AgentSupervisor;
         toolTracker: ToolExecutionTracker;
         agentPublisher: AgentPublisher;
         cleanup: () => Promise<void>;
     } {
-        // Create core components
         const toolTracker = new ToolExecutionTracker();
         const supervisor = new AgentSupervisor(context.agent, context, toolTracker);
         const agentPublisher = new AgentPublisher(context.agent);
 
-        // Build full context with additional properties
-        const fullContext: ExecutionContext = {
+        const fullContext = {
             ...context,
             conversationCoordinator: context.conversationCoordinator,
             agentPublisher,
-            getConversation: () =>
-                context.conversationCoordinator.getConversation(context.conversationId),
+            hasConcurrentRALs: context.otherRALSummaries.length > 0,
+            getConversation: () => context.conversationCoordinator.getConversation(context.conversationId),
         };
 
-        // Get conversation for tracking
         const conversation = fullContext.getConversation();
         if (!conversation) {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
-        // Start execution time tracking
         startExecutionTime(conversation);
 
-        // Create cleanup function
         const cleanup = async (): Promise<void> => {
             if (conversation) stopExecutionTime(conversation);
             toolTracker.clear();
@@ -350,19 +310,17 @@ export class AgentExecutor {
      * Execute with supervisor oversight and retry capability
      */
     private async executeWithSupervisor(
-        context: ExecutionContext,
+        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
         supervisor: AgentSupervisor,
         toolTracker: ToolExecutionTracker,
-        agentPublisher: AgentPublisher
+        agentPublisher: AgentPublisher,
+        ralNumber: number
     ): Promise<NDKEvent | undefined> {
         let completionEvent: CompleteEvent | undefined;
 
         try {
-            // Stream the LLM response
-            completionEvent = await this.executeStreaming(context, toolTracker);
+            completionEvent = await this.executeStreaming(context, toolTracker, ralNumber);
         } catch (streamError) {
-            // Streaming failed - error was already published in executeStreaming
-            // Re-throw to let the caller handle it
             logger.error("[AgentExecutor] Streaming failed in executeWithSupervisor", {
                 agent: context.agent.slug,
                 error: formatAnyError(streamError),
@@ -370,19 +328,17 @@ export class AgentExecutor {
             throw streamError;
         }
 
-        // Check if we paused for delegation - if so, return without publishing completion
-        // RAL is the single source of truth for delegation state
+        // Check if we have pending delegations
         const ralRegistry = RALRegistry.getInstance();
-        const ralState = ralRegistry.getStateByAgent(context.agent.pubkey);
+        const ralState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
-        if (ralState?.status === "paused" && ralState.pendingDelegations.length > 0) {
-            logger.info("[AgentExecutor] 🛑 Pausing for delegation, not publishing completion", {
-                agent: context.agent.slug,
-                pendingCount: ralState.pendingDelegations.length,
+        if (ralState?.pendingDelegations.length) {
+            trace.getActiveSpan()?.addEvent("executor.pending_delegations", {
+                "ral.number": ralNumber,
+                "delegation.pending_count": ralState.pendingDelegations.length,
             });
 
-            // Display pause in console
-            console.log(chalk.yellow(`\n⏸️  ${context.agent.slug} paused - awaiting ${ralState.pendingDelegations.length} delegation(s)`));
+            console.log(chalk.yellow(`\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting ${ralState.pendingDelegations.length} delegation(s)`));
 
             return undefined;
         }
@@ -391,7 +347,6 @@ export class AgentExecutor {
             throw new Error("LLM execution completed without producing a completion event");
         }
 
-        // Create event context for supervisor
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
         const isComplete = await supervisor.isExecutionComplete(
@@ -401,44 +356,26 @@ export class AgentExecutor {
         );
 
         if (!isComplete) {
-            logger.info("[AgentExecutor] 🔁 RECURSION: Execution not complete, continuing", {
-                agent: context.agent.slug,
-                reason: supervisor.getContinuationPrompt(),
+            trace.getActiveSpan()?.addEvent("executor.recursion", {
+                "reason": supervisor.getContinuationPrompt().substring(0, 200),
             });
 
-            // Only publish intermediate if we had actual content
             if (completionEvent?.message?.trim()) {
-                logger.info("[AgentExecutor] Publishing intermediate conversation", {
-                    agent: context.agent.slug,
-                    contentLength: completionEvent.message.length,
-                });
                 await agentPublisher.conversation(
-                    {
-                        content: completionEvent.message,
-                    },
+                    { content: completionEvent.message },
                     eventContext
                 );
             }
 
-            // Get continuation instructions from supervisor
             context.additionalSystemMessage = supervisor.getContinuationPrompt();
-
-            logger.info("[AgentExecutor] 🔄 Resetting supervisor and recursing", {
-                agent: context.agent.slug,
-                continuationMessage: context.additionalSystemMessage,
-            });
-
-            // Reset supervisor and recurse
             supervisor.reset();
-            return this.executeWithSupervisor(context, supervisor, toolTracker, agentPublisher);
+            return this.executeWithSupervisor(context, supervisor, toolTracker, agentPublisher, ralNumber);
         }
 
-        logger.info("[AgentExecutor] ✅ Execution complete, publishing final response", {
-            agent: context.agent.slug,
-            messageLength: completionEvent?.message?.length || 0,
+        trace.getActiveSpan()?.addEvent("executor.complete", {
+            "message.length": completionEvent?.message?.length || 0,
         });
 
-        // Execution is complete - publish and return
         const finalResponseEvent = await agentPublisher.complete(
             {
                 content: completionEvent?.message || "",
@@ -447,13 +384,10 @@ export class AgentExecutor {
             eventContext
         );
 
-        // Display completion in console
-        console.log(chalk.green(`\n✅ ${context.agent.slug} completed`));
+        console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
 
-        logger.info("[AgentExecutor] 🎯 Published final completion event", {
-            agent: context.agent.slug,
-            eventId: finalResponseEvent?.id,
-            usage: completionEvent.usage,
+        trace.getActiveSpan()?.addEvent("executor.final_published", {
+            "event.id": finalResponseEvent?.id || "",
         });
 
         return finalResponseEvent;
@@ -463,32 +397,25 @@ export class AgentExecutor {
      * Execute streaming and return the completion event
      */
     private async executeStreaming(
-        context: ExecutionContext,
-        toolTracker: ToolExecutionTracker
+        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
+        toolTracker: ToolExecutionTracker,
+        ralNumber: number
     ): Promise<CompleteEvent | undefined> {
-        // Get tools for response processing
-        // Tools are already properly configured in AgentRegistry.buildAgentInstance
         const toolNames = context.agent.tools || [];
-
-        // Get tools as a keyed object for AI SDK
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
-        // Initialize session manager for session resumption
         const sessionManager = new SessionManager(context.agent, context.conversationId);
         const { sessionId } = sessionManager.getSession();
 
-        // RAL is the single source of truth for messages during execution
-        // On first iteration: build from conversation history and save to RAL
-        // On subsequent iterations (recursion): use RAL messages directly
         const ralRegistry = RALRegistry.getInstance();
         let messages: ModelMessage[];
 
-        if (ralRegistry.hasMessages(context.agent.pubkey)) {
-            // Recursion: use RAL messages (includes any mid-execution injections)
-            messages = ralRegistry.getMessages(context.agent.pubkey) as ModelMessage[];
-            logger.info("[AgentExecutor] Using RAL messages for recursion", {
-                agent: context.agent.slug,
-                messageCount: messages.length,
+        if (ralRegistry.hasMessages(context.agent.pubkey, context.conversationId, ralNumber)) {
+            // Recursion: use RAL messages
+            messages = ralRegistry.getMessages(context.agent.pubkey, context.conversationId, ralNumber) as ModelMessage[];
+            trace.getActiveSpan()?.addEvent("executor.using_ral_messages", {
+                "ral.number": ralNumber,
+                "message.count": messages.length,
             });
         } else {
             // First iteration: build from conversation history
@@ -498,22 +425,33 @@ export class AgentExecutor {
                 context.triggeringEvent,
                 eventFilter
             );
-            // Save to RAL as single source of truth
-            ralRegistry.saveMessages(context.agent.pubkey, messages);
-            logger.info("[AgentExecutor] Built and saved initial messages to RAL", {
-                agent: context.agent.slug,
-                messageCount: messages.length,
+
+            // The triggering event is the last message after buildMessages
+            // This marks where this RAL's unique content starts
+            const triggeringEventIndex = messages.length - 1;
+
+            // If there are other active RALs, inject context about them
+            if (context.otherRALSummaries.length > 0) {
+                const coordinator = new ConcurrentRALCoordinator();
+                const concurrentContext = coordinator.buildContext(context.otherRALSummaries);
+                messages.push({
+                    role: "system",
+                    content: concurrentContext,
+                });
+            }
+
+            // Save to RAL as single source of truth, with the triggering event index
+            ralRegistry.saveMessages(context.agent.pubkey, context.conversationId, ralNumber, messages, triggeringEventIndex);
+            trace.getActiveSpan()?.addEvent("executor.messages_built", {
+                "ral.number": ralNumber,
+                "message.count": messages.length,
+                "has_concurrent_context": context.otherRALSummaries.length > 0,
             });
         }
 
-        // Register operation with the LLM Operations Registry
-        // Message injection now uses RAL as the single source of truth
         const abortSignal = llmOpsRegistry.registerOperation(context);
 
-        // Add continuation message from supervisor as user message
-        // Using "user" role ensures the LLM treats it as a request to act on,
-        // not just background context. This is critical for phase continuation
-        // where the LLM needs to understand it should continue working.
+        // Add continuation message from supervisor
         if (context.additionalSystemMessage) {
             messages = [
                 ...messages,
@@ -522,27 +460,9 @@ export class AgentExecutor {
                     content: context.additionalSystemMessage,
                 },
             ];
-            // Clear it after use
             context.additionalSystemMessage = undefined;
         }
 
-        logger.debug("[AgentExecutor] 📝 Messages ready for execution", {
-            messageCount: messages.length,
-            sessionId: sessionId || "NONE",
-            hasSession: !!sessionId,
-            messageTypes: messages.map((msg, i) => {
-                const contentStr =
-                    typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-                return {
-                    index: i,
-                    role: msg.role,
-                    contentLength: contentStr.length,
-                    contentPreview: contentStr.substring(0, 100),
-                };
-            }),
-        });
-
-        // Pass tools context and session ID for providers that need runtime configuration (like Claude Code)
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
 
         const agentPublisher = context.agentPublisher;
@@ -551,165 +471,80 @@ export class AgentExecutor {
         }
         const eventContext = createEventContext(context, llmService.model);
 
-        // Separate buffers for content and reasoning
         let contentBuffer = "";
         let reasoningBuffer = "";
         let completionEvent: CompleteEvent | undefined;
 
-        // Check if provider supports streaming
         const supportsStreaming = isAISdkProvider(llmService.provider)
             ? providerSupportsStreaming(llmService.provider)
             : true;
 
-        // Helper to flush accumulated reasoning
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
-                // Publish reasoning as kind:1111 with reasoning tag
                 await agentPublisher.conversation(
-                    {
-                        content: reasoningBuffer,
-                        isReasoning: true,
-                    },
+                    { content: reasoningBuffer, isReasoning: true },
                     eventContext
                 );
-
                 reasoningBuffer = "";
             }
         };
 
-        // Wire up event handlers
         llmService.on("content", async (event: ContentEvent) => {
-            logger.debug("[AgentExecutor] RECEIVED CONTENT EVENT!!!", {
-                deltaLength: event.delta?.length,
-                supportsStreaming,
-                preview: event.delta?.substring(0, 100),
-                agentName: context.agent.slug,
-            });
-
-            // Stream content to console
             process.stdout.write(chalk.white(event.delta));
 
-            // Publish chunks for display
             if (supportsStreaming) {
                 contentBuffer += event.delta;
-                // For streaming providers, publish as streaming deltas (TenexStreamingResponse)
                 await agentPublisher.publishStreamingDelta(event.delta, eventContext, false);
             } else {
-                // For non-streaming providers, publish as conversation events (GenericReply)
                 await agentPublisher.conversation({ content: event.delta }, eventContext);
             }
         });
 
         llmService.on("reasoning", async (event: ReasoningEvent) => {
-            // Stream reasoning to console in gray
             process.stdout.write(chalk.gray(event.delta));
 
-            // Only accumulate in buffer for streaming providers
-            // Non-streaming providers publish each chunk directly
             if (supportsStreaming) {
                 reasoningBuffer += event.delta;
-            }
-
-            // Publish chunks for display
-            if (supportsStreaming) {
-                // For streaming providers, publish as streaming deltas (TenexStreamingResponse)
                 await agentPublisher.publishStreamingDelta(event.delta, eventContext, true);
             } else {
-                // For non-streaming providers, publish as conversation events (GenericReply)
-                await agentPublisher.conversation(
-                    {
-                        content: event.delta,
-                        isReasoning: true,
-                    },
-                    eventContext
-                );
+                await agentPublisher.conversation({ content: event.delta, isReasoning: true }, eventContext);
             }
         });
 
         llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
-            logger.debug(`[AgentExecutor] Chunk type changed from ${event.from} to ${event.to}`, {
-                agentName: context.agent.slug,
-                hasReasoningBuffer: reasoningBuffer.length > 0,
-                hasContentBuffer: contentBuffer.length > 0,
-            });
-
-            // When switching FROM reasoning to anything else (text-start, text-delta, etc)
-            // flush reasoning as complete event
             if (event.from === "reasoning-delta") {
                 await flushReasoningBuffer();
             }
 
-            // if we are switching from text-delta to anything else, we flush conversation buffer
-            if (event.from === "text-delta" ) {
-                if (contentBuffer.trim().length > 0) {
-                    await agentPublisher.conversation(
-                        {
-                            content: contentBuffer,
-                        },
-                        eventContext
-                    );
-                    contentBuffer = "";
-                }
+            if (event.from === "text-delta" && contentBuffer.trim().length > 0) {
+                await agentPublisher.conversation({ content: contentBuffer }, eventContext);
+                contentBuffer = "";
             }
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
-            // Store the completion event
             completionEvent = event;
-
-            logger.info("[AgentExecutor] LLM complete event received", {
-                agent: context.agent.slug,
-                messageLength: event.message?.length || 0,
-                hasMessage: !!event.message,
-                hasReasoning: !!event.reasoning,
-                finishReason: event.finishReason,
-            });
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
-
-            // Reset streaming sequence on error
             agentPublisher.resetStreamingSequence();
 
-            // Publish error event to Nostr for visibility
             try {
                 const { message: errorMessage, errorType } = formatStreamError(event.error);
-
-                await agentPublisher.error(
-                    {
-                        message: errorMessage,
-                        errorType,
-                    },
-                    eventContext
-                );
-
-                logger.info("Stream error event published via stream-error handler", {
-                    agent: context.agent.slug,
-                    errorType,
-                });
+                await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
             } catch (publishError) {
-                logger.error("Failed to publish stream error event", {
-                    error: formatAnyError(publishError),
-                });
+                logger.error("Failed to publish stream error event", { error: formatAnyError(publishError) });
             }
         });
 
-        // Handle session capture - store any session ID from the provider
         llmService.on("session-captured", ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
             sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
         });
 
-        // Tool tracker is always provided from executeWithSupervisor
-
         llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
-            // Display tool execution in console
             const argsPreview = JSON.stringify(event.args).substring(0, 50);
-            console.log(
-                chalk.yellow(
-                    `\n🔧 ${event.toolName}(${argsPreview}${JSON.stringify(event.args).length > 50 ? "..." : ""})`
-                )
-            );
+            console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${JSON.stringify(event.args).length > 50 ? "..." : ""})`));
 
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
@@ -730,182 +565,188 @@ export class AgentExecutor {
             });
         });
 
+        const executionSpan = trace.getActiveSpan();
+
+        // Track whether we've released paused RALs (happens after first step)
+        let hasReleasedPausedRALs = false;
+
         try {
-            // Capture the current span for use in prepareStep callback
-            // prepareStep is called synchronously by AI SDK and may not have access to OTel context
-            const executionSpan = trace.getActiveSpan();
+            // Mark this RAL as streaming
+            ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
 
-            // Create prepareStep callback for message injection from RAL queue (SYNC)
-            // RAL is the single source of truth - injections are persisted to RAL.messages
-            // and also returned here for the current step
+            // prepareStep: synchronous, handles injections and release of paused RALs
+            const ralCoordinator = new ConcurrentRALCoordinator();
+
             const prepareStep = (
-                step: { messages: ModelMessage[]; stepNumber: number }
+                step: {
+                    messages: ModelMessage[];
+                    stepNumber: number;
+                    steps: Array<{ toolCalls: Array<{ toolName: string }>; text: string; reasoningText?: string }>;
+                }
             ): { messages?: ModelMessage[] } | undefined => {
-                const ralRegistry = RALRegistry.getInstance();
+                // Check if we should release paused RALs based on completed steps
+                // Only release after a step with actual tool calls (agent made a decision)
+                if (!hasReleasedPausedRALs && step.steps.length > 0) {
+                    const stepsInfo = step.steps.map((s, i) => ({
+                        stepNumber: i,
+                        toolCalls: s.toolCalls || [],
+                        text: s.text || "",
+                        reasoningText: s.reasoningText,
+                    }));
 
-                // Get newly queued injections - they're also persisted to RAL.messages for recursion
-                const newInjections = ralRegistry.getAndPersistInjections(context.agent.pubkey);
+                    if (ralCoordinator.shouldReleasePausedRALs(stepsInfo)) {
+                        hasReleasedPausedRALs = true;
+                        const releasedCount = ralRegistry.releaseOtherRALs(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber
+                        );
+
+                        if (releasedCount > 0 && executionSpan) {
+                            executionSpan.addEvent("executor.rals_released", {
+                                "ral.releasing_number": ralNumber,
+                                "ral.released_count": releasedCount,
+                                "step.completed_count": step.steps.length,
+                            });
+                        }
+                    }
+                }
+
+                const newInjections = ralRegistry.getAndPersistInjections(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
 
                 if (newInjections.length === 0) {
                     return undefined;
                 }
 
-                logger.info(`[prepareStep] Injecting ${newInjections.length} message(s) from RAL queue`, {
-                    agent: context.agent.slug,
-                    stepNumber: step.stepNumber,
-                    messageRoles: newInjections.map((q) => q.role),
-                });
-
-                // Convert to model messages
                 const injectedMessages: ModelMessage[] = newInjections.map((q) => ({
                     role: q.role,
                     content: q.content,
                 }));
 
-                // Add trace event
                 if (executionSpan) {
                     executionSpan.addEvent("ral_injection.process", {
                         "injection.message_count": newInjections.length,
-                        "injection.step_number": step.stepNumber,
-                        "injection.roles": newInjections.map((q) => q.role).join(","),
-                        "agent.slug": context.agent.slug,
+                        "ral.number": ralNumber,
                     });
                 }
 
-                return {
-                    messages: [...step.messages, ...injectedMessages],
-                };
+                return { messages: [...step.messages, ...injectedMessages] };
             };
 
-            // Create onStopCheck to detect delegation stop signals
             const onStopCheck = async (steps: any[]): Promise<boolean> => {
+                // Check if this RAL is paused by another RAL (e.g., a new RAL started)
+                // Awaiting here (in async onStopCheck) allows us to pause between steps
+                const pausePromise = ralRegistry.getPausePromise(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                if (pausePromise) {
+                    const pausedBy = ralRegistry.getRAL(
+                        context.agent.pubkey,
+                        context.conversationId,
+                        ralNumber
+                    )?.pausedByRalNumber;
+
+                    executionSpan?.addEvent("executor.ral_paused_waiting", {
+                        "ral.number": ralNumber,
+                        "ral.paused_by": pausedBy,
+                    });
+
+                    // Wait for the pause to be released
+                    await pausePromise;
+
+                    executionSpan?.addEvent("executor.ral_resumed", {
+                        "ral.number": ralNumber,
+                    });
+                }
+
                 if (steps.length === 0) return false;
 
                 const lastStep = steps[steps.length - 1];
                 const toolResults = lastStep.toolResults ?? [];
 
-                logger.debug("[AgentExecutor] onStopCheck called", {
-                    stepCount: steps.length,
-                    toolResultCount: toolResults.length,
-                    toolNames: toolResults.map((r: any) => r.toolName),
-                });
-
                 for (const toolResult of toolResults) {
-                    // AI SDK uses `output` for tool results, not `result`
-                    const hasStopSignal = isStopExecutionSignal(toolResult.output);
-                    logger.debug("[AgentExecutor] Checking tool result", {
-                        toolName: toolResult.toolName,
-                        hasStopSignal,
-                        resultType: typeof toolResult.output,
-                        resultKeys: toolResult.output && typeof toolResult.output === "object"
-                            ? Object.keys(toolResult.output)
-                            : [],
-                    });
-
-                    if (hasStopSignal) {
+                    if (isStopExecutionSignal(toolResult.output)) {
                         const pendingDelegations = toolResult.output.pendingDelegations;
 
-                        logger.info("[AgentExecutor] Detected delegation stop signal", {
-                            agent: context.agent.slug,
-                            delegationCount: pendingDelegations.length,
+                        executionSpan?.addEvent("executor.delegation_stop", {
+                            "ral.number": ralNumber,
+                            "delegation.count": pendingDelegations.length,
                         });
 
-                        // CRITICAL: Save RAL state immediately to avoid race condition
-                        // The delegation completion might arrive before streaming fully completes,
-                        // so we must register as "paused" NOW, not after streaming ends
-                        // RAL is the single source of truth - no instance field duplication
-                        ralRegistry.saveState(context.agent.pubkey, messages, pendingDelegations);
-                        logger.info("[AgentExecutor] Saved RAL state immediately on stop signal", {
-                            agent: context.agent.slug,
-                            pendingCount: pendingDelegations.length,
-                            messageCount: messages.length,
-                        });
+                        ralRegistry.saveState(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            messages,
+                            pendingDelegations
+                        );
 
-                        return true; // Stop execution
+                        return true;
                     }
                 }
 
                 return false;
             };
 
-            // Publish empty 21111 to signal execution start (implicit typing indicator)
             await agentPublisher.publishStreamingDelta("", eventContext, false);
-
             await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
         } catch (streamError) {
-            // Publish error event for stream errors
             try {
                 const { message: errorMessage, errorType } = formatStreamError(streamError);
-
-                await agentPublisher.error(
-                    {
-                        message: errorMessage,
-                        errorType,
-                    },
-                    eventContext
-                );
-
-                logger.info("Stream error event published to Nostr", {
-                    agent: context.agent.slug,
-                    errorType,
-                });
+                await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
             } catch (publishError) {
-                logger.error("Failed to publish stream error event", {
-                    agent: context.agent.slug,
-                    error: formatAnyError(publishError),
-                });
+                logger.error("Failed to publish stream error event", { error: formatAnyError(publishError) });
             }
-
-            // Re-throw to let parent handler catch it
             throw streamError;
         } finally {
-            // Complete the operation (handles both success and abort cases)
-            llmOpsRegistry.completeOperation(context);
+            // Mark as no longer streaming
+            ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, false);
 
-            // Clean up event listeners
+            // Safety release: ensure any RALs we paused are released on cleanup
+            if (!hasReleasedPausedRALs) {
+                const releasedCount = ralRegistry.releaseOtherRALs(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                if (releasedCount > 0) {
+                    executionSpan?.addEvent("executor.rals_released_cleanup", {
+                        "ral.releasing_number": ralNumber,
+                        "ral.released_count": releasedCount,
+                    });
+                }
+            }
+
+            llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
         }
-
-        // After streaming, handle cleanup and post-processing
-        logger.debug("[AgentExecutor] 🏃 Stream completed, handling post-processing", {
-            agent: context.agent.slug,
-            hasCompletionEvent: !!completionEvent,
-            hasReasoningBuffer: reasoningBuffer.trim().length > 0,
-        });
 
         if (reasoningBuffer.trim().length > 0) {
             await flushReasoningBuffer();
         }
 
-        // Reset streaming sequence counter for next stream
         agentPublisher.resetStreamingSequence();
 
-        // Store lastSentEventId for new Claude Code sessions (without session ID yet)
         if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
         // Handle RAL state based on finish reason
-        // Check RAL state directly - it's the single source of truth
-        const finalRalState = ralRegistry.getStateByAgent(context.agent.pubkey);
+        const finalRalState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
-        if (finalRalState?.status === "paused") {
-            // Stopped for delegation - state already saved in onStopCheck to avoid race condition
-            logger.debug("[AgentExecutor] Delegation pause already saved in onStopCheck", {
-                agent: context.agent.slug,
-                pendingCount: finalRalState.pendingDelegations.length,
-            });
-        } else if (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end") {
-            // Normal completion - clear RAL state
-            logger.info("[AgentExecutor] Clearing RAL state after normal completion", {
-                agent: context.agent.slug,
-                finishReason: completionEvent.finishReason,
-            });
-
-            ralRegistry.clear(context.agent.pubkey);
+        if (!finalRalState?.pendingDelegations.length &&
+            (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end")) {
+            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
         }
 
         return completionEvent;
     }
-
 }

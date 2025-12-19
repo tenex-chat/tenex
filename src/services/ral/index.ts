@@ -1,3 +1,3 @@
 export { RALRegistry } from "./RALRegistry";
-export { BusyResponder } from "./BusyResponder";
+export type { RALSummary } from "./RALRegistry";
 export * from "./types";

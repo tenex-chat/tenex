@@ -1,7 +1,11 @@
-import type { LanguageModelV2Middleware } from "@ai-sdk/provider";
+import type { LanguageModelMiddleware } from "ai";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+import { recordingState } from "../RecordingState";
+
+type WrapGenerateParams = Parameters<NonNullable<LanguageModelMiddleware["wrapGenerate"]>>[0];
+type WrapStreamParams = Parameters<NonNullable<LanguageModelMiddleware["wrapStream"]>>[0];
 
 /**
  * Flight recorder configuration
@@ -9,47 +13,34 @@ import { homedir } from "os";
 export interface FlightRecorderConfig {
     /** Base directory for recordings (defaults to ~/.tenex/recordings) */
     baseDir?: string;
-    /** Whether to enable the flight recorder (defaults to true) */
-    enabled?: boolean;
 }
 
 /**
- * Creates a flight recorder middleware that records all LLM interactions.
- * Unlike VCR (which is for testing), the flight recorder is always-on and
- * saves interactions to timestamped directories for debugging and analysis.
+ * Creates a flight recorder middleware that records LLM interactions when enabled.
+ * Recording is controlled by the global recordingState - toggle with Ctrl+R in daemon.
  *
  * Recordings are saved to: {baseDir}/YYYY-MM-DD/{timestamp}-{hash}.json
- *
- * @param config - Flight recorder configuration
- * @returns A middleware that records all interactions
  */
 export function createFlightRecorderMiddleware(
     config: FlightRecorderConfig = {}
-): LanguageModelV2Middleware {
-    const baseDir =
-        config.baseDir || join(homedir(), ".tenex", "recordings");
-    const enabled = config.enabled ?? true;
-
-    if (!enabled) {
-        return {};
-    }
+): LanguageModelMiddleware {
+    const baseDir = config.baseDir || join(homedir(), ".tenex", "recordings");
 
     return {
-        middlewareVersion: "v2",
+        specificationVersion: "v3" as const,
 
-        async wrapGenerate({ doGenerate, params, model }) {
+        async wrapGenerate({ doGenerate, params, model }: WrapGenerateParams) {
+            if (!recordingState.isRecording) {
+                return doGenerate();
+            }
+
             const startTime = Date.now();
-
-            // Create hash of request for filename
             const hash = createSimpleHash(JSON.stringify(params.prompt));
 
-            // Prepare recording metadata
             const recording = {
                 timestamp: new Date().toISOString(),
-                model: {
-                    provider: model.provider,
-                    modelId: model.modelId,
-                },
+                type: "generate",
+                model: { provider: model.provider, modelId: model.modelId },
                 request: {
                     prompt: params.prompt,
                     temperature: params.temperature,
@@ -64,76 +55,116 @@ export function createFlightRecorderMiddleware(
 
             try {
                 const result = await doGenerate();
-
-                // Record successful response
                 recording.response = {
                     content: result.content,
                     finishReason: result.finishReason,
                     usage: result.usage,
-                    providerMetadata: result.providerMetadata,
                 };
                 recording.duration = Date.now() - startTime;
-
-                // Save recording
                 await saveRecording(baseDir, hash, recording);
-
                 return result;
             } catch (error) {
-                // Record error
                 recording.error = {
                     message: error instanceof Error ? error.message : String(error),
-                    stack: error instanceof Error ? error.stack : undefined,
                 };
                 recording.duration = Date.now() - startTime;
-
-                // Save recording even on error
                 await saveRecording(baseDir, hash, recording);
-
                 throw error;
             }
+        },
+
+        wrapStream({ doStream, params, model }: WrapStreamParams) {
+            if (!recordingState.isRecording) {
+                return doStream();
+            }
+
+            const startTime = Date.now();
+            const hash = createSimpleHash(JSON.stringify(params.prompt));
+
+            // Buffer to collect stream content
+            const textParts: string[] = [];
+            const toolCalls: any[] = [];
+            let finishReason: string | undefined;
+            let usage: any;
+
+            // Wrap the stream with a TransformStream to intercept chunks
+            return doStream().then((result) => {
+                const transform = new TransformStream({
+                    transform(chunk, controller) {
+                        // Pass through the chunk
+                        controller.enqueue(chunk);
+
+                        // Collect data for recording
+                        if (chunk.type === "text-delta" && chunk.textDelta) {
+                            textParts.push(chunk.textDelta);
+                        }
+                        if (chunk.type === "tool-call") {
+                            toolCalls.push({
+                                toolCallId: chunk.toolCallId,
+                                toolName: chunk.toolName,
+                                args: chunk.args,
+                            });
+                        }
+                        if (chunk.type === "finish") {
+                            finishReason = chunk.finishReason;
+                            usage = chunk.usage;
+                        }
+                    },
+                    flush() {
+                        // Stream finished - save the recording
+                        const recording = {
+                            timestamp: new Date().toISOString(),
+                            type: "stream",
+                            model: { provider: model.provider, modelId: model.modelId },
+                            request: {
+                                prompt: params.prompt,
+                                temperature: params.temperature,
+                                maxOutputTokens: params.maxOutputTokens,
+                                tools: params.tools,
+                                toolChoice: params.toolChoice,
+                            },
+                            response: {
+                                content: [{ type: "text", text: textParts.join("") }],
+                                toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+                                finishReason,
+                                usage,
+                            },
+                            duration: Date.now() - startTime,
+                        };
+                        saveRecording(baseDir, hash, recording).catch(() => {});
+                    },
+                });
+
+                return {
+                    ...result,
+                    stream: result.stream.pipeThrough(transform),
+                };
+            });
         },
     };
 }
 
-/**
- * Saves a recording to disk
- */
-async function saveRecording(
-    baseDir: string,
-    hash: string,
-    recording: any
-): Promise<void> {
+async function saveRecording(baseDir: string, hash: string, recording: any): Promise<void> {
     try {
-        // Create directory structure: baseDir/YYYY-MM-DD/
         const now = new Date();
-        const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+        const dateStr = now.toISOString().split("T")[0];
         const dirPath = join(baseDir, dateStr);
-
         await mkdir(dirPath, { recursive: true });
 
-        // Create filename: timestamp-hash.json
         const timestamp = now.toISOString().replace(/[:.]/g, "-");
         const filename = `${timestamp}-${hash}.json`;
-        const filePath = join(dirPath, filename);
-
-        // Write recording
-        const content = JSON.stringify(recording, null, 2);
-        await writeFile(filePath, content, "utf-8");
+        await writeFile(join(dirPath, filename), JSON.stringify(recording, null, 2), "utf-8");
     } catch (error) {
-        // Don't throw - flight recorder should not break the application
         console.error("[FlightRecorder] Failed to save recording:", error);
     }
 }
 
-/**
- * Creates a simple hash for filename purposes
- */
 function createSimpleHash(input: string): string {
     let hash = 0;
     for (let i = 0; i < input.length; i++) {
         const char = input.charCodeAt(i);
         hash = (hash << 5) - hash + char;
-        hash = hash & hash; // Convert to 32-bit integer
+        hash = hash & hash;
     }
     return Math.abs(hash).toString(16).substring(0, 8);
 }

@@ -36,7 +36,10 @@ interface DelegateInput {
   delegations: DelegationItem[];
 }
 
-type DelegateOutput = StopExecutionSignal;
+interface DelegateOutput extends StopExecutionSignal {
+  /** Map of recipient pubkey to the event ID we published for their delegation */
+  delegationEventIds: Record<string, string>;
+}
 
 async function executeDelegate(
   input: DelegateInput,
@@ -127,15 +130,21 @@ async function executeDelegate(
     throw new Error("No valid recipients provided.");
   }
 
-  const stopSignal = {
+  // Build map of recipient pubkey to event ID
+  const delegationEventIds: Record<string, string> = {};
+  for (const d of pendingDelegations) {
+    delegationEventIds[d.recipientPubkey] = d.eventId;
+  }
+
+  const stopSignal: DelegateOutput = {
     __stopExecution: true as const,
     pendingDelegations,
+    delegationEventIds,
   };
 
   logger.info("[delegate] Published delegations, returning stop signal", {
     count: pendingDelegations.length,
-    signalKeys: Object.keys(stopSignal),
-    hasStopExecution: stopSignal.__stopExecution,
+    delegationEventIds,
   });
 
   return stopSignal;

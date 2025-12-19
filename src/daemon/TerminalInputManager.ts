@@ -1,4 +1,6 @@
 import { logger } from "@/utils/logger";
+import { recordingState } from "@/llm/RecordingState";
+import chalk from "chalk";
 import type { Daemon } from "./Daemon";
 import type { ProcessManagerController } from "./ProcessManagerController";
 
@@ -123,6 +125,24 @@ export class TerminalInputManager {
         if (key === "p" || key === "P") {
             logger.debug("Process manager key pressed");
             this.toggleProcessManager();
+            return;
+        }
+
+        // Handle Ctrl+R - toggle LLM recording
+        if (key === "\u0012") {
+            this.toggleRecording();
+        }
+    }
+
+    /**
+     * Toggle LLM recording on/off
+     */
+    private toggleRecording(): void {
+        const isRecording = recordingState.toggle();
+        if (isRecording) {
+            console.log(chalk.red.bold("⏺ REC") + chalk.gray(" - LLM recording started (~/.tenex/recordings/)"));
+        } else {
+            console.log(chalk.gray("⏹ Recording stopped"));
         }
     }
 
