@@ -4,6 +4,11 @@ export type {
     Tool as CoreTool,
     GenerateTextResult,
     StreamTextResult,
+    // Multimodal content types
+    UserContent,
+    ImagePart,
+    TextPart,
+    FilePart,
 } from "ai";
 
 // AI SDK v5 doesn't export ToolCall/ToolResult as separate types
