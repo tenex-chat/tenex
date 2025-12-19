@@ -14,6 +14,7 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { isProjectContextInitialized, getProjectContext } from "@/services/ProjectContext";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -31,6 +32,7 @@ import { FlattenedChronologicalStrategy } from "./strategies/FlattenedChronologi
 import type { MessageGenerationStrategy } from "./strategies/types";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
 import { getConcurrentRALCoordinator } from "./ConcurrentRALCoordinator";
+import { addConcurrentRALContext, findTriggeringEventIndex } from "@/conversations/utils/context-enhancers";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -283,11 +285,22 @@ export class AgentExecutor {
         const supervisor = new AgentSupervisor(context.agent, context, toolTracker);
         const agentPublisher = new AgentPublisher(context.agent);
 
+        // Check for active pairings for this agent
+        let hasActivePairings = false;
+        if (isProjectContextInitialized()) {
+            const projectContext = getProjectContext();
+            if (projectContext.pairingManager) {
+                const activePairings = projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey);
+                hasActivePairings = activePairings.length > 0;
+            }
+        }
+
         const fullContext = {
             ...context,
             conversationCoordinator: context.conversationCoordinator,
             agentPublisher,
             hasConcurrentRALs: context.otherRALSummaries.length > 0,
+            hasActivePairings,
             getConversation: () => context.conversationCoordinator.getConversation(context.conversationId),
         };
 
@@ -426,27 +439,17 @@ export class AgentExecutor {
                 eventFilter
             );
 
-            // The triggering event is the last message after buildMessages
-            // This marks where this RAL's unique content starts
-            const triggeringEventIndex = messages.length - 1;
+            // Find the triggering event index (last user message) before adding concurrent context
+            const triggeringEventIndex = findTriggeringEventIndex(messages);
 
-            // If there are other active RALs, inject context about them
-            if (context.otherRALSummaries.length > 0) {
-                const concurrentContext = getConcurrentRALCoordinator().buildContext(context.otherRALSummaries, ralNumber);
-                messages.push({
-                    role: "system",
-                    content: concurrentContext,
-                });
-
-                // Log what context was injected for debugging
-                trace.getActiveSpan()?.addEvent("executor.concurrent_context_injected", {
-                    "ral.number": ralNumber,
-                    "other_ral.count": context.otherRALSummaries.length,
-                    "other_ral.numbers": context.otherRALSummaries.map(r => r.ralNumber).join(","),
-                    "triggering_event.content": context.triggeringEvent.content?.substring(0, 500) || "",
-                    "context.length": concurrentContext.length,
-                });
-            }
+            // Add concurrent RAL context if there are other active RALs
+            addConcurrentRALContext(
+                messages,
+                context.otherRALSummaries,
+                ralNumber,
+                context.triggeringEvent.content,
+                context.agent.name
+            );
 
             // Save to RAL as single source of truth, with the triggering event index
             ralRegistry.saveMessages(context.agent.pubkey, context.conversationId, ralNumber, messages, triggeringEventIndex);

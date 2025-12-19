@@ -1,6 +1,6 @@
 /**
  * Context enhancers for message generation strategies
- * Purpose: Add special contexts like voice mode, debug mode, and delegation completion
+ * Purpose: Add special contexts like voice mode, debug mode, delegation completion, and concurrent RAL coordination
  * These are pure functions that take minimal parameters and return enhanced content
  */
 
@@ -8,9 +8,12 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { getPubkeyService } from "@/services/PubkeyService";
+import type { RALSummary } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
+import { getConcurrentRALCoordinator } from "@/agents/execution/ConcurrentRALCoordinator";
 
 /**
  * Add voice mode context if applicable
@@ -162,4 +165,69 @@ export async function addAllSpecialContexts(
     }
 
     return result;
+}
+
+/**
+ * Add concurrent RAL context when there are other active RALs
+ * @param messages - The messages array to add to
+ * @param otherRALSummaries - Summaries of other active RALs
+ * @param currentRALNumber - The current RAL's number
+ * @param triggeringEventContent - Content of the triggering event for telemetry
+ * @param agentName - Name of the agent for logging
+ * @returns True if concurrent context was added
+ */
+export function addConcurrentRALContext(
+    messages: ModelMessage[],
+    otherRALSummaries: RALSummary[],
+    currentRALNumber: number,
+    triggeringEventContent?: string,
+    agentName?: string
+): boolean {
+    if (otherRALSummaries.length === 0) {
+        return false;
+    }
+
+    const concurrentContext = getConcurrentRALCoordinator().buildContext(
+        otherRALSummaries,
+        currentRALNumber
+    );
+
+    messages.push({
+        role: "system",
+        content: concurrentContext,
+    });
+
+    trace.getActiveSpan()?.addEvent("context_enhancer.concurrent_ral_added", {
+        "ral.number": currentRALNumber,
+        "other_ral.count": otherRALSummaries.length,
+        "other_ral.numbers": otherRALSummaries.map(r => r.ralNumber).join(","),
+        "triggering_event.content": triggeringEventContent?.substring(0, 500) || "",
+        "context.length": concurrentContext.length,
+    });
+
+    if (agentName) {
+        logger.debug("[CONTEXT_ENHANCER] Added concurrent RAL context", {
+            agent: agentName,
+            currentRAL: currentRALNumber,
+            otherRALCount: otherRALSummaries.length,
+        });
+    }
+
+    return true;
+}
+
+/**
+ * Find the index of the triggering event (last user message) in the messages array.
+ * This is used to track where the RAL's unique content starts.
+ * @param messages - The messages array to search
+ * @returns The index of the last user message, or messages.length - 1 if none found
+ */
+export function findTriggeringEventIndex(messages: ModelMessage[]): number {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+            return i;
+        }
+    }
+    // Fallback to last message if no user message found
+    return messages.length - 1;
 }
