@@ -31,6 +31,19 @@ export class ToolMessageStorage {
         agentPubkey: string
     ): Promise<void> {
         try {
+            // Ensure input is always an object (AI SDK schema requires it, and JSON.stringify strips undefined)
+            const safeInput = toolCall.input !== undefined ? toolCall.input : {};
+
+            // Ensure output is always defined
+            const safeOutput = toolResult.output !== undefined
+                ? {
+                    type: "text" as const,
+                    value: typeof toolResult.output === "string"
+                        ? toolResult.output
+                        : JSON.stringify(toolResult.output),
+                }
+                : { type: "text" as const, value: "" };
+
             const messages: ModelMessage[] = [
                 {
                     role: "assistant",
@@ -39,7 +52,7 @@ export class ToolMessageStorage {
                             type: "tool-call" as const,
                             toolCallId: toolCall.toolCallId,
                             toolName: toolCall.toolName,
-                            input: toolCall.input,
+                            input: safeInput,
                         },
                     ],
                 },
@@ -50,13 +63,7 @@ export class ToolMessageStorage {
                             type: "tool-result" as const,
                             toolCallId: toolResult.toolCallId,
                             toolName: toolResult.toolName,
-                            output: {
-                                type: "text",
-                                value:
-                                    typeof toolResult.output === "string"
-                                        ? toolResult.output
-                                        : JSON.stringify(toolResult.output),
-                            },
+                            output: safeOutput,
                         },
                     ],
                 },
@@ -94,7 +101,35 @@ export class ToolMessageStorage {
             const filePath = path.join(this.storageDir, `${eventId}.json`);
             const data = await fs.readFile(filePath, "utf-8");
             const parsed = JSON.parse(data);
-            return parsed.messages;
+            const messages = parsed.messages as ModelMessage[];
+
+            // Normalize messages to ensure required fields are present
+            // This handles old files that may have been stored with undefined values
+            return messages.map(msg => {
+                if (msg.role === "assistant" && Array.isArray(msg.content)) {
+                    return {
+                        ...msg,
+                        content: msg.content.map((part: any) => {
+                            if (part.type === "tool-call" && part.input === undefined) {
+                                return { ...part, input: {} };
+                            }
+                            return part;
+                        }),
+                    };
+                }
+                if (msg.role === "tool" && Array.isArray(msg.content)) {
+                    return {
+                        ...msg,
+                        content: msg.content.map((part: any) => {
+                            if (part.type === "tool-result" && part.output === undefined) {
+                                return { ...part, output: { type: "text", value: "" } };
+                            }
+                            return part;
+                        }),
+                    };
+                }
+                return msg;
+            });
         } catch {
             // File doesn't exist or can't be read
             return null;

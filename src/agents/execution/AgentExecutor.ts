@@ -554,8 +554,9 @@ export class AgentExecutor {
         });
 
         llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
-            const argsPreview = JSON.stringify(event.args).substring(0, 50);
-            console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${JSON.stringify(event.args).length > 50 ? "..." : ""})`));
+            const argsStr = event.args !== undefined ? JSON.stringify(event.args) : "";
+            const argsPreview = argsStr.substring(0, 50);
+            console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`));
 
             await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
@@ -581,6 +582,10 @@ export class AgentExecutor {
         // Track whether we've released paused RALs (happens after first step)
         let hasReleasedPausedRALs = false;
 
+        // Track accumulated messages from prepareStep - this is updated before each step
+        // and includes all messages up to (but not including) the current step
+        let latestAccumulatedMessages: ModelMessage[] = messages;
+
         try {
             // Mark this RAL as streaming
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
@@ -593,6 +598,10 @@ export class AgentExecutor {
                     steps: Array<{ toolCalls: Array<{ toolName: string }>; text: string; reasoningText?: string }>;
                 }
             ): { messages?: ModelMessage[] } | undefined => {
+                // Update accumulated messages tracker - this is called BEFORE each step,
+                // so step.messages includes all messages up to but not including the current step
+                latestAccumulatedMessages = step.messages;
+
                 // Check if we should release paused RALs based on completed steps
                 // Only release after a step with actual tool calls (agent made a decision)
                 if (!hasReleasedPausedRALs && step.steps.length > 0) {
@@ -696,11 +705,45 @@ export class AgentExecutor {
                             "delegation.count": pendingDelegations.length,
                         });
 
+                        // Build complete messages including the current step's tool calls and results.
+                        // latestAccumulatedMessages has messages up to but not including this step.
+                        // We need to add the assistant's tool calls and the tool results.
+                        const toolCalls = lastStep.toolCalls ?? [];
+                        const messagesWithToolCalls: ModelMessage[] = [...latestAccumulatedMessages];
+
+                        // Add assistant message with tool calls (if any)
+                        if (toolCalls.length > 0) {
+                            messagesWithToolCalls.push({
+                                role: "assistant",
+                                content: toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
+                                    type: "tool-call" as const,
+                                    toolCallId: tc.toolCallId,
+                                    toolName: tc.toolName,
+                                    // AI SDK requires 'input' field, default to {} if undefined
+                                    input: tc.args !== undefined ? tc.args : {},
+                                })),
+                            });
+                        }
+
+                        // Add tool results
+                        if (toolResults.length > 0) {
+                            messagesWithToolCalls.push({
+                                role: "tool",
+                                content: toolResults.map((tr: { toolCallId: string; toolName: string; result: unknown }) => ({
+                                    type: "tool-result" as const,
+                                    toolCallId: tr.toolCallId,
+                                    toolName: tr.toolName,
+                                    // AI SDK requires 'output' field, default to empty if undefined
+                                    output: tr.result !== undefined ? tr.result : { type: "text", value: "" },
+                                })),
+                            });
+                        }
+
                         ralRegistry.saveState(
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber,
-                            messages,
+                            messagesWithToolCalls,
                             pendingDelegations
                         );
 
