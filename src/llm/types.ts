@@ -116,4 +116,8 @@ export interface ModelConfig {
 export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     costUsd?: number;
     model?: string;
+    /** Cached input tokens (from OpenRouter promptTokensDetails.cachedTokens) */
+    cachedInputTokens?: number;
+    /** Reasoning tokens (from OpenRouter completionTokensDetails.reasoningTokens) */
+    reasoningTokens?: number;
 };
