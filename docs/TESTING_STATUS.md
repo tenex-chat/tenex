@@ -65,7 +65,6 @@ Successfully integrated `@nostr-dev-kit/ndk/test` for professional testing:
 - `lessonFormatter.test.ts` - Feature removed
 - `delegate_external.test.ts` - Tool removed
 - `codebase_search.test.ts` - Empty stubs
-- `ThreadWithMemoryStrategy.marker.test.ts` - Feature removed
 - `service-stream-simulation.test.ts` - Implementation changed
 - `MessageBuilder.targeting.test.ts` - Module removed
 - `executor.test.ts` - File removed
@@ -143,14 +142,13 @@ const [, loadedPackage] = loadedModule.match(/node_modules[\\/]([^\\/]+)[\\/]/);
 ### Skipped Tests (47 skip + 12 describe.skip)
 
 **Files with Skipped Suites:**
-1. `ThreadWithMemoryStrategy.test.ts` (2 skips) - Complex scenarios
-2. `AgentEventEncoder.test.ts` (2 skips) - Needs NDK integration
-3. `AgentEventEncoder.integration.test.ts` (1 skip) - Integration test
-4. `StatusPublisher.ndk.test.ts` (1 skip) - NDK utilities test
-5. `delegation-integration.test.ts` (2 skips) - Integration scenarios
-6. `DelegationRegistry.unified.test.ts` (1 skip) - Multi-recipient
-7. `SchedulerService.test.ts` (2 skips) - Scheduler functionality
-8. `mcpInstaller.test.ts` (1 skip) - MCP integration
+1. `AgentEventEncoder.test.ts` (2 skips) - Needs NDK integration
+2. `AgentEventEncoder.integration.test.ts` (1 skip) - Integration test
+3. `StatusPublisher.ndk.test.ts` (1 skip) - NDK utilities test
+4. `delegation-integration.test.ts` (2 skips) - Integration scenarios
+5. `DelegationRegistry.unified.test.ts` (1 skip) - Multi-recipient
+6. `SchedulerService.test.ts` (2 skips) - Scheduler functionality
+7. `mcpInstaller.test.ts` (1 skip) - MCP integration
 
 ## Recommendations
 

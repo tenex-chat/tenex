@@ -806,7 +806,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
     }
 
     /**
-     * Process a single event into messages (reused from ThreadWithMemoryStrategy)
+     * Process a single event into messages
      */
     private async processEvent(
         event: NDKEvent,
