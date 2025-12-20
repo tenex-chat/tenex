@@ -1,7 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
-import { listWorktrees, loadWorktreeMetadata } from "@/utils/git/worktree";
+import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
 
 /**
@@ -38,7 +38,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
 
     // List worktrees first to determine what to show
     let worktrees: Array<{ branch: string; path: string }> = [];
-    let metadata: Record<string, any> = {};
+    let metadata: Record<string, WorktreeMetadata> = {};
     let hasFeatureWorktrees = false;
 
     try {

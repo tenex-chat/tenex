@@ -534,7 +534,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // Smooth streaming with 15ms delay and line-based chunking
             experimental_transform: smoothStream({
                 delayInMs: 15,
-                chunking: 'line'
+                chunking: "line"
             }),
 
             providerOptions: {

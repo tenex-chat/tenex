@@ -75,7 +75,7 @@ async function executeDelegate(
       .join(", ");
     throw new Error(
       `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
-      `Use delegate_followup to send guidance, or wait for the delegation to complete.`
+      "Use delegate_followup to send guidance, or wait for the delegation to complete."
     );
   }
 
@@ -116,7 +116,7 @@ async function executeDelegate(
 
     if (pubkey === context.agent.pubkey && !phase) {
       throw new Error(
-        `Self-delegation requires a phase. Use delegate with a phase parameter.`
+        "Self-delegation requires a phase. Use delegate with a phase parameter."
       );
     }
 

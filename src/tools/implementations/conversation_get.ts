@@ -18,7 +18,7 @@ type ConversationGetInput = z.infer<typeof conversationGetSchema>;
 
 interface ConversationGetOutput {
     success: boolean;
-    conversation?: Record<string, any>;
+    conversation?: Record<string, unknown>;
     message?: string;
 }
 
@@ -30,7 +30,7 @@ interface ConversationGetOutput {
 function safeCopy<T>(data: T): T {
     const seen = new WeakSet();
 
-    const replacer = (_key: string, value: any) => {
+    const replacer = (_key: string, value: unknown): unknown => {
         if (typeof value === "object" && value !== null) {
             if (seen.has(value)) {
                 return "[Circular]";
@@ -42,7 +42,7 @@ function safeCopy<T>(data: T): T {
 
     try {
         return JSON.parse(JSON.stringify(data, replacer));
-    } catch (error) {
+    } catch {
         // If JSON.stringify still fails, return a safe fallback
         return data;
     }
@@ -54,7 +54,7 @@ function safeCopy<T>(data: T): T {
  * that may be runtime-attached to the conversation object.
  * Uses safeCopy for nested objects to handle any remaining circular references.
  */
-function serializeConversation(conversation: Conversation): Record<string, any> {
+function serializeConversation(conversation: Conversation): Record<string, unknown> {
     // Convert agentStates Map to object first, then safeCopy
     const agentStatesObj = conversation.agentStates
         ? Object.fromEntries(conversation.agentStates.entries())

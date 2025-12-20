@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { exec } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { promisify } from "node:util";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
@@ -229,8 +230,7 @@ export async function spawnBackgroundProcess(
             });
 
             // Redirect output to log file
-            const fs = require("node:fs");
-            const logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+            const logStream = createWriteStream(logFilePath, { flags: "a" });
 
             if (child.stdout) {
                 child.stdout.pipe(logStream);
@@ -311,7 +311,14 @@ async function executeRestartTenexBackend(
             BackendRestartConfig.LOG_FILE_PATH
         );
 
-        const newPid = child.pid!;
+        const newPid = child.pid;
+
+        if (!newPid) {
+            return {
+                success: false,
+                message: `${killMessage}\nFailed to get PID from spawned process.`,
+            };
+        }
 
         logger.info("TENEX backend restarted successfully", {
             newPid,

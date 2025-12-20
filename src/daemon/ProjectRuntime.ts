@@ -328,8 +328,15 @@ export class ProjectRuntime {
             return;
         }
 
-        await projectContextStore.run(this.context, async () => {
-            const agent = this.context!.getAgentByPubkey(agentPubkey);
+        const context = this.context;
+        const coordinator = this.conversationCoordinator;
+        if (!context || !coordinator) {
+            logger.error("[ProjectRuntime] Missing context or coordinator for checkpoint trigger");
+            return;
+        }
+
+        await projectContextStore.run(context, async () => {
+            const agent = context.getAgentByPubkey(agentPubkey);
             if (!agent) {
                 logger.error("[ProjectRuntime] Agent not found for checkpoint trigger", {
                     agentPubkey: agentPubkey.substring(0, 8),
@@ -338,7 +345,7 @@ export class ProjectRuntime {
                 return;
             }
 
-            const conversation = await this.conversationCoordinator!.getConversation(conversationId);
+            const conversation = await coordinator.getConversation(conversationId);
             if (!conversation) {
                 logger.error("[ProjectRuntime] Conversation not found for checkpoint trigger", {
                     conversationId: conversationId.substring(0, 8),
@@ -370,7 +377,7 @@ export class ProjectRuntime {
                 conversationId,
                 projectBasePath: this.projectBasePath,
                 triggeringEvent: rootEvent,
-                conversationCoordinator: this.conversationCoordinator!,
+                conversationCoordinator: coordinator,
             });
 
             const agentExecutor = new AgentExecutor();

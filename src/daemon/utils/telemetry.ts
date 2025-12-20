@@ -77,7 +77,7 @@ function createContextFromNostrEvent(event: NDKEvent): {
  * This enables viewing entire conversations as single traces in Jaeger with proper
  * hierarchical relationships based on Nostr's e-tag threading.
  */
-export function createEventSpan(event: NDKEvent) {
+export function createEventSpan(event: NDKEvent): Span {
     // First check for explicit trace_context tag (backwards compat with delegations)
     const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
 
@@ -137,7 +137,7 @@ export function createEventSpan(event: NDKEvent) {
 /**
  * End span with success status
  */
-export function endSpanSuccess(span: Span) {
+export function endSpanSuccess(span: Span): void {
     span.setStatus({ code: SpanStatusCode.OK });
     span.end();
 }
@@ -145,7 +145,7 @@ export function endSpanSuccess(span: Span) {
 /**
  * End span with error status
  */
-export function endSpanError(span: Span, error: unknown) {
+export function endSpanError(span: Span, error: unknown): void {
     span.recordException(error instanceof Error ? error : new Error(String(error)));
     span.setStatus({
         code: SpanStatusCode.ERROR,
@@ -161,6 +161,6 @@ export function addRoutingEvent(
     span: Span,
     decision: string,
     details: Record<string, unknown>
-) {
+): void {
     span.addEvent("routing_decision", { decision, ...details });
 }

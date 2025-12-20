@@ -136,7 +136,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
  * or URLs from known image hosting services
  */
 const IMAGE_URL_REGEX =
-    /https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s<>"{}|\\^`\[\]]*)?/gi;
+    /https?:\/\/[^\s<>"{}|\\^`[\]]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s<>"{}|\\^`[\]]*)?/gi;
 
 /**
  * Additional patterns for image URLs that don't have file extensions
@@ -144,11 +144,11 @@ const IMAGE_URL_REGEX =
  */
 const IMAGE_HOSTING_PATTERNS = [
     /https?:\/\/(?:i\.)?imgur\.com\/[a-zA-Z0-9]+/gi,
-    /https?:\/\/pbs\.twimg\.com\/[^\s<>"{}|\\^`\[\]]+/gi,
-    /https?:\/\/[^\s<>"{}|\\^`\[\]]*blossom[^\s<>"{}|\\^`\[\]]+/gi,
-    /https?:\/\/nostr\.build\/[^\s<>"{}|\\^`\[\]]+/gi,
-    /https?:\/\/image\.nostr\.build\/[^\s<>"{}|\\^`\[\]]+/gi,
-    /https?:\/\/void\.cat\/d\/[^\s<>"{}|\\^`\[\]]+/gi,
+    /https?:\/\/pbs\.twimg\.com\/[^\s<>"{}|\\^`[\]]+/gi,
+    /https?:\/\/[^\s<>"{}|\\^`[\]]*blossom[^\s<>"{}|\\^`[\]]+/gi,
+    /https?:\/\/nostr\.build\/[^\s<>"{}|\\^`[\]]+/gi,
+    /https?:\/\/image\.nostr\.build\/[^\s<>"{}|\\^`[\]]+/gi,
+    /https?:\/\/void\.cat\/d\/[^\s<>"{}|\\^`[\]]+/gi,
 ];
 
 /**
