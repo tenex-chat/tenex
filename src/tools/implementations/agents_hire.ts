@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { getNDK } from "@/nostr";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { filterAndRelaySetFromBech32 } from "@nostr-dev-kit/ndk";

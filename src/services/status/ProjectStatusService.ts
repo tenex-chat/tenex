@@ -9,8 +9,8 @@ import {
     type ProjectContext,
     getProjectContext,
     isProjectContextInitialized,
-} from "@/services/ProjectContext";
-import { projectContextStore } from "@/services/ProjectContextStore";
+} from "@/services/projects";
+import { projectContextStore } from "@/services/projects";
 import { mcpService } from "@/services/mcp/MCPManager";
 import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";

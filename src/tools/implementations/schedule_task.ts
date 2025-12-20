@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { SchedulerService } from "@/services/SchedulerService";
+import { SchedulerService } from "@/services/scheduling";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
+import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import * as cron from "node-cron";

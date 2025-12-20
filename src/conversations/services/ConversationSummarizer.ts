@@ -4,7 +4,7 @@ import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import type { ProjectContext } from "@/services/ProjectContext";
+import type { ProjectContext } from "@/services/projects";
 import { z } from "zod";
 
 export class ConversationSummarizer {

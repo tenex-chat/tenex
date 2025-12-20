@@ -1,5 +1,5 @@
 import { NDKKind } from "@/nostr/kinds";
-import type { ProjectContext } from "@/services/ProjectContext";
+import type { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ensureExecutionTimeInitialized } from "../executionTime";

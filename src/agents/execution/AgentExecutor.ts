@@ -14,7 +14,7 @@ import type {
 import { isAISdkProvider } from "@/llm/type-guards";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { isProjectContextInitialized, getProjectContext } from "@/services/ProjectContext";
+import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";

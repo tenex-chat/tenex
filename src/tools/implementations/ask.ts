@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";

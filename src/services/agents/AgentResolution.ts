@@ -1,4 +1,4 @@
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
 

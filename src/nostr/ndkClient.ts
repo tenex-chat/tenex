@@ -1,4 +1,4 @@
-import { getRelayUrls } from "@/utils/relays";
+import { getRelayUrls } from "./relays";
 /**
  * TENEX CLI: NDK Singleton
  * Manages a single NDK instance for the CLI

@@ -3,7 +3,7 @@ import { calculateRelevanceScore, mapLanceResultToDocument } from "@/tools/utils
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import type { Table, VectorQuery } from "@lancedb/lancedb";
-import type { EmbeddingProvider } from "../EmbeddingProvider";
+import type { EmbeddingProvider } from "@/services/embedding";
 import type { RAGDatabaseService } from "./RAGDatabaseService";
 
 /**

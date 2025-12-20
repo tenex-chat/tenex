@@ -1,6 +1,6 @@
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
