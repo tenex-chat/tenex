@@ -3,6 +3,7 @@ import type {
     LanguageModelV2CallOptions,
     LanguageModelV2Content,
     LanguageModelV2FinishReason,
+    LanguageModelV2StreamPart,
 } from "@ai-sdk/provider";
 import {
     loadCassette,
@@ -166,13 +167,127 @@ export class VCR {
             },
 
             async doStream(options: LanguageModelV2CallOptions) {
-                // For streaming, we currently don't support playback
-                // Always pass through to the real model
-                // In the future, we could record the stream parts
-                console.log(
-                    "[VCR] Streaming not yet supported, passing through to real model"
-                );
-                return await model.doStream(options);
+                const hash = hashRequest(options);
+                const explanation = explainHash(options);
+
+                if (vcr.config.mode === "passthrough") {
+                    return await model.doStream(options);
+                }
+
+                if (vcr.config.mode === "playback") {
+                    const interaction = findInteraction(vcr.cassette!, hash);
+
+                    if (!interaction) {
+                        const message = `No recorded interaction found for hash ${hash}\nRequest: ${explanation}`;
+                        if (vcr.config.strictMatching) {
+                            throw new Error(message);
+                        }
+                        console.warn(
+                            `[VCR] ${message}\nFalling back to real LLM.`
+                        );
+                        return await model.doStream(options);
+                    }
+
+                    console.log(
+                        `[VCR] Playing back stream for: ${explanation}`
+                    );
+
+                    // Simulate a stream from the recorded response
+                    const stream = new ReadableStream<LanguageModelV2StreamPart>({
+                        start(controller) {
+                            for (const content of interaction.response.content) {
+                                if (content.type === "text" && content.text) {
+                                    controller.enqueue({
+                                        type: "text-delta",
+                                        id: crypto.randomUUID(),
+                                        delta: content.text,
+                                    });
+                                } else if (content.type === "tool-call") {
+                                    controller.enqueue({
+                                        type: "tool-call",
+                                        toolCallId: content.toolCallId!,
+                                        toolName: content.toolName!,
+                                        input: content.input!,
+                                    });
+                                }
+                            }
+                            controller.enqueue({
+                                type: "finish",
+                                finishReason: interaction.response.finishReason,
+                                usage: interaction.response.usage,
+                            });
+                            controller.close();
+                        },
+                    });
+
+                    return { stream };
+                }
+
+                // mode === "record"
+                console.log(`[VCR] Recording stream for: ${explanation}`);
+                const startTime = Date.now();
+                const result = await model.doStream(options);
+
+                const textParts: string[] = [];
+                const toolCalls: Array<{
+                    type: string;
+                    toolCallId?: string;
+                    toolName?: string;
+                    input?: string;
+                }> = [];
+                let finishReason: LanguageModelV2FinishReason = "stop";
+                let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+                const transform = new TransformStream({
+                    transform(chunk, controller) {
+                        controller.enqueue(chunk);
+                        if (chunk.type === "text-delta" && chunk.textDelta) {
+                            textParts.push(chunk.textDelta);
+                        }
+                        if (chunk.type === "tool-call") {
+                            toolCalls.push({
+                                type: "tool-call",
+                                toolCallId: chunk.toolCallId,
+                                toolName: chunk.toolName,
+                                input: chunk.args,
+                            });
+                        }
+                        if (chunk.type === "finish") {
+                            finishReason = chunk.finishReason;
+                            if (chunk.usage) usage = chunk.usage;
+                        }
+                    },
+                    async flush() {
+                        const duration = Date.now() - startTime;
+                        const content: VCRInteraction["response"]["content"] = [];
+                        if (textParts.length > 0) {
+                            content.push({ type: "text", text: textParts.join("") });
+                        }
+                        content.push(...toolCalls);
+
+                        const interaction: VCRInteraction = {
+                            hash,
+                            request: {
+                                prompt: options.prompt,
+                                temperature: options.temperature,
+                                maxOutputTokens: options.maxOutputTokens,
+                                tools: options.tools,
+                                toolChoice: options.toolChoice,
+                            },
+                            response: { content, finishReason, usage },
+                            metadata: {
+                                timestamp: new Date().toISOString(),
+                                modelId: model.modelId,
+                                provider: model.provider,
+                                duration,
+                            },
+                        };
+                        addInteraction(vcr.cassette!, interaction);
+                        if (vcr.config.autoSave) await vcr.save();
+                    },
+                });
+
+                return { ...result, stream: result.stream.pipeThrough(transform) };
             },
         };
     }

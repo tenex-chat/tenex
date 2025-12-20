@@ -101,35 +101,8 @@ export class ToolMessageStorage {
             const filePath = path.join(this.storageDir, `${eventId}.json`);
             const data = await fs.readFile(filePath, "utf-8");
             const parsed = JSON.parse(data);
-            const messages = parsed.messages as ModelMessage[];
-
-            // Normalize messages to ensure required fields are present
-            // This handles old files that may have been stored with undefined values
-            return messages.map(msg => {
-                if (msg.role === "assistant" && Array.isArray(msg.content)) {
-                    return {
-                        ...msg,
-                        content: msg.content.map((part: any) => {
-                            if (part.type === "tool-call" && part.input === undefined) {
-                                return { ...part, input: {} };
-                            }
-                            return part;
-                        }),
-                    };
-                }
-                if (msg.role === "tool" && Array.isArray(msg.content)) {
-                    return {
-                        ...msg,
-                        content: msg.content.map((part: any) => {
-                            if (part.type === "tool-result" && part.output === undefined) {
-                                return { ...part, output: { type: "text", value: "" } };
-                            }
-                            return part;
-                        }),
-                    };
-                }
-                return msg;
-            });
+            // The stored messages are valid ModelMessage[] from the store() method
+            return parsed.messages as ModelMessage[];
         } catch {
             // File doesn't exist or can't be read
             return null;

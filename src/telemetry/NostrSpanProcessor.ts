@@ -2,6 +2,17 @@ import type { Context } from "@opentelemetry/api";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 
 /**
+ * Internal OTEL Span structure - accessing private fields to rewrite span IDs
+ * This is necessary because OTEL doesn't expose a way to set spanId after creation
+ */
+interface SpanInternals {
+    _spanContext?: { spanId: string };
+    _parentSpanId?: string;
+    _parentSpanContext?: { spanId: string };
+    parentSpanContext?: { spanId: string };
+}
+
+/**
  * Convert a Nostr hex ID to OpenTelemetry spanID (16 hex chars)
  */
 function nostrIdToSpanId(nostrId: string): string {
@@ -43,12 +54,11 @@ export class NostrSpanProcessor implements SpanProcessor {
         const derivedSpanId = nostrIdToSpanId(eventId);
 
         // Access internal state - the Span class stores context in _spanContext
-        // biome-ignore lint/suspicious/noExplicitAny: Need to access private OTEL internals
-        const spanAny = span as any;
+        const spanInternal = span as unknown as SpanInternals;
 
         // Modify the spanContext's spanId
-        if (spanAny._spanContext) {
-            spanAny._spanContext.spanId = derivedSpanId;
+        if (spanInternal._spanContext) {
+            spanInternal._spanContext.spanId = derivedSpanId;
         }
 
         // Fix parentSpanId based on event.reply_to
@@ -58,15 +68,15 @@ export class NostrSpanProcessor implements SpanProcessor {
             const derivedParentSpanId = nostrIdToSpanId(replyTo);
 
             // Modify the parent span context
-            if (spanAny._parentSpanContext) {
-                spanAny._parentSpanContext.spanId = derivedParentSpanId;
-            } else if (spanAny.parentSpanContext) {
-                spanAny.parentSpanContext.spanId = derivedParentSpanId;
+            if (spanInternal._parentSpanContext) {
+                spanInternal._parentSpanContext.spanId = derivedParentSpanId;
+            } else if (spanInternal.parentSpanContext) {
+                spanInternal.parentSpanContext.spanId = derivedParentSpanId;
             }
         } else {
             // This is a root message - clear parent context so it becomes a true root span
-            spanAny._parentSpanContext = undefined;
-            spanAny.parentSpanContext = undefined;
+            spanInternal._parentSpanContext = undefined;
+            spanInternal.parentSpanContext = undefined;
         }
     }
 }
