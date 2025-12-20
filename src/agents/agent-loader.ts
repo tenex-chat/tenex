@@ -4,7 +4,7 @@ import { installAgentFromNostr } from "@/agents/agent-installer";
 import { AgentSlugConflictError } from "@/agents/errors";
 import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
-import { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
+import { AgentMetadataStore } from "@/services/agents";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { config } from "@/services/ConfigService";
