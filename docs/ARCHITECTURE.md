@@ -70,7 +70,6 @@ The `services/` layer contains stateful business logic and domain services:
 - `lib/shell.ts` - Shell execution
 - `lib/string.ts` - String utilities
 - `lib/validation.ts` - Validation helpers
-- `lib/formatting.ts` - Text formatting
 - `lib/error-formatter.ts` - Error formatting
 - `lib/time.ts` - Time utilities
 

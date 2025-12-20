@@ -88,7 +88,7 @@ Use this section to understand each service’s scope and dependencies:
 - **`src/telemetry`**: OpenTelemetry initialization, exporters, span helpers. Modules needing tracing should import helpers rather than reconfiguring OTel. AI SDK devtools provide LLM interaction tracing via `experimental_telemetry` config.
 
 ### Utilities & Shared Libraries
-- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`), shell utilities, and pure utilities (`string.ts`, `validation.ts`, `formatting.ts`, `error-formatter.ts`, `time.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
+- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`), shell utilities, and pure utilities (`string.ts`, `validation.ts`, `error-formatter.ts`, `time.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
 - **`src/utils`**: Higher-level utilities tied to TENEX behavior (agent fetchers, CLI config scope, Git helpers including worktree management, logger configuration). Can import from `lib/` and infrastructure, but not from `services/` or higher layers.
 
 ### Tools for Tests & Scripts
@@ -134,7 +134,7 @@ Use this section to understand each service’s scope and dependencies:
 
 ### Completed Improvements
 - **Configuration Architecture (COMPLETED 2025-01-18)**: Centralized all config path construction through `ConfigService.getConfigPath(subdir)`. Removed singleton pattern - now exports `config` instance. **Breaking change**: `config.json` and `llms.json` are now global-only (`~/.tenex/`); only `mcp.json` remains at project level. Migration path: Users must manually move project-level configs to global. See `ConfigService.ts` for API.
-- **Pure Utilities to lib/ (COMPLETED 2025-01-19)**: Moved `string.ts`, `validation.ts`, `formatting.ts`, `error-formatter.ts`, and `time.ts` from `utils/` to `lib/`. These are now pure utilities with zero TENEX dependencies.
+- **Pure Utilities to lib/ (COMPLETED 2025-01-19)**: Moved `string.ts`, `validation.ts`, `error-formatter.ts`, and `time.ts` from `utils/` to `lib/`. These are now pure utilities with zero TENEX dependencies.
 - **Git Utilities Consolidated (COMPLETED 2025-01-19)**: Moved `utils/worktree/` into `utils/git/worktree.ts` for better organization.
 - **Circular Dependency Fixed (COMPLETED 2025-01-19)**: Removed `lib/fs/filesystem.ts` dependency on `utils/logger`. Now uses `console.error` to maintain layer separation.
 - **Service Naming (COMPLETED 2025-01-19)**: Renamed `ReportManager.ts` → `ReportService.ts` and `PubkeyNameRepository.ts` → `PubkeyService.ts` for consistency. Also renamed the classes `ReportManager` → `ReportService` and `PubkeyNameRepository` → `PubkeyService`.
