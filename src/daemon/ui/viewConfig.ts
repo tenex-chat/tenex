@@ -2,7 +2,7 @@ import type { ViewMode } from "./types";
 
 export const VIEW_INSTRUCTIONS: Record<ViewMode, string> = {
     projects:
-        "Use ↑/↓ to navigate | Enter: expand/start | c: conversations | k: kill | r: restart | q: quit",
+        "Type to filter | ↑/↓: navigate | Enter: expand/start | c: conversations | k: kill | r: restart | ESC: close",
     conversations: "Use ↑/↓ to navigate | ESC: back to projects",
     agents: "Use ↑/↓ to navigate | Enter: view details | ESC: back",
     "agent-detail": "Use ↑/↓ to navigate | Enter: view details | ESC: back",

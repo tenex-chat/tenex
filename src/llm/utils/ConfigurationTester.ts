@@ -33,10 +33,8 @@ export class ConfigurationTester {
         console.log(chalk.gray(`Provider: ${config.provider}, Model: ${config.model}`));
 
         try {
-            // Ensure providers are initialized
-            if (!llmServiceFactory.hasProvider(config.provider)) {
-                await llmServiceFactory.initializeProviders(llmsConfig.providers);
-            }
+            // Initialize providers before testing
+            await llmServiceFactory.initializeProviders(llmsConfig.providers);
 
             // Create the service using the factory
             const service = llmServiceFactory.createService(config);
@@ -109,10 +107,8 @@ export class ConfigurationTester {
         });
 
         try {
-            // Ensure providers are initialized
-            if (!llmServiceFactory.hasProvider(config.provider)) {
-                await llmServiceFactory.initializeProviders(llmsConfig.providers);
-            }
+            // Initialize providers before testing
+            await llmServiceFactory.initializeProviders(llmsConfig.providers);
 
             // Create the service using the factory
             const service = llmServiceFactory.createService(config);

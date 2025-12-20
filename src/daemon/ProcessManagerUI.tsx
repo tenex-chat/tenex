@@ -33,6 +33,7 @@ export function ProcessManagerUI({
     const [viewState, dispatch] = useReducer(viewReducer, initialViewState);
     const [projects, setProjects] = useState<ProjectInfo[]>([]);
     const [conversations, setConversations] = useState<ConversationInfo[]>([]);
+    const [filterText, setFilterText] = useState<string>("");
 
     useEffect((): (() => void) => {
         const updateProjects = (): void => {
@@ -60,6 +61,23 @@ export function ProcessManagerUI({
         const interval = setInterval(updateConversations, 2000);
         return () => clearInterval(interval);
     }, [runtimes]);
+
+    // Filter projects when in projects view
+    const filteredProjects =
+        viewState.viewMode === "projects" && filterText
+            ? projects.filter((p) => p.title.toLowerCase().includes(filterText.toLowerCase()))
+            : projects;
+
+    // Reset selection when filter changes cause index to go out of bounds
+    useEffect(() => {
+        if (
+            viewState.viewMode === "projects" &&
+            viewState.selectedIndex >= filteredProjects.length &&
+            filteredProjects.length > 0
+        ) {
+            dispatch({ type: "NAVIGATE", direction: "up", maxIndex: filteredProjects.length - 1 });
+        }
+    }, [filteredProjects.length, viewState.selectedIndex, viewState.viewMode]);
 
     const loadAgents = (projectId: string): void => {
         try {
@@ -141,7 +159,12 @@ export function ProcessManagerUI({
 
     const navigateBack = (): void => {
         if (viewState.viewMode === "projects") {
-            onClose();
+            if (filterText) {
+                // Clear filter first if there is one
+                setFilterText("");
+            } else {
+                onClose();
+            }
         } else {
             dispatch({ type: "NAVIGATE_BACK" });
         }
@@ -151,7 +174,7 @@ export function ProcessManagerUI({
         let maxIndex: number;
         switch (viewState.viewMode) {
             case "projects":
-                maxIndex = projects.length - 1;
+                maxIndex = filteredProjects.length - 1;
                 break;
             case "conversations":
                 maxIndex = conversations.length - 1;
@@ -178,7 +201,8 @@ export function ProcessManagerUI({
 
         try {
             await onStart(projectId);
-            dispatch({ type: "SET_STATUS", message: `Started ${title}` });
+            // Auto-close the project list after successful start
+            onClose();
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             dispatch({
@@ -189,9 +213,9 @@ export function ProcessManagerUI({
     };
 
     const performAction = async (action: ActionType): Promise<void> => {
-        if (projects.length === 0) return;
+        if (filteredProjects.length === 0) return;
 
-        const project = projects[viewState.selectedIndex];
+        const project = filteredProjects[viewState.selectedIndex];
         if (!project) return;
 
         const actionVerb = action === "kill" ? "Killing" : "Restarting";
@@ -220,27 +244,40 @@ export function ProcessManagerUI({
             dispatch({ type: "CLEAR_STATUS" });
         }
 
-        if (key.escape || key.backspace) {
+        if (key.escape) {
             navigateBack();
             return;
         }
 
-        if (input === "q" && viewState.viewMode === "projects") {
+        // Handle backspace for filter or navigation
+        if (key.backspace) {
+            if (viewState.viewMode === "projects" && filterText) {
+                setFilterText((prev) => prev.slice(0, -1));
+            } else {
+                navigateBack();
+            }
+            return;
+        }
+
+        if (input === "q" && viewState.viewMode === "projects" && !filterText) {
             process.exit(0);
         }
 
         if (key.upArrow) {
             handleNavigation("up");
+            return;
         }
 
         if (key.downArrow) {
             handleNavigation("down");
+            return;
         }
 
         if (key.return) {
-            if (viewState.viewMode === "projects" && projects.length > 0) {
-                const project = projects[viewState.selectedIndex];
+            if (viewState.viewMode === "projects" && filteredProjects.length > 0) {
+                const project = filteredProjects[viewState.selectedIndex];
                 if (project) {
+                    setFilterText(""); // Clear filter when selecting
                     if (project.isRunning) {
                         // Running project - expand to show agents
                         loadAgents(project.projectId);
@@ -270,18 +307,23 @@ export function ProcessManagerUI({
             return;
         }
 
-        if (viewState.viewMode === "projects") {
-            if (input === "c") {
-                dispatch({ type: "VIEW_CONVERSATIONS" });
+        // Handle typing for filter in projects view
+        if (viewState.viewMode === "projects" && input && !key.ctrl && !key.meta) {
+            // Skip special single-key shortcuts when filtering
+            if (!filterText && (input === "c" || input === "k" || input === "r")) {
+                if (input === "c") {
+                    dispatch({ type: "VIEW_CONVERSATIONS" });
+                } else if (input === "k") {
+                    performAction("kill");
+                } else if (input === "r") {
+                    performAction("restart");
+                }
+                return;
             }
-
-            if (input === "k") {
-                performAction("kill");
-            }
-
-            if (input === "r") {
-                performAction("restart");
-            }
+            // Add character to filter
+            setFilterText((prev) => prev + input);
+            // Reset selection to first item when filtering
+            dispatch({ type: "NAVIGATE", direction: "up", maxIndex: 0 });
         }
     });
 
@@ -311,7 +353,19 @@ export function ProcessManagerUI({
             </Box>
 
             {viewState.viewMode === "projects" && (
-                <ProjectsView projects={projects} selectedIndex={viewState.selectedIndex} />
+                <>
+                    {filterText && (
+                        <Box marginBottom={1}>
+                            <Text>Filter: </Text>
+                            <Text color="yellow">{filterText}</Text>
+                            <Text dimColor> ({filteredProjects.length} matches)</Text>
+                        </Box>
+                    )}
+                    <ProjectsView
+                        projects={filteredProjects}
+                        selectedIndex={viewState.selectedIndex}
+                    />
+                </>
             )}
             {viewState.viewMode === "conversations" && (
                 <ConversationsView
