@@ -60,70 +60,11 @@ export class AgentRouter {
     }
 
     /**
-     * Legacy method for backward compatibility - returns first agent
-     * @deprecated Use resolveTargetAgents instead
-     */
-    static resolveTargetAgent(
-        event: NDKEvent,
-        projectContext: ProjectContext
-    ): AgentInstance | null {
-        const agents = AgentRouter.resolveTargetAgents(event, projectContext);
-        return agents.length > 0 ? agents[0] : null;
-    }
-
-    /**
      * Check if any of the resolved agents would be processing their own message (self-reply)
      * Returns the agents that would NOT be self-replying
      */
     static filterOutSelfReplies(event: NDKEvent, targetAgents: AgentInstance[]): AgentInstance[] {
         return targetAgents.filter((agent) => agent.pubkey !== event.pubkey);
-    }
-
-    /**
-     * Check if the resolved agent would be processing its own message (self-reply)
-     */
-    static wouldBeSelfReply(event: NDKEvent, targetAgent: AgentInstance | null): boolean {
-        if (!targetAgent) return false;
-        return targetAgent.pubkey === event.pubkey;
-    }
-
-    /**
-     * Get a human-readable description of why an event was routed to particular agents
-     */
-    static getRoutingReasons(event: NDKEvent, targetAgents: AgentInstance[]): string {
-        if (targetAgents.length === 0) {
-            return "No agents assigned (event will not be processed)";
-        }
-
-        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-
-        const reasons: string[] = [];
-        for (const agent of targetAgents) {
-            // Check if target was p-tagged
-            if (mentionedPubkeys.includes(agent.pubkey)) {
-                reasons.push(`Agent "${agent.name}" was directly mentioned (p-tagged)`);
-            }
-        }
-
-        return reasons.length > 0 ? reasons.join("; ") : "Unknown routing reason";
-    }
-
-    /**
-     * Get a human-readable description of why an event was routed to a particular agent
-     */
-    static getRoutingReason(event: NDKEvent, targetAgent: AgentInstance | null): string {
-        if (!targetAgent) {
-            return "No agent assigned (event will not be processed)";
-        }
-
-        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-
-        // Check if target was p-tagged
-        if (mentionedPubkeys.includes(targetAgent.pubkey)) {
-            return `Agent "${targetAgent.name}" was directly mentioned (p-tagged)`;
-        }
-
-        return "Unknown routing reason";
     }
 
 }
