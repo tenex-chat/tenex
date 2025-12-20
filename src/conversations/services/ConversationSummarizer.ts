@@ -12,20 +12,19 @@ export class ConversationSummarizer {
 
     async summarizeAndPublish(conversation: Conversation): Promise<void> {
         try {
-            // Get LLM configuration
+            // Get LLM configuration - use summarization config if set, otherwise default
             const { llms } = await config.loadConfig();
-            const metadataConfig =
-                llms.configurations.metadata ||
-                (llms.default ? llms.configurations[llms.default] : undefined);
+            const configName = llms.summarization || llms.default;
+            const summarizationConfig = configName ? llms.configurations[configName] : undefined;
 
-            if (!metadataConfig) {
-                console.warn("No LLM configuration available for metadata generation");
+            if (!summarizationConfig) {
+                console.warn("No LLM configuration available for summarization");
                 return;
             }
 
             // Create LLM service
             const llmService = llmServiceFactory.createService(
-                metadataConfig,
+                summarizationConfig,
                 {
                     agentName: "summarizer",
                     sessionId: `summarizer-${conversation.id}`,
@@ -83,7 +82,7 @@ Focus on what was accomplished or discussed, not on the process.`,
                 event.tags.push(["summary", result.summary]);
             }
             event.tags.push(["a", this.context.project.tagId()]); // Project reference
-            event.tags.push(["model", metadataConfig.model]);
+            event.tags.push(["model", summarizationConfig.model]);
 
             // Sign and publish
             if (this.context.signer) {
