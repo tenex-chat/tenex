@@ -51,6 +51,10 @@ export class ProcessManagerController {
         if (this.renderInstance) {
             this.renderInstance.unmount();
             this.renderInstance = null;
+
+            // Clear the screen after unmounting
+            process.stdout.write("\x1B[2J\x1B[0f");
+
             logger.debug("Process manager UI hidden");
 
             // Notify parent that UI was closed
