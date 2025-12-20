@@ -157,7 +157,8 @@ export class Daemon {
      * Acquire daemon lockfile to prevent multiple instances
      */
     private async acquireDaemonLock(): Promise<void> {
-        this.lockfile = new Lockfile(Lockfile.getDefaultPath());
+        const lockfilePath = path.join(config.getConfigPath("daemon"), "tenex.lock");
+        this.lockfile = new Lockfile(lockfilePath);
         await this.lockfile.acquire();
     }
 

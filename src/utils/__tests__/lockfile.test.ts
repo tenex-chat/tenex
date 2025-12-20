@@ -95,10 +95,4 @@ describe("Lockfile", () => {
         }
     });
 
-    it("should get default lockfile path", () => {
-        const defaultPath = Lockfile.getDefaultPath();
-        expect(defaultPath).toContain(".tenex");
-        expect(defaultPath).toContain("daemon");
-        expect(defaultPath).toContain("tenex.lock");
-    });
 });

@@ -1,7 +1,5 @@
 import * as fs from "node:fs/promises";
-import { config } from "@/services/ConfigService";
 import * as os from "node:os";
-import * as path from "node:path";
 import { logger } from "./logger";
 
 /**
@@ -122,11 +120,4 @@ export class Lockfile {
         }
     }
 
-    /**
-     * Get the default lockfile path for the daemon
-     */
-    static getDefaultPath(): string {
-        const daemonDir = config.getConfigPath("daemon");
-        return path.join(daemonDir, "tenex.lock");
-    }
 }

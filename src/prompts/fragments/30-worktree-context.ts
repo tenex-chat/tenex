@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import { config } from "@/services/ConfigService";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
@@ -43,7 +44,7 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
 
     try {
       worktrees = await listWorktrees(context.projectBasePath);
-      metadata = await loadWorktreeMetadata(context.projectBasePath);
+      metadata = await loadWorktreeMetadata(context.projectBasePath, config.getConfigPath("projects"));
       // Check if there are worktrees in .worktrees/ directory (beyond the main repo)
       hasFeatureWorktrees = worktrees.some(wt => wt.path.includes("/.worktrees/"));
     } catch (error) {
