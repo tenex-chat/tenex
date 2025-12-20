@@ -75,6 +75,7 @@ async function executeDelegateFollowup(
     {
       recipient: previousDelegation.recipientPubkey,
       content: message,
+      delegationEventId: delegation_event_id,
       replyToEventId: previousDelegation.responseEventId,
     },
     {

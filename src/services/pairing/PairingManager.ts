@@ -223,7 +223,7 @@ export class PairingManager {
   private async triggerCheckpoint(delegationId: string, state: PairingState): Promise<void> {
     state.checkpointNumber++;
 
-    const message = this.buildCheckpointMessage(state);
+    const checkpointInfo = this.buildCheckpointMessage(state);
 
     // Queue into supervisor's RAL
     const ralRegistry = RALRegistry.getInstance();
@@ -231,8 +231,19 @@ export class PairingManager {
       state.supervisorPubkey,
       state.supervisorConversationId,
       state.supervisorRalNumber,
-      message
+      checkpointInfo
     );
+
+    // Only include guidance instructions on the first checkpoint
+    if (state.checkpointNumber === 1) {
+      const userInstruction = this.buildCheckpointInstruction(state);
+      ralRegistry.queueUserMessage(
+        state.supervisorPubkey,
+        state.supervisorConversationId,
+        state.supervisorRalNumber,
+        userInstruction
+      );
+    }
 
     // Reset checkpoint state
     const eventCount = state.eventBuffer.length;
@@ -279,17 +290,26 @@ export class PairingManager {
     const ageMinutes = Math.round((Date.now() - state.createdAt) / 60000);
 
     return `[Pairing Checkpoint #${state.checkpointNumber}] Delegation to ${recipientLabel}
+Delegation ID: ${state.delegationId}
 
 Activity since last checkpoint:
 ${eventLines || "(no activity captured)"}
 
-Progress: ${state.totalEventsSeen} total events | ${state.checkpointNumber} checkpoints | Started ${ageMinutes}m ago
+Progress: ${state.totalEventsSeen} total events | ${state.checkpointNumber} checkpoints | Started ${ageMinutes}m ago`;
+  }
 
-You may:
-- Continue observing (respond briefly or wait)
-- Send guidance via delegate_followup
-- Use stop_pairing to end real-time supervision
-- Wait for next checkpoint or completion`;
+  /**
+   * Build the user instruction for what to do with the checkpoint.
+   */
+  private buildCheckpointInstruction(state: PairingState): string {
+    const recipientLabel = state.recipientSlug
+      ? `@${state.recipientSlug}`
+      : "the delegated agent";
+
+    return `Review ${recipientLabel}'s progress above. You can:
+- Do nothing if they're on track (they won't see your response)
+- Send guidance with delegate_followup(delegationEventId: "${state.delegationId}", message: "...")
+- Stop checkpoints with stop_pairing(delegationEventId: "${state.delegationId}")`;
   }
 
   /**
