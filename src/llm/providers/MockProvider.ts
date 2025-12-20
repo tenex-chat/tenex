@@ -1,7 +1,7 @@
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 
 // Using any types for the mock provider since V2/V3 types are in transition in AI SDK v6 beta
 
@@ -16,7 +16,7 @@ export function createMockProvider(config?: MockLLMConfig): any {
     const createLanguageModel = (modelId: string): any => {
         logger.info(`[MockProvider] Creating language model for: ${modelId}`);
 
-        return new MockLanguageModelV2({
+        return new MockLanguageModelV3({
             provider: "mock",
             modelId: modelId || "mock-model",
 
