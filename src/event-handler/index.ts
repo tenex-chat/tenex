@@ -69,7 +69,7 @@ export class EventHandler {
                     eventConstructor: event?.constructor?.name,
                     eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
                     eventKeys: Object.keys(event || {}),
-                    event: JSON.stringify(event, null, 2),
+                    event: event?.rawEvent ? JSON.stringify(event.rawEvent(), null, 2) : "no rawEvent method",
                 });
                 throw err;
             }
@@ -94,7 +94,7 @@ export class EventHandler {
                     eventPrototype: Object.getPrototypeOf(event)?.constructor?.name,
                     hasGetMatchingTags: typeof event?.getMatchingTags,
                     eventKeys: Object.keys(event || {}),
-                    event: JSON.stringify(event, null, 2),
+                    event: event?.rawEvent ? JSON.stringify(event.rawEvent(), null, 2) : "no rawEvent method",
                 });
                 throw err;
             }

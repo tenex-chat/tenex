@@ -203,6 +203,45 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Default configuration set to "${name}"`));
     }
 
+    static async setSummarizationModel(llmsConfig: TenexLLMs): Promise<void> {
+        const configNames = Object.keys(llmsConfig.configurations);
+
+        if (configNames.length === 0) {
+            console.log(chalk.yellow("⚠️  No configurations available"));
+            return;
+        }
+
+        const { name } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "name",
+                message: "Select summarization model:",
+                choices: configNames.map((n) => ({
+                    name: n === llmsConfig.summarization ? `${n} (current)` : n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        llmsConfig.summarization = name;
+        console.log(chalk.green(`✅ Summarization model set to "${name}"`));
+
+        // Offer to test the configuration
+        const { shouldTest } = await inquirer.prompt([
+            {
+                type: "confirm",
+                name: "shouldTest",
+                message: "Would you like to test this configuration with generateObject?",
+                default: true,
+            },
+        ]);
+
+        if (shouldTest) {
+            const { ConfigurationTester } = await import("./ConfigurationTester");
+            await ConfigurationTester.testSummarization(llmsConfig, name);
+        }
+    }
+
     private static getDefaultModelForProvider(provider: AISdkProvider): string {
         const defaults: Record<AISdkProvider, string> = {
             openrouter: "openai/gpt-4",

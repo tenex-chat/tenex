@@ -4,6 +4,7 @@ import { ExecutionConfig } from "@/agents/execution/constants";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -33,11 +34,48 @@ type ShellOutput = string;
 async function executeShell(input: ShellInput, context: ExecutionContext): Promise<ShellOutput> {
     const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input;
 
-    const workingDir = cwd || context.workingDirectory;
+    // Resolve cwd: if provided and relative, resolve against context.workingDirectory
+    // If not provided, use context.workingDirectory directly
+    let workingDir: string;
+    if (cwd) {
+        // If cwd is relative (like "."), resolve it against the project working directory
+        const { isAbsolute, resolve } = await import("node:path");
+        workingDir = isAbsolute(cwd) ? cwd : resolve(context.workingDirectory, cwd);
+    } else {
+        workingDir = context.workingDirectory;
+    }
+
+    // Add trace span with all context for debugging
+    const span = trace.getActiveSpan();
+    span?.setAttributes({
+        "shell.command": command.substring(0, 200),
+        "shell.cwd_param_raw": cwd || "(not provided)",
+        "shell.cwd_resolved": workingDir || "(empty)",
+        "shell.context.working_directory": context.workingDirectory || "(empty)",
+        "shell.context.project_base_path": context.projectBasePath || "(empty)",
+        "shell.context.current_branch": context.currentBranch || "(empty)",
+        "shell.agent": context.agent.name,
+        "shell.timeout": timeout ?? ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS,
+    });
+    span?.addEvent("shell.execute_start", {
+        command: command.substring(0, 200),
+        cwd: workingDir || "(empty)",
+    });
+
+    // Validate working directory - fail fast if it's empty
+    if (!workingDir) {
+        const errorMsg = `Shell command cannot run: workingDirectory is empty. ` +
+            `Context projectBasePath: "${context.projectBasePath}", ` +
+            `Context workingDirectory: "${context.workingDirectory}"`;
+        span?.addEvent("shell.error", { error: errorMsg });
+        throw new Error(errorMsg);
+    }
 
     logger.info("Executing shell command", {
         command,
         cwd: workingDir,
+        contextWorkingDir: context.workingDirectory,
+        contextProjectBasePath: context.projectBasePath,
         agent: context.agent.name,
         timeout,
     });
@@ -53,6 +91,12 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
     });
 
     const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : "");
+
+    span?.addEvent("shell.execute_complete", {
+        has_stdout: !!stdout,
+        has_stderr: !!stderr,
+        output_length: output.length,
+    });
 
     logger.info("Shell command completed", {
         command,

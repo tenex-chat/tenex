@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { ExecutionContext } from "@/agents/execution/types";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 
 /**
  * Resolves and validates a file path to ensure it stays within the project boundaries.
@@ -12,8 +13,31 @@ import { logger } from "@/utils/logger";
  * @throws Error if the path would escape the project directory
  */
 export function resolveAndValidatePath(filePath: string, projectPath: string): string {
+    // Validate projectPath is not empty - this would resolve to process.cwd()
+    if (!projectPath) {
+        const span = trace.getActiveSpan();
+        span?.setAttributes({
+            "path.error": "projectPath_empty",
+            "path.file_path": filePath,
+            "path.project_path": projectPath || "(empty)",
+        });
+        throw new Error(
+            `Cannot resolve path "${filePath}": projectPath is empty. ` +
+            `This indicates a bug in the execution context - workingDirectory was not set.`
+        );
+    }
+
     const fullPath = isAbsolute(filePath) ? filePath : resolve(projectPath, filePath);
     const relativePath = relative(projectPath, fullPath);
+
+    // Add trace attributes for debugging
+    const span = trace.getActiveSpan();
+    span?.addEvent("path.resolved", {
+        "path.input": filePath,
+        "path.project": projectPath,
+        "path.resolved": fullPath,
+        "path.relative": relativePath,
+    });
 
     if (relativePath.startsWith("..")) {
         throw new Error(`Path outside project directory: ${filePath}`);
