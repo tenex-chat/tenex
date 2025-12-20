@@ -455,12 +455,33 @@ export class RALRegistry {
    * Queue a system message for injection into a specific RAL
    */
   queueSystemMessage(agentPubkey: string, conversationId: string, ralNumber: number, message: string): void {
+    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message);
+  }
+
+  /**
+   * Queue a user message for injection into a specific RAL
+   */
+  queueUserMessage(agentPubkey: string, conversationId: string, ralNumber: number, message: string): void {
+    this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message);
+  }
+
+  /**
+   * Queue a message with specified role for injection into a specific RAL
+   */
+  private queueMessage(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    role: "system" | "user",
+    message: string
+  ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
-      logger.warn("[RALRegistry] Cannot queue system message - no RAL state", {
+      logger.warn("[RALRegistry] Cannot queue message - no RAL state", {
         agentPubkey: agentPubkey.substring(0, 8),
         conversationId: conversationId.substring(0, 8),
         ralNumber,
+        role,
       });
       return;
     }
@@ -474,7 +495,7 @@ export class RALRegistry {
     }
 
     ral.queuedInjections.push({
-      role: "system",
+      role,
       content: message,
       queuedAt: Date.now(),
     });
@@ -730,6 +751,29 @@ export class RALRegistry {
   }
 
   /**
+   * Find a RAL that has queued injections ready to process.
+   * Used for pairing checkpoint resumption - the supervisor has pending delegations
+   * but received a checkpoint message that needs processing.
+   */
+  findRALWithInjections(agentPubkey: string, conversationId: string): RALState | undefined {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    return rals.find(ral =>
+      ral.queuedInjections.length > 0 &&
+      ral.messages.length > 0
+    );
+  }
+
+  /**
+   * Find a RAL that is currently streaming.
+   * Used to avoid creating duplicate executions when a streaming RAL
+   * will pick up queued injections in its prepareStep.
+   */
+  findStreamingRAL(agentPubkey: string, conversationId: string): RALState | undefined {
+    const rals = this.getActiveRALs(agentPubkey, conversationId);
+    return rals.find(ral => ral.isStreaming && ral.messages.length > 0);
+  }
+
+  /**
    * Build a message containing delegation results for injection into the RAL.
    */
   buildDelegationResultsMessage(completions: CompletedDelegation[]): string {
@@ -739,16 +783,16 @@ export class RALRegistry {
 
     if (completions.length === 1) {
       const c = completions[0];
-      const agent = c.recipientSlug || c.recipientPubkey.substring(0, 8);
-      return `Delegation to ${agent} completed. Their response:\n\n${c.response}`;
+      const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
+      return `[Delegation completed: ${agent}]\n\n${c.response}`;
     }
 
     const parts = completions.map(c => {
-      const agent = c.recipientSlug || c.recipientPubkey.substring(0, 8);
-      return `## Response from ${agent}:\n${c.response}`;
+      const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
+      return `[Response from ${agent}]\n${c.response}`;
     });
 
-    return `All ${completions.length} delegations completed. Responses:\n\n${parts.join("\n\n")}`;
+    return `[All ${completions.length} delegations completed]\n\n${parts.join("\n\n")}`;
   }
 
   // === RAL Pause/Resume for concurrent execution coordination ===

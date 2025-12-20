@@ -188,6 +188,7 @@ export class AgentPublisher {
         params: {
             recipient: string;
             content: string;
+            delegationEventId: string;
             replyToEventId?: string;
         },
         context: EventContext
@@ -200,6 +201,9 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
+        // Add reference to the original delegation event
+        event.tags.push(["e", params.delegationEventId]);
+
         // Add conversation threading
         if (context.rootEvent) {
             event.tags.push(["E", context.rootEvent.id]);
@@ -210,7 +214,7 @@ export class AgentPublisher {
         // Add project a-tag (required for event routing)
         this.encoder.aTagProject(event);
 
-        // Reply to specific event if provided
+        // Reply to specific response event if provided (for threading)
         if (params.replyToEventId) {
             event.tags.push(["e", params.replyToEventId]);
         }
@@ -220,6 +224,7 @@ export class AgentPublisher {
 
         trace.getActiveSpan()?.addEvent("publisher.followup_published", {
             "event.id": event.id || "",
+            "delegation.event_id": params.delegationEventId,
         });
 
         return event.id;

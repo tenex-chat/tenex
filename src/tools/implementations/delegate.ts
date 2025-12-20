@@ -1,10 +1,19 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import { getProjectContext } from "@/services/ProjectContext";
+import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation, StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
+
+const pairConfigSchema = z.object({
+  interval: z
+    .number()
+    .min(1)
+    .describe("Number of tool executions between checkpoints (e.g., 5 means checkpoint every 5 tools)"),
+});
 
 const baseDelegationItemSchema = z.object({
   recipient: z
@@ -17,6 +26,9 @@ const baseDelegationItemSchema = z.object({
     .string()
     .optional()
     .describe("Git branch name for worktree isolation"),
+  pair: pairConfigSchema
+    .optional()
+    .describe("Enable real-time pairing supervision. You will receive periodic checkpoint updates about the delegated agent's progress."),
 });
 
 const phaseDelegationItemSchema = baseDelegationItemSchema.extend({
@@ -39,6 +51,8 @@ interface DelegateInput {
 interface DelegateOutput extends StopExecutionSignal {
   /** Map of recipient pubkey to the event ID we published for their delegation */
   delegationEventIds: Record<string, string>;
+  /** Human-readable message for the LLM */
+  message: string;
 }
 
 async function executeDelegate(
@@ -49,6 +63,20 @@ async function executeDelegate(
 
   if (!Array.isArray(delegations) || delegations.length === 0) {
     throw new Error("At least one delegation is required");
+  }
+
+  // Check if there are already pending delegations in the current RAL
+  // This prevents creating new delegations during checkpoint responses
+  const ralRegistry = RALRegistry.getInstance();
+  const currentRal = ralRegistry.getState(context.agent.pubkey, context.conversationId);
+  if (currentRal && currentRal.pendingDelegations.length > 0) {
+    const pendingRecipients = currentRal.pendingDelegations
+      .map(d => d.recipientSlug || d.recipientPubkey.substring(0, 8))
+      .join(", ");
+    throw new Error(
+      `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
+      `Use delegate_followup to send guidance, or wait for the delegation to complete.`
+    );
   }
 
   const pendingDelegations: PendingDelegation[] = [];
@@ -118,6 +146,47 @@ async function executeDelegate(
       recipientSlug: delegation.recipient,
       prompt: delegation.prompt,
     });
+
+    // Start pairing supervision if requested
+    if (delegation.pair) {
+      const projectContext = getProjectContext();
+      const pairingManager = projectContext.pairingManager;
+
+      if (!pairingManager) {
+        logger.warn("[delegate] Pairing requested but PairingManager not available", {
+          recipient: delegation.recipient,
+        });
+      } else {
+        // Get current RAL number for this agent/conversation
+        const ralRegistry = RALRegistry.getInstance();
+        const currentRal = ralRegistry.getState(context.agent.pubkey, context.conversationId);
+
+        if (!currentRal) {
+          logger.warn("[delegate] Pairing requested but no active RAL found", {
+            recipient: delegation.recipient,
+          });
+        } else {
+          pairingManager.startPairing(
+            eventId,
+            {
+              delegationId: eventId,
+              recipientPubkey: pubkey,
+              recipientSlug: delegation.recipient,
+              interval: delegation.pair.interval,
+            },
+            context.agent.pubkey,
+            context.conversationId,
+            currentRal.ralNumber
+          );
+
+          logger.info("[delegate] Started pairing supervision", {
+            delegationId: eventId.substring(0, 8),
+            recipient: delegation.recipient,
+            interval: delegation.pair.interval,
+          });
+        }
+      }
+    }
   }
 
   if (failedRecipients.length > 0) {
@@ -136,10 +205,18 @@ async function executeDelegate(
     delegationEventIds[d.recipientPubkey] = d.eventId;
   }
 
+  // Build human-readable message for the LLM
+  const delegationLines = pendingDelegations.map(d => {
+    const recipient = d.recipientSlug ? `@${d.recipientSlug}` : d.recipientPubkey.substring(0, 8);
+    return `${recipient} -> ${d.eventId}`;
+  });
+  const message = `Delegated to:\n${delegationLines.join("\n")}`;
+
   const stopSignal: DelegateOutput = {
     __stopExecution: true as const,
     pendingDelegations,
     delegationEventIds,
+    message,
   };
 
   logger.info("[delegate] Published delegations, returning stop signal", {
@@ -192,11 +269,14 @@ export function createDelegateTool(context: ExecutionContext): AISdkTool {
       if (delegations.length === 1) {
         const d = delegations[0];
         const phaseStr = "phase" in d && d.phase ? ` (${d.phase} phase)` : "";
-        return `Delegating to ${d.recipient}${phaseStr}`;
+        const pairStr = d.pair ? " with pairing" : "";
+        return `Delegating to ${d.recipient}${phaseStr}${pairStr}`;
       }
 
+      const hasPairing = delegations.some((d) => d.pair);
       const recipients = delegations.map((d) => d.recipient).join(", ");
-      return `Delegating ${delegations.length} tasks to: ${recipients}`;
+      const pairStr = hasPairing ? " with pairing" : "";
+      return `Delegating ${delegations.length} tasks to: ${recipients}${pairStr}`;
     },
     enumerable: false,
     configurable: true,

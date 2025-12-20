@@ -108,11 +108,42 @@ export class AgentExecutor {
             try {
                 const ralRegistry = RALRegistry.getInstance();
 
+                // Check if there's already a streaming RAL that will handle injections
+                // This prevents creating duplicate executions when checkpoints fire
+                // while a RAL is already actively processing
+                const streamingRal = ralRegistry.findStreamingRAL(
+                    context.agent.pubkey,
+                    context.conversationId
+                );
+
+                if (streamingRal) {
+                    // Don't create a new execution - the streaming RAL will pick up
+                    // any queued injections in its prepareStep callback
+                    logger.debug("[AgentExecutor] Skipping execution - RAL already streaming", {
+                        agent: context.agent.slug,
+                        streamingRal: streamingRal.ralNumber,
+                        pendingDelegations: streamingRal.pendingDelegations.length,
+                        queuedInjections: streamingRal.queuedInjections.length,
+                    });
+                    span.addEvent("executor.skipped_streaming_active", {
+                        "streaming_ral.number": streamingRal.ralNumber,
+                        "streaming_ral.has_pending_delegations": streamingRal.pendingDelegations.length > 0,
+                        "streaming_ral.queued_injections": streamingRal.queuedInjections.length,
+                    });
+                    span.end();
+                    return undefined;
+                }
+
                 // Check for a resumable RAL (one with completed delegations ready to continue)
                 const resumableRal = ralRegistry.findResumableRAL(
                     context.agent.pubkey,
                     context.conversationId
                 );
+
+                // Also check for RAL with queued injections (e.g., pairing checkpoint)
+                const injectionRal = !resumableRal
+                    ? ralRegistry.findRALWithInjections(context.agent.pubkey, context.conversationId)
+                    : undefined;
 
                 let ralNumber: number;
                 let isResumption = false;
@@ -122,12 +153,12 @@ export class AgentExecutor {
                     ralNumber = resumableRal.ralNumber;
                     isResumption = true;
 
-                    // Inject delegation results into the RAL
+                    // Inject delegation results into the RAL as user message
                     const resultsMessage = ralRegistry.buildDelegationResultsMessage(
                         resumableRal.completedDelegations
                     );
                     if (resultsMessage) {
-                        ralRegistry.queueSystemMessage(
+                        ralRegistry.queueUserMessage(
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber,
@@ -145,6 +176,16 @@ export class AgentExecutor {
                     span.addEvent("executor.ral_resumed", {
                         "ral.number": ralNumber,
                         "delegation.completed_count": resumableRal.completedDelegations.length,
+                    });
+                } else if (injectionRal) {
+                    // Resume RAL with queued injections (pairing checkpoint)
+                    ralNumber = injectionRal.ralNumber;
+                    isResumption = true;
+
+                    span.addEvent("executor.ral_resumed_for_injection", {
+                        "ral.number": ralNumber,
+                        "injection.count": injectionRal.queuedInjections.length,
+                        "pending_delegations": injectionRal.pendingDelegations.length,
                     });
                 } else {
                     // Create a new RAL for this execution
