@@ -59,6 +59,7 @@ import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
 /**
@@ -153,11 +154,11 @@ export class ToolExecutionTracker {
      * 3. Stores the execution state for later correlation with results
      *
      * @param options - Configuration for tracking the execution
-     * @returns Promise that resolves when the execution is tracked and event is published
+     * @returns Promise that resolves with the published Nostr event
      *
      * @throws Will throw if Nostr event publishing fails
      */
-    async trackExecution(options: TrackExecutionOptions): Promise<void> {
+    async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent> {
         const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
@@ -215,6 +216,8 @@ export class ToolExecutionTracker {
             toolEventId: toolEvent.id,
             totalTracked: this.executions.size,
         });
+
+        return toolEvent;
     }
 
     /**

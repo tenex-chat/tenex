@@ -573,7 +573,7 @@ export class AgentExecutor {
             const argsPreview = argsStr.substring(0, 50);
             console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`));
 
-            await toolTracker.trackExecution({
+            const toolEvent = await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
                 args: event.args,
@@ -581,6 +581,9 @@ export class AgentExecutor {
                 agentPublisher,
                 eventContext,
             });
+
+            // Add tool event to conversation history so it's visible in future turns
+            await context.conversationCoordinator.addEvent(context.conversationId, toolEvent);
         });
 
         llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
