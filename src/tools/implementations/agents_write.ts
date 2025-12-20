@@ -3,7 +3,7 @@ import { createAgentInstance } from "@/agents/agent-loader";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";

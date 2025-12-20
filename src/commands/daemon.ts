@@ -4,7 +4,7 @@ import { TerminalInputManager } from "@/daemon/TerminalInputManager";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { dynamicToolService } from "@/services/DynamicToolService";
-import { SchedulerService } from "@/services/SchedulerService";
+import { SchedulerService } from "@/services/scheduling";
 import { logger } from "@/utils/logger";
 import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "@/utils/setup";

@@ -4,7 +4,7 @@ import {
     getProjectContext,
     isProjectContextInitialized,
     type ProjectContext,
-} from "@/services/ProjectContext";
+} from "@/services/projects";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";

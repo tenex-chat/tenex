@@ -2,7 +2,7 @@ import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
