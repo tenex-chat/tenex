@@ -210,7 +210,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         // AI SDK DevTools - captures LLM interactions for debugging
         // View at http://localhost:4983 after running: npx @ai-sdk/devtools
-        middlewares.push(devToolsMiddleware());
+        middlewares.push(devToolsMiddleware() as LanguageModelMiddleware);
 
         // Flight recorder - records LLM interactions when enabled via 'r' key
         middlewares.push(createFlightRecorderMiddleware());
