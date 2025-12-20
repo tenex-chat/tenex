@@ -40,7 +40,7 @@ export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
         "discover_capabilities",
         "agents_hire",
         "agents_discover",
-        "nostr_projects",
+        "project_list",
     ];
 
     return tools;
@@ -60,6 +60,23 @@ export const DELEGATE_TOOLS: ToolName[] = [
  * Phase management tools
  */
 export const PHASE_MANAGEMENT_TOOLS: ToolName[] = ["phase_add", "phase_remove"];
+
+/**
+ * Context-sensitive tools that are auto-injected based on runtime conditions.
+ * These should NOT appear in TenexProjectStatus (24010) events since they're
+ * not configurable per-agent - they're injected based on execution context.
+ */
+export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
+    // Alpha mode bug reporting tools (injected when alphaMode is true)
+    "bug_list",
+    "bug_report_create",
+    "bug_report_add",
+    // RAL management tools (injected when hasConcurrentRALs is true)
+    "ral_inject",
+    "ral_abort",
+    // Pairing tools (injected when hasActivePairings is true)
+    "stop_pairing",
+];
 
 /**
  * Get the correct delegate tools for an agent based on whether they have phases defined

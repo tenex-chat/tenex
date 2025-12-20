@@ -301,16 +301,20 @@ export class ProjectStatusService {
             const projectCtx = this.projectContext || getProjectContext();
             const toolAgentMap = new Map<string, Set<string>>();
 
-            // Import the delegate tools and core tools lists from the single source of truth
-            const { DELEGATE_TOOLS, CORE_AGENT_TOOLS } = await import("@/agents/constants");
+            // Import the delegate tools, core tools, and context-injected tools from the single source of truth
+            const { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } = await import("@/agents/constants");
 
-            // First, add ALL tool names from the registry (except delegate tools and core tools)
+            // First, add ALL tool names from the registry (except excluded tools)
             const { getAllToolNames } = await import("@/tools/registry");
             const allToolNames = getAllToolNames();
             for (const toolName of allToolNames) {
-                // Skip delegate tools and core tools from TenexProjectStatus events
-                // These are handled automatically by the system
-                if (!DELEGATE_TOOLS.includes(toolName) && !CORE_AGENT_TOOLS.includes(toolName)) {
+                // Skip delegate tools, core tools, and context-injected tools from TenexProjectStatus events
+                // These are handled automatically by the system and not configurable per-agent
+                if (
+                    !DELEGATE_TOOLS.includes(toolName) &&
+                    !CORE_AGENT_TOOLS.includes(toolName) &&
+                    !CONTEXT_INJECTED_TOOLS.includes(toolName)
+                ) {
                     toolAgentMap.set(toolName, new Set());
                 }
             }
@@ -326,9 +330,13 @@ export class ProjectStatusService {
                         logger.warn(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
                         continue;
                     }
-                    // Skip delegate tools and core tools - they're not included in TenexProjectStatus events
+                    // Skip delegate tools, core tools, and context-injected tools - they're not included in TenexProjectStatus events
                     // These are handled automatically by the system
-                    if (DELEGATE_TOOLS.includes(toolName as any) || CORE_AGENT_TOOLS.includes(toolName as any)) {
+                    if (
+                        DELEGATE_TOOLS.includes(toolName as any) ||
+                        CORE_AGENT_TOOLS.includes(toolName as any) ||
+                        CONTEXT_INJECTED_TOOLS.includes(toolName as any)
+                    ) {
                         continue;
                     }
                     const toolAgents = toolAgentMap.get(toolName);

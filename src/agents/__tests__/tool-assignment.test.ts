@@ -63,7 +63,7 @@ describe("Tool assignment", () => {
             expect(tools).toContain("agents_hire");
             expect(tools).toContain("agents_discover");
             expect(tools).toContain("discover_capabilities");
-            expect(tools).toContain("nostr_projects");
+            expect(tools).toContain("project_list");
         });
     });
 

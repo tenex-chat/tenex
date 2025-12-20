@@ -2,7 +2,7 @@ import type { LLMLogger } from "@/logging/LLMLogger";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { trace } from "@opentelemetry/api";
+import { trace, type Span } from "@opentelemetry/api";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -31,12 +31,28 @@ export class LLMServiceFactory {
         providerConfigs: Record<string, { apiKey: string }>,
         options?: { enableTenexTools?: boolean }
     ): Promise<void> {
+        const tracer = trace.getTracer("llm-service-factory");
+
+        return tracer.startActiveSpan("initializeProviders", async (span) => {
+            try {
+                await this.doInitializeProviders(providerConfigs, options, span);
+            } finally {
+                span.end();
+            }
+        });
+    }
+
+    private async doInitializeProviders(
+        providerConfigs: Record<string, { apiKey: string }>,
+        options: { enableTenexTools?: boolean } | undefined,
+        span: Span
+    ): Promise<void> {
         this.providers.clear();
         this.enableTenexTools = options?.enableTenexTools !== false; // Default to true
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
-            trace.getActiveSpan()?.addEvent("llm_factory.mock_mode_enabled");
+            span.addEvent("llm_factory.mock_mode_enabled");
 
             // Dynamically import MockProvider only when needed to avoid loading test dependencies
             try {
@@ -135,7 +151,7 @@ export class LLMServiceFactory {
         if (this.providers.size > 0) {
             const providerObject = Object.fromEntries(this.providers.entries());
             this.registry = createProviderRegistry(providerObject);
-            trace.getActiveSpan()?.addEvent("llm_factory.registry_created", {
+            span.addEvent("llm_factory.registry_created", {
                 "providers.count": this.providers.size,
                 "providers.names": Array.from(this.providers.keys()).join(", "),
             });

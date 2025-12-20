@@ -29,7 +29,7 @@ import { createRalAbortTool } from "./implementations/ral_abort";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
-import { createNostrProjectsTool } from "./implementations/nostr_projects";
+import { createProjectListTool } from "./implementations/project_list";
 import { createRemovePhaseTool } from "./implementations/phase_remove";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
@@ -87,7 +87,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Project tools
     create_project: createCreateProjectTool,
-    nostr_projects: createNostrProjectsTool,
+    project_list: createProjectListTool,
 
     // Delegation tools
     delegate_external: createDelegateExternalTool,
