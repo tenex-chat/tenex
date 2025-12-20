@@ -217,7 +217,9 @@ export class AgentEventEncoder {
 
         this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
 
-        // p-tag the agent that triggered us
+        // Always p-tag the triggering event author - they are the one we're responding to.
+        // When resuming after delegation, the event handler should restore the original
+        // triggering event so we p-tag the correct requester (not the delegatee).
         event.tag(["p", context.triggeringEvent.pubkey]);
 
         // Mark as natural completion

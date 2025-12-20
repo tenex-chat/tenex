@@ -25,7 +25,7 @@ export type ToolName =
     | "ral_inject"
     | "ral_abort"
     | "ask"
-    | "nostr_projects"
+    | "project_list"
     | "create_project"
     | "delegate_external"
     | "report_write"

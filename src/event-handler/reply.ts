@@ -7,6 +7,7 @@ import type { Conversation, ConversationCoordinator } from "../conversations";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "../services/ProjectContext";
+import { RALRegistry } from "../services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
@@ -154,11 +155,36 @@ async function handleReplyLogic(
     // 2.5. Record any delegation completion (side effect only)
     // This records the completion in RALRegistry so AgentExecutor can detect resumption
     // Routing is handled normally below - the agent will be resolved via p-tags
-    await handleDelegationCompletion(
+    const delegationResult = await handleDelegationCompletion(
         event,
         conversation,
         conversationCoordinator
     );
+
+    // 2.6. If this was a delegation completion, check if we should skip execution
+    // When a delegation response arrives but there are still pending delegations,
+    // we just record it and wait - don't create a new RAL execution
+    if (delegationResult.recorded && delegationResult.agentSlug) {
+        const ralRegistry = RALRegistry.getInstance();
+        const targetAgent = projectCtx.getAgent(delegationResult.agentSlug);
+
+        if (targetAgent) {
+            const activeRals = ralRegistry.getActiveRALs(targetAgent.pubkey, conversation.id);
+            const ralWithPendingDelegations = activeRals.find(
+                ral => ral.pendingDelegations.length > 0
+            );
+
+            if (ralWithPendingDelegations) {
+                trace.getActiveSpan()?.addEvent("reply.delegation_recorded_waiting", {
+                    "agent.slug": delegationResult.agentSlug,
+                    "delegation.pending_count": ralWithPendingDelegations.pendingDelegations.length,
+                    "delegation.completed_count": ralWithPendingDelegations.completedDelegations.length,
+                });
+                // Don't proceed with execution - just wait for remaining delegations
+                return;
+            }
+        }
+    }
 
     // 3. Determine target agents
     let targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
@@ -221,13 +247,33 @@ async function handleReplyLogic(
 
     // 5. Execute each target agent in parallel
     const executionPromises = targetAgents.map(async (targetAgent) => {
+        // Check if this agent has a resumable RAL - if so, use the original triggering event
+        // This ensures p-tags go to the original requester, not the delegatee
+        let triggeringEventForContext = event;
+        const ralRegistry = RALRegistry.getInstance();
+        const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversation.id);
+
+        if (resumableRal?.originalTriggeringEventId) {
+            const originalEvent = conversation.history.find(
+                e => e.id === resumableRal.originalTriggeringEventId
+            );
+            if (originalEvent) {
+                triggeringEventForContext = originalEvent;
+                trace.getActiveSpan()?.addEvent("reply.restored_original_trigger", {
+                    "agent.slug": targetAgent.slug,
+                    "original.event_id": resumableRal.originalTriggeringEventId,
+                    "resumption.event_id": event.id || "",
+                });
+            }
+        }
+
         // Create execution context with environment resolution from event
         // The factory extracts branch tags and resolves worktrees internally
         const executionContext = await createExecutionContext({
             agent: targetAgent,
             conversationId: conversation.id,
             projectBasePath: projectCtx.agentRegistry.getBasePath(),
-            triggeringEvent: event,
+            triggeringEvent: triggeringEventForContext,
             conversationCoordinator,
         });
 
