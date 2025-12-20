@@ -122,9 +122,15 @@ export class ProviderConfigUI {
             for (const name of configNames) {
                 const config = llmsConfig.configurations[name];
                 const isDefault = name === llmsConfig.default;
-                const marker = isDefault ? chalk.cyan("• ") : "  ";
-                const defaultTag = isDefault ? chalk.gray(" (default)") : "";
-                console.log(`  ${marker}${name}${defaultTag}: ${config.provider}:${config.model}`);
+                const isSummarization = name === llmsConfig.summarization;
+                const marker = isDefault || isSummarization ? chalk.cyan("• ") : "  ";
+
+                const tags: string[] = [];
+                if (isDefault) tags.push("default");
+                if (isSummarization) tags.push("summarization");
+                const tagStr = tags.length > 0 ? chalk.gray(` (${tags.join(", ")})`) : "";
+
+                console.log(`  ${marker}${name}${tagStr}: ${config.provider}:${config.model}`);
             }
         }
     }

@@ -40,14 +40,15 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         }
 
         // Project context
-        parts.push(
-            [
-                "## Project Context",
-                `- Title: "${projectTitle}"`,
-                `- Absolute Path: ${workingDirectory || process.cwd()}`,
-                `- User (Owner) pubkey: "${projectOwnerPubkey}"`,
-            ].join("\n")
-        );
+        const contextLines = [
+            "## Project Context",
+            `- Title: "${projectTitle}"`,
+        ];
+        if (workingDirectory) {
+            contextLines.push(`- Absolute Path: ${workingDirectory}`);
+        }
+        contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
+        parts.push(contextLines.join("\n"));
 
         return parts.join("\n");
     },

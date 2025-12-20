@@ -31,8 +31,12 @@ export class LLMConfigEditor {
                     { name: "Add new configuration", value: "add" },
                     { name: "Delete configuration", value: "delete" },
                     {
-                        name: `Set default (current: ${llmsConfig.default || "none"})`,
+                        name: `Default agents' model: ${llmsConfig.default || "none"}`,
                         value: "default",
+                    },
+                    {
+                        name: `Summarization model: ${llmsConfig.summarization || "none"}`,
+                        value: "summarization",
                     },
                     { name: "Test configuration", value: "test" },
                     { name: "Exit", value: "exit" },
@@ -52,6 +56,7 @@ export class LLMConfigEditor {
             if (action === "add") await ConfigurationManager.add(llmsConfig);
             if (action === "delete") await ConfigurationManager.delete(llmsConfig);
             if (action === "default") await ConfigurationManager.setDefault(llmsConfig);
+            if (action === "summarization") await ConfigurationManager.setSummarizationModel(llmsConfig);
             await this.saveConfig(llmsConfig);
         }
 

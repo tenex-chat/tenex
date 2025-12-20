@@ -23,28 +23,71 @@ interface ConversationGetOutput {
 }
 
 /**
- * Safely copy data while handling circular references
- * Uses JSON.stringify with a replacer function that tracks seen objects
- * and replaces circular references with '[Circular]'
+ * Recursively deep copy an object while handling cycles, BigInts, Maps, Sets, and other edge cases
+ */
+function safeDeepCopy(obj: unknown, seen = new WeakSet()): unknown {
+    // Handle primitives and special values
+    if (obj === null || typeof obj !== 'object') {
+        if (typeof obj === 'bigint') return obj.toString();
+        if (typeof obj === 'function') return undefined;
+        return obj;
+    }
+
+    // Cycle detection
+    if (seen.has(obj)) {
+        return '[Circular]';
+    }
+    seen.add(obj);
+
+    // Handle Arrays
+    if (Array.isArray(obj)) {
+        return obj.map(item => safeDeepCopy(item, seen));
+    }
+
+    // Handle Maps
+    if (obj instanceof Map) {
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of obj) {
+            result[String(key)] = safeDeepCopy(value, seen);
+        }
+        return result;
+    }
+
+    // Handle Sets
+    if (obj instanceof Set) {
+        return Array.from(obj).map(item => safeDeepCopy(item, seen));
+    }
+
+    // Handle Dates
+    if (obj instanceof Date) {
+        return obj.toISOString();
+    }
+
+    // Handle plain Objects
+    const result: Record<string, unknown> = {};
+    for (const key in obj) {
+        // Only process own properties
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            try {
+                result[key] = safeDeepCopy((obj as Record<string, unknown>)[key], seen);
+            } catch {
+                result[key] = '[Access Error]';
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * Safely copy data while handling circular references, BigInts, Maps, Sets, and other edge cases
+ * Uses recursive deep copy with cycle detection instead of JSON.stringify
  */
 function safeCopy<T>(data: T): T {
-    const seen = new WeakSet();
-
-    const replacer = (_key: string, value: unknown): unknown => {
-        if (typeof value === "object" && value !== null) {
-            if (seen.has(value)) {
-                return "[Circular]";
-            }
-            seen.add(value);
-        }
-        return value;
-    };
-
     try {
-        return JSON.parse(JSON.stringify(data, replacer));
+        return safeDeepCopy(data) as T;
     } catch {
-        // If JSON.stringify still fails, return a safe fallback
-        return data;
+        // Fallback to string representation if even deep copy fails
+        return '[Serialization Failed]' as unknown as T;
     }
 }
 

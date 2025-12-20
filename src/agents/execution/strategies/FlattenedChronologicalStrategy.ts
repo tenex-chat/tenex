@@ -48,6 +48,75 @@ interface PreviousSubthread {
 }
 
 /**
+ * Reconstruct tool messages from a published tool event when storage is unavailable.
+ * Tool events are published with JSON content containing tool name, input, and output.
+ */
+function reconstructToolMessagesFromEvent(event: NDKEvent): ModelMessage[] | null {
+    try {
+        const parsed = JSON.parse(event.content);
+
+        // Validate required fields
+        if (!parsed.tool || parsed.input === undefined) {
+            logger.warn("[FlattenedChronologicalStrategy] Tool event missing required fields", {
+                eventId: event.id.substring(0, 8),
+                hasTool: !!parsed.tool,
+                hasInput: parsed.input !== undefined,
+            });
+            return null;
+        }
+
+        // Use first 16 chars of event ID as toolCallId
+        const toolCallId = `call_${event.id.substring(0, 16)}`;
+
+        // Build the tool-call message (assistant role)
+        const toolCallMessage: ModelMessage = {
+            role: "assistant",
+            content: [
+                {
+                    type: "tool-call" as const,
+                    toolCallId,
+                    toolName: parsed.tool,
+                    input: parsed.input,
+                },
+            ],
+        };
+
+        // Build the tool-result message (tool role)
+        const outputValue = parsed.output !== undefined
+            ? (typeof parsed.output === "string" ? parsed.output : JSON.stringify(parsed.output))
+            : "";
+
+        const toolResultMessage: ModelMessage = {
+            role: "tool",
+            content: [
+                {
+                    type: "tool-result" as const,
+                    toolCallId,
+                    toolName: parsed.tool,
+                    output: {
+                        type: "text" as const,
+                        value: outputValue,
+                    },
+                },
+            ],
+        };
+
+        logger.debug("[FlattenedChronologicalStrategy] Reconstructed tool messages from event", {
+            eventId: event.id.substring(0, 8),
+            toolName: parsed.tool,
+        });
+
+        return [toolCallMessage, toolResultMessage];
+    } catch (error) {
+        logger.warn("[FlattenedChronologicalStrategy] Failed to parse tool event content", {
+            eventId: event.id.substring(0, 8),
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+    }
+}
+
+/**
  * Message generation strategy that provides a flattened, chronological view
  * of all threads the agent has participated in, with delegation markers
  */
@@ -827,8 +896,14 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         if (isToolEvent) {
             if (isThisAgent) {
-                // Load tool messages from storage
-                const toolMessages = await toolMessageStorage.load(event.id);
+                // Try to load tool messages from storage first
+                let toolMessages = await toolMessageStorage.load(event.id);
+
+                // Fallback: reconstruct from event content if storage missed it
+                if (!toolMessages) {
+                    toolMessages = reconstructToolMessagesFromEvent(event);
+                }
+
                 if (toolMessages) {
                     // Add event ID prefix in debug mode
                     if (debug) {
@@ -842,6 +917,12 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                     messages.push(...toolMessages);
                     return messages;
                 }
+
+                // If we still can't reconstruct, log and skip
+                logger.warn("[FlattenedChronologicalStrategy] Could not load or reconstruct tool event", {
+                    eventId: event.id.substring(0, 8),
+                });
+                return [];
             } else {
                 // Skip tool events from other agents
                 return [];

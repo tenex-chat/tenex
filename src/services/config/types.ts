@@ -94,6 +94,7 @@ export interface TenexLLMs {
     >;
     configurations: Record<string, LLMConfiguration>;
     default?: string;
+    summarization?: string; // Named config to use for generating summaries (kind 513 events)
 }
 
 export const LLMConfigurationSchema = z
@@ -117,6 +118,7 @@ export const TenexLLMsSchema = z.object({
         .default({}),
     configurations: z.record(z.string(), LLMConfigurationSchema).default({}),
     default: z.string().optional(),
+    summarization: z.string().optional(),
 });
 
 // =====================================================================================
