@@ -12,14 +12,14 @@ const createProjectSchema = z.object({
     description: z.string().nullable().describe("Description of the project"),
     repository: z.string().nullable().describe("Repository URL for the project"),
     image: z.string().nullable().describe("Image URL for the project"),
-    tags: z.array(z.string()).nullable().describe("Additional tags for the project"),
+    tags: z.array(z.string()).default([]).describe("Additional tags for the project"),
     agents: z
         .array(z.string())
-        .nullable()
+        .default([])
         .describe("Array of agent definition event IDs to include in the project"),
     mcpServers: z
         .array(z.string())
-        .nullable()
+        .default([])
         .describe("Array of MCP announcement event IDs to include in the project"),
 });
 
@@ -74,36 +74,27 @@ async function executeCreateProject(
         }
 
         // Add any additional tags
-        if (tags && tags.length > 0) {
-            for (const tag of tags) {
-                // Add as generic "t" tags for categorization
-                project.tags.push(["t", tag]);
-            }
+        for (const tag of tags) {
+            project.tags.push(["t", tag]);
         }
 
         // Add agent event IDs
-        if (agents && agents.length > 0) {
-            for (const agentEventId of agents) {
-                // Normalize the event ID (handles nostr: prefix and validates format)
-                const cleanEventId = normalizeNostrIdentifier(agentEventId);
-                if (cleanEventId) {
-                    project.tags.push(["agent", cleanEventId]);
-                } else {
-                    logger.warn(`Invalid agent event ID format: ${agentEventId}`);
-                }
+        for (const agentEventId of agents) {
+            const cleanEventId = normalizeNostrIdentifier(agentEventId);
+            if (cleanEventId) {
+                project.tags.push(["agent", cleanEventId]);
+            } else {
+                logger.warn(`Invalid agent event ID format: ${agentEventId}`);
             }
         }
 
         // Add MCP server event IDs
-        if (mcpServers && mcpServers.length > 0) {
-            for (const mcpEventId of mcpServers) {
-                // Normalize the event ID (handles nostr: prefix and validates format)
-                const cleanEventId = normalizeNostrIdentifier(mcpEventId);
-                if (cleanEventId) {
-                    project.tags.push(["mcp", cleanEventId]);
-                } else {
-                    logger.warn(`Invalid MCP event ID format: ${mcpEventId}`);
-                }
+        for (const mcpEventId of mcpServers) {
+            const cleanEventId = normalizeNostrIdentifier(mcpEventId);
+            if (cleanEventId) {
+                project.tags.push(["mcp", cleanEventId]);
+            } else {
+                logger.warn(`Invalid MCP event ID format: ${mcpEventId}`);
             }
         }
 

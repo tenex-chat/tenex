@@ -21,7 +21,7 @@ const lessonLearnSchema = z.object({
         ),
     hashtags: z
         .array(z.string())
-        .optional()
+        .default([])
         .describe("Hashtags for easier sorting and discovery (e.g., ['async', 'error-handling'])"),
 });
 
@@ -95,8 +95,8 @@ async function executeLessonLearn(
                 content: lessonContent,
                 metadata: {
                     title,
-                    category: category || undefined,
-                    hashtags: hashtags || undefined,
+                    category,
+                    hashtags: hashtags.length > 0 ? hashtags : undefined,
                     agentPubkey: context.agent.pubkey,
                     agentName: context.agent.name,
                     timestamp: Date.now(),
