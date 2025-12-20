@@ -7,6 +7,23 @@ import { recordingState } from "../RecordingState";
 type WrapGenerateParams = Parameters<NonNullable<LanguageModelMiddleware["wrapGenerate"]>>[0];
 type WrapStreamParams = Parameters<NonNullable<LanguageModelMiddleware["wrapStream"]>>[0];
 
+// Recording types - using unknown for SDK types that may change between versions
+interface RecordingResponse {
+    content: unknown;
+    finishReason: string;
+    usage: unknown;
+}
+
+interface RecordingError {
+    message: string;
+}
+
+interface ToolCallRecord {
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+}
+
 /**
  * Flight recorder configuration
  */
@@ -48,8 +65,8 @@ export function createFlightRecorderMiddleware(
                     tools: params.tools,
                     toolChoice: params.toolChoice,
                 },
-                response: null as any,
-                error: null as any,
+                response: null as RecordingResponse | null,
+                error: null as RecordingError | null,
                 duration: 0,
             };
 
@@ -83,9 +100,9 @@ export function createFlightRecorderMiddleware(
 
             // Buffer to collect stream content
             const textParts: string[] = [];
-            const toolCalls: any[] = [];
+            const toolCalls: ToolCallRecord[] = [];
             let finishReason: string | undefined;
-            let usage: any;
+            let usage: unknown;
 
             // Wrap the stream with a TransformStream to intercept chunks
             return doStream().then((result) => {
@@ -144,7 +161,7 @@ export function createFlightRecorderMiddleware(
     };
 }
 
-async function saveRecording(baseDir: string, hash: string, recording: any): Promise<void> {
+async function saveRecording(baseDir: string, hash: string, recording: Record<string, unknown>): Promise<void> {
     try {
         const now = new Date();
         const dateStr = now.toISOString().split("T")[0];
