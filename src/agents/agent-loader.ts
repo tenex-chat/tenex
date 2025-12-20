@@ -8,7 +8,6 @@ import { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore"
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { config } from "@/services/ConfigService";
-import { getProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -53,10 +52,7 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
         },
         createLLMService: (options) => {
-            const projectCtx = getProjectContext();
-            const llmLogger = projectCtx.llmLogger.withAgent(storedAgent.name);
             return config.createLLMService(
-                llmLogger,
                 agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
                 {
                     tools: options?.tools ?? {},

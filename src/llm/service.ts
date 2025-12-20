@@ -1,5 +1,4 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
-import type { LLMLogger } from "@/logging/LLMLogger";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
@@ -121,7 +120,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private cachedContentForComplete = "";
 
     constructor(
-        private readonly llmLogger: LLMLogger,
         private readonly registry: ProviderRegistryProvider<any, any> | null,
         provider: string,
         model: string,
@@ -288,20 +286,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Add provider-specific cache control
         processedMessages = this.addCacheControl(processedMessages);
 
-        // Log the request
-        this.llmLogger
-            .logLLMRequest({
-                configKey: `${this.provider}:${this.model}`,
-                provider: this.provider,
-                model: this.model,
-                messages,
-                tools: Object.keys(tools).map((name) => ({ name })),
-                startTime,
-            })
-            .catch((err) => {
-                logger.error("[LLMService] Failed to log request", { error: err });
-            });
-
         try {
             const result = await generateText({
                 model,
@@ -395,26 +379,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             const duration = Date.now() - startTime;
 
-            // Log the response
-            this.llmLogger
-                .logLLMResponse({
-                    response: {
-                        content: result.text,
-                        usage: {
-                            prompt_tokens: result.usage?.inputTokens,
-                            completion_tokens: result.usage?.outputTokens,
-                            total_tokens:
-                                (result.usage?.inputTokens ?? 0) +
-                                (result.usage?.outputTokens ?? 0),
-                        },
-                    },
-                    endTime: Date.now(),
-                    startTime,
-                })
-                .catch((err) => {
-                    logger.error("[LLMService] Failed to log response", { error: err });
-                });
-
             trace.getActiveSpan()?.addEvent("llm.complete_response", {
                 "llm.model": `${this.provider}:${this.model}`,
                 "llm.duration_ms": duration,
@@ -425,16 +389,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             return result;
         } catch (error) {
             const duration = Date.now() - startTime;
-
-            this.llmLogger
-                .logLLMResponse({
-                    error: error as Error,
-                    endTime: Date.now(),
-                    startTime,
-                })
-                .catch((err) => {
-                    logger.error("[LLMService] Failed to log error", { error: err });
-                });
 
             logger.error("[LLMService] Complete failed", {
                 model: `${this.provider}:${this.model}`,
@@ -473,20 +427,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         // Add provider-specific cache control
         processedMessages = this.addCacheControl(processedMessages);
-
-        // Log the request
-        this.llmLogger
-            .logLLMRequest({
-                configKey: `${this.provider}:${this.model}`,
-                provider: this.provider,
-                model: this.model,
-                messages,
-                tools: Object.keys(tools).map((name) => ({ name })),
-                startTime: Date.now(),
-            })
-            .catch((err) => {
-                logger.error("[LLMService] Failed to log request", { error: err });
-            });
 
         const startTime = Date.now();
 
@@ -544,7 +484,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             },
 
             onChunk: this.handleChunk.bind(this),
-            onFinish: this.createFinishHandler(startTime),
+            onFinish: this.createFinishHandler(),
         });
 
         // Consume the stream (this is what triggers everything!)
@@ -649,9 +589,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         }
     }
 
-    private createFinishHandler(
-        startTime: number
-    ): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
+    private createFinishHandler(): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
         return async (e) => {
             try {
                 // Check for invalid tool calls and mark span as error
@@ -731,20 +669,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                         ? this.cachedContentForComplete
                         : e.text || "";
 
-                await this.llmLogger.logLLMResponse({
-                    response: {
-                        content: e.text,
-                        usage: {
-                            prompt_tokens: e.totalUsage?.inputTokens,
-                            completion_tokens: e.totalUsage?.outputTokens,
-                            total_tokens:
-                                (e.totalUsage?.inputTokens ?? 0) + (e.totalUsage?.outputTokens ?? 0),
-                        },
-                    },
-                    endTime: Date.now(),
-                    startTime,
-                });
-
                 if (
                     this.provider === "claudeCode" &&
                     e.providerMetadata?.["claude-code"]?.sessionId
@@ -789,16 +713,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
     private async handleStreamError(error: unknown, startTime: number): Promise<void> {
         const duration = Date.now() - startTime;
-
-        await this.llmLogger
-            .logLLMResponse({
-                error: error as Error,
-                endTime: Date.now(),
-                startTime,
-            })
-            .catch((err) => {
-                logger.error("[LLMService] Failed to log error response", { error: err });
-            });
 
         // Format stack trace for better readability
         const stackLines =
@@ -936,42 +850,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     }
 
     /**
-     * Log generation request
-     */
-    private async logGenerationRequest(messages: ModelMessage[], startTime: number): Promise<void> {
-        await this.llmLogger.logLLMRequest({
-            messages,
-            model: this.model,
-            provider: this.provider,
-            configKey: `${this.provider}:${this.model}`,
-            startTime,
-        });
-    }
-
-    /**
-     * Log generation response
-     */
-    private async logGenerationResponse(
-        content: string,
-        usage: LanguageModelUsage,
-        startTime: number
-    ): Promise<void> {
-        await this.llmLogger.logLLMResponse({
-            response: {
-                content,
-                usage: {
-                    prompt_tokens: usage?.inputTokens,
-                    completion_tokens: usage?.outputTokens,
-                    total_tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
-                },
-            },
-            endTime: Date.now(),
-            startTime,
-        });
-    }
-
-    /**
-     * Execute object generation and handle logging
+     * Execute object generation
      */
     private async executeObjectGeneration<T>(
         languageModel: LanguageModel,
@@ -1023,13 +902,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 );
 
                 const duration = Date.now() - startTime;
-
-                await this.logGenerationRequest(messages, startTime);
-                await this.logGenerationResponse(
-                    JSON.stringify(result.object),
-                    result.usage,
-                    startTime
-                );
 
                 trace.getActiveSpan()?.addEvent("llm.generate_object_complete", {
                     "llm.provider": this.provider,

@@ -1,7 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { ALPHA_BUG_HASHTAG, TENEX_BACKEND_PROJECT_ATAG } from "@/constants";
 import { llmServiceFactory } from "@/llm";
-import { LLMLogger } from "@/logging/LLMLogger";
 import { getNDK } from "@/nostr";
 import { config } from "@/services/ConfigService";
 import type { AISdkTool } from "@/tools/types";
@@ -57,9 +56,8 @@ async function summarizeBugConversation(
         };
     }
 
-    // Create LLM service with minimal logger (won't log since not initialized)
-    const llmLogger = new LLMLogger();
-    const llmService = llmServiceFactory.createService(llmLogger, metadataConfig, {
+    // Create LLM service
+    const llmService = llmServiceFactory.createService(metadataConfig, {
         agentName: "bug-summarizer",
         sessionId: `bug-summarizer-${bugEvent.id}`,
     });

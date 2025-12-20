@@ -3,7 +3,7 @@ import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import chalk from "chalk";
-import type { VCRCassette, VCRInteraction } from "@/test-utils/vcr";
+import { hashRequest, type VCRCassette, type VCRInteraction } from "@/test-utils/vcr";
 
 /**
  * Extracts a flight recording to a VCR cassette file
@@ -58,7 +58,7 @@ async function extractRecording(
 
         // Convert recording to VCR interaction
         const interaction: VCRInteraction = {
-            hash: createHash(recording.request.prompt),
+            hash: hashRequest({ prompt: recording.request.prompt }),
             request: {
                 prompt: recording.request.prompt,
                 temperature: recording.request.temperature,
@@ -154,13 +154,3 @@ function createEmptyCassette(cassettePath: string): VCRCassette {
     };
 }
 
-function createHash(prompt: any): string {
-    const input = JSON.stringify(prompt, null, 0);
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-        const char = input.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16).substring(0, 16).padStart(16, "0");
-}

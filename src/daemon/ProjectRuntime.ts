@@ -5,7 +5,6 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import { ConversationCoordinator } from "@/conversations";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { LLMLogger } from "@/logging/LLMLogger";
 import { getNDK } from "@/nostr";
 import { ProjectContext } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
@@ -115,11 +114,8 @@ export class ProjectRuntime {
             const agentRegistry = new AgentRegistry(this.projectBasePath, this.metadataPath);
             await agentRegistry.loadFromProject(this.project);
 
-            const llmLogger = new LLMLogger();
-            llmLogger.initialize(this.metadataPath);
-
             // Create project context directly (don't use global singleton)
-            this.context = new ProjectContext(this.project, agentRegistry, llmLogger);
+            this.context = new ProjectContext(this.project, agentRegistry);
 
             // Load MCP tools from project event
             await this.initializeMCPTools();
