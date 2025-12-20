@@ -147,7 +147,13 @@ Use this section to understand each service’s scope and dependencies:
 - Added `lint:architecture` script for static architecture checks
 
 ### Ongoing Improvements (Gradual Migration)
-- **Layer violation fixes**: Some `utils/` files import from `services/` (e.g., `relays.ts`, `lockfile.ts`, `cli-config-scope.ts`). These should be moved to appropriate layers or refactored to accept dependencies as parameters.
+- **Layer violations fixed (COMPLETED 2025-12-20)**: Fixed all `utils/` → `services/` layer violations:
+  - Moved `relays.ts` to `nostr/` (Nostr-specific)
+  - Refactored `lockfile.ts` to accept path parameter
+  - Deleted `cli-config-scope.ts` (unused)
+  - Moved `setup.ts` to `commands/setup/interactive.ts`
+  - Refactored `worktree.ts` metadata functions to accept projectsConfigPath
+  - Moved `agent-resolution.ts` to `services/agents/`
 - **Dependency injection pattern**: Gradually convert singletons to DI pattern with exported convenience instances.
 
 ### Known Issues to Address
