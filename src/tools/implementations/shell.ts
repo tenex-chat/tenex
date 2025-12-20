@@ -72,7 +72,7 @@ export function createShellTool(context: ExecutionContext): AISdkTool {
 
 IMPORTANT ESCAPING & STRING HANDLING:
 - For complex/multi-line strings (git commits, PR bodies, JSON, etc.), ALWAYS use HEREDOC pattern:
-  command -m "\$(cat <<'EOF'
+  command -m "$(cat <<'EOF'
   Your multi-line content here
   With "quotes" and $variables that don't need escaping!
   EOF

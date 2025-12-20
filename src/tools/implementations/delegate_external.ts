@@ -35,7 +35,7 @@ async function executeDelegateExternal(
 
   if (pubkey === context.agent.pubkey && !projectId) {
     throw new Error(
-      `Self-delegation requires a projectId for cross-project delegation.`
+      "Self-delegation requires a projectId for cross-project delegation."
     );
   }
 

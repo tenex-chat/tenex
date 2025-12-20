@@ -15,7 +15,7 @@ export function logRoutingDecision(
     routingMethod: "a_tag" | "p_tag_agent" | "none" = "none",
     matchedTags: string[] = [],
     reason?: string
-) {
+): Promise<void> {
     // Convert complex RoutingDecision to simple string type for logger
     const loggerDecision = routingDecision.type === "route_to_project" ? "routed" : routingDecision.type;
 
@@ -33,7 +33,7 @@ export function logDropped(
     routingLogger: EventRoutingLogger,
     event: NDKEvent,
     reason: string
-) {
+): Promise<void> {
     logger.debug(`Event dropped: ${reason}`, {
         eventId: event.id?.slice(0, 8),
         eventKind: event.kind,
@@ -52,7 +52,7 @@ export function logRouted(
     projectId: string,
     method: "a_tag" | "p_tag_agent",
     matchedTags: string[]
-) {
+): Promise<void> {
     logger.debug("Routing event to project", {
         eventId: event.id?.slice(0, 8),
         projectId: projectId.slice(0, 16),

@@ -823,13 +823,13 @@ export class RALRegistry {
         continue;
       }
 
-      let resolve: () => void;
+      let resolver: () => void = () => {};
       const promise = new Promise<void>((r) => {
-        resolve = r;
+        resolver = r;
       });
       ral.pausedByRalNumber = pausingRalNumber;
       ral.pausePromise = promise;
-      ral.pauseResolver = resolve!;
+      ral.pauseResolver = resolver;
       pausedCount++;
       paused.push(ral.ralNumber);
     }
