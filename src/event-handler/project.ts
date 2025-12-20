@@ -2,7 +2,7 @@ import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
 import { TagExtractor } from "../nostr/TagExtractor";
-import { getProjectContext, isProjectContextInitialized } from "../services/ProjectContext";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { mcpService } from "../services/mcp/MCPManager";
 import {
     getInstalledMCPEventIds,

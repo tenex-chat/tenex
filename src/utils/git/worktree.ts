@@ -3,7 +3,6 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import { exec } from "node:child_process";
 import { logger } from "@/utils/logger";
-import { config } from "@/services/ConfigService";
 import { ensureWorktreesGitignore } from "./gitignore";
 
 const execAsync = promisify(exec);
@@ -176,12 +175,13 @@ export async function createWorktree(
 /**
  * Get the path to the worktree metadata file for a project
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs (e.g., ~/.tenex/projects)
  * @returns Path to the worktree metadata JSON file
  */
-export async function getWorktreeMetadataPath(projectPath: string): Promise<string> {
+export async function getWorktreeMetadataPath(projectPath: string, projectsConfigPath: string): Promise<string> {
   // Extract dTag from project path (last segment of path)
   const dTag = path.basename(projectPath);
-  const metadataDir = path.join(config.getConfigPath("projects"), dTag);
+  const metadataDir = path.join(projectsConfigPath, dTag);
 
   // Ensure the metadata directory exists
   await fs.mkdir(metadataDir, { recursive: true });
@@ -192,13 +192,15 @@ export async function getWorktreeMetadataPath(projectPath: string): Promise<stri
 /**
  * Load worktree metadata for a project
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs (e.g., ~/.tenex/projects)
  * @returns Map of branch names to metadata
  */
 export async function loadWorktreeMetadata(
-  projectPath: string
+  projectPath: string,
+  projectsConfigPath: string
 ): Promise<Record<string, WorktreeMetadata>> {
   try {
-    const metadataPath = await getWorktreeMetadataPath(projectPath);
+    const metadataPath = await getWorktreeMetadataPath(projectPath, projectsConfigPath);
     const content = await fs.readFile(metadataPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
@@ -216,26 +218,30 @@ export async function loadWorktreeMetadata(
 /**
  * Save worktree metadata for a project
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  * @param metadata - Map of branch names to metadata
  */
 async function saveWorktreeMetadata(
   projectPath: string,
+  projectsConfigPath: string,
   metadata: Record<string, WorktreeMetadata>
 ): Promise<void> {
-  const metadataPath = await getWorktreeMetadataPath(projectPath);
+  const metadataPath = await getWorktreeMetadataPath(projectPath, projectsConfigPath);
   await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 }
 
 /**
  * Track the creation of a new worktree
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  * @param metadata - The worktree metadata
  */
 export async function trackWorktreeCreation(
   projectPath: string,
+  projectsConfigPath: string,
   metadata: Omit<WorktreeMetadata, "createdAt">
 ): Promise<void> {
-  const allMetadata = await loadWorktreeMetadata(projectPath);
+  const allMetadata = await loadWorktreeMetadata(projectPath, projectsConfigPath);
 
   // Add timestamp and save
   allMetadata[metadata.branch] = {
@@ -243,7 +249,7 @@ export async function trackWorktreeCreation(
     createdAt: Date.now()
   };
 
-  await saveWorktreeMetadata(projectPath, allMetadata);
+  await saveWorktreeMetadata(projectPath, projectsConfigPath, allMetadata);
 
   logger.info("Tracked worktree creation", {
     branch: metadata.branch,
@@ -255,17 +261,19 @@ export async function trackWorktreeCreation(
 /**
  * Mark a worktree as merged
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  * @param branch - The branch name
  */
 export async function markWorktreeMerged(
   projectPath: string,
+  projectsConfigPath: string,
   branch: string
 ): Promise<void> {
-  const allMetadata = await loadWorktreeMetadata(projectPath);
+  const allMetadata = await loadWorktreeMetadata(projectPath, projectsConfigPath);
 
   if (allMetadata[branch]) {
     allMetadata[branch].mergedAt = Date.now();
-    await saveWorktreeMetadata(projectPath, allMetadata);
+    await saveWorktreeMetadata(projectPath, projectsConfigPath, allMetadata);
 
     logger.info("Marked worktree as merged", { branch });
   }
@@ -274,17 +282,19 @@ export async function markWorktreeMerged(
 /**
  * Mark a worktree as deleted
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  * @param branch - The branch name
  */
 export async function markWorktreeDeleted(
   projectPath: string,
+  projectsConfigPath: string,
   branch: string
 ): Promise<void> {
-  const allMetadata = await loadWorktreeMetadata(projectPath);
+  const allMetadata = await loadWorktreeMetadata(projectPath, projectsConfigPath);
 
   if (allMetadata[branch]) {
     allMetadata[branch].deletedAt = Date.now();
-    await saveWorktreeMetadata(projectPath, allMetadata);
+    await saveWorktreeMetadata(projectPath, projectsConfigPath, allMetadata);
 
     logger.info("Marked worktree as deleted", { branch });
   }
@@ -293,16 +303,18 @@ export async function markWorktreeDeleted(
 /**
  * Get worktrees created by a specific agent in a conversation
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  * @param agentPubkey - The agent's pubkey
  * @param conversationId - The conversation ID
  * @returns Array of worktree metadata
  */
 export async function getAgentWorktrees(
   projectPath: string,
+  projectsConfigPath: string,
   agentPubkey: string,
   conversationId: string
 ): Promise<WorktreeMetadata[]> {
-  const allMetadata = await loadWorktreeMetadata(projectPath);
+  const allMetadata = await loadWorktreeMetadata(projectPath, projectsConfigPath);
 
   return Object.values(allMetadata).filter(
     wt =>
@@ -317,9 +329,10 @@ export async function getAgentWorktrees(
  * Clean up old worktree metadata
  * Removes metadata for worktrees that have been deleted or merged more than 30 days ago
  * @param projectPath - The base project directory
+ * @param projectsConfigPath - The base path for project configs
  */
-export async function cleanupOldMetadata(projectPath: string): Promise<void> {
-  const allMetadata = await loadWorktreeMetadata(projectPath);
+export async function cleanupOldMetadata(projectPath: string, projectsConfigPath: string): Promise<void> {
+  const allMetadata = await loadWorktreeMetadata(projectPath, projectsConfigPath);
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
   const cleanedMetadata: Record<string, WorktreeMetadata> = {};
@@ -335,7 +348,7 @@ export async function cleanupOldMetadata(projectPath: string): Promise<void> {
   }
 
   if (Object.keys(cleanedMetadata).length !== Object.keys(allMetadata).length) {
-    await saveWorktreeMetadata(projectPath, cleanedMetadata);
+    await saveWorktreeMetadata(projectPath, projectsConfigPath, cleanedMetadata);
 
     const removedCount = Object.keys(allMetadata).length - Object.keys(cleanedMetadata).length;
     logger.info("Cleaned up old worktree metadata", {

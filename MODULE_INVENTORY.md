@@ -64,18 +64,18 @@ Use this section to understand each service’s scope and dependencies:
 | `DelegationRegistryService` | `src/services/delegation/DelegationRegistryService.ts` | Tracks delegation batches, prevents duplicates, exposes lookups for follow-up handling. |
 | `DelegationService` | `src/services/delegation/DelegationService.ts` | Publishes delegation/ask events via `nostr/AgentPublisher`, waits for responses, enforces policy (self-delegation rules). Requires `conversationCoordinator`. |
 | `DynamicToolService` | `src/services/DynamicToolService.ts` | Watches `~/.tenex/tools`, compiles TS tool factories, and exposes them to the tool registry. Uses Bun file APIs and `agents/execution` contexts. |
-| `EmbeddingProvider` | `src/services/EmbeddingProvider.ts` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |
+| `EmbeddingProvider` | `src/services/embedding/` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |
 | `LLMOperationsRegistry` | `src/services/LLMOperationsRegistry.ts` | Tracks active LLM requests per project for throttling and telemetry; referenced by scheduler/status publishers. |
-| `NDKAgentDiscovery` | `src/services/NDKAgentDiscovery.ts` | Subscribes to relays to discover external agents, caches metadata via `PubkeyService`. |
-| `NudgeService` | `src/services/NudgeService.ts` | Emits reminders/prompts to stalled agents or phases; depends on scheduler + conversations. |
-| `OperationsStatusService` & `status/` | `src/services/status/OperationsStatusService.ts`, `src/services/status/*` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
-| `ProjectContext` + `ProjectContextStore` | `src/services/ProjectContext*.ts` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
+| `NDKAgentDiscovery` | `src/services/agents/` | Subscribes to relays to discover external agents, caches metadata via `PubkeyService`. |
+| `NudgeService` | `src/services/nudge/` | Emits reminders/prompts to stalled agents or phases; depends on scheduler + conversations. |
+| `OperationsStatusService` & `status/` | `src/services/status/` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
+| `ProjectContext` + `ProjectContextStore` | `src/services/projects/` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
 | `PubkeyService` | `src/services/PubkeyService.ts` | Provides caching and lookup for pubkey display names from Nostr. |
-| `RAG*` services | `src/services/rag/*.ts` | Manage LanceDB collections, document ingestion, query APIs, and subscription services. Tools in `src/tools/implementations/rag_*` should call these. |
-| `ReportService` | `src/services/ReportService.ts` | Creates, lists, updates task reports; used by reporting tools. |
-| `SchedulerService` | `src/services/SchedulerService.ts` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
-| `MCP` services | `src/services/mcp/*` | Install/manage MCP servers, expose them to dynamic tools and CLI setup flows. |
-| `EmbeddingProviderFactory` & `RagSubscriptionService` | `src/services/rag` | Glue for RAG ingestion/subscription workflows, bridging `EmbeddingProvider` and `tools`. |
+| `RAG*` services | `src/services/rag/` | Manage LanceDB collections, document ingestion, query APIs, and subscription services. Tools in `src/tools/implementations/rag_*` should call these. |
+| `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
+| `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
+| `MCP` services | `src/services/mcp/` | Install/manage MCP servers, expose them to dynamic tools and CLI setup flows. |
+| `EmbeddingProviderFactory` & `RagSubscriptionService` | `src/services/rag/` | Glue for RAG ingestion/subscription workflows, bridging `EmbeddingProvider` and `tools`. |
 
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.
 
@@ -138,6 +138,7 @@ Use this section to understand each service’s scope and dependencies:
 - **Git Utilities Consolidated (COMPLETED 2025-01-19)**: Moved `utils/worktree/` into `utils/git/worktree.ts` for better organization.
 - **Circular Dependency Fixed (COMPLETED 2025-01-19)**: Removed `lib/fs/filesystem.ts` dependency on `utils/logger`. Now uses `console.error` to maintain layer separation.
 - **Service Naming (COMPLETED 2025-01-19)**: Renamed `ReportManager.ts` → `ReportService.ts` and `PubkeyNameRepository.ts` → `PubkeyService.ts` for consistency. Also renamed the classes `ReportManager` → `ReportService` and `PubkeyNameRepository` → `PubkeyService`.
+- **Services Reorganization (COMPLETED 2025-12-20)**: Grouped related services into subdirectories: `projects/` (ProjectContext, ProjectContextStore), `embedding/` (EmbeddingProvider), `scheduling/` (SchedulerService), `reports/` (ReportService), `nudge/` (NudgeService), `agents/` (NDKAgentDiscovery). Each subdirectory has an `index.ts` barrel export.
 
 ### Architecture Guidelines Added (2025-01-19)
 - Created [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) with comprehensive architectural principles
@@ -146,7 +147,13 @@ Use this section to understand each service’s scope and dependencies:
 - Added `lint:architecture` script for static architecture checks
 
 ### Ongoing Improvements (Gradual Migration)
-- **Service subdirectory grouping**: Group related services into subdirectories (e.g., `services/delegation/`, `services/reports/`) when 3+ related files exist.
+- **Layer violations fixed (COMPLETED 2025-12-20)**: Fixed all `utils/` → `services/` layer violations:
+  - Moved `relays.ts` to `nostr/` (Nostr-specific)
+  - Refactored `lockfile.ts` to accept path parameter
+  - Deleted `cli-config-scope.ts` (unused)
+  - Moved `setup.ts` to `commands/setup/interactive.ts`
+  - Refactored `worktree.ts` metadata functions to accept projectsConfigPath
+  - Moved `agent-resolution.ts` to `services/agents/`
 - **Dependency injection pattern**: Gradually convert singletons to DI pattern with exported convenience instances.
 
 ### Known Issues to Address

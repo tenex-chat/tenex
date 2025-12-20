@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
-import { ReportService } from "@/services/ReportService";
+import { ReportService } from "@/services/reports";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";

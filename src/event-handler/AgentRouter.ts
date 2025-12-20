@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import type { ProjectContext } from "@/services/ProjectContext";
+import type { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";

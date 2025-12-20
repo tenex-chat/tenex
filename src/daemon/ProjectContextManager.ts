@@ -1,5 +1,5 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
-import { ProjectContext } from "@/services/ProjectContext";
+import { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";

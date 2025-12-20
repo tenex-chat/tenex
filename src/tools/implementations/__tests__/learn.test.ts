@@ -44,7 +44,7 @@ mock.module("@/events/NDKAgentLesson", () => {
 });
 
 import { getNDK } from "@/nostr";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 
 type MockLesson = {

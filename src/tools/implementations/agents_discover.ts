@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr";
-import { NDKAgentDiscovery } from "@/services/NDKAgentDiscovery";
+import { NDKAgentDiscovery } from "@/services/agents";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";

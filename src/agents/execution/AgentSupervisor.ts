@@ -3,7 +3,8 @@ import type { CompleteEvent } from "@/llm/service";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
+import { config } from "@/services/ConfigService";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
 import { trace } from "@opentelemetry/api";
@@ -451,6 +452,7 @@ Respond in one of two formats:
     async checkWorktreeCreation(): Promise<{ created: boolean; worktrees: WorktreeMetadata[] }> {
         const agentWorktrees = await getAgentWorktrees(
             this.context.projectBasePath,
+            config.getConfigPath("projects"),
             this.agent.pubkey,
             this.context.conversationId
         );

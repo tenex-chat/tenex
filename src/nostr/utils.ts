@@ -1,4 +1,4 @@
-import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**

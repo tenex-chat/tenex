@@ -8,8 +8,8 @@ import { getNDK } from "@/nostr";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
-import { NudgeService } from "@/services/NudgeService";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { NudgeService } from "@/services/nudge";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import {

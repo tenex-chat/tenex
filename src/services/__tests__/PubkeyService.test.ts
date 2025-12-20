@@ -26,7 +26,7 @@ mock.module("@/utils/logger", () => ({
 
 // Import after mocking
 import { getNDK } from "@/nostr";
-import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 
 describe("PubkeyService", () => {
     let service: PubkeyService;
