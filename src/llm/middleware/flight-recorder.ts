@@ -27,6 +27,8 @@ export function createFlightRecorderMiddleware(
     const baseDir = config.baseDir || join(homedir(), ".tenex", "recordings");
 
     return {
+        specificationVersion: "v3" as const,
+
         async wrapGenerate({ doGenerate, params, model }: WrapGenerateParams) {
             if (!recordingState.isRecording) {
                 return doGenerate();
