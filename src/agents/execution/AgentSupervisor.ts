@@ -74,12 +74,10 @@ export class AgentSupervisor {
         const definedPhases = Object.keys(this.agent.phases);
         const unusedPhases = definedPhases.filter((p) => !allExecutedPhases.has(p.toLowerCase()));
 
-        logger.info("[AgentSupervisor] Phase check complete", {
-            agent: this.agent.slug,
-            defined: definedPhases,
-            executedThisTurn: Array.from(executedPhases),
-            executedHistorically: Array.from(historicalPhases),
-            skipped: unusedPhases.length > 0,
+        trace.getActiveSpan()?.addEvent("supervisor.phase_check", {
+            "phase.defined_count": definedPhases.length,
+            "phase.executed_this_turn": executedPhases.size,
+            "phase.skipped": unusedPhases.length > 0,
         });
 
         return {
@@ -147,28 +145,13 @@ export class AgentSupervisor {
     ): Promise<boolean> {
         const activeSpan = trace.getActiveSpan();
 
-        logger.info("[AgentSupervisor] Starting execution completion check", {
-            agent: this.agent.slug,
-            hasCompletionEvent: !!completionEvent,
-            hasMessage: !!completionEvent?.message,
-            messageLength: completionEvent?.message?.length || 0,
-            hasReasoning: !!completionEvent?.reasoning,
-            reasoningLength: completionEvent?.reasoning?.length || 0,
-            hasPhases: !!this.agent.phases,
-            phaseCount: this.agent.phases ? Object.keys(this.agent.phases).length : 0,
-            continuationAttempts: this.continuationAttempts,
-            maxAttempts: this.maxContinuationAttempts,
+        activeSpan?.addEvent("supervisor.validation_start", {
+            "supervisor.continuation_attempts": this.continuationAttempts,
+            "supervisor.has_phases": !!this.agent.phases,
+            "supervisor.phase_count": this.agent.phases
+                ? Object.keys(this.agent.phases).length
+                : 0,
         });
-
-        if (activeSpan) {
-            activeSpan.addEvent("supervisor.validation_start", {
-                "supervisor.continuation_attempts": this.continuationAttempts,
-                "supervisor.has_phases": !!this.agent.phases,
-                "supervisor.phase_count": this.agent.phases
-                    ? Object.keys(this.agent.phases).length
-                    : 0,
-            });
-        }
 
         // Check if we've exceeded max continuation attempts
         if (this.continuationAttempts >= this.maxContinuationAttempts) {
@@ -181,12 +164,10 @@ export class AgentSupervisor {
                 }
             );
 
-            if (activeSpan) {
-                activeSpan.addEvent("supervisor.forced_completion", {
-                    reason: "max_attempts_exceeded",
-                    attempts: this.continuationAttempts,
-                });
-            }
+            activeSpan?.addEvent("supervisor.forced_completion", {
+                "reason": "max_attempts_exceeded",
+                "attempts": this.continuationAttempts,
+            });
 
             return true;
         }
@@ -200,12 +181,10 @@ export class AgentSupervisor {
 
             const reason = "The LLM did not return a completion event. Please try again.";
 
-            if (activeSpan) {
-                activeSpan.addEvent("supervisor.validation_failed", {
-                    "validation.type": "missing_completion_event",
-                    "validation.attempts": this.continuationAttempts,
-                });
-            }
+            activeSpan?.addEvent("supervisor.validation_failed", {
+                "validation.type": "missing_completion_event",
+                "validation.attempts": this.continuationAttempts,
+            });
 
             this.invalidReason = reason;
             this.lastInvalidReason = reason;
@@ -215,23 +194,12 @@ export class AgentSupervisor {
 
         // Second validation: Check if there's an actual response (not just reasoning)
         if (!completionEvent.message?.trim()) {
-            logger.info("[AgentSupervisor] ❌ INVALID: No response content from agent", {
-                agent: this.agent.slug,
-                hasReasoning: !!completionEvent.reasoning,
-                reasoningLength: completionEvent.reasoning?.length || 0,
-                attempts: this.continuationAttempts,
-            });
-
             const reason =
                 "You didn't provide a response to the user. Please address their request.";
 
-            if (activeSpan) {
-                activeSpan.addEvent("supervisor.validation_failed", {
-                    "validation.type": "empty_response",
-                    "validation.attempts": this.continuationAttempts,
-                    "validation.has_reasoning": !!completionEvent.reasoning,
-                });
-            }
+            activeSpan?.addEvent("supervisor.empty_response", {
+                "validation.has_reasoning": !!completionEvent.reasoning,
+            });
 
             this.invalidReason = reason;
             this.lastInvalidReason = reason;
@@ -239,39 +207,29 @@ export class AgentSupervisor {
             return false;
         }
 
-        logger.info("[AgentSupervisor] ✓ Response validation passed", {
-            agent: this.agent.slug,
-            messagePreview: completionEvent.message.substring(0, 100),
+        activeSpan?.addEvent("supervisor.response_validated", {
+            "response.length": completionEvent.message.length,
         });
-
-        if (activeSpan) {
-            activeSpan.addEvent("supervisor.response_validated", {
-                "response.length": completionEvent.message.length,
-            });
-        }
 
         // Third validation: Check phase completion if applicable
         if (this.agent.phases && Object.keys(this.agent.phases).length > 0) {
-            logger.info("[AgentSupervisor] Checking phase completion", {
-                agent: this.agent.slug,
-                definedPhases: Object.keys(this.agent.phases),
+            activeSpan?.addEvent("supervisor.checking_phases", {
+                "phase.defined_count": Object.keys(this.agent.phases).length,
             });
 
             const phaseCheck = this.checkPhaseCompletion();
 
             if (phaseCheck.skipped) {
-                logger.info("[AgentSupervisor] Phases were skipped, validating if intentional", {
-                    agent: this.agent.slug,
+                activeSpan?.addEvent("supervisor.phases_skipped", {
+                    "phase.unused": phaseCheck.unusedPhases.join(","),
                 });
 
                 // Validate if skipping was intentional
                 const shouldContinue = await this.validatePhaseSkipping(completionEvent.message);
 
                 if (shouldContinue) {
-                    logger.info("[AgentSupervisor] ❌ INVALID: Phases need to be executed", {
-                        agent: this.agent.slug,
-                        unusedPhases: phaseCheck.unusedPhases,
-                        attempts: this.continuationAttempts,
+                    activeSpan?.addEvent("supervisor.phases_needed", {
+                        "phase.unused": phaseCheck.unusedPhases.join(","),
                     });
                     this.invalidReason = shouldContinue;
                     this.lastInvalidReason = shouldContinue;
@@ -279,26 +237,17 @@ export class AgentSupervisor {
                     return false;
                 }
 
-                logger.info("[AgentSupervisor] ✓ Phase skipping was intentional", {
-                    agent: this.agent.slug,
-                    skippedPhases: phaseCheck.unusedPhases,
+                activeSpan?.addEvent("supervisor.skip_intentional", {
+                    "phase.skipped": phaseCheck.unusedPhases.join(","),
                 });
             } else {
-                logger.info("[AgentSupervisor] ✓ All phases executed or no phases skipped", {
-                    agent: this.agent.slug,
-                });
+                activeSpan?.addEvent("supervisor.phases_complete");
             }
         }
 
         // Fourth validation: Check for worktrees created by this agent
         const worktreeCheck = await this.checkWorktreeCreation();
         if (worktreeCheck.created) {
-            logger.info("[AgentSupervisor] Worktrees were created, validating cleanup", {
-                agent: this.agent.slug,
-                worktreeCount: worktreeCheck.worktrees.length,
-                branches: worktreeCheck.worktrees.map((wt) => wt.branch),
-            });
-
             // Ask agent about worktree cleanup
             const cleanupPrompt = await this.validateWorktreeCleanup(
                 completionEvent.message,
@@ -306,20 +255,12 @@ export class AgentSupervisor {
             );
 
             if (cleanupPrompt) {
-                logger.info("[AgentSupervisor] ❌ INVALID: Worktrees need cleanup decision", {
-                    agent: this.agent.slug,
-                    worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
-                    attempts: this.continuationAttempts,
+                activeSpan?.addEvent("supervisor.worktree_cleanup_needed", {
+                    "worktree.count": worktreeCheck.worktrees.length,
+                    "worktree.branches": worktreeCheck.worktrees
+                        .map((wt) => wt.branch)
+                        .join(", "),
                 });
-
-                if (activeSpan) {
-                    activeSpan.addEvent("supervisor.worktree_cleanup_needed", {
-                        "worktree.count": worktreeCheck.worktrees.length,
-                        "worktree.branches": worktreeCheck.worktrees
-                            .map((wt) => wt.branch)
-                            .join(", "),
-                    });
-                }
 
                 this.invalidReason = cleanupPrompt;
                 this.lastInvalidReason = cleanupPrompt;
@@ -327,18 +268,13 @@ export class AgentSupervisor {
                 return false;
             }
 
-            logger.info("[AgentSupervisor] ✓ Worktree cleanup addressed", {
-                agent: this.agent.slug,
-                worktrees: worktreeCheck.worktrees.map((wt) => wt.branch),
+            activeSpan?.addEvent("supervisor.worktree_addressed", {
+                "worktree.count": worktreeCheck.worktrees.length,
             });
         }
 
         // All validations passed - publish any decisions before completing
         if (this.phaseValidationDecision) {
-            logger.info("[AgentSupervisor] 📝 Publishing phase validation decision", {
-                agent: this.agent.slug,
-                decisionLength: this.phaseValidationDecision.length,
-            });
             await agentPublisher.conversation(
                 {
                     content: this.phaseValidationDecision,
@@ -349,10 +285,6 @@ export class AgentSupervisor {
         }
 
         if (this.worktreeCleanupDecision) {
-            logger.info("[AgentSupervisor] 📝 Publishing worktree cleanup decision", {
-                agent: this.agent.slug,
-                decisionLength: this.worktreeCleanupDecision.length,
-            });
             await agentPublisher.conversation(
                 {
                     content: this.worktreeCleanupDecision,
@@ -362,9 +294,7 @@ export class AgentSupervisor {
             );
         }
 
-        logger.info("[AgentSupervisor] ✅ EXECUTION COMPLETE: All validations passed", {
-            agent: this.agent.slug,
-        });
+        activeSpan?.addEvent("supervisor.complete");
         return true;
     }
 
@@ -376,17 +306,8 @@ export class AgentSupervisor {
     async validatePhaseSkipping(completionContent: string): Promise<string> {
         const phaseCheck = this.checkPhaseCompletion();
         if (!phaseCheck.skipped) {
-            logger.info("[AgentSupervisor] No phase validation needed - no phases skipped", {
-                agent: this.agent.slug,
-            });
             return ""; // No phases skipped, no need to continue
         }
-
-        logger.info("[AgentSupervisor] 🔍 Starting phase validation with conversation snapshot", {
-            agent: this.agent.slug,
-            unusedPhases: phaseCheck.unusedPhases,
-            responseLength: completionContent.length,
-        });
 
         try {
             // Format the conversation as a readable snapshot
@@ -427,17 +348,6 @@ export class AgentSupervisor {
             const response = result.text?.trim() || "";
             const responseLower = response.toLowerCase();
             const shouldContinue = responseLower.includes("continue");
-            const isDone = responseLower.includes("i'm done") || responseLower.includes("im done");
-
-            logger.info("[AgentSupervisor] 📊 Phase validation LLM response", {
-                agent: this.agent.slug,
-                llmResponse: response,
-                interpretation: shouldContinue
-                    ? "CONTINUE WITH PHASES"
-                    : isDone
-                      ? "INTENTIONALLY DONE"
-                      : "SKIP WAS INTENTIONAL",
-            });
 
             // Store the decision for later retrieval
             this.phaseValidationDecision = response;
@@ -557,19 +467,8 @@ Respond in one of two formats:
                 }
             } catch {
                 // Worktree path doesn't exist anymore
-                logger.debug("[AgentSupervisor] Worktree path no longer exists", {
-                    branch: worktree.branch,
-                    path: worktree.path,
-                });
             }
         }
-
-        logger.info("[AgentSupervisor] Worktree check complete", {
-            agent: this.agent.slug,
-            totalFound: agentWorktrees.length,
-            activeCount: activeWorktrees.length,
-            branches: activeWorktrees.map((wt) => wt.branch),
-        });
 
         return {
             created: activeWorktrees.length > 0,
@@ -587,13 +486,6 @@ Respond in one of two formats:
         completionContent: string,
         worktrees: WorktreeMetadata[]
     ): Promise<string> {
-        logger.info("[AgentSupervisor] 🔍 Validating worktree cleanup", {
-            agent: this.agent.slug,
-            worktreeCount: worktrees.length,
-            branches: worktrees.map((wt) => wt.branch),
-            responseLength: completionContent.length,
-        });
-
         // Check if the agent's response mentions any of the worktree branches
         const mentionedBranches = worktrees.filter((wt) =>
             completionContent.toLowerCase().includes(wt.branch.toLowerCase())
@@ -623,11 +515,6 @@ Respond in one of two formats:
 
         // If response mentions branches and cleanup keywords, assume it was addressed
         if (mentionedBranches.length > 0 && hasCleanupKeywords) {
-            logger.info("[AgentSupervisor] ✓ Worktree cleanup appears to be addressed", {
-                agent: this.agent.slug,
-                mentionedBranches: mentionedBranches.map((wt) => wt.branch),
-                hasCleanupKeywords,
-            });
             this.worktreeCleanupDecision = `Agent addressed worktree cleanup for branches: ${mentionedBranches.map((wt) => wt.branch).join(", ")}`;
             return "";
         }
@@ -646,11 +533,6 @@ Please specify what should be done with ${worktrees.length > 1 ? "these worktree
 - KEEP: If the worktree should remain for future work
 
 Use appropriate git commands (git merge, git worktree remove, etc.) to perform the cleanup, or clearly state your decision if you want to keep ${worktrees.length > 1 ? "them" : "it"}.`;
-
-        logger.info("[AgentSupervisor] 📋 Worktree cleanup needed", {
-            agent: this.agent.slug,
-            prompt: cleanupPrompt.substring(0, 200),
-        });
 
         return cleanupPrompt;
     }

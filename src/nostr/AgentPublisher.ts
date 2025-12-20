@@ -2,21 +2,18 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { DelegationRegistryService } from "@/services/delegation";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
     type NDKProject,
     type NDKTask,
 } from "@nostr-dev-kit/ndk";
-import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import {
     AgentEventEncoder,
-    type AskIntent,
     type CompletionIntent,
     type ConversationIntent,
-    type DelegationIntent,
     type ErrorIntent,
     type EventContext,
     type LessonIntent,
@@ -59,216 +56,178 @@ export class AgentPublisher {
      * Creates and publishes a properly tagged completion event.
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching completion", {
-            agent: this.agent.slug,
-            contentLength: intent.content.length,
-            summary: intent.summary,
-        });
-
         const event = this.encoder.encodeCompletion(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "completion event");
 
-        logger.debug("Completion event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
+        trace.getActiveSpan()?.addEvent("publisher.completion_published", {
+            "event.id": event.id || "",
+            "content.length": intent.content.length,
         });
 
         return event;
     }
 
     /**
-     * Publish delegation request events.
-     * Creates and publishes N kind:1111 conversation events, one per delegation.
+     * Publish a delegation event
      */
     async delegate(
-        intent: DelegationIntent,
+        params: {
+            recipient: string;
+            content: string;
+            phase?: string;
+            phaseInstructions?: string;
+            branch?: string;
+        },
         context: EventContext
-    ): Promise<{
-        events: NDKEvent[];
-        batchId: string;
-    }> {
-        const events = this.encoder.encodeDelegation(intent, context);
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
 
-        // CRITICAL: Inject trace context into delegation events for distributed tracing
-        // This allows the delegated agents to link their execution back to this delegation
-        const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
-            const carrier: Record<string, string> = {};
-            propagation.inject(otelContext.active(), carrier);
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
 
-            // Add trace context as a tag on each Nostr event
-            for (const event of events) {
-                if (carrier.traceparent) {
-                    event.tags.push(["trace_context", carrier.traceparent]);
-                    logger.debug("[AgentPublisher] Injected trace context into delegation event", {
-                        eventId: event.id?.substring(0, 8),
-                        traceparent: `${carrier.traceparent.substring(0, 32)}...`,
-                    });
-                }
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
+        }
+
+        // Add e-tag for triggering event (reply threading)
+        if (context.triggeringEvent?.id) {
+            event.tags.push(["e", context.triggeringEvent.id]);
+        }
+
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
+
+        // Add phase tags if present
+        if (params.phase) {
+            event.tags.push(["phase", params.phase]);
+        }
+        if (params.phaseInstructions) {
+            event.tags.push(["phase-instructions", params.phaseInstructions]);
+        }
+        if (params.branch) {
+            event.tags.push(["branch", params.branch]);
+        }
+
+        await this.agent.sign(event);
+        await event.publish();
+
+        trace.getActiveSpan()?.addEvent("publisher.delegation_published", {
+            "event.id": event.id || "",
+        });
+
+        return event.id;
+    }
+
+    /**
+     * Publish an ask event
+     */
+    async ask(
+        params: {
+            recipient: string;
+            content: string;
+            suggestions?: string[];
+        },
+        context: EventContext
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
+
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
+
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
+        }
+
+        // Add e-tag for triggering event (reply threading)
+        if (context.triggeringEvent?.id) {
+            event.tags.push(["e", context.triggeringEvent.id]);
+        }
+
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
+
+        // Add ask marker
+        event.tags.push(["ask", "true"]);
+
+        // Add suggestions
+        if (params.suggestions) {
+            for (const suggestion of params.suggestions) {
+                event.tags.push(["suggestion", suggestion]);
             }
         }
 
-        // Sign all events first (to get IDs)
-        for (const event of events) {
-            await this.agent.sign(event);
-        }
-
-        // Register delegation with per-delegation event IDs
-        const registry = DelegationRegistryService.getInstance();
-
-        const batchId = await registry.registerDelegation({
-            delegations: intent.delegations.map((delegation, i) => ({
-                eventId: events[i].id,
-                pubkey: delegation.recipient,
-                request: delegation.request,
-                phase: delegation.phase,
-            })),
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
-        });
-
-        // Publish all events
-        for (const [index, event] of events.entries()) {
-            await this.safePublish(event, "delegation request");
-            logger.debug("Published delegation request", {
-                index,
-                eventId: event.id,
-                eventIdTruncated: event.id?.substring(0, 8),
-                kind: event.kind,
-                assignedTo: event.tagValue("p")?.substring(0, 16),
-            });
-        }
-
-        // Add telemetry for delegation
-        if (activeSpan) {
-            activeSpan.addEvent("delegation_published", {
-                "delegation.batch_id": batchId,
-                "delegation.count": intent.delegations.length,
-                "delegation.recipients": intent.delegations
-                    .map((d) => d.recipient.substring(0, 8))
-                    .join(", "),
-            });
-        }
-
-        logger.debug("Delegation batch published", {
-            batchId,
-            eventCount: events.length,
-        });
-
-        return { events, batchId };
-    }
-
-    /**
-     * Publish delegation follow-up request event.
-     * Creates and publishes a follow-up event as a reply to a previous delegation response.
-     */
-    async delegateFollowUp(
-        intent: DelegationIntent,
-        context: EventContext
-    ): Promise<{
-        events: NDKEvent[];
-        batchId: string;
-    }> {
-        // For follow-ups, triggeringEvent should be the response event we're replying to
-        const responseEvent = context.triggeringEvent;
-        const delegation = intent.delegations[0]; // Follow-ups are always to single recipient
-
-        logger.debug("[AgentPublisher] Creating follow-up event", {
-            agent: this.agent.slug,
-            recipientPubkey: delegation.recipient.substring(0, 8),
-            responseEventId: responseEvent.id?.substring(0, 8),
-        });
-
-        // Use encoder to create the follow-up event
-        const followUpEvent = this.encoder.encodeFollowUp(responseEvent, delegation.request, context);
-
-        // Sign the event
-        await this.agent.sign(followUpEvent);
-
-        // Register with DelegationRegistry for tracking
-        const registry = DelegationRegistryService.getInstance();
-        const batchId = await registry.registerDelegation({
-            delegations: [
-                {
-                    eventId: followUpEvent.id,
-                    pubkey: delegation.recipient,
-                    request: delegation.request,
-                    phase: delegation.phase,
-                },
-            ],
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
-        });
-
-        // Publish the follow-up event
-        await this.safePublish(followUpEvent, "follow-up event");
-
-        logger.debug("Follow-up event published", {
-            eventId: followUpEvent.id?.substring(0, 8),
-            replyingTo: responseEvent.id?.substring(0, 8),
-            batchId,
-        });
-
-        return { events: [followUpEvent], batchId };
-    }
-
-    /**
-     * Publish an ask event.
-     * Creates and publishes an event asking a question to the project manager/human user.
-     */
-    async ask(
-        intent: AskIntent,
-        context: EventContext
-    ): Promise<{
-        event: NDKEvent;
-        batchId: string;
-    }> {
-        logger.debug("[AgentPublisher] Publishing ask event", {
-            agent: this.agent.slug,
-            content: intent.content,
-            hasSuggestions: !!intent.suggestions,
-            suggestionCount: intent.suggestions?.length,
-        });
-
-        const event = this.encoder.encodeAsk(intent, context);
-
-        // Sign the event
         await this.agent.sign(event);
+        await event.publish();
 
-        // Get project owner pubkey for registration
-        const projectCtx = await import("@/services/ProjectContext").then((m) => m.getProjectContext());
-        const ownerPubkey = projectCtx?.project?.pubkey;
+        trace.getActiveSpan()?.addEvent("publisher.ask_published", {
+            "event.id": event.id || "",
+        });
 
-        if (!ownerPubkey) {
-            throw new Error("No project owner configured - cannot determine who to ask");
+        return event.id;
+    }
+
+    /**
+     * Publish a delegation follow-up event
+     */
+    async delegateFollowup(
+        params: {
+            recipient: string;
+            content: string;
+            delegationEventId: string;
+            replyToEventId?: string;
+        },
+        context: EventContext
+    ): Promise<string> {
+        const ndk = getNDK();
+        const event = new NDKEvent(ndk);
+        event.kind = 1111;
+        event.content = params.content;
+
+        // Add recipient p-tag
+        event.tags.push(["p", params.recipient]);
+
+        // Add reference to the original delegation event
+        event.tags.push(["e", params.delegationEventId]);
+
+        // Add conversation threading
+        if (context.rootEvent) {
+            event.tags.push(["E", context.rootEvent.id]);
+            event.tags.push(["K", String(context.rootEvent.kind)]);
+            event.tags.push(["P", context.rootEvent.pubkey]);
         }
 
-        // Register with DelegationRegistry for tracking (ask uses delegation infrastructure)
-        const registry = DelegationRegistryService.getInstance();
-        const batchId = await registry.registerDelegation({
-            delegations: [
-                {
-                    eventId: event.id,
-                    pubkey: ownerPubkey,
-                    request: intent.content,
-                },
-            ],
-            delegatingAgent: this.agent,
-            rootConversationId: context.rootEvent.id,
+        // Add project a-tag (required for event routing)
+        this.encoder.aTagProject(event);
+
+        // Reply to specific response event if provided (for threading)
+        if (params.replyToEventId) {
+            event.tags.push(["e", params.replyToEventId]);
+        }
+
+        await this.agent.sign(event);
+        await event.publish();
+
+        trace.getActiveSpan()?.addEvent("publisher.followup_published", {
+            "event.id": event.id || "",
+            "delegation.event_id": params.delegationEventId,
         });
 
-        // Publish the event
-        await this.safePublish(event, "ask event");
-
-        logger.debug("Ask event published", {
-            eventId: event.id?.substring(0, 8),
-            batchId,
-        });
-
-        return { event, batchId };
+        return event.id;
     }
 
     /**
@@ -276,11 +235,6 @@ export class AgentPublisher {
      * Creates and publishes a standard response event.
      */
     async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching conversation response", {
-            agent: this.agent.slug,
-            contentLength: intent.content.length,
-        });
-
         const event = this.encoder.encodeConversation(intent, context);
 
         // Sign and publish
@@ -295,21 +249,15 @@ export class AgentPublisher {
      * Creates and publishes an error notification event.
      */
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching error", {
-            agent: this.agent.slug,
-            error: intent.message,
-        });
-
         const event = this.encoder.encodeError(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "error event");
 
-        logger.debug("Error event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
-            error: intent.message,
+        trace.getActiveSpan()?.addEvent("publisher.error_published", {
+            "event.id": event.id || "",
+            "error.message": intent.message.substring(0, 100),
         });
 
         return event;
@@ -326,14 +274,6 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "streaming event");
 
-        logger.debug("[AgentPublisher] Streaming event published", {
-            eventId: event.id?.substring(0, 8),
-            kind: event.kind,
-            contentLength: intent.content.length,
-            isReasoning: intent.isReasoning,
-            sequence: intent.sequence,
-        });
-
         return event;
     }
 
@@ -341,19 +281,14 @@ export class AgentPublisher {
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching lesson", {
-            agent: this.agent.slug,
-        });
-
         const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
         // Sign and publish
         await this.agent.sign(lessonEvent);
         await this.safePublish(lessonEvent, "lesson event");
 
-        logger.debug("Lesson event published", {
-            eventId: lessonEvent.id,
-            agent: this.agent.slug,
+        trace.getActiveSpan()?.addEvent("publisher.lesson_published", {
+            "event.id": lessonEvent.id || "",
         });
 
         return lessonEvent;
@@ -364,22 +299,15 @@ export class AgentPublisher {
      * Creates and publishes an event with tool name and output tags.
      */
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
-        logger.debug("Dispatching tool usage", {
-            agent: this.agent.slug,
-            tool: intent.toolName,
-            contentLength: intent.content.length,
-        });
-
         const event = this.encoder.encodeToolUse(intent, context);
 
         // Sign and publish
         await this.agent.sign(event);
         await this.safePublish(event, "tool use event");
 
-        logger.debug("Tool usage event published", {
-            eventId: event.id,
-            agent: this.agent.slug,
-            tool: intent.toolName,
+        trace.getActiveSpan()?.addEvent("publisher.tool_published", {
+            "event.id": event.id || "",
+            "tool.name": intent.toolName,
         });
 
         return event;
@@ -401,14 +329,6 @@ export class AgentPublisher {
             sequence: ++this.streamSequence,
             isReasoning,
         };
-
-        logger.debug("[AgentPublisher] Publishing streaming event for pre-buffered content", {
-            contentLength: delta.length,
-            sequence: streamingIntent.sequence,
-            isReasoning,
-            contentPreview: delta.substring(0, 50) + (delta.length > 50 ? "..." : ""),
-            agentName: this.agent.slug,
-        });
 
         await this.streaming(streamingIntent, context);
     }
@@ -438,13 +358,6 @@ export class AgentPublisher {
         await this.agent.sign(task);
         await this.safePublish(task, "task event");
 
-        logger.debug("Created task", {
-            taskId: task.id,
-            title,
-            agent: this.agent.slug,
-            sessionId: claudeSessionId,
-        });
-
         return task;
     }
 
@@ -470,12 +383,6 @@ export class AgentPublisher {
         update.tag(["status", status]);
         await this.agent.sign(update);
         await this.safePublish(update, "task update");
-
-        logger.debug("Published task update", {
-            taskId: task.id,
-            contentLength: content.length,
-            agent: this.agent.slug,
-        });
 
         return update;
     }
@@ -513,12 +420,6 @@ export class AgentPublisher {
 
         await ev.sign(signer);
         ev.publish();
-
-        logger.debug("Published project agent snapshot (kind:14199)", {
-            projectTag,
-            agentCount: agents.length,
-            whitelistedCount: whitelisted.length,
-        });
     }
 
     /**
@@ -694,11 +595,6 @@ export class AgentPublisher {
 
             try {
                 await requestEvent.publish();
-                logger.debug("Published agent request", {
-                    agentName: agentConfig.name,
-                    pubkey: signer.pubkey,
-                    hasNDKAgentDefinitionEvent: !!ndkAgentEventId,
-                });
             } catch (publishError) {
                 logger.warn("Failed to publish agent request (may already exist)", {
                     error: publishError,
@@ -761,4 +657,5 @@ export class AgentPublisher {
             // Don't throw - contact list is not critical
         }
     }
+
 }

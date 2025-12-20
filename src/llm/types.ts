@@ -4,6 +4,11 @@ export type {
     Tool as CoreTool,
     GenerateTextResult,
     StreamTextResult,
+    // Multimodal content types
+    UserContent,
+    ImagePart,
+    TextPart,
+    FilePart,
 } from "ai";
 
 // AI SDK v5 doesn't export ToolCall/ToolResult as separate types
@@ -111,4 +116,8 @@ export interface ModelConfig {
 export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     costUsd?: number;
     model?: string;
+    /** Cached input tokens (from OpenRouter promptTokensDetails.cachedTokens) */
+    cachedInputTokens?: number;
+    /** Reasoning tokens (from OpenRouter completionTokensDetails.reasoningTokens) */
+    reasoningTokens?: number;
 };

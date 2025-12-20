@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import type { CompletionResponse, Message } from "@/llm/types";
-import type { ModelMessage } from "@ai-sdk/provider-utils";
+import type { ModelMessage } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 interface LLMLogEntry {

@@ -11,6 +11,7 @@ import {
 } from "../services/mcp/mcpInstaller";
 import { installAgentFromNostr } from "../agents/agent-installer";
 import { logger } from "../utils/logger";
+import { trace } from "@opentelemetry/api";
 
 /**
  * Handles project update events by syncing agent and MCP tool definitions.
@@ -23,7 +24,6 @@ import { logger } from "../utils/logger";
  */
 export async function handleProjectEvent(event: NDKEvent, projectPath: string): Promise<void> {
     const title = TagExtractor.getTagValue(event, "title") || "Untitled";
-    logger.info(`📋 Project event update received: ${title}`);
 
     // Extract agent event IDs from the project
     const agentEventIds = TagExtractor.getTagValues(event, "agent")
@@ -33,16 +33,14 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
     const mcpEventIds = TagExtractor.getTagValues(event, "mcp")
         .filter((id): id is string => typeof id === "string");
 
-    if (agentEventIds.length > 0) {
-        logger.info(`Project references ${agentEventIds.length} agent(s)`);
-    }
-    if (mcpEventIds.length > 0) {
-        logger.info(`Project references ${mcpEventIds.length} MCP tool(s)`);
-    }
+    trace.getActiveSpan()?.addEvent("project.update_received", {
+        "project.title": title,
+        "project.agent_count": agentEventIds.length,
+        "project.mcp_count": mcpEventIds.length,
+    });
 
     // Only process if project context is initialized (daemon is running)
     if (!isProjectContextInitialized()) {
-        logger.debug("Project context not initialized, skipping agent update");
         return;
     }
 
@@ -54,10 +52,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         const eventDTag = TagExtractor.getDTag(event);
 
         if (currentProjectDTag !== eventDTag) {
-            logger.debug("Project event is for a different project, skipping", {
-                currentProjectDTag,
-                eventDTag,
-            });
             return;
         }
 
@@ -82,16 +76,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
             (id) => !newAgentEventIdsSet.has(id)
         );
 
-        // We'll process if there are any changes to agents OR MCP tools
-
-        if (newAgentEventIds.length > 0) {
-            logger.info(`Found ${newAgentEventIds.length} new agent(s) to add`);
-        }
-
-        if (agentsToRemove.length > 0) {
-            logger.info(`Found ${agentsToRemove.length} agent(s) to remove`);
-        }
-
         // Handle agent removals first
         if (agentsToRemove.length > 0) {
             const agentRegistry = currentContext.agentRegistry;
@@ -104,12 +88,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
 
                 if (agent) {
                     try {
-                        const removed = await agentRegistry.removeAgentFromProject(agent.slug);
-                        if (removed) {
-                            logger.info(`Removed agent ${agent.slug} from project`);
-                        } else {
-                            logger.warn(`Failed to remove agent ${agent.slug} from project`);
-                        }
+                        await agentRegistry.removeAgentFromProject(agent.slug);
                     } catch (error) {
                         logger.error(`Error removing agent ${agent.slug}`, { error });
                     }
@@ -125,7 +104,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
             for (const eventId of newAgentEventIds) {
                 try {
                     await installAgentFromNostr(eventId, undefined, ndk);
-                    logger.info("Successfully installed agent", { eventId });
                 } catch (error) {
                     logger.error("Failed to install agent from event", { eventId, error });
                 }
@@ -148,14 +126,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
             (id) => !newMCPEventIdsSet.has(id)
         );
 
-        if (newMCPEventIds.length > 0) {
-            logger.info(`Found ${newMCPEventIds.length} new MCP tool(s) to add`);
-        }
-
-        if (mcpToolsToRemove.length > 0) {
-            logger.info(`Found ${mcpToolsToRemove.length} MCP tool(s) to remove`);
-        }
-
         // Handle MCP tool removals first
         for (const eventId of mcpToolsToRemove) {
             try {
@@ -172,10 +142,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
                 if (mcpEvent) {
                     const mcpTool = NDKMCPTool.from(mcpEvent);
                     await installMCPServerFromEvent(projectPath, mcpTool);
-                    logger.info("Installed MCP tool from project update", {
-                        eventId,
-                        name: mcpTool.name,
-                    });
                 }
             } catch (error) {
                 logger.error("Failed to fetch or install MCP tool", { error, eventId });
@@ -185,7 +151,6 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         // Reload MCP service if there were any MCP tool changes
         const hasMCPChanges = newMCPEventIds.length > 0 || mcpToolsToRemove.length > 0;
         if (hasMCPChanges) {
-            logger.info("Reloading MCP service after tool changes");
             await mcpService.reload(projectPath);
         }
 
@@ -193,13 +158,12 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         // This will reload agents from the project
         await currentContext.updateProjectData(ndkProject);
 
-        logger.info("Project context updated", {
-            totalAgents: currentContext.agents.size,
-            newAgentsAdded: newAgentEventIds.length,
-            agentsRemoved: agentsToRemove.length,
-            newMCPToolsAdded: newMCPEventIds.length,
-            mcpToolsRemoved: mcpToolsToRemove.length,
-            mcpReloaded: hasMCPChanges,
+        trace.getActiveSpan()?.addEvent("project.updated", {
+            "project.total_agents": currentContext.agents.size,
+            "project.agents_added": newAgentEventIds.length,
+            "project.agents_removed": agentsToRemove.length,
+            "project.mcp_added": newMCPEventIds.length,
+            "project.mcp_removed": mcpToolsToRemove.length,
         });
     } catch (error) {
         logger.error("Failed to update project from event", { error });

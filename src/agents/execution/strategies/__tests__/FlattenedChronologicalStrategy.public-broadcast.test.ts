@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation } from "@/conversations";
 import { ThreadService } from "@/conversations/services/ThreadService";
-import { DelegationRegistryService } from "@/services/delegation";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { ExecutionContext } from "../../types";
 import { FlattenedChronologicalStrategy } from "../FlattenedChronologicalStrategy";
@@ -24,8 +23,6 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
     let mockConversation: Conversation;
 
     beforeAll(async () => {
-        await DelegationRegistryService.initialize();
-
         events = [];
 
         // Event 1: Public broadcast from user (no p-tags to agents)

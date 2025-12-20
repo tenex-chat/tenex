@@ -1,8 +1,12 @@
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
+import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { SubscriptionFilterBuilder, type SubscriptionConfig } from "./filters/SubscriptionFilterBuilder";
+import { trace } from "@opentelemetry/api";
+
+const lessonTracer = trace.getTracer("tenex.lessons");
 
 /**
  * Manages a single subscription for all projects and agents.
@@ -71,8 +75,22 @@ export class SubscriptionManager {
      * Create or recreate the NDK subscription
      */
     private async createSubscription(): Promise<void> {
+        const span = lessonTracer.startSpan("tenex.lesson.subscription_create", {
+            attributes: {
+                "subscription.agent_pubkeys_count": this.agentPubkeys.size,
+                "subscription.agent_definition_ids_count": this.agentDefinitionIds.size,
+                "subscription.agent_definition_ids": JSON.stringify(
+                    Array.from(this.agentDefinitionIds).map((id) => id.substring(0, 16))
+                ),
+                "subscription.agent_pubkeys": JSON.stringify(
+                    Array.from(this.agentPubkeys).map((pk) => pk.substring(0, 16))
+                ),
+            },
+        });
+
         // Stop existing subscription if any
         if (this.subscription) {
+            span.addEvent("stopping_existing_subscription");
             this.subscription.stop();
             this.subscription = null;
         }
@@ -85,6 +103,11 @@ export class SubscriptionManager {
             agentDefinitionIds: this.agentDefinitionIds,
         };
         const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+        // Count lesson-specific filters
+        const lessonFilters = filters.filter((f) => f.kinds?.includes(NDKKind.AgentLesson));
+        span.setAttribute("subscription.lesson_filters_count", lessonFilters.length);
+        span.setAttribute("subscription.total_filters_count", filters.length);
 
         logger.debug("Creating subscription with filters", {
             filterCount: filters.length,
@@ -120,8 +143,18 @@ export class SubscriptionManager {
         });
 
         this.subscription.on("eose", () => {
-            logger.debug("Subscription EOSE received");
+            // Note: Can't add to span here - it's already ended by the time eose fires
+            logger.debug("Subscription EOSE received", {
+                agentDefinitionIdsCount: this.agentDefinitionIds.size,
+                agentPubkeysCount: this.agentPubkeys.size,
+            });
         });
+
+        span.addEvent("subscription_created", {
+            "subscription.filters_count": filters.length,
+            "subscription.lesson_filters_count": lessonFilters.length,
+        });
+        span.end();
     }
 
     /**
@@ -215,16 +248,55 @@ export class SubscriptionManager {
      * Manually update agent definition IDs (called by ProjectContextManager)
      */
     updateAgentDefinitionIds(eventIds: string[]): void {
+        const span = lessonTracer.startSpan("tenex.lesson.subscription_update", {
+            attributes: {
+                "subscription.old_definition_ids_count": this.agentDefinitionIds.size,
+                "subscription.new_definition_ids_count": eventIds.length,
+                "subscription.old_definition_ids": JSON.stringify(
+                    Array.from(this.agentDefinitionIds).map((id) => id.substring(0, 16))
+                ),
+                "subscription.new_definition_ids": JSON.stringify(
+                    eventIds.map((id) => id.substring(0, 16))
+                ),
+            },
+        });
+
         const oldSize = this.agentDefinitionIds.size;
+        const oldIds = new Set(this.agentDefinitionIds);
         this.agentDefinitionIds = new Set(eventIds);
 
-        if (oldSize !== this.agentDefinitionIds.size) {
+        // Check both size change AND content change
+        const sizeChanged = oldSize !== this.agentDefinitionIds.size;
+        const contentChanged = !this.setsEqual(oldIds, this.agentDefinitionIds);
+
+        span.setAttribute("subscription.size_changed", sizeChanged);
+        span.setAttribute("subscription.content_changed", contentChanged);
+        span.setAttribute("subscription.will_restart", sizeChanged || contentChanged);
+
+        if (sizeChanged || contentChanged) {
             logger.debug("Agent definition IDs updated", {
                 old: oldSize,
                 new: this.agentDefinitionIds.size,
+                contentChanged,
+            });
+            span.addEvent("scheduling_restart", {
+                "reason": contentChanged ? "content_changed" : "size_changed",
             });
             this.scheduleRestart();
         }
+
+        span.end();
+    }
+
+    /**
+     * Helper to compare two sets for equality
+     */
+    private setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+        if (a.size !== b.size) return false;
+        for (const item of a) {
+            if (!b.has(item)) return false;
+        }
+        return true;
     }
 
     /**

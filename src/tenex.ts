@@ -11,6 +11,7 @@ import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
 import { runDebugSystemPrompt, runDebugThreadedFormatter } from "./commands/debug/index";
 import { setupCommand } from "./commands/setup/index";
+import { createVCRCommand } from "./commands/vcr/index";
 import { initNDK } from "./nostr/ndkClient";
 
 const program = new Command();
@@ -21,6 +22,7 @@ program.name("tenex").description("TENEX Command Line Interface").version("0.1.0
 program.addCommand(agentCommand);
 program.addCommand(daemonCommand);
 program.addCommand(setupCommand);
+program.addCommand(createVCRCommand());
 
 // Add debug command
 const debug = program.command("debug").description("Debug commands");

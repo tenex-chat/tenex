@@ -9,7 +9,6 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getTargetedAgentPubkeys, isEventFromUser } from "@/nostr/utils";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
-import { DelegationRegistryService } from "@/services/delegation";
 import { NudgeService } from "@/services/NudgeService";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
@@ -37,10 +36,231 @@ interface EventWithContext {
 }
 
 /**
+ * Represents a previous subthread this agent participated in
+ */
+interface PreviousSubthread {
+    delegationEventId: string;
+    delegatorSlug: string;
+    delegatorPubkey: string;
+    prompt: string;
+    response?: string;
+    timestamp: number;
+}
+
+/**
  * Message generation strategy that provides a flattened, chronological view
  * of all threads the agent has participated in, with delegation markers
  */
 export class FlattenedChronologicalStrategy implements MessageGenerationStrategy {
+    /**
+     * Detect if this is a delegated execution (this agent was delegated to by another agent)
+     */
+    private isDelegatedExecution(context: ExecutionContext): boolean {
+        const triggeringEvent = context.triggeringEvent;
+        const agentPubkey = context.agent.pubkey;
+
+        // Check if triggering event is from another agent and targets this agent
+        if (triggeringEvent.pubkey === agentPubkey) {
+            return false; // Self-triggered, not a delegation
+        }
+
+        // Check if this agent is in the p-tags (delegation target)
+        const pTags = triggeringEvent.getMatchingTags("p");
+        const isTargeted = pTags.some((tag) => tag[1] === agentPubkey);
+
+        if (!isTargeted) {
+            return false;
+        }
+
+        // Check if the sender is an agent (not a user)
+        const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
+        if (projectCtx) {
+            const senderAgent = projectCtx.getAgentByPubkey(triggeringEvent.pubkey);
+            if (senderAgent) {
+                return true; // Triggered by another agent targeting this agent = delegation
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Find previous subthreads this agent participated in (for re-invocation context)
+     */
+    private async gatherPreviousSubthreads(
+        agentPubkey: string,
+        currentDelegationEventId: string,
+        allEvents: NDKEvent[]
+    ): Promise<PreviousSubthread[]> {
+        const subthreads: PreviousSubthread[] = [];
+        const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
+        const nameRepo = getPubkeyService();
+
+        // Find all delegation events TO this agent (excluding current one)
+        for (const event of allEvents) {
+            if (event.id === currentDelegationEventId) continue;
+            if (event.pubkey === agentPubkey) continue; // Skip events FROM this agent
+
+            // Check if this is a delegation to this agent
+            const pTags = event.getMatchingTags("p");
+            const targetsThisAgent = pTags.some((tag) => tag[1] === agentPubkey);
+
+            if (!targetsThisAgent) continue;
+
+            // Check if sender is an agent
+            const senderAgent = projectCtx?.getAgentByPubkey(event.pubkey);
+            if (!senderAgent) continue;
+
+            // Find this agent's response to this delegation
+            const response = allEvents.find(
+                (e) =>
+                    e.pubkey === agentPubkey &&
+                    e.getMatchingTags("e").some((tag) => tag[1] === event.id)
+            );
+
+            const delegatorSlug = senderAgent?.slug || (await nameRepo.getName(event.pubkey));
+
+            subthreads.push({
+                delegationEventId: event.id,
+                delegatorSlug,
+                delegatorPubkey: event.pubkey,
+                prompt: event.content,
+                response: response?.content,
+                timestamp: event.created_at || 0,
+            });
+        }
+
+        // Sort by timestamp
+        subthreads.sort((a, b) => a.timestamp - b.timestamp);
+
+        return subthreads;
+    }
+
+    /**
+     * Format previous subthreads as context message
+     */
+    private formatPreviousSubthreadsContext(subthreads: PreviousSubthread[]): string | null {
+        if (subthreads.length === 0) return null;
+
+        const parts = [
+            "## Previous Tasks in This Conversation",
+            "",
+            "You were previously delegated other tasks in this conversation. Here's a summary for context:",
+            "",
+        ];
+
+        for (const subthread of subthreads) {
+            parts.push(`### Task from ${subthread.delegatorSlug}`);
+            parts.push(`**Request:** ${subthread.prompt.substring(0, 500)}${subthread.prompt.length > 500 ? "..." : ""}`);
+            if (subthread.response) {
+                parts.push(`**Your response:** ${subthread.response.substring(0, 300)}${subthread.response.length > 300 ? "..." : ""}`);
+            }
+            parts.push("");
+        }
+
+        parts.push("---");
+        parts.push("Focus on your current task. The above is just context.");
+
+        return parts.join("\n");
+    }
+
+    /**
+     * Gather events for a delegated execution - ISOLATED VIEW
+     * Only includes the delegation request and events in this subthread
+     */
+    private async gatherDelegationSubthread(
+        context: ExecutionContext,
+        allEvents: NDKEvent[],
+        eventFilter?: (event: NDKEvent) => boolean
+    ): Promise<EventWithContext[]> {
+        const triggeringEvent = context.triggeringEvent;
+        const relevantEvents: EventWithContext[] = [];
+        const activeSpan = trace.getActiveSpan();
+
+        // The triggering event is the delegation request - it becomes our "root"
+        const delegationEventId = triggeringEvent.id;
+
+        // Build set of events in this subthread:
+        // - The delegation request itself
+        // - Any events that reply to it (directly or transitively)
+        const subthreadEventIds = new Set<string>([delegationEventId]);
+
+        // Find all transitive replies to the delegation event
+        let foundNew = true;
+        while (foundNew) {
+            foundNew = false;
+            for (const event of allEvents) {
+                if (subthreadEventIds.has(event.id)) continue;
+
+                const eTags = event.getMatchingTags("e");
+                for (const eTag of eTags) {
+                    if (subthreadEventIds.has(eTag[1])) {
+                        subthreadEventIds.add(event.id);
+                        foundNew = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (activeSpan) {
+            activeSpan.addEvent("delegation_subthread_computed", {
+                "subthread.event_count": subthreadEventIds.size,
+                "subthread.root_id": delegationEventId?.substring(0, 8),
+            });
+        }
+
+        // Filter events to only those in the subthread
+        for (const event of allEvents) {
+            // Apply external filter if provided
+            if (eventFilter && !eventFilter(event)) {
+                continue;
+            }
+
+            // Skip reasoning events
+            if (hasReasoningTag(event)) {
+                continue;
+            }
+
+            // Only include events in the subthread
+            if (!subthreadEventIds.has(event.id)) {
+                if (activeSpan) {
+                    activeSpan.addEvent("event.filtered_delegation_isolation", {
+                        "event.id": event.id?.substring(0, 8),
+                        "event.content": event.content?.substring(0, 50),
+                        "filter.reason": "not_in_delegation_subthread",
+                    });
+                }
+                continue;
+            }
+
+            const eventWithContext: EventWithContext = {
+                event,
+                timestamp: event.created_at || Date.now() / 1000,
+            };
+
+            if (activeSpan) {
+                activeSpan.addEvent("event.included_delegation", {
+                    "event.id": event.id?.substring(0, 8),
+                    "event.content": event.content?.substring(0, 50),
+                    "event.pubkey": event.pubkey.substring(0, 8),
+                    "inclusion.reason": "in_delegation_subthread",
+                });
+            }
+
+            relevantEvents.push(eventWithContext);
+        }
+
+        logger.debug("[FlattenedChronologicalStrategy] Gathered delegation subthread", {
+            delegationEventId: delegationEventId?.substring(0, 8),
+            subthreadSize: subthreadEventIds.size,
+            relevantEventCount: relevantEvents.length,
+            totalEventCount: allEvents.length,
+        });
+
+        return relevantEvents;
+    }
+
     /**
      * Build messages with flattened chronological context (telemetry wrapper)
      */
@@ -97,6 +317,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         const messages: ModelMessage[] = [];
 
+        // Check if this is a delegated execution (isolated view)
+        const isDelegated = this.isDelegatedExecution(context);
+        span.setAttribute("execution.is_delegated", isDelegated);
+
         // Add system prompt
         await this.addSystemPrompt(messages, context, span);
 
@@ -114,16 +338,41 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             });
         }
 
+        // For delegated executions, add context about previous subthreads
+        if (isDelegated) {
+            const previousSubthreads = await this.gatherPreviousSubthreads(
+                context.agent.pubkey,
+                context.triggeringEvent.id,
+                conversation.history
+            );
+
+            if (previousSubthreads.length > 0) {
+                const subthreadContext = this.formatPreviousSubthreadsContext(previousSubthreads);
+                if (subthreadContext) {
+                    messages.push({
+                        role: "system",
+                        content: subthreadContext,
+                    });
+                    span.addEvent("previous_subthreads_added", {
+                        count: previousSubthreads.length,
+                    });
+                }
+            }
+        }
+
         // Get all events that involve this agent
+        // For delegated executions, this will return only the delegation subthread
         const relevantEvents = await this.gatherRelevantEvents(
             context,
             conversation.history,
-            eventFilter
+            eventFilter,
+            isDelegated
         );
 
         span.addEvent("events_gathered", {
             relevant_event_count: relevantEvents.length,
             total_event_count: conversation.history.length,
+            is_delegated: isDelegated,
         });
 
         // Sort events chronologically
@@ -161,22 +410,43 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
     /**
      * Gather all events relevant to this agent
+     * @param isDelegated If true, only include events in the delegation subthread (isolated view)
      */
     private async gatherRelevantEvents(
         context: ExecutionContext,
         allEvents: NDKEvent[],
-        eventFilter?: (event: NDKEvent) => boolean
+        eventFilter?: (event: NDKEvent) => boolean,
+        isDelegated = false
     ): Promise<EventWithContext[]> {
         const agentPubkey = context.agent.pubkey;
         const relevantEvents: EventWithContext[] = [];
-        const delegationRegistry = DelegationRegistryService.getInstance();
+        const triggeringEvent = context.triggeringEvent;
+        const activeSpan = trace.getActiveSpan();
 
-        // Track delegations this agent has made
-        const outgoingDelegations = new Map<string, { content: string; targets: string[] }>();
+        // DELEGATION ISOLATION: If this is a delegated execution, only show the delegation subthread
+        if (isDelegated) {
+            return this.gatherDelegationSubthread(
+                context,
+                allEvents,
+                eventFilter
+            );
+        }
+
+        // Build index of delegation requests from this agent for response matching
+        // Delegation request = kind 1111 from agent with phase tag
+        const delegationRequestsById = new Map<string, NDKEvent>();
+        for (const event of allEvents) {
+            if (
+                event.pubkey === agentPubkey &&
+                event.kind === 1111 &&
+                event.tagValue("phase")
+            ) {
+                delegationRequestsById.set(event.id, event);
+            }
+        }
 
         // STEP 1: Build thread path set for inclusion
         // Build the parent chain from triggering event to root
-        const triggeringEvent = context.triggeringEvent;
         const eventMap = new Map(allEvents.map((e) => [e.id, e]));
 
         // Build parent chain
@@ -225,7 +495,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
         const threadPathIds = new Set(threadPath.map((e) => e.id));
 
-        const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
             activeSpan.addEvent("thread_path_computed", {
                 "thread_path.event_count": threadPath.length,
@@ -280,24 +549,19 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             // Check if this is a delegation response (do this FIRST, before other filtering)
             // Delegation responses are special because they should be formatted differently
+            // Delegation response = kind 1111 that e-tags a delegation request and p-tags the delegating agent
             if (!isFromAgent && event.kind === 1111) {
-                const isDelegationResponse = await this.checkIfDelegationResponse(
-                    event,
-                    agentPubkey,
-                    context.conversationId,
-                    delegationRegistry
-                );
-                if (isDelegationResponse) {
-                    eventWithContext.isDelegationResponse = true;
-                    // Get the delegation ID for the marker
-                    const delegationRecord = delegationRegistry.getDelegationByConversationKey(
-                        context.conversationId,
-                        agentPubkey,
-                        event.pubkey
-                    );
-                    if (delegationRecord) {
-                        eventWithContext.delegationId =
-                            delegationRecord.delegationEventId.substring(0, 8);
+                const eTags = event.getMatchingTags("e");
+                const pTags = event.getMatchingTags("p");
+                const mentionsAgent = pTags.some((tag) => tag[1] === agentPubkey);
+
+                // Check if any e-tag references one of our delegation requests
+                for (const eTag of eTags) {
+                    const referencedId = eTag[1];
+                    if (delegationRequestsById.has(referencedId) && mentionsAgent) {
+                        eventWithContext.isDelegationResponse = true;
+                        eventWithContext.delegationId = referencedId.substring(0, 8);
+                        break;
                     }
                 }
             }
@@ -333,60 +597,22 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             }
 
             // Check if this is a delegation request from this agent
+            // Delegation request = kind 1111 from agent with p-tag pointing to another agent
+            // Phase tag is optional (only required for self-delegation)
             if (isFromAgent && event.kind === 1111) {
-                // Check for delegation event (has phase tag)
-                const phaseTag = event.tagValue("phase");
+                const pTags = event.getMatchingTags("p");
+                if (pTags.length > 0) {
+                    const recipientPubkey = pTags[0][1];
+                    // This is a delegation if it's pointing to another agent (or same agent with phase)
+                    const phaseTag = event.tagValue("phase");
+                    const isSelfDelegation = recipientPubkey === agentPubkey;
 
-                if (phaseTag) {
-                    // This is a delegation event - get recipient from p-tags
-                    const pTags = event.getMatchingTags("p");
-                    // Filter out user pubkeys - delegation recipients are agents
-                    for (const pTag of pTags) {
-                        const recipientPubkey = pTag[1];
-
-                        // Try to find delegation record for this recipient
-                        const delegationRecord = delegationRegistry.getDelegationByConversationKey(
-                            context.conversationId,
-                            agentPubkey,
-                            recipientPubkey
-                        );
-
-                        if (delegationRecord && delegationRecord.delegationEventId === event.id) {
-                            eventWithContext.isDelegationRequest = true;
-                            eventWithContext.delegationId =
-                                delegationRecord.delegationEventId.substring(0, 8);
-                            eventWithContext.delegationContent = event.content;
-                            eventWithContext.delegatedToPubkey = recipientPubkey;
-
-                            // Track this delegation for later response matching
-                            outgoingDelegations.set(delegationRecord.delegationEventId, {
-                                content: event.content,
-                                targets: [recipientPubkey],
-                            });
-
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Check if this is a response to a delegation from this agent
-            if (!isFromAgent && event.kind === 1111) {
-                const delegationRecord = delegationRegistry.getDelegationByConversationKey(
-                    context.conversationId,
-                    agentPubkey,
-                    event.pubkey
-                );
-
-                if (delegationRecord) {
-                    // Only consider it a delegation response if it p-tags the delegating agent
-                    const pTags = event.getMatchingTags("p");
-                    const mentionsAgent = pTags.some((tag) => tag[1] === agentPubkey);
-
-                    if (mentionsAgent) {
-                        eventWithContext.isDelegationResponse = true;
-                        eventWithContext.delegationId =
-                            delegationRecord.delegationEventId.substring(0, 8);
+                    // Detect as delegation if: delegating to another agent, OR self-delegation with phase
+                    if (!isSelfDelegation || phaseTag) {
+                        eventWithContext.isDelegationRequest = true;
+                        eventWithContext.delegationId = event.id.substring(0, 8);
+                        eventWithContext.delegationContent = event.content;
+                        eventWithContext.delegatedToPubkey = recipientPubkey;
                     }
                 }
             }
@@ -415,50 +641,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         return relevantEvents;
     }
 
-    /**
-     * Check if an event is a delegation response to this agent
-     */
-    private async checkIfDelegationResponse(
-        event: NDKEvent,
-        agentPubkey: string,
-        conversationId: string,
-        registry: DelegationRegistryService
-    ): Promise<boolean> {
-        if (event.kind !== 1111) {
-            return false;
-        }
-
-        try {
-            // Check if there's a delegation record where this agent delegated to the event's author
-            const record = registry.getDelegationByConversationKey(
-                conversationId,
-                agentPubkey,
-                event.pubkey
-            );
-
-            if (!record) return false;
-
-            // Check if this event references the delegation
-            const eTag = event.tagValue("e");
-            if (eTag === record.delegationEventId) {
-                // IMPORTANT: Only consider it a delegation response if it p-tags the delegating agent
-                // Events that reply to the delegation but don't p-tag the delegating agent are
-                // just the delegated agent working on the task, not responding back
-                const pTags = event.getMatchingTags("p");
-                const mentionsAgent = pTags.some((tag) => tag[1] === agentPubkey);
-
-                if (mentionsAgent) {
-                    return true;
-                }
-            }
-        } catch (error) {
-            logger.debug("[FlattenedChronologicalStrategy] Error checking delegation response", {
-                error,
-            });
-        }
-
-        return false;
-    }
 
     /**
      * Build the flattened chronological view
@@ -472,7 +654,6 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const messages: ModelMessage[] = [];
         const nameRepo = getPubkeyService();
         const projectCtx = isProjectContextInitialized() ? getProjectContext() : null;
-        const delegationRegistry = DelegationRegistryService.getInstance();
 
         // First pass: Collect all delegations and their responses
         interface DelegationData {
@@ -493,78 +674,70 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
         const delegationMap = new Map<string, DelegationData>();
         const delegationResponseEventIds = new Set<string>();
 
-        // Identify delegations and responses
+        // Build delegation map from event tags (no registry needed)
         for (const eventContext of events) {
             const { event } = eventContext;
 
             if (eventContext.isDelegationRequest && eventContext.delegationId) {
-                const record = delegationRegistry.getDelegationByConversationKey(
-                    conversationId,
-                    agentPubkey,
-                    eventContext.delegatedToPubkey || ""
-                );
+                // Get agent names from project context or pubkey service
+                const fromAgent = projectCtx?.getAgentByPubkey(agentPubkey);
+                const fromSlug = fromAgent?.slug || (await nameRepo.getName(agentPubkey));
 
-                if (record) {
-                    // Use delegation record for names (more reliable than name repository)
-                    const fromSlug = record.delegatingAgent.slug;
-                    // assignedTo.slug might not be set, fallback to looking it up
-                    let toSlug = record.assignedTo.slug;
-                    if (!toSlug) {
-                        const toAgent = projectCtx?.getAgentByPubkey(record.assignedTo.pubkey);
-                        toSlug =
-                            toAgent?.slug || (await nameRepo.getName(record.assignedTo.pubkey));
-                    }
+                const toAgent = eventContext.delegatedToPubkey
+                    ? projectCtx?.getAgentByPubkey(eventContext.delegatedToPubkey)
+                    : undefined;
+                const toSlug = toAgent?.slug ||
+                    (eventContext.delegatedToPubkey
+                        ? await nameRepo.getName(eventContext.delegatedToPubkey)
+                        : "unknown");
 
-                    // Get phase from event tags if available
-                    const phaseTag = event.tags.find((t) => t[0] === "phase");
-                    const phase = phaseTag?.[1];
+                // Get phase from event tags
+                const phaseTag = event.tags.find((t) => t[0] === "phase");
+                const phase = phaseTag?.[1];
 
-                    if (!delegationMap.has(eventContext.delegationId)) {
-                        delegationMap.set(eventContext.delegationId, {
-                            id: eventContext.delegationId,
-                            from: fromSlug,
-                            recipients: [toSlug],
-                            phase,
-                            message: eventContext.delegationContent || "",
-                            requestEventId: event.id,
-                            requestEvent: event,
-                            responses: [],
-                        });
-                    } else {
-                        // Add recipient to existing delegation (multi-recipient case)
-                        const delegation = delegationMap.get(eventContext.delegationId);
-                        if (!delegation) {
-                            throw new Error(
-                                `Delegation ${eventContext.delegationId} not found in delegationMap after has() check`
-                            );
-                        }
-                        if (toSlug && !delegation.recipients.includes(toSlug)) {
-                            delegation.recipients.push(toSlug);
-                        }
+                // Use full event ID for map key (delegationId is truncated)
+                const fullId = event.id;
+                if (!delegationMap.has(fullId)) {
+                    delegationMap.set(fullId, {
+                        id: eventContext.delegationId,
+                        from: fromSlug,
+                        recipients: [toSlug],
+                        phase,
+                        message: eventContext.delegationContent || "",
+                        requestEventId: event.id,
+                        requestEvent: event,
+                        responses: [],
+                    });
+                } else {
+                    // Add recipient to existing delegation (multi-recipient case)
+                    const delegation = delegationMap.get(fullId);
+                    if (delegation && toSlug && !delegation.recipients.includes(toSlug)) {
+                        delegation.recipients.push(toSlug);
                     }
                 }
             }
 
             if (eventContext.isDelegationResponse && eventContext.delegationId) {
-                const delegation = delegationMap.get(eventContext.delegationId);
-                if (delegation) {
-                    // Look up the delegation record to get the responder's slug
-                    const record = delegationRegistry.getDelegationByConversationKey(
-                        conversationId,
-                        agentPubkey,
-                        event.pubkey
-                    );
-                    const responderSlug =
-                        record?.assignedTo.slug || (await nameRepo.getName(event.pubkey));
+                // Find the delegation this responds to by matching e-tags
+                const eTags = event.getMatchingTags("e");
+                for (const eTag of eTags) {
+                    const delegationEventId = eTag[1];
+                    const delegation = delegationMap.get(delegationEventId);
+                    if (delegation) {
+                        // Get responder name from project context or pubkey service
+                        const responderAgent = projectCtx?.getAgentByPubkey(event.pubkey);
+                        const responderSlug = responderAgent?.slug || (await nameRepo.getName(event.pubkey));
 
-                    delegation.responses.push({
-                        from: responderSlug,
-                        content: event.content || "",
-                        eventId: event.id,
-                        status: "completed",
-                    });
+                        delegation.responses.push({
+                            from: responderSlug,
+                            content: event.content || "",
+                            eventId: event.id,
+                            status: "completed",
+                        });
 
-                    delegationResponseEventIds.add(event.id);
+                        delegationResponseEventIds.add(event.id);
+                        break;
+                    }
                 }
             }
         }
@@ -597,9 +770,10 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
 
             // Handle delegation request - emit condensed XML block
             if (eventContext.isDelegationRequest && eventContext.delegationId) {
-                const delegation = delegationMap.get(eventContext.delegationId);
+                // Use full event ID for lookup (delegation map is keyed by full ID)
+                const delegation = delegationMap.get(event.id);
 
-                if (delegation && !processedDelegations.has(eventContext.delegationId)) {
+                if (delegation && !processedDelegations.has(event.id)) {
                     const xml = DelegationXmlFormatter.render(delegation, debug);
 
                     messages.push({
@@ -607,7 +781,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                         content: xml,
                     });
 
-                    processedDelegations.add(eventContext.delegationId);
+                    processedDelegations.add(event.id);
                 }
                 // Skip the actual delegation request event - it's now in the XML block
                 continue;
@@ -753,8 +927,45 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             const agentLessonsMap = new Map();
             const currentAgentLessons = projectCtx.getLessonsForAgent(context.agent.pubkey);
 
+            // Add lesson tracing to understand lesson state at prompt build time
+            span.addEvent("tenex.lesson.context_state", {
+                "agent.name": context.agent.name,
+                "agent.slug": context.agent.slug,
+                "agent.pubkey": context.agent.pubkey.substring(0, 16),
+                "agent.event_id": context.agent.eventId?.substring(0, 16) || "none",
+                "lessons.for_this_agent_count": currentAgentLessons.length,
+                "lessons.total_in_context": projectCtx.agentLessons.size,
+                "lessons.all_agent_pubkeys_with_lessons": JSON.stringify(
+                    Array.from(projectCtx.agentLessons.keys()).map((k) => k.substring(0, 16))
+                ),
+            });
+
+            // Log all lessons in context for debugging
+            if (projectCtx.agentLessons.size > 0) {
+                const allLessonsDebug: Array<{ pubkey: string; count: number; titles: string[] }> = [];
+                for (const [pubkey, lessons] of projectCtx.agentLessons) {
+                    allLessonsDebug.push({
+                        pubkey: pubkey.substring(0, 16),
+                        count: lessons.length,
+                        titles: lessons.slice(0, 3).map((l) => l.title || "untitled"),
+                    });
+                }
+                span.setAttribute("lessons.all_in_context", JSON.stringify(allLessonsDebug));
+            }
+
             if (currentAgentLessons.length > 0) {
                 agentLessonsMap.set(context.agent.pubkey, currentAgentLessons);
+                span.addEvent("lessons_found_for_agent", {
+                    "lessons.count": currentAgentLessons.length,
+                    "lessons.titles": JSON.stringify(
+                        currentAgentLessons.slice(0, 5).map((l) => l.title || "untitled")
+                    ),
+                });
+            } else {
+                span.addEvent("no_lessons_for_agent", {
+                    "agent.pubkey": context.agent.pubkey.substring(0, 16),
+                    "agent.event_id": context.agent.eventId?.substring(0, 16) || "none",
+                });
             }
 
             const isProjectManager = context.agent.pubkey === projectCtx.getProjectManager().pubkey;

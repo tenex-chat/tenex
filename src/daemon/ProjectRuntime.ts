@@ -81,8 +81,9 @@ export class ProjectRuntime {
         const projectTitle = this.project.tagValue("title") || "Untitled";
         console.log(chalk.yellow(`🚀 Starting project: ${chalk.bold(projectTitle)}`));
 
-        logger.info(`Starting project runtime: ${this.projectId}`, {
-            title: this.project.tagValue("title"),
+        trace.getActiveSpan()?.addEvent("project_runtime.starting", {
+            "project.id": this.projectId,
+            "project.title": this.project.tagValue("title") ?? "",
         });
 
         try {
@@ -94,18 +95,20 @@ export class ProjectRuntime {
             const repoUrl = this.project.repo;
 
             if (repoUrl) {
-                logger.info(`Project has repository: ${repoUrl}`, { projectId: this.projectId });
+                trace.getActiveSpan()?.addEvent("project_runtime.cloning_repo", {
+                    "repo.url": repoUrl,
+                });
                 const result = await cloneGitRepository(repoUrl, this.projectBasePath);
                 if (!result) {
                     throw new Error(`Failed to clone repository: ${repoUrl}`);
                 }
             } else {
-                logger.info("Initializing new git repository", { projectId: this.projectId });
+                trace.getActiveSpan()?.addEvent("project_runtime.init_repo");
                 await initializeGitRepository(this.projectBasePath);
             }
 
-            logger.info(`Git repository ready`, {
-                projectPath: this.projectBasePath,
+            trace.getActiveSpan()?.addEvent("project_runtime.repo_ready", {
+                "project.path": this.projectBasePath,
             });
 
             // Initialize components
@@ -131,6 +134,13 @@ export class ProjectRuntime {
 
             // Set conversation coordinator in context
             this.context.conversationCoordinator = this.conversationCoordinator;
+
+            // Initialize pairing manager for real-time delegation supervision
+            const { PairingManager } = await import("@/services/pairing");
+            const pairingManager = new PairingManager(async (agentPubkey, conversationId) => {
+                await this.triggerAgentForCheckpoint(agentPubkey, conversationId);
+            });
+            this.context.pairingManager = pairingManager;
 
             // Initialize event handler with the conversation coordinator
             this.eventHandler = new EventHandler(
@@ -218,9 +228,10 @@ export class ProjectRuntime {
         const projectTitle = this.project.tagValue("title") || "Untitled";
         console.log(chalk.yellow(`🛑 Stopping project: ${chalk.bold(projectTitle)}`));
 
-        logger.info(`Stopping project runtime: ${this.projectId}`, {
-            uptime: this.startTime ? Date.now() - this.startTime.getTime() : 0,
-            eventsProcessed: this.eventCount,
+        trace.getActiveSpan()?.addEvent("project_runtime.stopping", {
+            "project.id": this.projectId,
+            "uptime_ms": this.startTime ? Date.now() - this.startTime.getTime() : 0,
+            "events.processed": this.eventCount,
         });
 
         // Stop status publisher
@@ -245,6 +256,11 @@ export class ProjectRuntime {
         if (this.conversationCoordinator) {
             await this.conversationCoordinator.cleanup();
             this.conversationCoordinator = null;
+        }
+
+        // Stop all active pairings to clean up subscriptions
+        if (this.context?.pairingManager) {
+            this.context.pairingManager.stopAll();
         }
 
         // Clear context
@@ -300,6 +316,69 @@ export class ProjectRuntime {
     }
 
     /**
+     * Trigger agent execution for a pairing checkpoint.
+     * Used by PairingManager when it queues a checkpoint and needs to resume the supervisor.
+     */
+    async triggerAgentForCheckpoint(agentPubkey: string, conversationId: string): Promise<void> {
+        if (!this.isRunning || !this.context || !this.conversationCoordinator) {
+            logger.warn("[ProjectRuntime] Cannot trigger checkpoint - runtime not ready", {
+                projectId: this.projectId,
+                isRunning: this.isRunning,
+            });
+            return;
+        }
+
+        await projectContextStore.run(this.context, async () => {
+            const agent = this.context!.getAgentByPubkey(agentPubkey);
+            if (!agent) {
+                logger.error("[ProjectRuntime] Agent not found for checkpoint trigger", {
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    projectId: this.projectId,
+                });
+                return;
+            }
+
+            const conversation = await this.conversationCoordinator!.getConversation(conversationId);
+            if (!conversation) {
+                logger.error("[ProjectRuntime] Conversation not found for checkpoint trigger", {
+                    conversationId: conversationId.substring(0, 8),
+                    projectId: this.projectId,
+                });
+                return;
+            }
+
+            // Use root event as triggering context
+            const rootEvent = conversation.history[0];
+            if (!rootEvent) {
+                logger.error("[ProjectRuntime] No root event in conversation", {
+                    conversationId: conversationId.substring(0, 8),
+                });
+                return;
+            }
+
+            logger.info("[ProjectRuntime] Triggering agent for pairing checkpoint", {
+                agentSlug: agent.slug,
+                conversationId: conversationId.substring(0, 8),
+            });
+
+            // Create execution context and execute
+            const { createExecutionContext } = await import("@/agents/execution/ExecutionContextFactory");
+            const { AgentExecutor } = await import("@/agents/execution/AgentExecutor");
+
+            const executionContext = await createExecutionContext({
+                agent,
+                conversationId,
+                projectBasePath: this.projectBasePath,
+                triggeringEvent: rootEvent,
+                conversationCoordinator: this.conversationCoordinator!,
+            });
+
+            const agentExecutor = new AgentExecutor();
+            await agentExecutor.execute(executionContext);
+        });
+    }
+
+    /**
      * Initialize MCP tools from the project event
      * Extracts MCP tool event IDs from "mcp" tags, fetches and installs them
      */
@@ -311,18 +390,11 @@ export class ProjectRuntime {
                 .map((tag) => tag[1])
                 .filter((id): id is string => typeof id === "string");
 
-            logger.debug(
-                `[ProjectRuntime] Found ${mcpEventIds.length} MCP tool(s) in project tags`,
-                {
-                    projectId: this.projectId,
-                    mcpEventIds: mcpEventIds.map((id) => id.substring(0, 12)),
-                }
-            );
+            trace.getActiveSpan()?.addEvent("project_runtime.mcp_tools_found", {
+                "mcp.count": mcpEventIds.length,
+            });
 
             if (mcpEventIds.length === 0) {
-                logger.debug(
-                    "[ProjectRuntime] No MCP tools defined in project, skipping MCP initialization"
-                );
                 return;
             }
 
@@ -332,9 +404,9 @@ export class ProjectRuntime {
             // Fetch and install each MCP tool
             for (const eventId of mcpEventIds) {
                 try {
-                    logger.debug(
-                        `[ProjectRuntime] Fetching MCP tool event: ${eventId.substring(0, 12)}...`
-                    );
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_fetching", {
+                        "mcp.event_id": eventId.substring(0, 12),
+                    });
                     const mcpEvent = await ndk.fetchEvent(eventId);
 
                     if (!mcpEvent) {
@@ -346,20 +418,17 @@ export class ProjectRuntime {
                     }
 
                     const mcpTool = NDKMCPTool.from(mcpEvent);
-                    logger.debug(
-                        `[ProjectRuntime] Installing MCP tool: ${mcpTool.name || "unnamed"}`,
-                        {
-                            eventId: eventId.substring(0, 12),
-                            command: mcpTool.command,
-                        }
-                    );
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installing", {
+                        "mcp.name": mcpTool.name ?? "unnamed",
+                        "mcp.event_id": eventId.substring(0, 12),
+                    });
 
                     await installMCPServerFromEvent(this.projectBasePath, mcpTool);
                     installedCount.success++;
 
-                    logger.info(`[ProjectRuntime] Installed MCP tool: ${mcpTool.name}`, {
-                        eventId: eventId.substring(0, 12),
-                        slug: mcpTool.slug,
+                    trace.getActiveSpan()?.addEvent("project_runtime.mcp_installed", {
+                        "mcp.name": mcpTool.name ?? "",
+                        "mcp.slug": mcpTool.slug ?? "",
                     });
                 } catch (error) {
                     logger.error("[ProjectRuntime] Failed to install MCP tool", {
@@ -370,27 +439,22 @@ export class ProjectRuntime {
                 }
             }
 
-            logger.info("[ProjectRuntime] MCP tool installation complete", {
-                total: mcpEventIds.length,
-                success: installedCount.success,
-                failed: installedCount.failed,
+            trace.getActiveSpan()?.addEvent("project_runtime.mcp_installation_complete", {
+                "mcp.total": mcpEventIds.length,
+                "mcp.success": installedCount.success,
+                "mcp.failed": installedCount.failed,
             });
 
             // Initialize MCP service if any tools were installed
             if (installedCount.success > 0) {
-                logger.info(
-                    `[ProjectRuntime] Initializing MCP service with ${installedCount.success} tool(s)`
-                );
                 await mcpService.initialize(this.projectBasePath);
 
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());
 
-                logger.info("[ProjectRuntime] MCP service initialized", {
-                    runningServers: runningServers.length,
-                    runningServerNames: runningServers,
-                    availableTools: availableTools.length,
-                    toolNames: availableTools,
+                trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
+                    "mcp.running_servers": runningServers.length,
+                    "mcp.available_tools": availableTools.length,
                 });
             } else {
                 logger.warn(

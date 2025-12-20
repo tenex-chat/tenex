@@ -1,137 +1,119 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { DelegationRegistryService } from "@/services/delegation";
-import { type DelegationResponses, DelegationService } from "@/services/delegation";
+import { RALRegistry } from "@/services/ral";
+import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
 const delegateFollowupSchema = z.object({
-    recipient: z
-        .string()
-        .describe(
-            "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey of the agent you delegated to"
-        ),
-    message: z.string().describe("Your follow-up question or clarification request"),
+  delegation_event_id: z
+    .string()
+    .describe(
+      "The event ID of the delegation you want to follow up on (returned in delegationEventIds from the delegate tool)"
+    ),
+  message: z.string().describe("Your follow-up question or clarification request"),
 });
 
 type DelegateFollowupInput = z.infer<typeof delegateFollowupSchema>;
+type DelegateFollowupOutput = StopExecutionSignal;
 
-// Core implementation
 async function executeDelegateFollowup(
-    input: DelegateFollowupInput,
-    context: ExecutionContext
-): Promise<DelegationResponses> {
-    const { recipient, message } = input;
+  input: DelegateFollowupInput,
+  context: ExecutionContext
+): Promise<DelegateFollowupOutput> {
+  const { delegation_event_id, message } = input;
 
-    // Resolve recipient to pubkey
-    const recipientPubkey = resolveRecipientToPubkey(recipient);
-    if (!recipientPubkey) {
-        throw new Error(`Could not resolve recipient: ${recipient}`);
+  // Find the delegation by event ID in RAL state
+  const registry = RALRegistry.getInstance();
+
+  // Search all active RALs for this agent+conversation
+  const activeRALs = registry.getActiveRALs(context.agent.pubkey, context.conversationId);
+
+  let previousDelegation: { recipientPubkey: string; recipientSlug?: string; responseEventId?: string } | undefined;
+
+  for (const ral of activeRALs) {
+    // Check completed delegations
+    const completed = ral.completedDelegations.find(d => d.eventId === delegation_event_id);
+    if (completed) {
+      previousDelegation = completed;
+      break;
     }
 
-    // Check for self-delegation (not allowed in delegate_followup tool)
-    if (recipientPubkey === context.agent.pubkey) {
-        throw new Error(
-            `Self-delegation is not permitted with the delegate_followup tool. Agent "${context.agent.slug}" cannot send follow-up questions to itself. Use the delegate tool with a phase if you need to transition phases within the same agent.`
-        );
+    // Also check pending delegations (for following up before completion)
+    const pending = ral.pendingDelegations.find(d => d.eventId === delegation_event_id);
+    if (pending) {
+      previousDelegation = {
+        recipientPubkey: pending.recipientPubkey,
+        recipientSlug: pending.recipientSlug,
+      };
+      break;
     }
+  }
 
-    // Get delegation record from registry
-    const registry = DelegationRegistryService.getInstance();
-    const delegationRecord = registry.getDelegationByConversationKey(
-        context.conversationId,
-        context.agent.pubkey,
-        recipientPubkey
+  if (!previousDelegation) {
+    throw new Error(
+      `No delegation found with event ID ${delegation_event_id}. Check the delegationEventIds from your delegate call.`
     );
+  }
 
-    if (!delegationRecord) {
-        throw new Error(
-            `No recent delegation found to ${recipient}. Use delegate first, then use delegate_followup to ask clarifying questions.`
-        );
+  if (previousDelegation.recipientPubkey === context.agent.pubkey) {
+    throw new Error(`Self-delegation is not permitted with delegate_followup.`);
+  }
+
+  if (!context.agentPublisher) {
+    throw new Error("AgentPublisher not available");
+  }
+
+  logger.info("[delegate_followup] Publishing follow-up", {
+    fromAgent: context.agent.slug,
+    delegationEventId: delegation_event_id,
+    recipientPubkey: previousDelegation.recipientPubkey.substring(0, 8),
+  });
+
+  const eventId = await context.agentPublisher.delegateFollowup(
+    {
+      recipient: previousDelegation.recipientPubkey,
+      content: message,
+      delegationEventId: delegation_event_id,
+      replyToEventId: previousDelegation.responseEventId,
+    },
+    {
+      triggeringEvent: context.triggeringEvent,
+      rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
+      conversationId: context.conversationId,
     }
+  );
 
-    if (!delegationRecord.completion?.event) {
-        throw new Error(
-            `Delegation to ${recipient} has not completed yet or did not return a response event.`
-        );
-    }
-
-    const responseEvent = delegationRecord.completion.event;
-
-    logger.info("[delegate_followup] 🔄 Creating follow-up delegation", {
-        fromAgent: context.agent.slug,
-        toPubkey: recipientPubkey.substring(0, 8),
-        responseEventId: responseEvent.id?.substring(0, 8),
-        message: message.substring(0, 100),
-    });
-
-    // Create DelegationService with the response event as context
-    const delegationService = new DelegationService(
-        context.agent,
-        context.conversationId,
-        context.conversationCoordinator,
-        responseEvent, // This becomes the triggering event for threading
-        context.agentPublisher!,
-        context.projectBasePath,
-        context.currentBranch
-    );
-
-    // Execute as a follow-up delegation
-    const responses = await delegationService.execute({
-        type: "delegation_followup",
-        delegations: [
-            {
-                recipient: recipientPubkey,
-                request: message,
-            },
-        ],
-    });
-
-    logger.info("[delegate_followup] ✅ Follow-up complete", {
-        fromAgent: context.agent.slug,
-        recipient: recipient,
-        responseCount: responses.responses.length,
-    });
-
-    return responses;
+  return {
+    __stopExecution: true,
+    pendingDelegations: [
+      {
+        type: "followup" as const,
+        eventId,
+        recipientPubkey: previousDelegation.recipientPubkey,
+        recipientSlug: previousDelegation.recipientSlug,
+        prompt: message,
+      },
+    ],
+  };
 }
 
-// AI SDK tool factory
 export function createDelegateFollowupTool(context: ExecutionContext): AISdkTool {
-    const aiTool = tool({
-        description:
-            "Send a follow-up question to an agent you previously delegated to. Use after delegate to ask clarifying questions about their response. The tool will wait for their response before continuing.",
-        inputSchema: delegateFollowupSchema,
-        execute: async (input: DelegateFollowupInput) => {
-            return await executeDelegateFollowup(input, context);
-        },
-    });
+  const aiTool = tool({
+    description:
+      "Send a follow-up question to an agent you previously delegated to. Use after delegate to ask clarifying questions about their response.",
+    inputSchema: delegateFollowupSchema,
+    execute: async (input: DelegateFollowupInput) => {
+      return await executeDelegateFollowup(input, context);
+    },
+  });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: () => "Sending follow-up question",
-        enumerable: false,
-        configurable: true,
-    });
+  Object.defineProperty(aiTool, "getHumanReadableContent", {
+    value: () => "Sending follow-up question",
+    enumerable: false,
+    configurable: true,
+  });
 
-    return aiTool as AISdkTool;
+  return aiTool as AISdkTool;
 }
-
-/**
- * Delegate Follow-up tool - enables multi-turn conversations during delegations
- *
- * This tool allows an agent to ask follow-up questions after receiving a delegation response:
- * 1. Takes a recipient parameter to identify which delegation to follow up on
- * 2. Looks up the delegation in DelegationRegistry using agent+conversation+recipient
- * 3. Creates a reply to the stored response event
- * 4. Waits synchronously for the response (just like delegate)
- * 5. Can be chained for multiple follow-ups
- *
- * Example flow:
- * - Agent1 delegates to architect: "Design auth system"
- * - Architect responds: "I suggest OAuth2..."
- * - Agent1 uses delegate_followup(recipient: "architect", message: "What about refresh tokens?")
- * - Architect responds: "Use rotating tokens with 7-day expiry"
- * - Agent1 can continue with more follow-ups or proceed
- */
