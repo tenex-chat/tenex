@@ -48,7 +48,6 @@ export interface CompletedDelegation {
 export interface QueuedInjection {
   role: InjectionRole;
   content: string;
-  eventId?: string;
   queuedAt: number;
 }
 
