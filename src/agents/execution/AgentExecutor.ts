@@ -824,11 +824,11 @@ export class AgentExecutor {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
-        // Handle RAL state based on finish reason
+        // Clear RAL if execution completed without pending delegations
+        // We clear for any terminal finish reason (not just "stop"/"end" - Gemini returns "other")
         const finalRalState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
-        if (!finalRalState?.pendingDelegations.length &&
-            (completionEvent?.finishReason === "stop" || completionEvent?.finishReason === "end")) {
+        if (!finalRalState?.pendingDelegations.length) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
         }
 
