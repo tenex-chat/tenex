@@ -1,4 +1,4 @@
-import type { AgentMetadataStore } from "@/conversations/services/AgentMetadataStore";
+import type { AgentMetadataStore } from "@/services/agents";
 import type { LLMService } from "@/llm/service";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
