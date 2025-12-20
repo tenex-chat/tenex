@@ -10,7 +10,7 @@ type WrapStreamParams = Parameters<NonNullable<LanguageModelMiddleware["wrapStre
 // Recording types - using unknown for SDK types that may change between versions
 interface RecordingResponse {
     content: unknown;
-    finishReason: string;
+    finishReason: unknown;
     usage: unknown;
 }
 
