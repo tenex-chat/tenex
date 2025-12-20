@@ -21,6 +21,8 @@ import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
 
+const lessonTracer = trace.getTracer("tenex.lessons");
+
 /**
  * Main daemon that manages all projects in a single process.
  * Uses lazy loading - projects only start when they receive events.
@@ -370,10 +372,9 @@ export class Daemon {
                 pubkeys.add(agent.pubkey);
 
                 // Collect agent definition event IDs for lesson monitoring
+                // Note: eventId may be null for locally-created agents
                 if (agent.eventId) {
                     definitionIds.add(agent.eventId);
-                } else {
-                    throw new Error("Agent eventId not found");
                 }
             }
         }
@@ -458,62 +459,131 @@ export class Daemon {
      * Does NOT start new project runtimes
      */
     private async handleLessonEvent(event: NDKEvent): Promise<void> {
-        const { NDKAgentLesson } = await import("@/events/NDKAgentLesson");
-        const { shouldTrustLesson } = await import("@/utils/lessonTrust");
+        const span = lessonTracer.startSpan("tenex.lesson.received", {
+            attributes: {
+                "lesson.event_id": event.id?.substring(0, 16) || "unknown",
+                "lesson.publisher": event.pubkey?.substring(0, 16) || "unknown",
+                "lesson.created_at": event.created_at || 0,
+            },
+        });
 
-        const lesson = NDKAgentLesson.from(event);
+        try {
+            const { NDKAgentLesson } = await import("@/events/NDKAgentLesson");
+            const { shouldTrustLesson } = await import("@/utils/lessonTrust");
 
-        // Check if we should trust this lesson
-        if (!shouldTrustLesson(lesson, event.pubkey)) {
-            return;
-        }
+            const lesson = NDKAgentLesson.from(event);
+            span.setAttribute("lesson.title", lesson.title || "untitled");
 
-        const agentDefinitionId = lesson.agentDefinitionId;
-
-        if (!agentDefinitionId) {
-            if (!event.id) {
-                throw new Error("Event ID not found");
+            // Check if we should trust this lesson
+            if (!shouldTrustLesson(lesson, event.pubkey)) {
+                span.setAttribute("lesson.rejected", true);
+                span.setAttribute("lesson.rejection_reason", "trust_check_failed");
+                span.end();
+                return;
             }
-            if (!event.pubkey) {
-                throw new Error("Event pubkey not found");
+
+            const agentDefinitionId = lesson.agentDefinitionId;
+            const lessonAuthorPubkey = event.pubkey;
+            span.setAttribute("lesson.agent_definition_id", agentDefinitionId?.substring(0, 16) || "none");
+            span.setAttribute("lesson.author_pubkey", lessonAuthorPubkey?.substring(0, 16) || "unknown");
+
+            // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
+            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+            span.setAttribute("lesson.active_runtimes_count", activeRuntimes.size);
+
+            let totalMatches = 0;
+            let totalAgentsChecked = 0;
+
+            for (const [projectId, runtime] of activeRuntimes) {
+                try {
+                    const context = runtime.getContext();
+                    if (!context) {
+                        continue;
+                    }
+
+                    const allAgents = context.agentRegistry.getAllAgents();
+                    totalAgentsChecked += allAgents.length;
+
+                    // Match agents by EITHER:
+                    // 1. Author pubkey (the agent published this lesson)
+                    // 2. Definition eventId (lesson references agent's definition via e-tag)
+                    const matchingAgents = allAgents.filter((agent: AgentInstance) => {
+                        // Always match if the agent authored this lesson
+                        if (agent.pubkey === lessonAuthorPubkey) {
+                            return true;
+                        }
+                        // Also match if lesson references this agent's definition (and agent has an eventId)
+                        if (agentDefinitionId && agent.eventId === agentDefinitionId) {
+                            return true;
+                        }
+                        return false;
+                    });
+
+                    if (matchingAgents.length === 0) {
+                        // Log all agent info for debugging
+                        const agentInfo = allAgents.map((a: AgentInstance) => ({
+                            slug: a.slug,
+                            pubkey: a.pubkey.substring(0, 16),
+                            eventId: a.eventId?.substring(0, 16) || "none",
+                        }));
+                        span.addEvent("no_matching_agents_in_project", {
+                            "project.id": projectId,
+                            "project.agent_count": allAgents.length,
+                            "project.agents": JSON.stringify(agentInfo),
+                            "lesson.agent_definition_id": agentDefinitionId?.substring(0, 16) || "none",
+                            "lesson.author_pubkey": lessonAuthorPubkey?.substring(0, 16) || "unknown",
+                        });
+                        continue;
+                    }
+
+                    // Store the lesson for each matching agent
+                    for (const agent of matchingAgents) {
+                        const matchedByAuthor = agent.pubkey === lessonAuthorPubkey;
+                        const matchedByEventId = agentDefinitionId && agent.eventId === agentDefinitionId;
+                        const matchReason = matchedByAuthor && matchedByEventId
+                            ? "author_and_event_id"
+                            : matchedByAuthor
+                                ? "author_pubkey"
+                                : "event_id";
+
+                        context.addLesson(agent.pubkey, lesson);
+                        totalMatches++;
+                        span.addEvent("lesson_stored", {
+                            "agent.slug": agent.slug,
+                            "agent.pubkey": agent.pubkey.substring(0, 16),
+                            "project.id": projectId,
+                            "lesson.title": lesson.title || "untitled",
+                            "match_reason": matchReason,
+                        });
+                        logger.info("Stored lesson for agent", {
+                            agentSlug: agent.slug,
+                            lessonTitle: lesson.title,
+                            lessonId: event.id?.substring(0, 8),
+                            matchReason,
+                        });
+                    }
+                } catch (error) {
+                    span.addEvent("hydration_error", {
+                        "project.id": projectId,
+                        "error": error instanceof Error ? error.message : String(error),
+                    });
+                    logger.error("Failed to hydrate lesson into project", {
+                        projectId,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
             }
-            logger.warn("Lesson event missing agent definition ID (e-tag)", {
-                eventId: event.id.substring(0, 8),
-                publisher: event.pubkey.substring(0, 8),
-            });
-            return;
+
+            span.setAttribute("lesson.total_agents_checked", totalAgentsChecked);
+            span.setAttribute("lesson.total_matches", totalMatches);
+            span.setAttribute("lesson.stored", totalMatches > 0);
+            span.end();
+        } catch (error) {
+            span.setAttribute("error", true);
+            span.setAttribute("error.message", error instanceof Error ? error.message : String(error));
+            span.end();
+            throw error;
         }
-
-        // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
-        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-        for (const [projectId, runtime] of activeRuntimes) {
-            try {
-                const context = runtime.getContext();
-                if (!context) {
-                    continue;
-                }
-
-                // Find agents in this project that match the definition ID
-                const matchingAgents = context.agentRegistry
-                    .getAllAgents()
-                    .filter((agent: AgentInstance) => agent.eventId === agentDefinitionId);
-
-                if (matchingAgents.length === 0) {
-                    continue;
-                }
-
-                // Store the lesson for each matching agent
-                for (const agent of matchingAgents) {
-                    context.addLesson(agent.pubkey, lesson);
-                }
-            } catch (error) {
-                logger.error("Failed to hydrate lesson into project", {
-                    projectId,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-        }
-
     }
 
     /**

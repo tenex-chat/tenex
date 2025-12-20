@@ -1,6 +1,7 @@
-import { afterAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
+import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
 import { createDelegateExternalTool } from "@/tools/implementations/delegate_external";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
@@ -24,86 +25,105 @@ mockParse.mockImplementation((recipient: string) => {
 });
 
 describe("Delegation tools - Self-delegation validation", () => {
+    const conversationId = "test-conversation-id";
+    let registry: RALRegistry;
+
     const createMockContext = (): ExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
-        conversationId: "test-conversation-id",
+        conversationId,
         conversationCoordinator: {} as any,
         triggeringEvent: {} as any,
         agentPublisher: {} as any,
         phase: undefined,
     });
 
+    beforeEach(() => {
+        // Reset singleton for testing
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+        registry = RALRegistry.getInstance();
+    });
+
     describe("delegate tool", () => {
-        it("should reject self-delegation by slug", async () => {
+        it("should reject self-delegation without phase by slug", async () => {
             const context = createMockContext();
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                recipients: ["self-agent"],
-                fullRequest: "Do something",
+                delegations: [
+                    { recipient: "self-agent", prompt: "Do something" }
+                ],
             };
 
             try {
                 await delegateTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain(
-                    "Self-delegation is not permitted with the delegate tool"
-                );
-                expect(error.message).toContain("self-agent");
+                // Self-delegation is now allowed with phase, so error says "requires a phase"
+                expect(error.message).toContain("Self-delegation requires a phase");
             }
         });
 
-        it("should reject self-delegation by pubkey", async () => {
+        it("should reject self-delegation without phase by pubkey", async () => {
             const context = createMockContext();
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                recipients: ["agent-pubkey-123"],
-                fullRequest: "Do something",
+                delegations: [
+                    { recipient: "agent-pubkey-123", prompt: "Do something" }
+                ],
             };
 
             try {
                 await delegateTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain(
-                    "Self-delegation is not permitted with the delegate tool"
-                );
+                expect(error.message).toContain("Self-delegation requires a phase");
             }
         });
 
-        it("should reject when self is included in multiple recipients", async () => {
+        it("should reject when self without phase is included in multiple recipients", async () => {
             const context = createMockContext();
             const delegateTool = createDelegateTool(context);
 
             const input = {
-                recipients: ["self-agent", "other-agent"],
-                fullRequest: "Do something",
+                delegations: [
+                    { recipient: "self-agent", prompt: "Task for self" },
+                    { recipient: "other-agent", prompt: "Task for other" },
+                ],
             };
 
             try {
                 await delegateTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain(
-                    "Self-delegation is not permitted with the delegate tool"
-                );
+                // Will fail on self-delegation without phase
+                expect(error.message).toContain("Self-delegation requires a phase");
             }
         });
     });
 
     describe("delegate_followup tool", () => {
-        it("should reject self-delegation", async () => {
+        it("should reject self-delegation when delegation points to self", async () => {
             const context = createMockContext();
             const followupTool = createDelegateFollowupTool(context);
 
+            // Set up a delegation in the RAL that points to self
+            const ralNumber = registry.create(context.agent.pubkey, conversationId);
+            registry.saveState(context.agent.pubkey, conversationId, ralNumber, [], [
+                {
+                    eventId: "self-delegation-event",
+                    recipientPubkey: "agent-pubkey-123", // Same as self
+                    prompt: "Original task",
+                },
+            ]);
+
             const input = {
-                recipient: "self-agent",
+                delegation_event_id: "self-delegation-event",
                 message: "Follow-up question",
             };
 
@@ -111,10 +131,27 @@ describe("Delegation tools - Self-delegation validation", () => {
                 await followupTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain(
-                    "Self-delegation is not permitted with the delegate_followup tool"
-                );
-                expect(error.message).toContain("self-agent");
+                expect(error.message).toContain("Self-delegation is not permitted");
+            }
+        });
+
+        it("should error when delegation event ID not found", async () => {
+            const context = createMockContext();
+            const followupTool = createDelegateFollowupTool(context);
+
+            // Don't set up any delegations
+            registry.create(context.agent.pubkey, conversationId);
+
+            const input = {
+                delegation_event_id: "non-existent-event",
+                message: "Follow-up question",
+            };
+
+            try {
+                await followupTool.execute(input);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error: any) {
+                expect(error.message).toContain("No delegation found with event ID");
             }
         });
     });
@@ -133,10 +170,8 @@ describe("Delegation tools - Self-delegation validation", () => {
                 await externalTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain(
-                    "Self-delegation is not permitted with the delegate_external tool unless targeting a different project"
-                );
-                expect(error.message).toContain("self-agent");
+                // Error message updated - self-delegation requires projectId
+                expect(error.message).toContain("Self-delegation requires a projectId");
             }
         });
 

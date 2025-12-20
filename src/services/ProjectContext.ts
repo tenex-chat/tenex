@@ -3,6 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LLMLogger } from "@/logging/LLMLogger";
+import type { PairingManager } from "@/services/pairing";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -59,6 +60,11 @@ export class ProjectContext {
      * Conversation manager for the project (optional, initialized when needed)
      */
     public conversationCoordinator?: ConversationCoordinator;
+
+    /**
+     * PairingManager for real-time delegation supervision (optional, initialized when needed)
+     */
+    public pairingManager?: PairingManager;
 
     /**
      * LLM Logger instance for this project

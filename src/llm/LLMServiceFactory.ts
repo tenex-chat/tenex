@@ -2,11 +2,12 @@ import type { LLMLogger } from "@/logging/LLMLogger";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createProviderRegistry } from "ai";
-import type { ProviderV2 } from "@ai-sdk/provider";
+// Using 'any' for provider types due to version mismatch between different provider packages
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createOllama } from "ollama-ai-provider-v2";
@@ -18,7 +19,7 @@ import { config as configService } from "@/services/ConfigService";
  * Factory for creating LLM services with proper provider initialization
  */
 export class LLMServiceFactory {
-    private providers: Map<string, ProviderV2> = new Map();
+    private providers: Map<string, any> = new Map();
     private registry: ReturnType<typeof createProviderRegistry> | null = null;
     private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
     private initialized = false;
@@ -35,9 +36,7 @@ export class LLMServiceFactory {
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
-            logger.debug(
-                "[LLMServiceFactory] Mock LLM mode enabled via USE_MOCK_LLM environment variable"
-            );
+            trace.getActiveSpan()?.addEvent("llm_factory.mock_mode_enabled");
 
             // Dynamically import MockProvider only when needed to avoid loading test dependencies
             try {
@@ -56,7 +55,6 @@ export class LLMServiceFactory {
 
         for (const [name, config] of Object.entries(providerConfigs)) {
             if (!config?.apiKey) {
-                logger.debug(`[LLMServiceFactory] Skipping provider ${name} - no API key`);
                 continue;
             }
 
@@ -69,7 +67,6 @@ export class LLMServiceFactory {
                                 apiKey: config.apiKey,
                             })
                         );
-                        logger.debug("[LLMServiceFactory] Initialized OpenRouter provider");
                         break;
 
                     case "anthropic":
@@ -79,7 +76,6 @@ export class LLMServiceFactory {
                                 apiKey: config.apiKey,
                             })
                         );
-                        logger.debug("[LLMServiceFactory] Initialized Anthropic provider");
                         break;
 
                     case "openai":
@@ -89,7 +85,6 @@ export class LLMServiceFactory {
                                 apiKey: config.apiKey,
                             })
                         );
-                        logger.debug("[LLMServiceFactory] Initialized OpenAI provider");
                         break;
 
                     case "ollama": {
@@ -109,25 +104,20 @@ export class LLMServiceFactory {
                         // Create Ollama provider with custom base URL if provided
                         const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
 
-                        this.providers.set(name, ollamaProvider as ProviderV2);
-                        logger.debug(
-                            `[LLMServiceFactory] Initialized Ollama provider with baseURL: ${baseURL || "default (http://localhost:11434)"}`
-                        );
+                        this.providers.set(name, ollamaProvider as any);
                         break;
                     }
 
                     case "gemini-cli": {
                         this.providers.set(
                             name,
-                            createGeminiProvider({ authType: "oauth-personal" }) as ProviderV2
+                            createGeminiProvider({ authType: "oauth-personal" }) as any
                         );
-                        logger.debug("[LLMServiceFactory] Initialized Gemini CLI provider");
                         break;
                     }
 
                     case "claudeCode": {
                         // Claude Code is always available, no initialization needed
-                        logger.debug("[LLMServiceFactory] Claude Code provider is always available");
                         break;
                     }
 
@@ -145,9 +135,10 @@ export class LLMServiceFactory {
         if (this.providers.size > 0) {
             const providerObject = Object.fromEntries(this.providers.entries());
             this.registry = createProviderRegistry(providerObject);
-            logger.debug(
-                `[LLMServiceFactory] Created provider registry with ${this.providers.size} providers`
-            );
+            trace.getActiveSpan()?.addEvent("llm_factory.registry_created", {
+                "providers.count": this.providers.size,
+                "providers.names": Array.from(this.providers.keys()).join(", "),
+            });
         } else {
             logger.warn("[LLMServiceFactory] No providers were successfully initialized");
             // Create an empty registry to avoid null checks everywhere
@@ -189,26 +180,18 @@ export class LLMServiceFactory {
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
 
-        if (actualProvider === "mock" && actualProvider !== config.provider) {
-            logger.debug(
-                `[LLMServiceFactory] Using mock provider instead of ${config.provider} due to USE_MOCK_LLM=true`
-            );
-        }
-
         // Handle Claude Code provider specially
         if (actualProvider === "claudeCode") {
             // Extract tool names from the provided tools
             const toolNames = context?.tools ? Object.keys(context.tools) : [];
             const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
 
-            logger.info("[LLMServiceFactory] 🚀 CREATING CLAUDE CODE PROVIDER", {
-                agent: context?.agentName,
-                agentSlug,
-                sessionId: context?.sessionId || "NONE",
-                hasSessionId: !!context?.sessionId,
-                regularTools,
-                toolCount: regularTools.length,
-                enableTenexTools: this.enableTenexTools,
+            trace.getActiveSpan()?.addEvent("llm_factory.creating_claude_code", {
+                "agent.name": context?.agentName ?? "",
+                "agent.slug": agentSlug ?? "",
+                "session.id": context?.sessionId ?? "",
+                "tools.count": regularTools.length,
+                "tenex_tools.enabled": this.enableTenexTools,
             });
 
             // Create SDK MCP server for local TENEX tools if enabled and tools exist
@@ -239,9 +222,9 @@ export class LLMServiceFactory {
                     };
                 }
 
-                logger.info("[LLMServiceFactory] Added MCP servers to Claude Code agent", {
-                    serverCount: Object.keys(mcpConfig.servers).length,
-                    servers: Object.keys(mcpConfig.servers),
+                trace.getActiveSpan()?.addEvent("llm_factory.mcp_servers_added", {
+                    "mcp.server_count": Object.keys(mcpConfig.servers).length,
+                    "mcp.servers": Object.keys(mcpConfig.servers).join(", "),
                 });
             }
 
@@ -273,7 +256,7 @@ export class LLMServiceFactory {
                 config.model,
                 config.temperature,
                 config.maxTokens,
-                providerFunction,
+                providerFunction as any,
                 context?.sessionId,
                 agentSlug
             );

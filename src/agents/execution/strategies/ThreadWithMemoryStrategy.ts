@@ -11,6 +11,7 @@ import { getProjectContext, isProjectContextInitialized } from "@/services/Proje
 import { NudgeService } from "@/services/NudgeService";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import {
     extractNostrEntities,
     resolveNostrEntitiesToSystemMessages,
@@ -46,13 +47,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         await this.addSystemPrompt(messages, context);
 
         // 1. Get current thread (from root to triggering event)
-        logger.debug("[ThreadWithMemoryStrategy] Getting thread for triggering event", {
-            triggeringEventId: triggeringEvent.id.substring(0, 8),
-            triggeringContent: triggeringEvent.content?.substring(0, 50),
-            triggeringParent: triggeringEvent.tagValue("e")?.substring(0, 8),
-            historySize: conversation.history.length,
-        });
-
         let currentThread = threadService.getThreadToEvent(
             triggeringEvent.id,
             conversation.history
@@ -61,61 +55,28 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
         // Apply event filter if provided (e.g., for Claude Code session resumption)
         if (eventFilter) {
             const originalLength = currentThread.length;
-            const originalEvents = currentThread.map((e) => ({
-                id: e.id.substring(0, 8),
-                content: e.content?.substring(0, 30),
-            }));
             currentThread = currentThread.filter(eventFilter);
-            const remainingEvents = currentThread.map((e) => ({
-                id: e.id.substring(0, 8),
-                content: e.content?.substring(0, 30),
-            }));
-            logger.info("[ThreadWithMemoryStrategy] Applied event filter to current thread", {
-                originalLength,
-                filteredLength: currentThread.length,
-                eventsRemoved: originalLength - currentThread.length,
-                originalEvents,
-                remainingEvents,
+            trace.getActiveSpan()?.addEvent("strategy.event_filter_applied", {
+                "thread.original_length": originalLength,
+                "thread.filtered_length": currentThread.length,
             });
         }
 
-        logger.debug("[ThreadWithMemoryStrategy] Current thread retrieved", {
-            conversationId: context.conversationId.substring(0, 8),
-            agentName: context.agent.name,
-            currentThreadLength: currentThread.length,
-            triggeringEventId: triggeringEvent.id.substring(0, 8),
-            threadEvents: currentThread.slice(0, 5).map((e) => ({
-                id: e.id.substring(0, 8),
-                content: e.content?.substring(0, 30),
-                pubkey: e.pubkey?.substring(0, 8),
-            })),
+        trace.getActiveSpan()?.addEvent("strategy.thread_retrieved", {
+            "conversation.id": context.conversationId.substring(0, 8),
+            "agent.name": context.agent.name,
+            "thread.length": currentThread.length,
         });
 
         // 2. Create a Set of event IDs from the active branch
         const activeBranchIds = new Set<string>(currentThread.map((e) => e.id));
-
-        logger.debug("[ThreadWithMemoryStrategy] Active branch identified", {
-            activeBranchSize: activeBranchIds.size,
-            activeBranchIds: Array.from(activeBranchIds)
-                .slice(0, 5)
-                .map((id) => id.substring(0, 8)),
-        });
 
         // 3. Get ALL events in the conversation and format other branches
         let allEvents = conversation.history;
 
         // Apply event filter to all events if provided
         if (eventFilter) {
-            const originalLength = allEvents.length;
             allEvents = allEvents.filter(eventFilter);
-            logger.info(
-                "[ThreadWithMemoryStrategy] Applied event filter to all events for other branches",
-                {
-                    originalLength,
-                    filteredLength: allEvents.length,
-                    eventsRemoved: originalLength - allEvents.length,
-                }
-            );
         }
 
         const formatter = new ThreadedConversationFormatter();
@@ -138,8 +99,8 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 content: `You were active in these other related subthreads in this conversation:\n\n${enhancedContent}`,
             });
 
-            logger.debug("[ThreadWithMemoryStrategy] Added agent memory from other branches", {
-                agentName: context.agent.name,
+            trace.getActiveSpan()?.addEvent("strategy.other_branches_added", {
+                "agent.name": context.agent.name,
             });
 
             // 4. Add current thread context (FULL thread from root to current)
@@ -147,32 +108,11 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 role: "system",
                 content: "Current thread you are responding to:",
             });
-        } else {
-            logger.debug("[ThreadWithMemoryStrategy] No other branches with agent participation", {
-                agentName: context.agent.name,
-            });
         }
-
-        logger.debug("[ThreadWithMemoryStrategy] Adding current thread events", {
-            threadLength: currentThread.length,
-            firstEvent: currentThread[0]
-                ? {
-                      id: currentThread[0].id.substring(0, 8),
-                      content: currentThread[0].content?.substring(0, 30),
-                  }
-                : null,
-            lastEvent: currentThread[currentThread.length - 1]
-                ? {
-                      id: currentThread[currentThread.length - 1].id.substring(0, 8),
-                      content: currentThread[currentThread.length - 1].content?.substring(0, 30),
-                  }
-                : null,
-        });
 
         // Process and add ALL events in current thread
         for (let i = 0; i < currentThread.length; i++) {
             const event = currentThread[i];
-            const isTriggeringEvent = event.id === triggeringEvent.id;
 
             const processedMessages = await this.processEvent(
                 event,
@@ -180,14 +120,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                 context.conversationId
             );
             messages.push(...processedMessages);
-
-            logger.debug("[ThreadWithMemoryStrategy] Added event to messages", {
-                eventId: event.id.substring(0, 8),
-                eventContent: event.content?.substring(0, 30),
-                messageCount: processedMessages.length,
-                isAgent: event.pubkey === context.agent.pubkey,
-                isTriggeringEvent,
-            });
         }
 
         // Add special context instructions if needed
@@ -198,10 +130,10 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             context.agent.name
         );
 
-        logger.debug("[ThreadWithMemoryStrategy] Message building complete", {
-            totalMessages: messages.length,
-            hasMemoryFromOtherThreads: otherBranchesFormatted !== null,
-            currentThreadLength: currentThread.length,
+        trace.getActiveSpan()?.addEvent("strategy.messages_built", {
+            "messages.total": messages.length,
+            "thread.length": currentThread.length,
+            "memory.has_other_branches": otherBranchesFormatted !== null,
         });
 
         return messages;
@@ -233,10 +165,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
 
         // Skip reasoning events - they should not be included in context
         if (hasReasoningTag(event)) {
-            logger.debug("[ThreadWithMemoryStrategy] Skipping reasoning event", {
-                eventId: event.id.substring(0, 8),
-                pubkey: event.pubkey.substring(0, 8),
-            });
             return [];
         }
 
@@ -253,22 +181,7 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                     return messages;
                 }
             } else {
-                // Try to get the agent that published this event
-                if (isProjectContextInitialized()) {
-                    const projectCtx = getProjectContext();
-                    const otherAgent = projectCtx.getAgentByPubkey(event.pubkey);
-                    if (otherAgent) {
-                        console.log(
-                            `Skipping tool event from agent: ${otherAgent.slug} (${otherAgent.name})`
-                        );
-                    } else {
-                        console.log(
-                            `Skipping tool event from unknown agent with pubkey: ${event.pubkey.substring(0, 8)}`
-                        );
-                    }
-                } else {
-                    console.log("Skipping tool event from a different agent from thread");
-                }
+                // Skip tool events from other agents
                 return [];
             }
         }
@@ -365,12 +278,6 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
             // Add nudges if present on triggering event
             const nudgeIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
             if (nudgeIds.length > 0) {
-                logger.debug("[ThreadWithMemoryStrategy] Injecting nudges", {
-                    agent: context.agent.slug,
-                    nudgeCount: nudgeIds.length,
-                    conversationId: context.conversationId.substring(0, 8),
-                });
-
                 const nudgeService = NudgeService.getInstance();
                 const nudgeContent = await nudgeService.fetchNudges(nudgeIds);
                 if (nudgeContent) {
@@ -379,15 +286,9 @@ export class ThreadWithMemoryStrategy implements MessageGenerationStrategy {
                         content: nudgeContent,
                     });
 
-                    logger.info("[ThreadWithMemoryStrategy] Nudges injected successfully", {
-                        agent: context.agent.slug,
-                        nudgeCount: nudgeIds.length,
-                        contentLength: nudgeContent.length,
-                    });
-                } else {
-                    logger.debug("[ThreadWithMemoryStrategy] Nudge content was empty", {
-                        agent: context.agent.slug,
-                        nudgeCount: nudgeIds.length,
+                    trace.getActiveSpan()?.addEvent("strategy.nudges_injected", {
+                        "agent.slug": context.agent.slug,
+                        "nudges.count": nudgeIds.length,
                     });
                 }
             }
