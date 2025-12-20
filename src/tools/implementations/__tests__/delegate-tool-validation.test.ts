@@ -7,7 +7,7 @@ import { createDelegateExternalTool } from "@/tools/implementations/delegate_ext
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
 
 // Mock the resolution function to return pubkeys for our test agents
-import * as agentResolution from "@/utils/agent-resolution";
+import * as agentResolution from "@/services/agents";
 const mockResolve = spyOn(agentResolution, "resolveRecipientToPubkey");
 mockResolve.mockImplementation((recipient: string) => {
     if (recipient === "self-agent") return "agent-pubkey-123";

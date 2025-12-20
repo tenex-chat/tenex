@@ -3,7 +3,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation, StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/utils/agent-resolution";
+import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
