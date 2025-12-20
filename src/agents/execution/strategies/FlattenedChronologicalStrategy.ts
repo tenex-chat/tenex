@@ -50,8 +50,9 @@ interface PreviousSubthread {
 /**
  * Reconstruct tool messages from a published tool event when storage is unavailable.
  * Tool events are published with JSON content containing tool name, input, and output.
+ * @internal Exported for testing
  */
-function reconstructToolMessagesFromEvent(event: NDKEvent): ModelMessage[] | null {
+export function reconstructToolMessagesFromEvent(event: NDKEvent): ModelMessage[] | null {
     try {
         const parsed = JSON.parse(event.content);
 

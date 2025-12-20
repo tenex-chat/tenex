@@ -154,6 +154,21 @@ describe("ToolExecutionTracker", () => {
             );
         });
 
+        it("should return the published NDKEvent", async () => {
+            const returnedEvent = await tracker.trackExecution({
+                toolCallId: "call-return-event",
+                toolName: "search",
+                args: { query: "test" },
+                toolsObject: mockToolsObject,
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(returnedEvent).toBeDefined();
+            expect(returnedEvent.id).toBe("mock-event-id-123");
+            expect(returnedEvent.pubkey).toBe("mock-pubkey");
+        });
+
         it("should track multiple concurrent executions", async () => {
             await tracker.trackExecution({
                 toolCallId: "call-1",
