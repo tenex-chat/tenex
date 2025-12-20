@@ -1,5 +1,4 @@
 import type { ModelMessage } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import type {
@@ -241,14 +240,6 @@ export class RALRegistry {
   }
 
   /**
-   * Check if any RAL for this agent+conversation is streaming
-   */
-  isAnyStreaming(agentPubkey: string, conversationId: string): boolean {
-    const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals.some(r => r.isStreaming);
-  }
-
-  /**
    * Save/update messages for a specific RAL
    * @param uniqueContentStartsAt - Index where this RAL's unique content starts (typically the triggering event).
    *                                Only needs to be set on first save. Subsequent saves will preserve the original value.
@@ -390,10 +381,9 @@ export class RALRegistry {
 
     // Enforce queue size limit
     if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      const dropped = ral.queuedInjections.shift();
+      ral.queuedInjections.shift();
       logger.warn("[RALRegistry] Queue full, dropping oldest message", {
         agentPubkey: agentPubkey.substring(0, 8),
-        droppedEventId: dropped?.eventId?.substring(0, 8),
       });
     }
 
@@ -487,10 +477,9 @@ export class RALRegistry {
     }
 
     if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      const dropped = ral.queuedInjections.shift();
+      ral.queuedInjections.shift();
       logger.warn("[RALRegistry] Queue full, dropping oldest message", {
         agentPubkey: agentPubkey.substring(0, 8),
-        droppedEventId: dropped?.eventId?.substring(0, 8),
       });
     }
 
@@ -498,44 +487,6 @@ export class RALRegistry {
       role,
       content: message,
       queuedAt: Date.now(),
-    });
-  }
-
-  /**
-   * Queue an event for injection into a specific RAL
-   */
-  queueEvent(agentPubkey: string, conversationId: string, ralNumber: number, event: NDKEvent): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] Cannot queue event - no RAL state", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-        eventId: event.id?.substring(0, 8),
-      });
-      return;
-    }
-
-    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      const dropped = ral.queuedInjections.shift();
-      logger.warn("[RALRegistry] Queue full, dropping oldest event", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        droppedEventId: dropped?.eventId?.substring(0, 8),
-      });
-    }
-
-    ral.queuedInjections.push({
-      role: "user",
-      content: event.content,
-      eventId: event.id,
-      queuedAt: Date.now(),
-    });
-
-    trace.getActiveSpan()?.addEvent("ral.event_queued", {
-      "ral.id": ral.id,
-      "ral.number": ralNumber,
-      "event.id": event.id || "",
-      "queue.size": ral.queuedInjections.length,
     });
   }
 
@@ -568,39 +519,6 @@ export class RALRegistry {
     });
 
     return newInjections;
-  }
-
-  /**
-   * Check if an event is still queued for injection
-   */
-  eventStillQueued(agentPubkey: string, conversationId: string, ralNumber: number, eventId: string): boolean {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return false;
-    return ral.queuedInjections.some(i => i.eventId === eventId);
-  }
-
-  /**
-   * Swap a queued user event with a system message
-   */
-  swapQueuedEvent(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number,
-    eventId: string,
-    systemMessage: string
-  ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return;
-
-    // Find and remove the event
-    ral.queuedInjections = ral.queuedInjections.filter(i => i.eventId !== eventId);
-
-    // Add system message instead
-    ral.queuedInjections.push({
-      role: "system",
-      content: systemMessage,
-      queuedAt: Date.now(),
-    });
   }
 
   /**
@@ -764,16 +682,6 @@ export class RALRegistry {
   }
 
   /**
-   * Find a RAL that is currently streaming.
-   * Used to avoid creating duplicate executions when a streaming RAL
-   * will pick up queued injections in its prepareStep.
-   */
-  findStreamingRAL(agentPubkey: string, conversationId: string): RALState | undefined {
-    const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals.find(ral => ral.isStreaming && ral.messages.length > 0);
-  }
-
-  /**
    * Build a message containing delegation results for injection into the RAL.
    */
   buildDelegationResultsMessage(completions: CompletedDelegation[]): string {
@@ -893,15 +801,6 @@ export class RALRegistry {
   isPaused(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     return ral?.pausedByRalNumber !== undefined;
-  }
-
-  // === Convenience methods (for backwards compatibility) ===
-
-  /**
-   * Check if any RAL is streaming (convenience wrapper)
-   */
-  isStreaming(agentPubkey: string, conversationId: string): boolean {
-    return this.isAnyStreaming(agentPubkey, conversationId);
   }
 
   /**

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import type { ModelMessage } from "ai";
 import type { PendingDelegation, CompletedDelegation } from "../types";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 describe("RALRegistry", () => {
   let registry: RALRegistry;
@@ -122,7 +121,7 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("setStreaming and isAnyStreaming", () => {
+  describe("setStreaming", () => {
     it("should set streaming state", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
       const initialState = registry.getState(agentPubkey, conversationId);
@@ -133,22 +132,6 @@ describe("RALRegistry", () => {
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.isStreaming).toBe(true);
       expect(state?.lastActivityAt).toBeGreaterThanOrEqual(initialLastActivity!);
-    });
-
-    it("should return correct streaming status via isAnyStreaming method", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      expect(registry.isAnyStreaming(agentPubkey, conversationId)).toBe(false);
-
-      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
-      expect(registry.isAnyStreaming(agentPubkey, conversationId)).toBe(true);
-
-      registry.setStreaming(agentPubkey, conversationId, ralNumber, false);
-      expect(registry.isAnyStreaming(agentPubkey, conversationId)).toBe(false);
-    });
-
-    it("should return false for non-existent agent", () => {
-      expect(registry.isAnyStreaming("nonexistent", conversationId)).toBe(false);
     });
 
     it("should handle setStreaming for non-existent RAL gracefully", () => {
@@ -353,55 +336,6 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("queueEvent", () => {
-    it("should queue an event for injection", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event = new NDKEvent();
-      event.content = "Test event content";
-      event.id = "event-123";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.queuedInjections).toHaveLength(1);
-      expect(state?.queuedInjections[0].role).toBe("user");
-      expect(state?.queuedInjections[0].content).toBe("Test event content");
-      expect(state?.queuedInjections[0].eventId).toBe("event-123");
-      expect(state?.queuedInjections[0].queuedAt).toBeDefined();
-    });
-
-    it("should handle queueEvent for non-existent RAL gracefully", () => {
-      const event = new NDKEvent();
-      event.content = "Test";
-      event.id = "event-123";
-
-      expect(() => {
-        registry.queueEvent("nonexistent", conversationId, 1, event);
-      }).not.toThrow();
-    });
-
-    it("should queue multiple events", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event1 = new NDKEvent();
-      event1.content = "Event 1";
-      event1.id = "event-1";
-
-      const event2 = new NDKEvent();
-      event2.content = "Event 2";
-      event2.id = "event-2";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event1);
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event2);
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.queuedInjections).toHaveLength(2);
-      expect(state?.queuedInjections[0].eventId).toBe("event-1");
-      expect(state?.queuedInjections[1].eventId).toBe("event-2");
-    });
-  });
-
   describe("queueSystemMessage", () => {
     it("should queue a system message", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
@@ -423,43 +357,6 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("eventStillQueued", () => {
-    it("should return false for non-existent RAL", () => {
-      expect(registry.eventStillQueued("nonexistent", conversationId, 1, "event-123")).toBe(false);
-    });
-
-    it("should return false when event is not queued", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-      expect(registry.eventStillQueued(agentPubkey, conversationId, ralNumber, "event-123")).toBe(false);
-    });
-
-    it("should return true when event is queued", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event = new NDKEvent();
-      event.content = "Test";
-      event.id = "event-123";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
-
-      expect(registry.eventStillQueued(agentPubkey, conversationId, ralNumber, "event-123")).toBe(true);
-    });
-
-    it("should return false after event is cleared", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event = new NDKEvent();
-      event.content = "Test";
-      event.id = "event-123";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
-      expect(registry.eventStillQueued(agentPubkey, conversationId, ralNumber, "event-123")).toBe(true);
-
-      registry.getAndPersistInjections(agentPubkey, conversationId, ralNumber);
-      expect(registry.eventStillQueued(agentPubkey, conversationId, ralNumber, "event-123")).toBe(false);
-    });
-  });
-
   describe("getAndPersistInjections", () => {
     it("should return empty array for non-existent RAL", () => {
       const injections = registry.getAndPersistInjections("nonexistent", conversationId, 1);
@@ -469,18 +366,14 @@ describe("RALRegistry", () => {
     it("should return and persist queued injections to messages", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
-      const event = new NDKEvent();
-      event.content = "User event";
-      event.id = "event-123";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "User message");
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "System message");
 
       const injections = registry.getAndPersistInjections(agentPubkey, conversationId, ralNumber);
 
       expect(injections).toHaveLength(2);
       expect(injections[0].role).toBe("user");
-      expect(injections[0].content).toBe("User event");
+      expect(injections[0].content).toBe("User message");
       expect(injections[1].role).toBe("system");
       expect(injections[1].content).toBe("System message");
 
@@ -499,54 +392,6 @@ describe("RALRegistry", () => {
 
       expect(injections1).toHaveLength(1);
       expect(injections2).toEqual([]);
-    });
-  });
-
-  describe("swapQueuedEvent", () => {
-    it("should swap user event with system message", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event = new NDKEvent();
-      event.content = "User event";
-      event.id = "event-123";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
-
-      registry.swapQueuedEvent(agentPubkey, conversationId, ralNumber, "event-123", "System message instead");
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.queuedInjections).toHaveLength(1);
-      expect(state?.queuedInjections[0].role).toBe("system");
-      expect(state?.queuedInjections[0].content).toBe("System message instead");
-      expect(state?.queuedInjections[0].eventId).toBeUndefined();
-    });
-
-    it("should handle swapQueuedEvent for non-existent RAL gracefully", () => {
-      expect(() => {
-        registry.swapQueuedEvent("nonexistent", conversationId, 1, "event-123", "System message");
-      }).not.toThrow();
-    });
-
-    it("should only remove the specific event", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const event1 = new NDKEvent();
-      event1.content = "Event 1";
-      event1.id = "event-1";
-
-      const event2 = new NDKEvent();
-      event2.content = "Event 2";
-      event2.id = "event-2";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event1);
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event2);
-
-      registry.swapQueuedEvent(agentPubkey, conversationId, ralNumber, "event-1", "System replacement");
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.queuedInjections).toHaveLength(2);
-      expect(state?.queuedInjections.some((i) => i.eventId === "event-2")).toBe(true);
-      expect(state?.queuedInjections.some((i) => i.role === "system")).toBe(true);
     });
   });
 
@@ -619,10 +464,7 @@ describe("RALRegistry", () => {
     it("should clear specific RAL state", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
-      const event = new NDKEvent();
-      event.content = "Test";
-      event.id = "event-123";
-      registry.queueEvent(agentPubkey, conversationId, ralNumber, event);
+      registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "Test");
 
       registry.clearRAL(agentPubkey, conversationId, ralNumber);
 
@@ -752,25 +594,17 @@ describe("RALRegistry", () => {
       const ralNumber1 = registry.create(agentPubkey, conversationId);
       const ralNumber2 = registry.create(agentPubkey, conversationId2);
 
-      const event1 = new NDKEvent();
-      event1.content = "Event for conversation 1";
-      event1.id = "event-1";
-
-      const event2 = new NDKEvent();
-      event2.content = "Event for conversation 2";
-      event2.id = "event-2";
-
-      registry.queueEvent(agentPubkey, conversationId, ralNumber1, event1);
-      registry.queueEvent(agentPubkey, conversationId2, ralNumber2, event2);
+      registry.queueSystemMessage(agentPubkey, conversationId, ralNumber1, "Message for conversation 1");
+      registry.queueSystemMessage(agentPubkey, conversationId2, ralNumber2, "Message for conversation 2");
 
       const state1 = registry.getState(agentPubkey, conversationId);
       const state2 = registry.getState(agentPubkey, conversationId2);
 
       expect(state1?.queuedInjections).toHaveLength(1);
-      expect(state1?.queuedInjections[0].eventId).toBe("event-1");
+      expect(state1?.queuedInjections[0].content).toBe("Message for conversation 1");
 
       expect(state2?.queuedInjections).toHaveLength(1);
-      expect(state2?.queuedInjections[0].eventId).toBe("event-2");
+      expect(state2?.queuedInjections[0].content).toBe("Message for conversation 2");
     });
 
     it("should clear one conversation without affecting others", () => {
