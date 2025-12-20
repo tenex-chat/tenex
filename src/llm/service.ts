@@ -20,7 +20,6 @@ import {
     streamText,
     wrapLanguageModel,
 } from "ai";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
@@ -209,10 +208,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         // Build middleware chain
         const middlewares: LanguageModelMiddleware[] = [];
-
-        // AI SDK DevTools - captures LLM interactions for debugging
-        // View at http://localhost:4983 after running: npx @ai-sdk/devtools
-        middlewares.push(devToolsMiddleware());
 
         // Flight recorder - records LLM interactions when enabled via 'r' key
         middlewares.push(createFlightRecorderMiddleware());
