@@ -6,7 +6,7 @@ import type { ExecutionContext } from "../agents/execution/types";
 import type { Conversation, ConversationCoordinator } from "../conversations";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
-import { getProjectContext } from "../services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "../services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";

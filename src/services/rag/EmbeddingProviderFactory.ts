@@ -6,7 +6,7 @@ import {
     type EmbeddingProvider,
     LocalTransformerEmbeddingProvider,
     OpenAIEmbeddingProvider,
-} from "../EmbeddingProvider";
+} from "@/services/embedding";
 
 /**
  * Configuration for embedding providers

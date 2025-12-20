@@ -3,7 +3,7 @@ import type { CompleteEvent } from "@/llm/service";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getProjectContext, isProjectContextInitialized } from "@/services/ProjectContext";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
 import { trace } from "@opentelemetry/api";

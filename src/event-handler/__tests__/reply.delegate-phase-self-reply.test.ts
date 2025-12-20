@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
-import { projectContextStore } from "../../services/ProjectContextStore";
+import { projectContextStore } from "@/services/projects";
 
 describe("Agent Phase Self-Reply", () => {
     let mockConversationCoordinator: any;

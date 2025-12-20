@@ -5,8 +5,8 @@ import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import * as cron from "node-cron";
-import { logger } from "../utils/logger";
-import { getProjectContext } from "./ProjectContext";
+import { logger } from "@/utils/logger";
+import { getProjectContext } from "@/services/projects";
 
 interface ScheduledTask {
     id: string;

@@ -1,5 +1,5 @@
 import { logger } from "@/utils/logger";
-import type { EmbeddingProvider } from "../EmbeddingProvider";
+import type { EmbeddingProvider } from "@/services/embedding";
 import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
 import { RAGDatabaseService } from "./RAGDatabaseService";
 import { RAGOperations } from "./RAGOperations";

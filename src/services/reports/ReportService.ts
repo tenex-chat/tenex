@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { getNDK } from "@/nostr";
-import { getProjectContext } from "@/services/ProjectContext";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { type NDKFilter, NDKArticle } from "@nostr-dev-kit/ndk";
