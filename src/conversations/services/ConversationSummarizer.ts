@@ -25,7 +25,6 @@ export class ConversationSummarizer {
 
             // Create LLM service
             const llmService = llmServiceFactory.createService(
-                this.context.llmLogger,
                 metadataConfig,
                 {
                     agentName: "summarizer",

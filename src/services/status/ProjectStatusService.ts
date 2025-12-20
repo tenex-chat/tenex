@@ -12,6 +12,7 @@ import {
 } from "@/services/ProjectContext";
 import { projectContextStore } from "@/services/ProjectContextStore";
 import { mcpService } from "@/services/mcp/MCPManager";
+import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -333,9 +334,9 @@ export class ProjectStatusService {
                     // Skip delegate tools, core tools, and context-injected tools - they're not included in TenexProjectStatus events
                     // These are handled automatically by the system
                     if (
-                        DELEGATE_TOOLS.includes(toolName as any) ||
-                        CORE_AGENT_TOOLS.includes(toolName as any) ||
-                        CONTEXT_INJECTED_TOOLS.includes(toolName as any)
+                        DELEGATE_TOOLS.includes(toolName as ToolName) ||
+                        CORE_AGENT_TOOLS.includes(toolName as ToolName) ||
+                        CONTEXT_INJECTED_TOOLS.includes(toolName as ToolName)
                     ) {
                         continue;
                     }

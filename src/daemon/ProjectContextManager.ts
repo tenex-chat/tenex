@@ -1,5 +1,4 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
-import type { LLMLogger } from "@/logging/LLMLogger";
 import { ProjectContext } from "@/services/ProjectContext";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey } from "@nostr-dev-kit/ndk";
@@ -35,8 +34,7 @@ export class ProjectContextManager {
      */
     async loadProject(
         project: NDKProject,
-        agentRegistry: AgentRegistry,
-        llmLogger: LLMLogger
+        agentRegistry: AgentRegistry
     ): Promise<ProjectContext> {
         const projectId = this.getProjectId(project);
 
@@ -47,7 +45,7 @@ export class ProjectContextManager {
                 authorPubkey: project.pubkey,
             });
 
-            context = new ProjectContext(project, agentRegistry, llmLogger);
+            context = new ProjectContext(project, agentRegistry);
             this.contexts.set(projectId, context);
 
             // Update agent-to-project mappings

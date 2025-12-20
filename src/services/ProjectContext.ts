@@ -2,7 +2,6 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { LLMLogger } from "@/logging/LLMLogger";
 import type { PairingManager } from "@/services/pairing";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -66,15 +65,9 @@ export class ProjectContext {
      */
     public pairingManager?: PairingManager;
 
-    /**
-     * LLM Logger instance for this project
-     */
-    public readonly llmLogger: LLMLogger;
-
-    constructor(project: NDKProject, agentRegistry: AgentRegistry, llmLogger: LLMLogger) {
+    constructor(project: NDKProject, agentRegistry: AgentRegistry) {
         this.project = project;
         this.agentRegistry = agentRegistry;
-        this.llmLogger = llmLogger;
 
         const agents = agentRegistry.getAllAgentsMap();
 

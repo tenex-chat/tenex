@@ -1,4 +1,3 @@
-import type { LLMLogger } from "@/logging/LLMLogger";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -38,14 +37,8 @@ export class ConfigurationTester {
                 await llmServiceFactory.initializeProviders(llmsConfig.providers);
             }
 
-            // Create a simple mock logger for testing
-            const mockLogger: Pick<LLMLogger, "logLLMRequest" | "logLLMResponse"> = {
-                logLLMRequest: async () => {},
-                logLLMResponse: async () => {},
-            };
-
             // Create the service using the factory
-            const service = llmServiceFactory.createService(mockLogger as LLMLogger, config);
+            const service = llmServiceFactory.createService(config);
 
             console.log(chalk.cyan("📡 Sending test message..."));
             const result = await service.complete(

@@ -4,7 +4,6 @@ import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants"
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import type { LLMService } from "@/llm/service";
-import type { LLMLogger } from "@/logging/LLMLogger";
 import type {
     ConfigFile,
     LLMConfiguration,
@@ -261,7 +260,6 @@ export class ConfigService {
      * Create an LLM service for a named configuration
      */
     createLLMService(
-        llmLogger: LLMLogger,
         configName?: string,
         context?: {
             tools?: Record<string, unknown>;
@@ -272,7 +270,7 @@ export class ConfigService {
         }
     ): LLMService {
         const config = this.getLLMConfig(configName);
-        return llmServiceFactory.createService(llmLogger, config, context as Parameters<typeof llmServiceFactory.createService>[2]);
+        return llmServiceFactory.createService(config, context as Parameters<typeof llmServiceFactory.createService>[1]);
     }
 
     // =====================================================================================

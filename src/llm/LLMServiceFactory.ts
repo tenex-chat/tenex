@@ -1,4 +1,3 @@
-import type { LLMLogger } from "@/logging/LLMLogger";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -166,12 +165,10 @@ export class LLMServiceFactory {
 
     /**
      * Create an LLM service from a resolved configuration
-     * @param llmLogger Logger for the service
      * @param config LLM configuration
      * @param context Optional runtime context for Claude Code
      */
     createService(
-        llmLogger: LLMLogger,
         config: LLMConfiguration,
         context?: {
             tools?: Record<string, AISdkTool>;
@@ -185,13 +182,10 @@ export class LLMServiceFactory {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }
 
-        // Convert agent name to slug format for logging
+        // Convert agent name to slug format for telemetry
         const agentSlug = context?.agentName
             ? context.agentName.toLowerCase().replace(/\s+/g, "-")
             : undefined;
-
-        // Create a logger with agent set if agentSlug is provided
-        const serviceLogger = agentSlug ? llmLogger.withAgent(agentSlug) : llmLogger;
 
         // If mock mode is enabled, always use mock provider regardless of config
         const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
@@ -266,7 +260,6 @@ export class LLMServiceFactory {
             });
 
             return new LLMService(
-                serviceLogger,
                 null,
                 "claudeCode",
                 config.model,
@@ -293,7 +286,6 @@ export class LLMServiceFactory {
         }
 
         return new LLMService(
-            serviceLogger,
             this.registry,
             actualProvider,
             config.model,
