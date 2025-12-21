@@ -18,27 +18,110 @@ type ConversationGetInput = z.infer<typeof conversationGetSchema>;
 
 interface ConversationGetOutput {
     success: boolean;
-    conversation?: Record<string, any>;
+    conversation?: Record<string, unknown>;
     message?: string;
 }
 
 /**
- * Serialize a Conversation object to a JSON-safe plain object
- * Handles circular references in NDKEvent objects and converts Map to plain object
+ * Recursively deep copy an object while handling cycles, BigInts, Maps, Sets, and other edge cases
  */
-function serializeConversation(conversation: Conversation): Record<string, any> {
+function safeDeepCopy(obj: unknown, seen = new WeakSet()): unknown {
+    // Handle primitives and special values
+    if (obj === null || typeof obj !== 'object') {
+        if (typeof obj === 'bigint') return obj.toString();
+        if (typeof obj === 'function') return undefined;
+        return obj;
+    }
+
+    // Cycle detection
+    if (seen.has(obj)) {
+        return '[Circular]';
+    }
+    seen.add(obj);
+
+    // Handle Arrays
+    if (Array.isArray(obj)) {
+        return obj.map(item => safeDeepCopy(item, seen));
+    }
+
+    // Handle Maps
+    if (obj instanceof Map) {
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of obj) {
+            result[String(key)] = safeDeepCopy(value, seen);
+        }
+        return result;
+    }
+
+    // Handle Sets
+    if (obj instanceof Set) {
+        return Array.from(obj).map(item => safeDeepCopy(item, seen));
+    }
+
+    // Handle Dates
+    if (obj instanceof Date) {
+        return obj.toISOString();
+    }
+
+    // Handle plain Objects
+    const result: Record<string, unknown> = {};
+    for (const key in obj) {
+        // Only process own properties
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            try {
+                result[key] = safeDeepCopy((obj as Record<string, unknown>)[key], seen);
+            } catch {
+                result[key] = '[Access Error]';
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * Safely copy data while handling circular references, BigInts, Maps, Sets, and other edge cases
+ * Uses recursive deep copy with cycle detection instead of JSON.stringify
+ */
+function safeCopy<T>(data: T): T {
+    try {
+        return safeDeepCopy(data) as T;
+    } catch {
+        // Fallback to string representation if even deep copy fails
+        return '[Serialization Failed]' as unknown as T;
+    }
+}
+
+/**
+ * Serialize a Conversation object to a JSON-safe plain object
+ * Explicitly constructs result field-by-field to avoid copying cyclic properties
+ * that may be runtime-attached to the conversation object.
+ * Uses safeCopy for nested objects to handle any remaining circular references.
+ */
+function serializeConversation(conversation: Conversation): Record<string, unknown> {
+    // Convert agentStates Map to object first, then safeCopy
+    const agentStatesObj = conversation.agentStates
+        ? Object.fromEntries(conversation.agentStates.entries())
+        : {};
+
     return {
-        ...conversation,
-        agentStates: conversation.agentStates
-            ? Object.fromEntries(conversation.agentStates.entries())
-            : {},
+        id: conversation.id,
+        title: conversation.title,
+        phase: conversation.phase,
+        phaseStartedAt: conversation.phaseStartedAt,
+        metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
+        executionTime: conversation.executionTime ? safeCopy(conversation.executionTime) : {
+            totalSeconds: 0,
+            isActive: false,
+            lastUpdated: Date.now()
+        },
+        agentStates: safeCopy(agentStatesObj),
         history: conversation.history.map(event => ({
             id: event.id,
             kind: event.kind,
             pubkey: event.pubkey,
             content: event.content,
             created_at: event.created_at,
-            tags: event.tags,
+            tags: safeCopy(event.tags),
             sig: event.sig
         }))
     };

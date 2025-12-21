@@ -18,7 +18,6 @@ import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createCodebaseSearchTool } from "./implementations/codebase_search";
 import { createConversationGetTool } from "./implementations/conversation_get";
-import { createConversationListTool } from "./implementations/conversation_list";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateTool } from "./implementations/delegate";
@@ -46,7 +45,6 @@ import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
-import { createSearchConversationsTool } from "./implementations/search_conversations";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createWriteFileTool } from "./implementations/write_file";
@@ -78,7 +76,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Conversation tools
     conversation_get: createConversationGetTool,
-    conversation_list: createConversationListTool,
 
     // Project tools
     create_project: createCreateProjectTool,
@@ -112,9 +109,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     schedule_task_cancel: createCancelScheduledTaskTool,
     schedule_task: createScheduleTaskTool,
     schedule_tasks_list: createListScheduledTasksTool,
-
-    // Conversation search
-    search_conversations: createSearchConversationsTool,
 
     shell: createShellTool,
 
