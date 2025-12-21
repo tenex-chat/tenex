@@ -180,7 +180,7 @@ export class ProjectStatusService {
             }
 
             // Gather model info
-            await this.gatherModelInfo(intent, projectPath);
+            await this.gatherModelInfo(intent);
 
             // Gather tool info
             await this.gatherToolInfo(intent);
@@ -213,9 +213,9 @@ export class ProjectStatusService {
         }
     }
 
-    private async gatherModelInfo(intent: StatusIntent, projectPath: string): Promise<void> {
+    private async gatherModelInfo(intent: StatusIntent): Promise<void> {
         try {
-            const { llms } = await config.loadConfig(projectPath);
+            const { llms } = await config.loadConfig();
 
             if (!llms || !llms.configurations) {
                 logger.debug("No LLM configurations found");

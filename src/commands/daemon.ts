@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { getDaemon } from "@/daemon";
 import { TerminalInputManager } from "@/daemon/TerminalInputManager";
 import { getNDK } from "@/nostr/ndkClient";
@@ -38,10 +37,8 @@ export const daemonCommand = new Command("daemon")
         // Set alpha mode state
         _alphaMode = options.alpha || false;
 
-        // Load configuration
-        const { config: globalConfig, llms: globalLLMs } = await config.loadConfig(
-            options.config ? path.dirname(options.config) : undefined
-        );
+        // Load configuration (MCP config will be loaded later per-project with metadataPath)
+        const { config: globalConfig, llms: globalLLMs } = await config.loadConfig();
 
         // Initialize daemon logging
         await logger.initDaemonLogging();
