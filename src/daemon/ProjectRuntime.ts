@@ -426,7 +426,7 @@ export class ProjectRuntime {
                         "mcp.event_id": eventId.substring(0, 12),
                     });
 
-                    await installMCPServerFromEvent(this.projectBasePath, mcpTool);
+                    await installMCPServerFromEvent(this.metadataPath, mcpTool);
                     installedCount.success++;
 
                     trace.getActiveSpan()?.addEvent("project_runtime.mcp_installed", {
@@ -450,7 +450,7 @@ export class ProjectRuntime {
 
             // Initialize MCP service if any tools were installed
             if (installedCount.success > 0) {
-                await mcpService.initialize(this.projectBasePath);
+                await mcpService.initialize(this.metadataPath, this.projectBasePath);
 
                 const runningServers = mcpService.getRunningServers();
                 const availableTools = Object.keys(mcpService.getCachedTools());

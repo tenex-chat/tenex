@@ -96,9 +96,12 @@ export class ConfigService {
         return this.loadedConfig.mcp;
     }
 
-    async loadConfig(projectPath?: string): Promise<LoadedConfig> {
+    /**
+     * Load all TENEX configuration
+     * @param metadataPath Optional project metadata path (~/.tenex/projects/{dTag}) for project MCP config
+     */
+    async loadConfig(metadataPath?: string): Promise<LoadedConfig> {
         const globalPath = this.getGlobalPath();
-        const projPath = projectPath ? this.getProjectPath(projectPath) : undefined;
 
         // Load global config only (no project-level config.json)
         const config = await this.loadTenexConfig(globalPath);
@@ -106,10 +109,10 @@ export class ConfigService {
         // Load global LLMs only (no project-level llms.json)
         const llms = await this.loadTenexLLMs(globalPath);
 
-        // Load MCP (merge global and project - only mcp.json is kept at project level)
+        // Load MCP (merge global and project metadata path)
         const globalMCP = await this.loadTenexMCP(globalPath);
-        const projectMCP = projPath
-            ? await this.loadTenexMCP(projPath)
+        const projectMCP = metadataPath
+            ? await this.loadTenexMCP(metadataPath)
             : { servers: {}, enabled: true };
         const mcp: TenexMCP = {
             servers: { ...globalMCP.servers, ...projectMCP.servers },
@@ -349,12 +352,6 @@ export class ConfigService {
         await this.saveTenexMCP(globalPath, mcp);
     }
 
-    async saveProjectMCP(projectPath: string, mcp: TenexMCP): Promise<void> {
-        const projPath = this.getProjectPath(projectPath);
-        await ensureDirectory(projPath);
-        await this.saveTenexMCP(projPath, mcp);
-    }
-
     // =====================================================================================
     // FILE EXISTENCE CHECKS
     // =====================================================================================
@@ -365,10 +362,6 @@ export class ConfigService {
 
     async globalConfigExists(configFile: ConfigFile): Promise<boolean> {
         return this.configExists(this.getGlobalPath(), configFile);
-    }
-
-    async projectConfigExists(projectPath: string, configFile: ConfigFile): Promise<boolean> {
-        return this.configExists(this.getProjectPath(projectPath), configFile);
     }
 
     // =====================================================================================

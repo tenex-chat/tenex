@@ -22,7 +22,7 @@ import { trace } from "@opentelemetry/api";
  * 4. Saves definitions to disk and registers them
  * 5. Updates the ProjectContext with the new configuration
  */
-export async function handleProjectEvent(event: NDKEvent, projectPath: string): Promise<void> {
+export async function handleProjectEvent(event: NDKEvent): Promise<void> {
     const title = TagExtractor.getTagValue(event, "title") || "Untitled";
 
     // Extract agent event IDs from the project
@@ -46,6 +46,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
 
     try {
         const currentContext = getProjectContext();
+        const metadataPath = currentContext.agentRegistry.getMetadataPath();
 
         // Check if this is the same project that's currently loaded
         const currentProjectDTag = currentContext.project.dTag;
@@ -115,7 +116,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         // Process MCP tool changes
 
         // Get currently installed MCP event IDs (only those with event IDs)
-        const installedMCPEventIds = await getInstalledMCPEventIds(projectPath);
+        const installedMCPEventIds = await getInstalledMCPEventIds(metadataPath);
 
         // Find new MCP tools that need to be fetched
         const newMCPEventIds = mcpEventIds.filter((id) => !!id && !installedMCPEventIds.has(id));
@@ -129,7 +130,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         // Handle MCP tool removals first
         for (const eventId of mcpToolsToRemove) {
             try {
-                await removeMCPServerByEventId(projectPath, eventId);
+                await removeMCPServerByEventId(metadataPath, eventId);
             } catch (error) {
                 logger.error("Failed to remove MCP tool", { error, eventId });
             }
@@ -141,7 +142,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
                 const mcpEvent = await ndk.fetchEvent(eventId);
                 if (mcpEvent) {
                     const mcpTool = NDKMCPTool.from(mcpEvent);
-                    await installMCPServerFromEvent(projectPath, mcpTool);
+                    await installMCPServerFromEvent(metadataPath, mcpTool);
                 }
             } catch (error) {
                 logger.error("Failed to fetch or install MCP tool", { error, eventId });
@@ -151,7 +152,7 @@ export async function handleProjectEvent(event: NDKEvent, projectPath: string): 
         // Reload MCP service if there were any MCP tool changes
         const hasMCPChanges = newMCPEventIds.length > 0 || mcpToolsToRemove.length > 0;
         if (hasMCPChanges) {
-            await mcpService.reload(projectPath);
+            await mcpService.reload(metadataPath);
         }
 
         // Update the existing project context atomically
