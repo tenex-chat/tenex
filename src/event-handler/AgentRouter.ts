@@ -60,11 +60,17 @@ export class AgentRouter {
     }
 
     /**
-     * Check if any of the resolved agents would be processing their own message (self-reply)
-     * Returns the agents that would NOT be self-replying
+     * Filter out agents that would process their own message (self-reply).
+     * Exception: Agents with phases defined can self-reply for phase transitions.
      */
     static filterOutSelfReplies(event: NDKEvent, targetAgents: AgentInstance[]): AgentInstance[] {
-        return targetAgents.filter((agent) => agent.pubkey !== event.pubkey);
+        return targetAgents.filter((agent) => {
+            if (agent.pubkey !== event.pubkey) {
+                return true;
+            }
+            // Allow self-reply only if agent has phases (for phase transitions)
+            return agent.phases && Object.keys(agent.phases).length > 0;
+        });
     }
 
 }
