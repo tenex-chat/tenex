@@ -272,12 +272,46 @@ export class AgentExecutor {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
 
-                // Clean up this RAL on error (not all RALs)
-                // Note: We don't have ralNumber here if creation failed
-                logger.debug("[AgentExecutor] Error during execution", {
-                    agent: context.agent.slug,
-                    error: formatAnyError(error),
-                });
+                const errorMessage = formatAnyError(error);
+                const isCreditsError = errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
+
+                const displayMessage = isCreditsError
+                    ? "⚠️ Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
+                    : `⚠️ Unable to process your request due to an error: ${errorMessage}`;
+
+                // Publish error to user
+                const conversation = context.getConversation();
+                if (conversation) {
+                    const agentPublisher = new AgentPublisher(context.agent);
+                    try {
+                        await agentPublisher.error(
+                            {
+                                message: displayMessage,
+                                errorType: isCreditsError ? "insufficient_credits" : "execution_error",
+                            },
+                            {
+                                triggeringEvent: context.triggeringEvent,
+                                rootEvent: conversation.history[0],
+                                conversationId: conversation.id,
+                            }
+                        );
+                    } catch (publishError) {
+                        logger.error("Failed to publish execution error event", {
+                            error: formatAnyError(publishError),
+                        });
+                    }
+                }
+
+                logger.error(
+                    isCreditsError
+                        ? "[AgentExecutor] Execution failed due to insufficient credits"
+                        : "[AgentExecutor] Execution failed",
+                    {
+                        agent: context.agent.slug,
+                        error: errorMessage,
+                        conversationId: context.conversationId,
+                    }
+                );
 
                 throw error;
             } finally {

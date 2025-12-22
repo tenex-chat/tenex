@@ -136,7 +136,7 @@ export class EventHandler {
 
                 this.isUpdatingProject = true;
                 try {
-                    await handleProjectEvent(event, this.projectBasePath);
+                    await handleProjectEvent(event);
                 } finally {
                     this.isUpdatingProject = false;
                 }
