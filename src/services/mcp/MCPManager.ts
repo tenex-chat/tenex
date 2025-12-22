@@ -33,7 +33,8 @@ export class MCPManager {
     private static instance: MCPManager;
     private clients: Map<string, MCPClientEntry> = new Map();
     private isInitialized = false;
-    private projectPath?: string;
+    private metadataPath?: string;
+    private workingDirectory?: string;
     private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
 
     private constructor() {}
@@ -45,22 +46,39 @@ export class MCPManager {
         return MCPManager.instance;
     }
 
-    async initialize(projectPath?: string): Promise<void> {
+    /**
+     * Initialize MCP manager with project paths
+     * @param metadataPath The project metadata path (~/.tenex/projects/{dTag}) for config loading
+     * @param workingDirectory The project working directory (~/tenex/{dTag}) for MCP server CWD
+     */
+    async initialize(metadataPath?: string, workingDirectory?: string): Promise<void> {
         if (this.isInitialized) {
             return;
         }
 
         try {
-            this.projectPath = projectPath;
-            const loadedConfig = await configService.loadConfig(projectPath);
+            this.metadataPath = metadataPath;
+            this.workingDirectory = workingDirectory;
 
-            if (!loadedConfig.mcp || !loadedConfig.mcp.enabled) {
+            // Load and merge global + project MCP configs
+            const globalPath = configService.getGlobalPath();
+            const globalMCP = await configService.loadTenexMCP(globalPath);
+            const projectMCP = metadataPath
+                ? await configService.loadTenexMCP(metadataPath)
+                : { servers: {}, enabled: true };
+
+            const mergedMCP: TenexMCP = {
+                servers: { ...globalMCP.servers, ...projectMCP.servers },
+                enabled: projectMCP.enabled !== undefined ? projectMCP.enabled : globalMCP.enabled,
+            };
+
+            if (!mergedMCP.enabled) {
                 this.isInitialized = true;
                 return;
             }
 
-            if (loadedConfig.mcp.servers) {
-                await this.startServers(loadedConfig.mcp);
+            if (mergedMCP.servers && Object.keys(mergedMCP.servers).length > 0) {
+                await this.startServers(mergedMCP);
                 await this.refreshToolCache();
             }
             this.isInitialized = true;
@@ -100,8 +118,8 @@ export class MCPManager {
         }
 
         // SECURITY CHECK: Enforce allowedPaths
-        if (config.allowedPaths && config.allowedPaths.length > 0 && this.projectPath) {
-            const resolvedProjectPath = path.resolve(this.projectPath);
+        if (config.allowedPaths && config.allowedPaths.length > 0 && this.workingDirectory) {
+            const resolvedWorkingDir = path.resolve(this.workingDirectory);
             // Filter out undefined/null values from allowedPaths
             const validAllowedPaths = config.allowedPaths.filter(
                 (p): p is string => typeof p === "string" && p.length > 0
@@ -109,14 +127,14 @@ export class MCPManager {
             const isAllowed = validAllowedPaths.some((allowedPath) => {
                 const resolvedAllowedPath = path.resolve(allowedPath);
                 return (
-                    resolvedProjectPath.startsWith(resolvedAllowedPath) ||
-                    resolvedAllowedPath.startsWith(resolvedProjectPath)
+                    resolvedWorkingDir.startsWith(resolvedAllowedPath) ||
+                    resolvedAllowedPath.startsWith(resolvedWorkingDir)
                 );
             });
 
             if (!isAllowed) {
                 logger.warn(
-                    `Skipping MCP server '${name}' due to path restrictions. Project path '${this.projectPath}' is not in allowedPaths: ${validAllowedPaths.join(", ")}`
+                    `Skipping MCP server '${name}' due to path restrictions. Working directory '${this.workingDirectory}' is not in allowedPaths: ${validAllowedPaths.join(", ")}`
                 );
                 return;
             }
@@ -143,7 +161,7 @@ export class MCPManager {
             command: config.command,
             args: config.args,
             env: mergedEnv,
-            cwd: this.projectPath,
+            cwd: this.workingDirectory,
         });
 
         try {
@@ -278,15 +296,20 @@ export class MCPManager {
 
     /**
      * Reload MCP service configuration and restart servers
+     * @param metadataPath The project metadata path (~/.tenex/projects/{dTag})
+     * @param workingDirectory The project working directory (~/tenex/{dTag})
      */
-    async reload(projectPath?: string): Promise<void> {
+    async reload(metadataPath?: string, workingDirectory?: string): Promise<void> {
         trace.getActiveSpan()?.addEvent("mcp.reloading");
 
         // Shutdown existing servers
         await this.shutdown();
 
         // Re-initialize with the new configuration
-        await this.initialize(projectPath || this.projectPath);
+        await this.initialize(
+            metadataPath || this.metadataPath,
+            workingDirectory || this.workingDirectory
+        );
 
         trace.getActiveSpan()?.addEvent("mcp.reloaded", {
             "servers.running": this.getRunningServers().length,

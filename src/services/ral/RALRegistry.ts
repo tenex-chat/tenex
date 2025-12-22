@@ -829,4 +829,15 @@ export class RALRegistry {
       }
     }
   }
+
+  /**
+   * Clear all state (for testing)
+   */
+  clearAll(): void {
+    this.states.clear();
+    this.nextRalNumber.clear();
+    this.delegationToRal.clear();
+    this.ralIdToLocation.clear();
+    this.abortControllers.clear();
+  }
 }
