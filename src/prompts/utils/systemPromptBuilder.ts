@@ -41,6 +41,7 @@ export interface BuildSystemPromptOptions {
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
+    ralNumber?: number; // RAL number for todo list context
 }
 
 export interface BuildStandalonePromptOptions {
@@ -173,6 +174,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         conversation,
         agentLessons,
         alphaMode,
+        ralNumber,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
@@ -190,6 +192,15 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
+
+    // Add agent todos status if we have RAL context
+    if (ralNumber && conversation?.id) {
+        systemPromptBuilder.add("agent-todos", {
+            agentPubkey: agent.pubkey,
+            conversationId: conversation.id,
+            ralNumber,
+        });
+    }
 
     // Add worktree context if we have the necessary information
     if (workingDirectory && currentBranch && projectBasePath) {

@@ -4,6 +4,7 @@ import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { config } from "@/services/ConfigService";
+import { RALRegistry } from "@/services/ral";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
@@ -112,6 +113,33 @@ export class AgentSupervisor {
         }
 
         return historicalPhases;
+    }
+
+    /**
+     * Check if there are pending todo items (items with status='pending')
+     */
+    checkTodoCompletion(): { hasPending: boolean; pendingItems: string[] } {
+        const ralNumber = this.context.ralNumber;
+        if (!ralNumber) {
+            return { hasPending: false, pendingItems: [] };
+        }
+
+        const ralRegistry = RALRegistry.getInstance();
+        const pendingTodos = ralRegistry.getPendingTodos(
+            this.agent.pubkey,
+            this.context.conversationId,
+            ralNumber
+        );
+
+        trace.getActiveSpan()?.addEvent("supervisor.todo_check", {
+            "todo.pending_count": pendingTodos.length,
+            "todo.pending_items": pendingTodos.map((t) => t.title).join(","),
+        });
+
+        return {
+            hasPending: pendingTodos.length > 0,
+            pendingItems: pendingTodos.map((t) => t.title),
+        };
     }
 
     /**
@@ -246,7 +274,36 @@ export class AgentSupervisor {
             }
         }
 
-        // Fourth validation: Check for worktrees created by this agent
+        // Fourth validation: Check todo completion (pending items)
+        const todoCheck = this.checkTodoCompletion();
+        if (todoCheck.hasPending) {
+            activeSpan?.addEvent("supervisor.todos_pending", {
+                "todo.pending_count": todoCheck.pendingItems.length,
+                "todo.pending_items": todoCheck.pendingItems.join(","),
+            });
+
+            // Validate if pending todos were intentionally not addressed
+            const shouldContinue = await this.validateTodoPending(
+                completionEvent.message,
+                todoCheck.pendingItems
+            );
+
+            if (shouldContinue) {
+                activeSpan?.addEvent("supervisor.todos_needed", {
+                    "todo.pending": todoCheck.pendingItems.join(","),
+                });
+                this.invalidReason = shouldContinue;
+                this.lastInvalidReason = shouldContinue;
+                this.continuationAttempts++;
+                return false;
+            }
+
+            activeSpan?.addEvent("supervisor.todos_skip_intentional", {
+                "todo.skipped": todoCheck.pendingItems.join(","),
+            });
+        }
+
+        // Fifth validation: Check for worktrees created by this agent
         const worktreeCheck = await this.checkWorktreeCreation();
         if (worktreeCheck.created) {
             // Ask agent about worktree cleanup
@@ -403,6 +460,7 @@ export class AgentSupervisor {
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
                 alphaMode: this.context.alphaMode,
+                ralNumber: this.context.ralNumber,
             });
 
             // Combine all system messages into one
@@ -442,6 +500,88 @@ ${unusedPhases.join(", ")}
 Respond in one of two formats:
 - "I'M DONE: [brief explanation of why you intentionally skipped the phases]"
 - "CONTINUE: [brief explanation of what you will do next]" if you should execute your phases for a more complete response. Be specific about which phase you'll execute and why.`;
+
+        return { system, user };
+    }
+
+    /**
+     * Validate if pending todos were intentionally not addressed
+     * @param completionContent - The agent's response that left todos pending
+     * @param pendingItems - List of pending todo titles
+     * @returns continuation instruction if agent should continue, empty string if intentional
+     */
+    async validateTodoPending(completionContent: string, pendingItems: string[]): Promise<string> {
+        if (pendingItems.length === 0) {
+            return ""; // No pending todos
+        }
+
+        try {
+            const conversationSnapshot = await formatConversationSnapshot(this.context);
+            const systemPrompt = await this.getSystemPrompt();
+
+            const validationPrompt = this.buildTodoValidationPrompt(
+                pendingItems,
+                conversationSnapshot,
+                completionContent
+            );
+
+            const llmService = this.context.agent.createLLMService();
+
+            const result = await llmService.complete(
+                [
+                    { role: "system", content: systemPrompt },
+                    { role: "system", content: validationPrompt.system },
+                    { role: "user", content: validationPrompt.user },
+                ],
+                {} // No tools
+            );
+
+            const response = result.text?.trim() || "";
+            const shouldContinue = response.toLowerCase().includes("continue");
+
+            // Reuse phaseValidationDecision for todo decisions
+            this.phaseValidationDecision = response;
+
+            return shouldContinue ? response : "";
+        } catch (error) {
+            logger.error("[AgentSupervisor] ❌ Todo validation failed", {
+                agent: this.agent.slug,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return "";
+        }
+    }
+
+    /**
+     * Build validation prompt for pending todos
+     */
+    private buildTodoValidationPrompt(
+        pendingItems: string[],
+        conversationSnapshot: string,
+        agentResponse: string
+    ): { system: string; user: string } {
+        const system = `You just completed a response but have pending todo items.
+
+<conversation-history>
+${conversationSnapshot}
+</conversation-history>
+
+<your-response>
+${agentResponse}
+</your-response>
+
+<pending-todos>
+${pendingItems.join("\n")}
+</pending-todos>`;
+
+        const user = `Review the conversation and your pending todos. Consider:
+1. Did you fully address what was requested?
+2. Are the pending items still relevant to the task?
+3. Should you complete them or explicitly skip them (with a reason)?
+
+Respond in one of two formats:
+- "I'M DONE: [brief explanation of why pending items are not needed]"
+- "CONTINUE: [brief explanation of what you will do next]"`;
 
         return { system, user };
     }

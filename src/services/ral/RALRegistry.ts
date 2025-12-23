@@ -6,6 +6,8 @@ import type {
   PendingDelegation,
   CompletedDelegation,
   QueuedInjection,
+  TodoItem,
+  TodoStatus,
 } from "./types";
 
 export interface RALSummary {
@@ -134,6 +136,7 @@ export class RALRegistry {
       createdAt: now,
       lastActivityAt: now,
       originalTriggeringEventId,
+      todos: [],
     };
 
     // Get or create the conversation's RAL map
@@ -828,6 +831,171 @@ export class RALRegistry {
         });
       }
     }
+  }
+
+  // ============================================================================
+  // Todo Management
+  // ============================================================================
+
+  /**
+   * Create a slug from a title for use as todo ID
+   */
+  private slugify(title: string): string {
+    return title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 50);
+  }
+
+  /**
+   * Add todo items to a specific RAL
+   */
+  addTodos(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    items: Array<{
+      title: string;
+      description: string;
+      position?: number;
+      delegationInstructions?: string;
+    }>
+  ): { added: TodoItem[]; duplicates: string[] } {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      logger.warn("[RALRegistry] Cannot add todos - RAL not found", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
+      });
+      return { added: [], duplicates: [] };
+    }
+
+    const added: TodoItem[] = [];
+    const duplicates: string[] = [];
+    const now = Date.now();
+
+    for (const item of items) {
+      const id = this.slugify(item.title);
+
+      // Check for duplicate ID
+      if (ral.todos.some((t) => t.id === id)) {
+        duplicates.push(item.title);
+        continue;
+      }
+
+      const position = item.position ?? ral.todos.length;
+      const todoItem: TodoItem = {
+        id,
+        title: item.title,
+        description: item.description,
+        status: "pending",
+        delegationInstructions: item.delegationInstructions,
+        position,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Insert at position (clamped to valid range)
+      const clampedPosition = Math.max(0, Math.min(position, ral.todos.length));
+      ral.todos.splice(clampedPosition, 0, todoItem);
+
+      // Reindex positions
+      ral.todos.forEach((t, idx) => (t.position = idx));
+
+      added.push(todoItem);
+    }
+
+    ral.lastActivityAt = now;
+
+    trace.getActiveSpan()?.addEvent("ral.todos_added", {
+      "ral.number": ralNumber,
+      "todo.added_count": added.length,
+      "todo.duplicate_count": duplicates.length,
+      "todo.total_count": ral.todos.length,
+    });
+
+    return { added, duplicates };
+  }
+
+  /**
+   * Update todo item statuses
+   */
+  updateTodoStatus(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    updates: Array<{ id: string; status: TodoStatus; skipReason?: string }>
+  ): { updated: TodoItem[]; notFound: string[]; errors: string[] } {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      logger.warn("[RALRegistry] Cannot update todos - RAL not found", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
+      });
+      return { updated: [], notFound: [], errors: [] };
+    }
+
+    const updated: TodoItem[] = [];
+    const notFound: string[] = [];
+    const errors: string[] = [];
+    const now = Date.now();
+
+    for (const update of updates) {
+      const todo = ral.todos.find((t) => t.id === update.id);
+      if (!todo) {
+        notFound.push(update.id);
+        continue;
+      }
+
+      // Validate skip_reason requirement
+      if (update.status === "skipped" && !update.skipReason) {
+        errors.push(`${update.id}: skip_reason required when status='skipped'`);
+        continue;
+      }
+
+      todo.status = update.status;
+      todo.skipReason = update.skipReason;
+      todo.updatedAt = now;
+      updated.push(todo);
+    }
+
+    ral.lastActivityAt = now;
+
+    trace.getActiveSpan()?.addEvent("ral.todos_updated", {
+      "ral.number": ralNumber,
+      "todo.updated_count": updated.length,
+      "todo.not_found_count": notFound.length,
+      "todo.error_count": errors.length,
+    });
+
+    return { updated, notFound, errors };
+  }
+
+  /**
+   * Get todos for a specific RAL
+   */
+  getTodos(agentPubkey: string, conversationId: string, ralNumber: number): TodoItem[] {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.todos || [];
+  }
+
+  /**
+   * Check if RAL has pending todos
+   */
+  hasPendingTodos(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.todos.some((t) => t.status === "pending") || false;
+  }
+
+  /**
+   * Get pending todo items for a specific RAL
+   */
+  getPendingTodos(agentPubkey: string, conversationId: string, ralNumber: number): TodoItem[] {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.todos.filter((t) => t.status === "pending") || [];
   }
 
   /**

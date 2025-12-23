@@ -114,6 +114,18 @@ async function executeDelegate(
       phaseInstructions = phaseEntry[1];
     }
 
+    // If no explicit phase, check for in_progress todo with delegationInstructions
+    if (!phaseInstructions && context.ralNumber) {
+      const inProgressTodos = ralRegistry
+        .getTodos(context.agent.pubkey, context.conversationId, context.ralNumber)
+        .filter((t) => t.status === "in_progress" && t.delegationInstructions);
+
+      if (inProgressTodos.length > 0) {
+        // Use the first in_progress todo's delegation instructions
+        phaseInstructions = inProgressTodos[0].delegationInstructions;
+      }
+    }
+
     if (pubkey === context.agent.pubkey && !phase) {
       throw new Error(
         "Self-delegation requires a phase. Use delegate with a phase parameter."

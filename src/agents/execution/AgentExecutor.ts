@@ -168,6 +168,30 @@ export class AgentExecutor {
                         context.conversationId,
                         context.triggeringEvent.id
                     );
+
+                    // Convert phases to todos if agent has phases defined
+                    if (context.agent.phases && Object.keys(context.agent.phases).length > 0) {
+                        const phaseItems = Object.entries(context.agent.phases).map(
+                            ([name, instructions], idx) => ({
+                                title: `Phase: ${name}`,
+                                description: `Execute the ${name} phase`,
+                                delegationInstructions: instructions,
+                                position: idx,
+                            })
+                        );
+
+                        const result = ralRegistry.addTodos(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            phaseItems
+                        );
+
+                        span.addEvent("executor.phases_to_todos", {
+                            "phase.count": phaseItems.length,
+                            "todo.added_count": result.added.length,
+                        });
+                    }
                 }
 
                 // Check for other active RALs in this conversation
