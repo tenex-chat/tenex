@@ -8,6 +8,7 @@ import type { Tool as CoreTool } from "ai";
 export type ToolName =
     | "read_path"
     | "write_file"
+    | "edit"
     | "codebase_search"
     | "conversation_get"
     | "conversation_list"
