@@ -64,6 +64,9 @@ import { createRestartTenexBackendTool } from "./implementations/restart_tenex_b
 // Pairing tools
 import { createStopPairingTool } from "./implementations/stop_pairing";
 
+// Todo tools
+import { createTodoAddTool, createTodoListTool, createTodoRemoveTool } from "./implementations/todo";
+
 /**
  * Registry of tool factories
  */
@@ -156,6 +159,11 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Pairing tools
     stop_pairing: createStopPairingTool,
+
+    // Todo tools
+    todo_add: createTodoAddTool,
+    todo_list: createTodoListTool,
+    todo_remove: createTodoRemoveTool,
 };
 
 /**

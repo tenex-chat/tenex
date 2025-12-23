@@ -77,7 +77,11 @@ export function normalizeAgentTools(
 }
 
 /**
- * Validate and filter tools, separating valid tools from MCP tool requests
+ * Validate and filter tools, separating valid tools from MCP tool requests.
+ *
+ * ## Warning: Unrecognized tools are logged
+ * Tools that are neither valid static/dynamic tools nor MCP tools are logged
+ * as warnings. This helps debug issues where dynamic tools fail to load.
  */
 export function validateAndSeparateTools(toolNames: string[]): {
     validTools: string[];
@@ -85,13 +89,25 @@ export function validateAndSeparateTools(toolNames: string[]): {
 } {
     const validTools: string[] = [];
     const mcpToolRequests: string[] = [];
+    const droppedTools: string[] = [];
 
     for (const toolName of toolNames) {
         if (isValidToolName(toolName)) {
             validTools.push(toolName);
         } else if (toolName.startsWith("mcp__")) {
             mcpToolRequests.push(toolName);
+        } else {
+            // Track dropped tools to warn about them
+            droppedTools.push(toolName);
         }
+    }
+
+    // Warn about dropped tools - this helps debug dynamic tool loading issues
+    if (droppedTools.length > 0) {
+        logger.warn(
+            `[tool-normalization] Dropping ${droppedTools.length} unrecognized tool(s): ${droppedTools.join(", ")}. ` +
+            `If these are dynamic tools, they may not have loaded yet.`
+        );
     }
 
     return { validTools, mcpToolRequests };

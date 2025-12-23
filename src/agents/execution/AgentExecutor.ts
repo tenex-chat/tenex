@@ -466,6 +466,10 @@ export class AgentExecutor {
         const toolNames = context.agent.tools || [];
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
+        // Store reference to active tools in context for dynamic tool injection
+        // This allows create_dynamic_tool to add new tools mid-stream
+        context.activeToolsObject = toolsObject;
+
         const sessionManager = new SessionManager(context.agent, context.conversationId);
         const { sessionId } = sessionManager.getSession();
 

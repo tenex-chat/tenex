@@ -485,6 +485,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(),
+            onError: ({ error }) => {
+                // Emit stream-error event for the executor to handle and publish to user
+                this.emit("stream-error", { error });
+            },
         });
 
         // Consume the stream (this is what triggers everything!)

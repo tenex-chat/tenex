@@ -53,7 +53,10 @@ export type ToolName =
     | "bug_report_create"
     | "bug_report_add"
     | "restart_tenex_backend"
-    | "stop_pairing";
+    | "stop_pairing"
+    | "todo_add"
+    | "todo_list"
+    | "todo_remove";
 
 /**
  * AI SDK tool with optional human-readable formatter.

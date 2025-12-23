@@ -132,6 +132,26 @@ export class DynamicToolService {
     }
 
     /**
+     * Synchronously load a dynamic tool immediately after file creation.
+     *
+     * This method bypasses the debounced file watcher and loads the tool
+     * immediately. Used by create_dynamic_tool to ensure the tool is
+     * available before agent tools are validated.
+     *
+     * @param filePath - Absolute path to the dynamic tool file
+     * @returns Promise that resolves when the tool is loaded
+     *
+     * @example
+     * // In create_dynamic_tool after writeFile:
+     * await writeFile(filePath, toolCode, "utf-8");
+     * await dynamicToolService.loadToolSync(filePath);
+     * // Now the tool is immediately available for validation
+     */
+    public async loadToolSync(filePath: string): Promise<void> {
+        await this.loadTool(filePath);
+    }
+
+    /**
      * Load or reload a dynamic tool from a file
      */
     private async loadTool(filePath: string): Promise<void> {
@@ -217,13 +237,19 @@ export class DynamicToolService {
 
     /**
      * Extract tool name from filename
-     * Format: agent_{agentId}_{toolName}.ts -> toolName
+     * Format: agent_{agentName}__{toolName}.ts -> toolName
+     * Note: Uses double underscore (__) as separator to allow agent names with underscores
      */
     private extractToolName(filename: string): string {
-        // If it follows the agent_{agentId}_{toolName} pattern
-        const match = filename.match(/^agent_[^_]+_(.+)$/);
+        // If it follows the agent_{agentName}__{toolName} pattern (double underscore separator)
+        const match = filename.match(/^agent_.+__(.+)$/);
         if (match) {
             return match[1];
+        }
+        // Legacy format: agent_{agentId}_{toolName} (single underscore, agent ID without underscores)
+        const legacyMatch = filename.match(/^agent_[^_]+_(.+)$/);
+        if (legacyMatch) {
+            return legacyMatch[1];
         }
         // Otherwise use the filename as-is
         return filename;
