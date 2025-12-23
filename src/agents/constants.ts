@@ -20,6 +20,9 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "rag_create_collection", // All agents should be able to create collections
     "rag_delete_collection", // All agents should be able to delete collections
     "rag_list_collections", // All agents should be able to list collections
+    // Todo tools for task tracking
+    "todo_add", // All agents should be able to add todo items
+    "todo_update", // All agents should be able to update todo status
 ] as const;
 
 /**
@@ -76,6 +79,9 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "ral_abort",
     // Pairing tools (injected when hasActivePairings is true)
     "stop_pairing",
+    // Todo tools (excluded from 24010 events - all agents get via CORE_AGENT_TOOLS)
+    "todo_add",
+    "todo_update",
 ];
 
 /**

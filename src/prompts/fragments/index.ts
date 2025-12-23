@@ -9,6 +9,7 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 // Import all fragment definitions
 import { agentIdentityFragment } from "./01-agent-identity";
 import { agentPhasesFragment } from "./05-agent-phases";
+import { agentTodosFragment } from "./06-agent-todos";
 // 10-referenced-article uses inline registration, no named export
 import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
@@ -32,6 +33,7 @@ export function registerAllFragments(): void {
     // Core identity and context
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentPhasesFragment);
+    fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(delegatedTaskContextFragment);
     fragmentRegistry.register(debugModeFragment);

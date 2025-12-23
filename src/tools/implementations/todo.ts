@@ -1,74 +1,76 @@
 /**
- * Todo Tools - In-memory todo list management for agents
+ * Todo Tools - RAL-scoped todo list management for agents
  *
- * Provides todo_add, todo_list, and todo_remove functionality.
- * Each agent's todo list is stored in memory, keyed by their pubkey.
+ * Provides todo_add and todo_update functionality.
+ * Todos are stored in RALState (in-memory, ephemeral per execution).
  */
 
 import type { ExecutionContext } from "@/agents/execution/types";
+import { RALRegistry } from "@/services/ral";
+import type { TodoStatus } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { tool } from "ai";
 import { z } from "zod";
-
-// In-memory storage for todo lists, keyed by agent pubkey
-const todoStorage = new Map<string, string[]>();
-
-/**
- * Get the todo list for an agent
- */
-function getTodoList(pubkey: string): string[] {
-    if (!todoStorage.has(pubkey)) {
-        todoStorage.set(pubkey, []);
-    }
-    return todoStorage.get(pubkey)!;
-}
 
 // ============================================================================
 // todo_add
 // ============================================================================
 
+const todoAddItemSchema = z.object({
+    title: z.string().describe("Short title for the todo item (becomes the ID as a slug)"),
+    description: z.string().describe("Detailed description of what needs to be done"),
+    position: z
+        .number()
+        .optional()
+        .describe("Position in the list (0-indexed). If omitted, appends to end"),
+});
+
 const todoAddSchema = z.object({
-    item: z.string().describe("The todo item to add to the list"),
+    items: z.array(todoAddItemSchema).min(1).describe("Array of todo items to add"),
 });
 
 type TodoAddInput = z.infer<typeof todoAddSchema>;
 
 interface TodoAddOutput {
     success: boolean;
-    message: string;
-    item: string;
+    added: Array<{ id: string; title: string; position: number }>;
+    duplicates: string[];
     totalItems: number;
 }
 
-async function executeTodoAdd(input: TodoAddInput, context: ExecutionContext): Promise<TodoAddOutput> {
-    const { item } = input;
-    const pubkey = context.agent.pubkey;
+async function executeTodoAdd(
+    input: TodoAddInput,
+    context: ExecutionContext
+): Promise<TodoAddOutput> {
+    const ralRegistry = RALRegistry.getInstance();
+    const ralNumber = context.ralNumber!;
 
-    const todoList = getTodoList(pubkey);
+    const result = ralRegistry.addTodos(
+        context.agent.pubkey,
+        context.conversationId,
+        ralNumber,
+        input.items.map((item) => ({
+            title: item.title,
+            description: item.description,
+            position: item.position,
+        }))
+    );
 
-    // Check for duplicates
-    if (todoList.includes(item)) {
-        return {
-            success: false,
-            message: "Item already exists in the todo list",
-            item,
-            totalItems: todoList.length,
-        };
-    }
-
-    todoList.push(item);
+    const todos = ralRegistry.getTodos(context.agent.pubkey, context.conversationId, ralNumber);
 
     return {
-        success: true,
-        message: "Item added successfully",
-        item,
-        totalItems: todoList.length,
+        success: result.added.length > 0,
+        added: result.added.map((t) => ({ id: t.id, title: t.title, position: t.position })),
+        duplicates: result.duplicates,
+        totalItems: todos.length,
     };
 }
 
 export function createTodoAddTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: "Add a new item to your todo list. Each agent has their own separate todo list stored in memory.",
+        description:
+            "Add items to your todo list. Each item gets a unique ID derived from its title. " +
+            "Todos are scoped to this execution and help track progress on complex tasks.",
         inputSchema: todoAddSchema,
         execute: async (input: TodoAddInput) => {
             return await executeTodoAdd(input, context);
@@ -76,46 +78,12 @@ export function createTodoAddTool(context: ExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ item }: TodoAddInput) => `Adding todo: "${item}"`,
-        enumerable: false,
-        configurable: true,
-    });
-
-    return aiTool as AISdkTool;
-}
-
-// ============================================================================
-// todo_list
-// ============================================================================
-
-const todoListSchema = z.object({}).describe("No parameters required");
-
-interface TodoListOutput {
-    items: string[];
-    count: number;
-}
-
-async function executeTodoList(context: ExecutionContext): Promise<TodoListOutput> {
-    const pubkey = context.agent.pubkey;
-    const todoList = getTodoList(pubkey);
-
-    return {
-        items: [...todoList],
-        count: todoList.length,
-    };
-}
-
-export function createTodoListTool(context: ExecutionContext): AISdkTool {
-    const aiTool = tool({
-        description: "List all items on your todo list. Returns all todo items for the current agent.",
-        inputSchema: todoListSchema,
-        execute: async () => {
-            return await executeTodoList(context);
+        value: ({ items }: TodoAddInput) => {
+            if (items.length === 1) {
+                return `Adding todo: "${items[0].title}"`;
+            }
+            return `Adding ${items.length} todos`;
         },
-    });
-
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: () => "Listing todo items",
         enumerable: false,
         configurable: true,
     });
@@ -124,81 +92,85 @@ export function createTodoListTool(context: ExecutionContext): AISdkTool {
 }
 
 // ============================================================================
-// todo_remove
+// todo_update
 // ============================================================================
 
-const todoRemoveSchema = z.object({
-    item: z.string().describe("The todo item to remove from the list"),
+const todoUpdateItemSchema = z.object({
+    id: z.string().describe("The todo item ID (slug)"),
+    status: z
+        .enum(["pending", "in_progress", "done", "skipped"])
+        .describe("New status for the item"),
+    skip_reason: z
+        .string()
+        .optional()
+        .describe("Required when status='skipped' - explain why this item was skipped"),
 });
 
-type TodoRemoveInput = z.infer<typeof todoRemoveSchema>;
+const todoUpdateSchema = z.object({
+    items: z.array(todoUpdateItemSchema).min(1).describe("Array of todo status updates"),
+});
 
-interface TodoRemoveOutput {
+type TodoUpdateInput = z.infer<typeof todoUpdateSchema>;
+
+interface TodoUpdateOutput {
     success: boolean;
-    message: string;
-    item: string;
-    remainingItems: number;
+    updated: Array<{ id: string; status: string }>;
+    notFound: string[];
+    errors: string[];
+    pendingCount: number;
 }
 
-async function executeTodoRemove(input: TodoRemoveInput, context: ExecutionContext): Promise<TodoRemoveOutput> {
-    const { item } = input;
-    const pubkey = context.agent.pubkey;
+async function executeTodoUpdate(
+    input: TodoUpdateInput,
+    context: ExecutionContext
+): Promise<TodoUpdateOutput> {
+    const ralRegistry = RALRegistry.getInstance();
+    const ralNumber = context.ralNumber!;
 
-    const todoList = getTodoList(pubkey);
-    const index = todoList.indexOf(item);
+    const result = ralRegistry.updateTodoStatus(
+        context.agent.pubkey,
+        context.conversationId,
+        ralNumber,
+        input.items.map((item) => ({
+            id: item.id,
+            status: item.status as TodoStatus,
+            skipReason: item.skip_reason,
+        }))
+    );
 
-    if (index === -1) {
-        return {
-            success: false,
-            message: "Item not found in the todo list",
-            item,
-            remainingItems: todoList.length,
-        };
-    }
-
-    todoList.splice(index, 1);
+    const todos = ralRegistry.getTodos(context.agent.pubkey, context.conversationId, ralNumber);
+    const pendingCount = todos.filter((t) => t.status === "pending").length;
 
     return {
-        success: true,
-        message: "Item removed successfully",
-        item,
-        remainingItems: todoList.length,
+        success: result.updated.length > 0 && result.errors.length === 0,
+        updated: result.updated.map((t) => ({ id: t.id, status: t.status })),
+        notFound: result.notFound,
+        errors: result.errors,
+        pendingCount,
     };
 }
 
-export function createTodoRemoveTool(context: ExecutionContext): AISdkTool {
+export function createTodoUpdateTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Remove an item from your todo list. The item must match exactly as it was added.",
-        inputSchema: todoRemoveSchema,
-        execute: async (input: TodoRemoveInput) => {
-            return await executeTodoRemove(input, context);
+            "Update the status of todo items. Use 'in_progress' when starting work, 'done' when complete, " +
+            "'skipped' (with skip_reason) if not applicable. Items with 'pending' status indicate work not yet started.",
+        inputSchema: todoUpdateSchema,
+        execute: async (input: TodoUpdateInput) => {
+            return await executeTodoUpdate(input, context);
         },
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ item }: TodoRemoveInput) => `Removing todo: "${item}"`,
+        value: ({ items }: TodoUpdateInput) => {
+            if (items.length === 1) {
+                return `Updating todo "${items[0].id}" to ${items[0].status}`;
+            }
+            return `Updating ${items.length} todo statuses`;
+        },
         enumerable: false,
         configurable: true,
     });
 
     return aiTool as AISdkTool;
-}
-
-// ============================================================================
-// Utility functions for testing/management
-// ============================================================================
-
-/**
- * Clear the todo list for an agent (useful for testing)
- */
-export function clearTodoList(pubkey: string): void {
-    todoStorage.delete(pubkey);
-}
-
-/**
- * Clear all todo lists (useful for testing)
- */
-export function clearAllTodoLists(): void {
-    todoStorage.clear();
 }

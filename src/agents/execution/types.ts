@@ -35,6 +35,7 @@ export interface ExecutionContext {
     alphaMode?: boolean; // True when running in alpha mode - enables bug reporting tools
     hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools
     hasActivePairings?: boolean; // True when this agent has active pairing sessions - enables stop_pairing tool
+    ralNumber?: number; // The RAL number for this execution - set by AgentExecutor during execution
 
     /**
      * Reference to the active tools object used by the LLM service.

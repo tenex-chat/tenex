@@ -1064,6 +1064,7 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
                 alphaMode: context.alphaMode,
+                ralNumber: context.ralNumber,
             });
 
             for (const systemMsg of systemMessages) {

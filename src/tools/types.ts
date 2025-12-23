@@ -55,8 +55,7 @@ export type ToolName =
     | "restart_tenex_backend"
     | "stop_pairing"
     | "todo_add"
-    | "todo_list"
-    | "todo_remove";
+    | "todo_update";
 
 /**
  * AI SDK tool with optional human-readable formatter.
