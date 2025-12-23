@@ -102,6 +102,7 @@ describe("FlattenedChronologicalStrategy - Public Broadcasts", () => {
             history: events,
             participants: new Set([USER_PUBKEY, AGENT_A_PUBKEY, AGENT_B_PUBKEY]),
             agentStates: new Map(),
+            agentTodos: new Map(),
             metadata: {},
             executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         } as Conversation;

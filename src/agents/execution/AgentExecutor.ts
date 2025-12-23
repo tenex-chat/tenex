@@ -17,6 +17,7 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
+import { addTodosToConversation } from "@/tools/implementations/todo";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -170,7 +171,8 @@ export class AgentExecutor {
                     );
 
                     // Convert phases to todos if agent has phases defined
-                    if (context.agent.phases && Object.keys(context.agent.phases).length > 0) {
+                    const conversation = context.getConversation();
+                    if (context.agent.phases && Object.keys(context.agent.phases).length > 0 && conversation) {
                         const phaseItems = Object.entries(context.agent.phases).map(
                             ([name, instructions], idx) => ({
                                 title: `Phase: ${name}`,
@@ -180,10 +182,9 @@ export class AgentExecutor {
                             })
                         );
 
-                        const result = ralRegistry.addTodos(
+                        const result = addTodosToConversation(
+                            conversation,
                             context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
                             phaseItems
                         );
 

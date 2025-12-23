@@ -45,6 +45,7 @@ describe("handleNewConversation with NDK utilities", () => {
                 phase: "CHAT",
                 history: [event],
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 executionTime: {

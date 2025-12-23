@@ -20,6 +20,8 @@ function createTestConversation(id: string): Conversation {
         title: "Test Conversation",
         phase: "CHAT",
         history: [],
+        agentStates: new Map(),
+        agentTodos: new Map(),
         metadata: {},
         executionTime: {
             totalSeconds: 0,
@@ -186,6 +188,8 @@ describe("Execution Time Tracking", () => {
                 title: "Loaded",
                 phase: "CHAT",
                 history: [],
+                agentStates: new Map(),
+                agentTodos: new Map(),
                 metadata: {},
                 executionTime: undefined as any, // Simulate missing executionTime
             };
@@ -228,6 +232,8 @@ describe("Execution Time Tracking", () => {
                 title: "Partial",
                 phase: "CHAT",
                 history: [],
+                agentStates: new Map(),
+                agentTodos: new Map(),
                 metadata: {},
                 executionTime: {
                     totalSeconds: 100,

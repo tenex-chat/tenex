@@ -117,6 +117,7 @@ describe("ConversationEventProcessor", () => {
                 phase: "CHAT",
                 history: [],
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 executionTime: {
@@ -153,6 +154,7 @@ describe("ConversationEventProcessor", () => {
                 phase: "CHAT",
                 history: [existingEvent],
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 executionTime: {
@@ -185,6 +187,7 @@ describe("ConversationEventProcessor", () => {
                 phase: "CHAT",
                 history: [],
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 executionTime: {
@@ -232,6 +235,7 @@ describe("ConversationEventProcessor", () => {
                 phase: "CHAT",
                 history: [],
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 phaseStartedAt: Date.now(),
                 metadata: {},
                 executionTime: {

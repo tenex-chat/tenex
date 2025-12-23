@@ -2,11 +2,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { getNDK } from "@/nostr/ndkClient";
+import type { TodoItem } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { z } from "zod";
 import type { AgentState, Conversation } from "../types";
-import { type AgentStateSchema, MetadataFileSchema, SerializedConversationSchema } from "./schemas";
+import { type AgentStateSchema, MetadataFileSchema, SerializedConversationSchema, type TodoItemSchema } from "./schemas";
 import type {
     ConversationMetadata,
     ConversationPersistenceAdapter,
@@ -50,11 +51,30 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 }
             }
 
+            // Convert agentTodos Map to a plain object for serialization
+            const agentTodosObj: Record<string, z.infer<typeof TodoItemSchema>[]> = {};
+            if (conversation.agentTodos) {
+                for (const [agentPubkey, todos] of conversation.agentTodos.entries()) {
+                    agentTodosObj[agentPubkey] = todos.map((todo) => ({
+                        id: todo.id,
+                        title: todo.title,
+                        description: todo.description,
+                        status: todo.status,
+                        skipReason: todo.skipReason,
+                        delegationInstructions: todo.delegationInstructions,
+                        position: todo.position,
+                        createdAt: todo.createdAt,
+                        updatedAt: todo.updatedAt,
+                    }));
+                }
+            }
+
             // Serialize NDKEvents to a storable format
             const serialized = {
                 ...conversation,
                 history: conversation.history.map((event) => event.serialize(true, true)),
                 agentStates: agentStatesObj,
+                agentTodos: agentTodosObj,
             };
 
             await writeJsonFile(filePath, serialized);
@@ -107,6 +127,25 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 }
             }
 
+            // Reconstruct agentTodos Map
+            const agentTodosMap = new Map<string, TodoItem[]>();
+            if (data.agentTodos) {
+                for (const [agentPubkey, todosData] of Object.entries(data.agentTodos)) {
+                    const todos: TodoItem[] = todosData.map((todoData) => ({
+                        id: todoData.id,
+                        title: todoData.title,
+                        description: todoData.description,
+                        status: todoData.status,
+                        skipReason: todoData.skipReason,
+                        delegationInstructions: todoData.delegationInstructions,
+                        position: todoData.position,
+                        createdAt: todoData.createdAt,
+                        updatedAt: todoData.updatedAt,
+                    }));
+                    agentTodosMap.set(agentPubkey, todos);
+                }
+            }
+
             // Deserialize events first
             const deserializedEvents = data.history
                 .map((serializedEvent: string) => {
@@ -144,6 +183,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 title: data.title || undefined,
                 history: deduplicatedHistory,
                 agentStates: agentStatesMap,
+                agentTodos: agentTodosMap,
                 metadata: data.metadata,
                 executionTime: data.executionTime || {
                     totalSeconds: 0,

@@ -22,6 +22,7 @@ describe("ConversationStore", () => {
             phase: "CHAT",
             history: [mockEvent],
             agentStates: new Map(),
+            agentTodos: new Map(),
             phaseStartedAt: Date.now(),
             metadata: {
                 summary: "Test summary",

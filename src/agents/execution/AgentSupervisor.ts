@@ -4,7 +4,6 @@ import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { config } from "@/services/ConfigService";
-import { RALRegistry } from "@/services/ral";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { formatConversationSnapshot } from "@/utils/phase-utils";
@@ -119,17 +118,13 @@ export class AgentSupervisor {
      * Check if there are pending todo items (items with status='pending')
      */
     checkTodoCompletion(): { hasPending: boolean; pendingItems: string[] } {
-        const ralNumber = this.context.ralNumber;
-        if (!ralNumber) {
+        const conversation = this.context.getConversation();
+        if (!conversation) {
             return { hasPending: false, pendingItems: [] };
         }
 
-        const ralRegistry = RALRegistry.getInstance();
-        const pendingTodos = ralRegistry.getPendingTodos(
-            this.agent.pubkey,
-            this.context.conversationId,
-            ralNumber
-        );
+        const todos = conversation.agentTodos.get(this.agent.pubkey) || [];
+        const pendingTodos = todos.filter((t) => t.status === "pending");
 
         trace.getActiveSpan()?.addEvent("supervisor.todo_check", {
             "todo.pending_count": pendingTodos.length,
@@ -460,7 +455,6 @@ export class AgentSupervisor {
                 isProjectManager,
                 projectManagerPubkey: projectCtx.getProjectManager().pubkey,
                 alphaMode: this.context.alphaMode,
-                ralNumber: this.context.ralNumber,
             });
 
             // Combine all system messages into one

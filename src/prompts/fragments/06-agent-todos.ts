@@ -1,11 +1,10 @@
-import { RALRegistry } from "@/services/ral";
+import type { Conversation } from "@/conversations/types";
 import type { TodoItem } from "@/services/ral/types";
 import type { PromptFragment } from "../core/types";
 
 interface AgentTodosArgs {
+    conversation: Conversation;
     agentPubkey: string;
-    conversationId: string;
-    ralNumber: number;
 }
 
 function formatTodoItem(item: TodoItem): string {
@@ -32,9 +31,8 @@ function formatTodoItem(item: TodoItem): string {
 export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
     id: "agent-todos",
     priority: 6, // After phases (5), before other context
-    template: ({ agentPubkey, conversationId, ralNumber }) => {
-        const ralRegistry = RALRegistry.getInstance();
-        const todos = ralRegistry.getTodos(agentPubkey, conversationId, ralNumber);
+    template: ({ conversation, agentPubkey }) => {
+        const todos = conversation.agentTodos.get(agentPubkey) || [];
 
         if (todos.length === 0) {
             return "";

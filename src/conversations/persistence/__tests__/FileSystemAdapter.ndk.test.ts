@@ -42,6 +42,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                     phase: "CHAT",
                     history: conversation,
                     agentStates: new Map([["bob", { lastActive: Date.now(), messagesCount: 2 }]]),
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: {
                         participants: ["alice", "bob"],
@@ -112,6 +113,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                         ["dave", { role: "technical-lead" }],
                         ["eve", { role: "marketing-lead" }],
                     ]),
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: {
                         type: "planning",
@@ -179,6 +181,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                     phase: "CHAT",
                     history: [event],
                     agentStates,
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: {},
                     executionTime: {
@@ -218,6 +221,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                     phase: "INIT",
                     history: [initialEvent],
                     agentStates: new Map(),
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: { version: 1 },
                     executionTime: {
@@ -269,6 +273,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                         phase: "CHAT",
                         history: [event],
                         agentStates: new Map(),
+                        agentTodos: new Map(),
                         phaseStartedAt: Date.now() - i * 1000,
                         metadata: { index: i },
                         executionTime: {
@@ -307,6 +312,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                     phase: "CHAT",
                     history: [event],
                     agentStates: new Map(),
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: {},
                     executionTime: {
@@ -350,6 +356,7 @@ describe("FileSystemAdapter with NDK utilities", () => {
                         ["agent1", { messagesCount: 25 }],
                         ["agent2", { messagesCount: 25 }],
                     ]),
+                    agentTodos: new Map(),
                     phaseStartedAt: Date.now(),
                     metadata: {
                         totalMessages: 50,

@@ -1,5 +1,6 @@
 import { NDKKind } from "@/nostr/kinds";
 import type { ProjectContext } from "@/services/projects";
+import type { TodoItem } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ensureExecutionTimeInitialized } from "../executionTime";
@@ -264,6 +265,12 @@ export class ConversationCoordinator {
                 if (!(conversation.agentStates instanceof Map)) {
                     const statesObj = conversation.agentStates as Record<string, AgentState>;
                     conversation.agentStates = new Map(Object.entries(statesObj || {}));
+                }
+
+                // Ensure agentTodos is a Map
+                if (!(conversation.agentTodos instanceof Map)) {
+                    const todosObj = conversation.agentTodos as Record<string, TodoItem[]>;
+                    conversation.agentTodos = new Map(Object.entries(todosObj || {}));
                 }
 
                 this.store.set(conversation.id, conversation);

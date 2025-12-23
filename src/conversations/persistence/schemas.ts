@@ -14,11 +14,25 @@ export const AgentStateSchema = z.object({
     lastProcessedMessageIndex: z.number().int().min(0),
 });
 
+// Todo item schema for persistence
+export const TodoItemSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    status: z.enum(["pending", "in_progress", "done", "skipped"]),
+    skipReason: z.string().optional(),
+    delegationInstructions: z.string().optional(),
+    position: z.number().int().min(0),
+    createdAt: z.number(),
+    updatedAt: z.number(),
+});
+
 export const SerializedConversationSchema = z.object({
     id: z.string(),
     title: z.string(),
     history: z.array(z.string()),
     agentStates: z.record(z.string(), AgentStateSchema).optional(), // Map serialized as object
+    agentTodos: z.record(z.string(), z.array(TodoItemSchema)).optional(), // Map serialized as object
     metadata: ConversationMetadataSchema,
     executionTime: ExecutionTimeSchema.optional(),
 });
