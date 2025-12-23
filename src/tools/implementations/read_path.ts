@@ -32,20 +32,6 @@ async function executeReadPath(path: string, context: ExecutionContext): Promise
         content = `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
     } else {
         content = await readFile(fullPath, "utf-8");
-
-        // Track file read in conversation metadata if path starts with context/
-        if (path.startsWith("context/") && context.conversationCoordinator) {
-            const conversation = context.getConversation();
-            const currentMetadata = conversation?.metadata || {};
-            const readFiles = currentMetadata.readFiles || [];
-
-            // Only add if not already tracked
-            if (!readFiles.includes(path)) {
-                await context.conversationCoordinator.updateMetadata(context.conversationId, {
-                    readFiles: [...readFiles, path],
-                });
-            }
-        }
     }
 
     return content;
@@ -58,7 +44,7 @@ async function executeReadPath(path: string, context: ExecutionContext): Promise
 export function createReadPathTool(context: ExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
-            "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Automatically tracks context file reads for conversation metadata. Safe and sandboxed to project directory.",
+            "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Safe and sandboxed to project directory.",
 
         inputSchema: readPathSchema,
 

@@ -8,11 +8,8 @@ import { createReadPathTool } from "../read_path";
 // Mock conversation manager
 const mockConversationCoordinator = {
     getConversation: mock(() => ({
-        metadata: {
-            readFiles: [],
-        },
+        metadata: {},
     })),
-    updateMetadata: mock(async () => {}),
 };
 
 describe("readPath tool", () => {
@@ -25,13 +22,10 @@ describe("readPath tool", () => {
 
         // Reset mocks before each test
         mockConversationCoordinator.getConversation.mockClear();
-        mockConversationCoordinator.updateMetadata.mockClear();
 
         // Reset mock implementation
         mockConversationCoordinator.getConversation = mock(() => ({
-            metadata: {
-                readFiles: [],
-            },
+            metadata: {},
         }));
 
         // Create test context
@@ -117,46 +111,6 @@ describe("readPath tool", () => {
 
             expect(result).toContain("Directory listing for empty:");
             expect(result).toContain("To read a specific file");
-        });
-    });
-
-    describe("context file tracking", () => {
-        it("should track context/ files in metadata", async () => {
-            const contextDir = path.join(testDir, "context");
-            mkdirSync(contextDir);
-            writeFileSync(path.join(contextDir, "important.md"), "Context content");
-
-            await readPathTool.execute({ path: "context/important.md" });
-
-            expect(mockConversationCoordinator.updateMetadata).toHaveBeenCalledWith(
-                "test-conv-123",
-                {
-                    readFiles: ["context/important.md"],
-                }
-            );
-        });
-
-        it("should not duplicate tracked files", async () => {
-            const contextDir = path.join(testDir, "context");
-            mkdirSync(contextDir);
-            writeFileSync(path.join(contextDir, "tracked.md"), "Already tracked");
-
-            // Mock conversation with existing tracked file
-            mockConversationCoordinator.getConversation = mock(() => ({
-                metadata: { readFiles: ["context/tracked.md"] },
-            }));
-
-            await readPathTool.execute({ path: "context/tracked.md" });
-
-            expect(mockConversationCoordinator.updateMetadata).not.toHaveBeenCalled();
-        });
-
-        it("should not track non-context files", async () => {
-            writeFileSync(path.join(testDir, "regular.txt"), "Regular file");
-
-            await readPathTool.execute({ path: "regular.txt" });
-
-            expect(mockConversationCoordinator.updateMetadata).not.toHaveBeenCalled();
         });
     });
 
@@ -266,40 +220,4 @@ describe("readPath tool", () => {
         });
     });
 
-    describe("metadata edge cases", () => {
-        it("should handle missing conversation", async () => {
-            const contextDir = path.join(testDir, "context");
-            mkdirSync(contextDir);
-            writeFileSync(path.join(contextDir, "file.md"), "content");
-
-            // Create new context without conversation coordinator and recreate tool
-            const minimalContext = {
-                ...context,
-                conversationCoordinator: undefined,
-            } as ExecutionContext;
-            const minimalTool = createReadPathTool(minimalContext);
-
-            const result = await minimalTool.execute({ path: "context/file.md" });
-
-            expect(result).toBe("content");
-        });
-
-        it("should handle conversation without metadata", async () => {
-            const contextDir = path.join(testDir, "context");
-            mkdirSync(contextDir);
-            writeFileSync(path.join(contextDir, "file.md"), "content");
-
-            mockConversationCoordinator.getConversation = mock(() => null);
-
-            const result = await readPathTool.execute({ path: "context/file.md" });
-
-            expect(result).toBe("content");
-            expect(mockConversationCoordinator.updateMetadata).toHaveBeenCalledWith(
-                "test-conv-123",
-                {
-                    readFiles: ["context/file.md"],
-                }
-            );
-        });
-    });
 });

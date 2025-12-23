@@ -236,20 +236,9 @@ export class ConversationCoordinator {
             return;
         }
 
-        this.eventProcessor.cleanupMetadata(conversation);
         this.store.delete(conversationId);
 
         await this.persistence.save(conversation);
-    }
-
-    /**
-     * Clean up conversation metadata
-     */
-    cleanupConversationMetadata(conversationId: string): void {
-        const conversation = this.store.get(conversationId);
-        if (conversation) {
-            this.eventProcessor.cleanupMetadata(conversation);
-        }
     }
 
     // Private helper methods
