@@ -115,14 +115,18 @@ async function executeDelegate(
     }
 
     // If no explicit phase, check for in_progress todo with delegationInstructions
-    if (!phaseInstructions && context.ralNumber) {
-      const inProgressTodos = ralRegistry
-        .getTodos(context.agent.pubkey, context.conversationId, context.ralNumber)
-        .filter((t) => t.status === "in_progress" && t.delegationInstructions);
+    if (!phaseInstructions) {
+      const conversation = context.getConversation();
+      if (conversation) {
+        const todos = conversation.agentTodos.get(context.agent.pubkey) || [];
+        const inProgressTodos = todos.filter(
+          (t) => t.status === "in_progress" && t.delegationInstructions
+        );
 
-      if (inProgressTodos.length > 0) {
-        // Use the first in_progress todo's delegation instructions
-        phaseInstructions = inProgressTodos[0].delegationInstructions;
+        if (inProgressTodos.length > 0) {
+          // Use the first in_progress todo's delegation instructions
+          phaseInstructions = inProgressTodos[0].delegationInstructions;
+        }
       }
     }
 

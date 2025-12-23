@@ -1,4 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { TodoItem } from "@/services/ral/types";
 
 // Simplified agent state to track what an agent has seen
 export interface AgentState {
@@ -12,6 +13,7 @@ export interface Conversation {
     phaseStartedAt?: number;
     history: NDKEvent[]; // The SINGLE source of truth for all events/messages
     agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
+    agentTodos: Map<string, TodoItem[]>; // Track todos per agent (keyed by agent pubkey)
     metadata: ConversationMetadata;
 
     // Execution time tracking

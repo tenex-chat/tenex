@@ -141,6 +141,7 @@ describe("FlattenedChronologicalStrategy - Tool Output in Subsequent Chats", () 
                 history: events,
                 participants: new Set([USER_PUBKEY, AGENT_PUBKEY]),
                 agentStates: new Map(),
+                agentTodos: new Map(),
                 metadata: {},
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             } as Conversation;

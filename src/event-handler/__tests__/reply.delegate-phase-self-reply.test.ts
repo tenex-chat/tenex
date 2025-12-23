@@ -104,6 +104,7 @@ describe("Agent Phase Self-Reply", () => {
             history: [],
             phase: "planning",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         // Update mock to return conversation
@@ -156,6 +157,7 @@ describe("Agent Phase Self-Reply", () => {
             history: [],
             phase: "chat",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         // Update mock to return conversation
@@ -209,6 +211,7 @@ describe("Agent Phase Self-Reply", () => {
             history: [],
             phase: "planning",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         // Update mock to return conversation

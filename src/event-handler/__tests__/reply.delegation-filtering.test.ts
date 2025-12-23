@@ -127,6 +127,7 @@ describe("Delegation Event Filtering Bug", () => {
             history: [],
             phase: "chat",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         // Update mock to return conversation
@@ -185,6 +186,7 @@ describe("Delegation Event Filtering Bug", () => {
             history: [],
             phase: "chat",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
@@ -229,6 +231,7 @@ describe("Delegation Event Filtering Bug", () => {
             history: [],
             phase: "chat",
             agentStates: new Map(),
+            agentTodos: new Map(),
         };
 
         mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);

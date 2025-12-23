@@ -105,8 +105,6 @@ export interface RALState {
   pausePromise?: Promise<void>;
   /** Resolver function to unpause this RAL */
   pauseResolver?: () => void;
-  /** Todo items for this RAL execution */
-  todos: TodoItem[];
 }
 
 export interface StopExecutionSignal {
