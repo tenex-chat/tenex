@@ -52,6 +52,7 @@ import { createSearchConversationsTool } from "./implementations/search_conversa
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createWriteFileTool } from "./implementations/write_file";
+import { createEditTool } from "./implementations/edit";
 
 // Alpha mode bug reporting tools
 import { createBugListTool } from "./implementations/bug_list";
@@ -113,6 +114,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     read_path: createReadPathTool,
     write_file: createWriteFileTool,
+    edit: createEditTool,
 
     // Report tools
     report_delete: createReportDeleteTool,

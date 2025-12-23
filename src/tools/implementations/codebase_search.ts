@@ -14,7 +14,7 @@ const codebaseSearchSchema = z.object({
     query: z
         .string()
         .describe(
-            "The search query - can be file name (e.g., 'ChatHeader.tsx'), pattern (e.g., '*.tsx'), or content to grep (e.g., 'function ChatHeader')"
+            "The search query - can be file name (e.g., 'ChatHeader.tsx'), pattern (e.g., '*.tsx'), or content to grep (e.g., 'function ChatHeader'). When regex is true, supports full regex syntax (e.g., 'log.*Error', 'function\\s+\\w+')"
         ),
     searchType: z
         .enum(["filename", "content", "both"])
@@ -29,6 +29,23 @@ const codebaseSearchSchema = z.object({
         .nullable()
         .default(false)
         .describe("If true, include brief content snippets for content matches"),
+    regex: z
+        .boolean()
+        .nullable()
+        .default(false)
+        .describe("If true, treat query as regex pattern for content searches. Uses ripgrep (rg) or grep -E"),
+    contextAfter: z
+        .number()
+        .nullable()
+        .describe("Number of lines to show after each match (only when includeSnippets is true)"),
+    contextBefore: z
+        .number()
+        .nullable()
+        .describe("Number of lines to show before each match (only when includeSnippets is true)"),
+    contextAround: z
+        .number()
+        .nullable()
+        .describe("Number of lines to show before and after each match (only when includeSnippets is true)"),
 });
 
 type SearchResult = {
@@ -53,10 +70,15 @@ async function executeCodebaseSearch(
         fileType,
         maxResults: inputMaxResults = 50,
         includeSnippets: inputIncludeSnippets = false,
+        regex: inputRegex = false,
+        contextAfter,
+        contextBefore,
+        contextAround,
     } = input;
 
     const maxResults = inputMaxResults ?? 50;
     const includeSnippets = inputIncludeSnippets ?? false;
+    const regex = inputRegex ?? false;
 
     logger.info("Executing codebase search", {
         query,
@@ -64,6 +86,10 @@ async function executeCodebaseSearch(
         fileType,
         maxResults,
         includeSnippets,
+        regex,
+        contextAfter,
+        contextBefore,
+        contextAround,
         agent: context.agent.name,
     });
 
@@ -84,7 +110,11 @@ async function executeCodebaseSearch(
                 fileType,
                 results,
                 maxResults,
-                includeSnippets
+                includeSnippets,
+                regex,
+                contextAfter,
+                contextBefore,
+                contextAround
             );
         }
 
@@ -269,7 +299,26 @@ async function recursiveFileSearch(
 }
 
 /**
- * Search for content within files using grep
+ * Escape regex special characters for literal matching
+ */
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Check if ripgrep is available
+ */
+async function isRipgrepAvailable(): Promise<boolean> {
+    try {
+        await execAsync("which rg", { timeout: 1000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Search for content within files using grep or ripgrep
  */
 async function searchByContent(
     query: string,
@@ -277,29 +326,90 @@ async function searchByContent(
     fileType: string | null,
     results: SearchResult[],
     maxResults: number,
-    includeSnippets: boolean
+    includeSnippets: boolean,
+    regex = false,
+    contextAfter?: number | null,
+    contextBefore?: number | null,
+    contextAround?: number | null
 ): Promise<void> {
-    // Build grep command
-    let grepCommand = `grep -rn "${query}" .`;
+    // Escape query for literal matching if not using regex
+    const searchPattern = regex ? query : escapeRegex(query);
 
-    // Add file type filter if specified
-    if (fileType) {
-        const ext = fileType.startsWith(".") ? fileType : `.${fileType}`;
-        grepCommand += ` --include="*${ext}"`;
+    // Check if ripgrep is available for regex searches
+    const useRipgrep = regex && (await isRipgrepAvailable());
+
+    let searchCommand: string;
+
+    if (useRipgrep) {
+        // Build ripgrep command
+        searchCommand = `rg -n "${searchPattern}" .`;
+
+        // Add file type filter if specified
+        if (fileType) {
+            const ext = fileType.startsWith(".") ? fileType.slice(1) : fileType;
+            searchCommand += ` -t${ext}`;
+        }
+
+        // Add context lines if includeSnippets is true
+        if (includeSnippets) {
+            if (contextAround != null && contextAround > 0) {
+                searchCommand += ` -C ${contextAround}`;
+            } else {
+                if (contextBefore != null && contextBefore > 0) {
+                    searchCommand += ` -B ${contextBefore}`;
+                }
+                if (contextAfter != null && contextAfter > 0) {
+                    searchCommand += ` -A ${contextAfter}`;
+                }
+            }
+        }
+
+        // Exclude common directories
+        searchCommand += " -g '!node_modules'";
+        searchCommand += " -g '!.git'";
+        searchCommand += " -g '!dist'";
+        searchCommand += " -g '!build'";
+        searchCommand += " -g '!.next'";
+        searchCommand += " -g '!coverage'";
+    } else {
+        // Build grep command (with -E for regex support if needed)
+        const grepFlags = regex ? "rn -E" : "rn";
+        searchCommand = `grep ${grepFlags} "${searchPattern}" .`;
+
+        // Add file type filter if specified
+        if (fileType) {
+            const ext = fileType.startsWith(".") ? fileType : `.${fileType}`;
+            searchCommand += ` --include="*${ext}"`;
+        }
+
+        // Add context lines if includeSnippets is true
+        if (includeSnippets) {
+            if (contextAround != null && contextAround > 0) {
+                searchCommand += ` -C ${contextAround}`;
+            } else {
+                if (contextBefore != null && contextBefore > 0) {
+                    searchCommand += ` -B ${contextBefore}`;
+                }
+                if (contextAfter != null && contextAfter > 0) {
+                    searchCommand += ` -A ${contextAfter}`;
+                }
+            }
+        }
+
+        // Exclude common directories and binary files
+        searchCommand += " --exclude-dir=node_modules";
+        searchCommand += " --exclude-dir=.git";
+        searchCommand += " --exclude-dir=dist";
+        searchCommand += " --exclude-dir=build";
+        searchCommand += " --exclude-dir=.next";
+        searchCommand += " --exclude-dir=coverage";
+        searchCommand += " --binary-files=without-match";
     }
 
-    // Exclude common directories and binary files
-    grepCommand += " --exclude-dir=node_modules";
-    grepCommand += " --exclude-dir=.git";
-    grepCommand += " --exclude-dir=dist";
-    grepCommand += " --exclude-dir=build";
-    grepCommand += " --exclude-dir=.next";
-    grepCommand += " --exclude-dir=coverage";
-    grepCommand += " --binary-files=without-match";
-    grepCommand += ` | head -${maxResults * 2}`; // Get more results since we'll filter
+    searchCommand += ` | head -${maxResults * 2}`; // Get more results since we'll filter
 
     try {
-        const { stdout } = await execAsync(grepCommand, {
+        const { stdout } = await execAsync(searchCommand, {
             cwd: projectPath,
             timeout: 15000, // 15 second timeout
             maxBuffer: 1024 * 1024 * 10, // 10MB buffer
@@ -311,18 +421,32 @@ async function searchByContent(
             for (const match of matches) {
                 if (results.length >= maxResults) break;
 
-                // Parse grep output format: "path:line:content"
+                // Skip context separator lines
+                if (match === "--") continue;
+
+                // Parse output format: "path:line:content" or "path-line-content" for context lines
                 const colonIndex = match.indexOf(":");
-                if (colonIndex === -1) continue;
+                const dashIndex = match.indexOf("-");
 
-                const path = match.substring(0, colonIndex);
-                const afterPath = match.substring(colonIndex + 1);
-                const secondColonIndex = afterPath.indexOf(":");
+                // Use colon for actual matches, dash for context lines
+                const separatorIndex =
+                    colonIndex !== -1 && (dashIndex === -1 || colonIndex < dashIndex)
+                        ? colonIndex
+                        : dashIndex;
 
-                if (secondColonIndex === -1) continue;
+                if (separatorIndex === -1) continue;
 
-                const lineNumber = Number.parseInt(afterPath.substring(0, secondColonIndex));
-                const content = afterPath.substring(secondColonIndex + 1);
+                const path = match.substring(0, separatorIndex);
+                const afterPath = match.substring(separatorIndex + 1);
+                const secondSeparatorIndex = Math.min(
+                    afterPath.indexOf(":") !== -1 ? afterPath.indexOf(":") : Number.POSITIVE_INFINITY,
+                    afterPath.indexOf("-") !== -1 ? afterPath.indexOf("-") : Number.POSITIVE_INFINITY
+                );
+
+                if (secondSeparatorIndex === Number.POSITIVE_INFINITY) continue;
+
+                const lineNumber = Number.parseInt(afterPath.substring(0, secondSeparatorIndex));
+                const content = afterPath.substring(secondSeparatorIndex + 1);
 
                 // Clean up the path
                 const cleanPath = path.startsWith("./") ? path.slice(2) : path;
@@ -338,8 +462,8 @@ async function searchByContent(
             }
         }
     } catch (error) {
-        // Grep might fail if no matches found or other issues
-        logger.debug("Grep search failed or no results", { error, query });
+        // Grep/rg might fail if no matches found or other issues
+        logger.debug("Search failed or no results", { error, query, useRipgrep });
     }
 }
 
@@ -349,7 +473,7 @@ async function searchByContent(
 export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
-            "Searches the project codebase for files, directories, or content matching specified criteria. Supports searching by file name patterns, content keywords, or file types. Returns a list of matching paths with optional snippets. Paths are relative to project root. Safe and sandboxed to project directory.",
+            "Searches the project codebase for files, directories, or content matching specified criteria. Supports searching by file name patterns, content keywords (literal or regex), or file types. When regex is enabled, uses ripgrep (rg) for fast pattern matching with full regex syntax support (e.g., 'log.*Error', 'function\\s+\\w+'). Context lines can be shown around matches. Returns a list of matching paths with optional snippets. Paths are relative to project root. Safe and sandboxed to project directory.",
 
         inputSchema: codebaseSearchSchema,
 
