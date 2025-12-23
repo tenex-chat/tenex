@@ -95,7 +95,8 @@ function safeCopy<T>(data: T): T {
  * Serialize a Conversation object to a JSON-safe plain object
  * Explicitly constructs result field-by-field to avoid copying cyclic properties
  * that may be runtime-attached to the conversation object.
- * Uses safeCopy for nested objects to handle any remaining circular references.
+ * Uses safeCopy for nested objects and strict primitive enforcement for fields
+ * that should always be primitives (preventing accidental circular object serialization).
  */
 function serializeConversation(conversation: Conversation): Record<string, unknown> {
     // Convert agentStates Map to object first, then safeCopy
@@ -104,10 +105,13 @@ function serializeConversation(conversation: Conversation): Record<string, unkno
         : {};
 
     return {
-        id: conversation.id,
-        title: conversation.title,
-        phase: conversation.phase,
-        phaseStartedAt: conversation.phaseStartedAt,
+        // Strictly enforce primitive types for top-level fields
+        id: String(conversation.id),
+        title: conversation.title ? String(conversation.title) : undefined,
+        phase: conversation.phase ? String(conversation.phase) : undefined,
+        phaseStartedAt: typeof conversation.phaseStartedAt === 'number'
+            ? conversation.phaseStartedAt
+            : undefined,
         metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
         executionTime: conversation.executionTime ? safeCopy(conversation.executionTime) : {
             totalSeconds: 0,
@@ -116,13 +120,14 @@ function serializeConversation(conversation: Conversation): Record<string, unkno
         },
         agentStates: safeCopy(agentStatesObj),
         history: conversation.history.map(event => ({
-            id: event.id,
-            kind: event.kind,
-            pubkey: event.pubkey,
-            content: event.content,
-            created_at: event.created_at,
+            // Strictly enforce primitive types for event fields
+            id: String(event.id),
+            kind: Number(event.kind),
+            pubkey: String(event.pubkey),
+            content: String(event.content),
+            created_at: Number(event.created_at),
             tags: safeCopy(event.tags),
-            sig: event.sig
+            sig: event.sig ? String(event.sig) : undefined
         }))
     };
 }

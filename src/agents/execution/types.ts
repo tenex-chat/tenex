@@ -1,3 +1,4 @@
+import type { Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -34,6 +35,15 @@ export interface ExecutionContext {
     alphaMode?: boolean; // True when running in alpha mode - enables bug reporting tools
     hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools
     hasActivePairings?: boolean; // True when this agent has active pairing sessions - enables stop_pairing tool
+
+    /**
+     * Reference to the active tools object used by the LLM service.
+     * Tools created via create_dynamic_tool can inject themselves here
+     * to become immediately available in the current streaming session.
+     *
+     * Note: This is a mutable reference - modifying it affects the running stream.
+     */
+    activeToolsObject?: Record<string, CoreTool<unknown, unknown>>;
 
     /**
      * Helper method to get the conversation for this context

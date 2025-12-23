@@ -105,8 +105,10 @@ const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: Exec
 export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
             // Determine the file path - must match DynamicToolService's watched path
+            // Use double underscore (__) to separate agent name from tool name
+            // This allows agent names with underscores to be parsed correctly
             const dynamicToolsDir = join(homedir(), ".tenex", "tools");
-            const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${name}.ts`;
+            const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}__${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
 
             // Ensure the directory exists
@@ -114,6 +116,21 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
 
             // Write the tool file
             await writeFile(filePath, toolCode, "utf-8");
+
+            // Load the tool synchronously to make it immediately available
+            // This bypasses the 300ms debounce in the file watcher
+            const { dynamicToolService } = await import("@/services/DynamicToolService");
+            await dynamicToolService.loadToolSync(filePath);
+
+            // Inject the new tool into the active execution's tool set
+            // This makes it available immediately in the current streaming session
+            if (context.activeToolsObject) {
+                const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+                if (dynamicTools[name]) {
+                    context.activeToolsObject[name] = dynamicTools[name];
+                    logger.info(`[CreateDynamicTool] Injected tool '${name}' into active execution context`);
+                }
+            }
 
             logger.info("[CreateDynamicTool] Created new dynamic tool", {
                 name,
@@ -177,7 +194,7 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                 toolName: name,
                 fileName,
                 path: filePath,
-                message: `Successfully created dynamic tool '${name}'. It will be available for use in a few moments.`,
+                message: `Successfully created dynamic tool '${name}'. The tool is now available and you can use it immediately.`,
             };
         },
     });
