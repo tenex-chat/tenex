@@ -141,20 +141,6 @@ export class ConversationEventProcessor {
     }
 
     /**
-     * Clean up conversation metadata that's no longer needed
-     */
-    cleanupMetadata(conversation: Conversation): void {
-        // Clear readFiles tracking
-        if (conversation.metadata.readFiles) {
-            logger.info("[ConversationEventProcessor] Cleaning up readFiles metadata", {
-                conversationId: conversation.id,
-                fileCount: conversation.metadata.readFiles.length,
-            });
-            conversation.metadata.readFiles = undefined;
-        }
-    }
-
-    /**
      * Extract completion from an event
      */
     extractCompletionFromEvent(event: NDKEvent): {
