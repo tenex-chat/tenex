@@ -300,9 +300,3 @@ export function createTodoUpdateTool(context: ExecutionContext): AISdkTool {
 
     return aiTool as AISdkTool;
 }
-
-// ============================================================================
-// Exported helper for use by other modules (e.g., AgentExecutor for phases)
-// ============================================================================
-
-export { addTodosToConversation };

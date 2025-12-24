@@ -24,32 +24,29 @@ export const agentPhasesFragment: PromptFragment<AgentPhasesArgs> = {
         parts.push("## Your Defined Phases");
         parts.push("");
         parts.push(
-            "You manage the following phases. When delegating, you can use the 'phase' parameter to specify one of these phases:"
+            "These phases describe the types of work you typically perform. They are **guidance**, not an immediate task list."
         );
+        parts.push("");
+        parts.push("**How to use phases:**");
+        parts.push("1. First, understand what the user is actually asking for");
+        parts.push("2. Determine which phases (if any) apply to this specific request");
+        parts.push("3. Create your own todos based on the actual task, using phases as a framework");
+        parts.push("4. Not every request requires all phases - use judgment");
         parts.push("");
 
         // List all phases with their instructions
         for (const [phaseName, instructions] of Object.entries(agent.phases)) {
             parts.push(`### Phase: ${phaseName.toUpperCase()}`);
-            parts.push("**Instructions that will be provided to delegated agents:**");
+            parts.push("**Instructions for this type of work:**");
             parts.push(instructions);
             parts.push("");
         }
 
-        parts.push("## Phase Management");
+        parts.push("## Delegating with Phases");
         parts.push("");
-        parts.push("You can manage your phases dynamically using:");
-        parts.push("- `phase_add`: Add a new phase with its instructions");
-        parts.push("- `phase_remove`: Remove an existing phase");
-        parts.push("");
-        parts.push("When you delegate with a phase:");
-        parts.push("1. Use the 'phase' parameter in your delegation item: { recipient, prompt, phase }");
-        parts.push("2. The phase instructions are provided to ALL agents working in that phase");
-        parts.push("3. The delegated agent receives both your request AND the phase instructions");
-        parts.push("");
-        parts.push(
-            "IMPORTANT: Choose phases carefully - they provide context and constraints for all work done in that phase."
-        );
+        parts.push("When delegating work, you can use the 'phase' parameter to pass phase instructions:");
+        parts.push("- Use `{ recipient, prompt, phase }` in your delegation");
+        parts.push("- The delegated agent receives both your request AND the phase instructions");
 
         return parts.join("\n");
     },
