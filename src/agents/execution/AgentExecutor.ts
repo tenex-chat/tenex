@@ -832,8 +832,11 @@ export class AgentExecutor {
                                     type: "tool-result" as const,
                                     toolCallId: tr.toolCallId,
                                     toolName: tr.toolName,
-                                    // AI SDK TypedToolResult provides 'output' field
-                                    output: tr.output !== undefined ? tr.output : { type: "text", value: "" },
+                                    // Wrap output in LanguageModelV2ToolResultOutput format
+                                    // The AI SDK expects { type: 'json', value: ... } for object outputs
+                                    output: tr.output !== undefined
+                                        ? { type: "json" as const, value: tr.output }
+                                        : { type: "text" as const, value: "" },
                                 })),
                             });
                         }
