@@ -6,10 +6,14 @@ import { createExecutionContext } from "../ExecutionContextFactory";
 
 // Mock git utilities
 const mockListWorktrees = mock(() => Promise.resolve([]));
+const mockCreateWorktree = mock((projectPath: string, branch: string) =>
+    Promise.resolve(`${projectPath}/.worktrees/${branch.replace(/\//g, "_")}`)
+);
 const mockGetCurrentBranchWithFallback = mock(() => Promise.resolve("main"));
 
 mock.module("@/utils/git/worktree", () => ({
     listWorktrees: mockListWorktrees,
+    createWorktree: mockCreateWorktree,
     sanitizeBranchName: (branch: string) => branch.replace(/\//g, "_"),
     WORKTREES_DIR: ".worktrees",
 }));
@@ -38,6 +42,7 @@ describe("ExecutionContextFactory", () => {
 
     beforeEach(() => {
         mockListWorktrees.mockClear();
+        mockCreateWorktree.mockClear();
         mockGetCurrentBranchWithFallback.mockClear();
         mockGetCurrentBranchWithFallback.mockResolvedValue("main");
         mockCoordinator.getConversation = mock(() => undefined);
@@ -73,7 +78,7 @@ describe("ExecutionContextFactory", () => {
             expect(mockListWorktrees).toHaveBeenCalledWith(projectBasePath);
         });
 
-        it("should construct expected path when branch tag has no matching worktree", async () => {
+        it("should create worktree when branch tag has no matching worktree", async () => {
             // Setup: Event has branch tag, but no matching worktree
             const eventWithBranch: NDKEvent = {
                 ...mockEvent,
@@ -93,7 +98,8 @@ describe("ExecutionContextFactory", () => {
                 conversationCoordinator: mockCoordinator,
             });
 
-            // Assert - should construct expected path in .worktrees with sanitized branch name
+            // Assert - should create worktree and use the returned path
+            expect(mockCreateWorktree).toHaveBeenCalledWith(projectBasePath, "feature/nonexistent", "main");
             expect(context.workingDirectory).toBe("/test/project/.worktrees/feature_nonexistent");
             expect(context.currentBranch).toBe("feature/nonexistent");
         });

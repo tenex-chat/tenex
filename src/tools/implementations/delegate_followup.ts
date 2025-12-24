@@ -57,10 +57,6 @@ async function executeDelegateFollowup(
     );
   }
 
-  if (previousDelegation.recipientPubkey === context.agent.pubkey) {
-    throw new Error("Self-delegation is not permitted with delegate_followup.");
-  }
-
   if (!context.agentPublisher) {
     throw new Error("AgentPublisher not available");
   }
