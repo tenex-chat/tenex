@@ -59,3 +59,13 @@ mock.module("@/nostr/ndkClient", () => ({
         fetchEvents: mock(() => new Set()),
     })),
 }));
+
+// Mock RALRegistry for delegation detection
+// By default, no events are tracked as delegations
+mock.module("@/services/ral/RALRegistry", () => ({
+    RALRegistry: {
+        getInstance: () => ({
+            getRalKeyForDelegation: () => undefined, // No delegations tracked by default
+        }),
+    },
+}));
