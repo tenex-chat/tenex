@@ -828,12 +828,12 @@ export class AgentExecutor {
                         if (toolResults.length > 0) {
                             messagesWithToolCalls.push({
                                 role: "tool",
-                                content: toolResults.map((tr: { toolCallId: string; toolName: string; result: unknown }) => ({
+                                content: toolResults.map((tr: { toolCallId: string; toolName: string; output: unknown }) => ({
                                     type: "tool-result" as const,
                                     toolCallId: tr.toolCallId,
                                     toolName: tr.toolName,
-                                    // AI SDK requires 'output' field, default to empty if undefined
-                                    output: tr.result !== undefined ? tr.result : { type: "text", value: "" },
+                                    // AI SDK provides 'output' field on TypedToolResult
+                                    output: tr.output !== undefined ? tr.output : { type: "text", value: "" },
                                 })),
                             });
                         }
