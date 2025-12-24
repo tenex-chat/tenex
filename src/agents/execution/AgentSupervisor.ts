@@ -35,9 +35,6 @@ import {
     validateWorktreeCleanup,
 } from "./validators/WorktreeValidator";
 
-/**
- * AgentSupervisor - Monitors agent execution and validates completion
- */
 export class AgentSupervisor {
     private invalidReason: string | undefined;
     private continuationAttempts = 0;
