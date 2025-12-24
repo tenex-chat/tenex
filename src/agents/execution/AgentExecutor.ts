@@ -24,7 +24,7 @@ import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type { Tool as CoreTool, ModelMessage } from "ai";
+import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet } from "ai";
 import chalk from "chalk";
 import { AgentSupervisor } from "./AgentSupervisor";
 import { SessionManager } from "./SessionManager";
@@ -814,12 +814,12 @@ export class AgentExecutor {
                         if (toolCalls.length > 0) {
                             messagesWithToolCalls.push({
                                 role: "assistant",
-                                content: toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
+                                content: toolCalls.map((tc: TypedToolCall<ToolSet>) => ({
                                     type: "tool-call" as const,
                                     toolCallId: tc.toolCallId,
                                     toolName: tc.toolName,
-                                    // AI SDK requires 'input' field, default to {} if undefined
-                                    input: tc.args !== undefined ? tc.args : {},
+                                    // AI SDK TypedToolCall and ModelMessage both use 'input'
+                                    input: tc.input !== undefined ? tc.input : {},
                                 })),
                             });
                         }
@@ -828,12 +828,12 @@ export class AgentExecutor {
                         if (toolResults.length > 0) {
                             messagesWithToolCalls.push({
                                 role: "tool",
-                                content: toolResults.map((tr: { toolCallId: string; toolName: string; result: unknown }) => ({
+                                content: toolResults.map((tr: TypedToolResult<ToolSet>) => ({
                                     type: "tool-result" as const,
                                     toolCallId: tr.toolCallId,
                                     toolName: tr.toolName,
-                                    // AI SDK requires 'output' field, default to empty if undefined
-                                    output: tr.result !== undefined ? tr.result : { type: "text", value: "" },
+                                    // AI SDK TypedToolResult provides 'output' field
+                                    output: tr.output !== undefined ? tr.output : { type: "text", value: "" },
                                 })),
                             });
                         }
