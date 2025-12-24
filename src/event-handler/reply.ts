@@ -6,6 +6,7 @@ import type { ConversationCoordinator } from "../conversations";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
+import { config } from "@/services/ConfigService";
 import { RALRegistry } from "../services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
@@ -103,8 +104,20 @@ async function handleReplyLogic(
     // Record any delegation completion (side effect only)
     await handleDelegationCompletion(event, conversation, conversationCoordinator);
 
-    // Determine target agents
-    const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx);
+    // If sender is whitelisted, they can unblock any blocked agents they're messaging
+    const whitelistedPubkeys = config.getConfig().whitelistedPubkeys ?? [];
+    const whitelist = new Set(whitelistedPubkeys);
+    if (whitelist.has(event.pubkey)) {
+        const { unblocked } = AgentRouter.unblockAgent(event, conversation, projectCtx, whitelist);
+        if (unblocked) {
+            trace.getActiveSpan()?.addEvent("reply.agent_unblocked_by_whitelist", {
+                "event.pubkey": event.pubkey.substring(0, 8),
+            });
+        }
+    }
+
+    // Determine target agents (passing conversation to filter blocked agents)
+    const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx, conversation);
 
     const activeSpan = trace.getActiveSpan();
     if (activeSpan) {

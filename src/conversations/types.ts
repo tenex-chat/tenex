@@ -15,6 +15,7 @@ export interface Conversation {
     agentStates: Map<string, AgentState>; // Track what each agent has seen in 'history'
     agentTodos: Map<string, TodoItem[]>; // Track todos per agent (keyed by agent pubkey)
     metadata: ConversationMetadata;
+    blockedAgents: Set<string>; // Agent pubkeys that are blocked from executing in this conversation
 
     // Execution time tracking
     executionTime: {

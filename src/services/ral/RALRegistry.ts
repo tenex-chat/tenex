@@ -831,6 +831,37 @@ export class RALRegistry {
   }
 
   /**
+   * Abort all running RALs for an agent in a conversation.
+   * This is used when a stop signal is received to immediately terminate all executions.
+   */
+  abortAllForAgent(agentPubkey: string, conversationId: string): number {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const rals = this.states.get(key);
+    if (!rals) return 0;
+
+    let abortedCount = 0;
+
+    for (const [ralNumber] of rals) {
+      const abortKey = this.makeAbortKey(key, ralNumber);
+      const controller = this.abortControllers.get(abortKey);
+      if (controller && !controller.signal.aborted) {
+        controller.abort();
+        abortedCount++;
+        trace.getActiveSpan()?.addEvent("ral.aborted_by_stop_signal", {
+          "ral.number": ralNumber,
+          "agent.pubkey": agentPubkey.substring(0, 8),
+          "conversation.id": conversationId.substring(0, 8),
+        });
+      }
+    }
+
+    // Clear all state for this agent+conversation
+    this.clear(agentPubkey, conversationId);
+
+    return abortedCount;
+  }
+
+  /**
    * Clear all state (for testing)
    */
   clearAll(): void {
