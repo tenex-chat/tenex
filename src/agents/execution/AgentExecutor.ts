@@ -17,7 +17,6 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
-import { addTodosToConversation } from "@/tools/implementations/todo";
 import { getToolsObject } from "@/tools/registry";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -169,30 +168,6 @@ export class AgentExecutor {
                         context.conversationId,
                         context.triggeringEvent.id
                     );
-
-                    // Convert phases to todos if agent has phases defined
-                    const conversation = context.getConversation();
-                    if (context.agent.phases && Object.keys(context.agent.phases).length > 0 && conversation) {
-                        const phaseItems = Object.entries(context.agent.phases).map(
-                            ([name, instructions], idx) => ({
-                                title: `Phase: ${name}`,
-                                description: `Execute the ${name} phase`,
-                                delegationInstructions: instructions,
-                                position: idx,
-                            })
-                        );
-
-                        const result = addTodosToConversation(
-                            conversation,
-                            context.agent.pubkey,
-                            phaseItems
-                        );
-
-                        span.addEvent("executor.phases_to_todos", {
-                            "phase.count": phaseItems.length,
-                            "todo.added_count": result.added.length,
-                        });
-                    }
                 }
 
                 // Check for other active RALs in this conversation
