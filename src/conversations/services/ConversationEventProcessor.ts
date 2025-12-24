@@ -29,6 +29,7 @@ export class ConversationEventProcessor {
             history: [event],
             agentStates: new Map(),
             agentTodos: new Map(),
+            blockedAgents: new Set(),
             metadata: {
                 summary: event.content,
                 referencedArticle,

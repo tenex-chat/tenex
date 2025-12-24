@@ -75,6 +75,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 history: conversation.history.map((event) => event.serialize(true, true)),
                 agentStates: agentStatesObj,
                 agentTodos: agentTodosObj,
+                blockedAgents: Array.from(conversation.blockedAgents ?? []),
             };
 
             await writeJsonFile(filePath, serialized);
@@ -184,6 +185,7 @@ export class FileSystemAdapter implements ConversationPersistenceAdapter {
                 history: deduplicatedHistory,
                 agentStates: agentStatesMap,
                 agentTodos: agentTodosMap,
+                blockedAgents: new Set(data.blockedAgents ?? []),
                 metadata: data.metadata,
                 executionTime: data.executionTime || {
                     totalSeconds: 0,

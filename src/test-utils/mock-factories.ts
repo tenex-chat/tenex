@@ -98,6 +98,8 @@ export function createMockConversation(overrides?: Partial<Conversation>): Conve
         phase: "CHAT",
         history: [],
         agentStates: new Map(),
+        agentTodos: new Map(),
+        blockedAgents: new Set(),
         phaseStartedAt: Date.now(),
         metadata: {
             summary: "Mock conversation summary",

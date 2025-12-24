@@ -33,6 +33,7 @@ export const SerializedConversationSchema = z.object({
     history: z.array(z.string()),
     agentStates: z.record(z.string(), AgentStateSchema).optional(), // Map serialized as object
     agentTodos: z.record(z.string(), z.array(TodoItemSchema)).optional(), // Map serialized as object
+    blockedAgents: z.array(z.string()).optional(), // Set serialized as array
     metadata: ConversationMetadataSchema,
     executionTime: ExecutionTimeSchema.optional(),
 });

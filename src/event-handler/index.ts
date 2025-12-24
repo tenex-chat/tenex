@@ -7,6 +7,7 @@ import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import type { ConversationCoordinator } from "../conversations";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
+import { config } from "@/services/ConfigService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleNewConversation } from "./newConversation";
@@ -46,6 +47,18 @@ export class EventHandler {
     async handleEvent(event: NDKEvent): Promise<void> {
         // Ignore ephemeral status and typing indicator events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
+
+        // EMERGENCY STOP: If a whitelisted pubkey sends "EMERGENCY STOP", exit immediately
+        if (event.content === "EMERGENCY STOP") {
+            const whitelistedPubkeys = config.getConfig().whitelistedPubkeys ?? [];
+            if (whitelistedPubkeys.includes(event.pubkey)) {
+                logger.warn("EMERGENCY STOP received from whitelisted pubkey", {
+                    pubkey: event.pubkey.substring(0, 8),
+                    eventId: event.id,
+                });
+                process.exit(0);
+            }
+        }
 
         // Try to get agent slug if the event is from an agent
         let fromIdentifier = event.pubkey;
@@ -263,6 +276,7 @@ export class EventHandler {
 
     private async handleStopEvent(event: NDKEvent): Promise<void> {
         const eTags = event.getMatchingTags("e");
+        const pTags = event.getMatchingTags("p");
 
         if (eTags.length === 0) {
             logger.warn("[EventHandler] Stop event received with no e-tags", {
@@ -272,15 +286,51 @@ export class EventHandler {
         }
 
         let totalStopped = 0;
+        let agentsBlocked = 0;
+        let ralsAborted = 0;
 
-        for (const [_, eventId] of eTags) {
-            const stopped = llmOpsRegistry.stopByEventId(eventId);
+        // Import RALRegistry and AgentRouter dynamically to avoid circular dependencies
+        const { RALRegistry } = await import("../services/ral");
+        const { AgentRouter } = await import("./AgentRouter");
+        const projectCtx = getProjectContext();
+
+        // For each e-tag (conversation ID), block the p-tagged agents
+        for (const [, conversationId] of eTags) {
+            // Stop LLM operations (existing behavior)
+            const stopped = llmOpsRegistry.stopByEventId(conversationId);
             totalStopped += stopped;
+
+            // Get the conversation
+            const conversation = this.conversationCoordinator.getConversation(conversationId);
+            if (!conversation) {
+                continue;
+            }
+
+            // Block each p-tagged agent in this conversation
+            for (const [, agentPubkey] of pTags) {
+                const agent = projectCtx.getAgentByPubkey(agentPubkey);
+                if (agent) {
+                    // Block the agent
+                    AgentRouter.processStopSignal(event, conversation, projectCtx);
+                    agentsBlocked++;
+
+                    // Abort all running RALs for this agent
+                    const ralRegistry = RALRegistry.getInstance();
+                    const aborted = ralRegistry.abortAllForAgent(agentPubkey, conversationId);
+                    ralsAborted += aborted;
+
+                    logger.info(`[EventHandler] Stopped agent ${agent.slug} in conversation ${conversationId.substring(0, 8)}`, {
+                        ralsAborted: aborted,
+                    });
+                }
+            }
         }
 
         trace.getActiveSpan()?.addEvent("event_handler.stop_operations", {
             "operations.stopped": totalStopped,
             "operations.remaining": llmOpsRegistry.getActiveOperationsCount(),
+            "agents.blocked": agentsBlocked,
+            "rals.aborted": ralsAborted,
         });
     }
 
