@@ -42,6 +42,19 @@ mock.module("@/services/PubkeyService", () => ({
     })),
 }));
 
+// Mock RALRegistry for delegation detection
+// Tracks which event IDs are registered as delegations
+const mockTrackedDelegations = new Set<string>();
+mock.module("@/services/ral/RALRegistry", () => ({
+    RALRegistry: {
+        getInstance: () => ({
+            getRalKeyForDelegation: (eventId: string) => {
+                return mockTrackedDelegations.has(eventId) ? { key: "test-key", ralNumber: 1 } : undefined;
+            },
+        }),
+    },
+}));
+
 import {
     isDelegatedExecution,
     gatherPreviousSubthreads,
@@ -66,6 +79,7 @@ function createMockEvent(overrides: Partial<NDKEvent> = {}): NDKEvent {
 describe("EventGatherer", () => {
     beforeEach(() => {
         mockProjectCtx = null;
+        mockTrackedDelegations.clear();
     });
 
     describe("isDelegatedExecution", () => {
@@ -427,6 +441,9 @@ describe("EventGatherer", () => {
                     ["phase", "research"],
                 ],
             });
+
+            // Register this event as a delegation in RALRegistry
+            mockTrackedDelegations.add("delegation");
 
             const triggeringEvent = createMockEvent({
                 id: "trigger",
