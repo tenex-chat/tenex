@@ -3,10 +3,9 @@ import { isAlphaMode } from "@/commands/daemon";
 import type { ConversationCoordinator } from "@/conversations";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { listWorktrees, sanitizeBranchName, WORKTREES_DIR } from "@/utils/git/worktree";
+import { listWorktrees, createWorktree } from "@/utils/git/worktree";
 import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
 import { logger } from "@/utils/logger";
-import * as path from "node:path";
 import type { ExecutionContext } from "./types";
 
 /**
@@ -55,21 +54,32 @@ export async function createExecutionContext(params: {
                 path: matchingWorktree.path
             });
         } else {
-            // Worktree not found - construct expected path in .worktrees/
-            // This is intentional: the worktree may be created later by the delegate tool.
-            // If the path doesn't exist when commands run, git/shell will fail with clear errors.
-            const sanitizedBranch = sanitizeBranchName(branchTag);
-            const expectedPath = path.join(params.projectBasePath, WORKTREES_DIR, sanitizedBranch);
+            // Worktree not found - create it now
+            const baseBranch = await getCurrentBranchWithFallback(params.projectBasePath);
 
-            logger.warn("Branch tag specified but worktree not found, using expected path (may not exist yet)", {
+            logger.info("Branch tag specified but worktree not found, creating it", {
                 branch: branchTag,
-                expectedPath,
-                availableWorktrees: worktrees.map(wt => wt.branch),
-                hint: "Worktree may be created later by delegate tool, or this is a stale branch tag"
+                baseBranch,
             });
 
-            workingDirectory = expectedPath;
-            currentBranch = branchTag;
+            try {
+                workingDirectory = await createWorktree(params.projectBasePath, branchTag, baseBranch);
+                currentBranch = branchTag;
+
+                logger.info("Created worktree for delegation", {
+                    branch: branchTag,
+                    path: workingDirectory,
+                    baseBranch,
+                });
+            } catch (error) {
+                // If worktree creation fails, fall back to project root with a warning
+                logger.error("Failed to create worktree, falling back to project root", {
+                    branch: branchTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                workingDirectory = params.projectBasePath;
+                currentBranch = baseBranch;
+            }
         }
     } else {
         // No branch tag - use project root (default branch)
