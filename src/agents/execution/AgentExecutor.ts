@@ -471,6 +471,13 @@ export class AgentExecutor {
             eventContext
         );
 
+        // Add completion event to conversation history immediately
+        // This prevents race conditions where user sends another message before
+        // the completion event comes back through the Nostr subscription
+        if (finalResponseEvent) {
+            await context.conversationCoordinator.addEvent(context.conversationId, finalResponseEvent);
+        }
+
         console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
 
         trace.getActiveSpan()?.addEvent("executor.final_published", {

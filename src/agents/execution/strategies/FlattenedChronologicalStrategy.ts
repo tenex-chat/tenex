@@ -11,6 +11,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { NudgeService } from "@/services/nudge";
 import { getPubkeyService } from "@/services/PubkeyService";
+import { RALRegistry } from "@/services/ral/RALRegistry";
 import { logger } from "@/utils/logger";
 import {
     extractNostrEntities,
@@ -667,22 +668,19 @@ export class FlattenedChronologicalStrategy implements MessageGenerationStrategy
             }
 
             // Check if this is a delegation request from this agent
-            // Delegation request = kind 1111 from agent with p-tag pointing to another agent
-            // Phase tag is optional (only required for self-delegation)
-            if (isFromAgent && event.kind === 1111) {
-                const pTags = event.getMatchingTags("p");
-                if (pTags.length > 0) {
-                    const recipientPubkey = pTags[0][1];
-                    // This is a delegation if it's pointing to another agent (or same agent with phase)
-                    const phaseTag = event.tagValue("phase");
-                    const isSelfDelegation = recipientPubkey === agentPubkey;
+            // A delegation is ONLY detected if it's tracked in RALRegistry
+            // This avoids incorrectly marking user-directed responses as delegations
+            if (isFromAgent && event.kind === 1111 && event.id) {
+                const ralRegistry = RALRegistry.getInstance();
+                const isTrackedDelegation = ralRegistry.getRalKeyForDelegation(event.id) !== undefined;
 
-                    // Detect as delegation if: delegating to another agent, OR self-delegation with phase
-                    if (!isSelfDelegation || phaseTag) {
+                if (isTrackedDelegation) {
+                    const pTags = event.getMatchingTags("p");
+                    if (pTags.length > 0) {
                         eventWithContext.isDelegationRequest = true;
                         eventWithContext.delegationId = event.id.substring(0, 8);
                         eventWithContext.delegationContent = event.content;
-                        eventWithContext.delegatedToPubkey = recipientPubkey;
+                        eventWithContext.delegatedToPubkey = pTags[0][1];
                     }
                 }
             }
