@@ -82,6 +82,8 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     // Todo tools (excluded from 24010 events - all agents get via CORE_AGENT_TOOLS)
     "todo_add",
     "todo_update",
+    // Edit tool (auto-injected when write_file is available)
+    "edit",
 ];
 
 /**

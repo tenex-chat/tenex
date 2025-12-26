@@ -226,6 +226,9 @@ const CONCURRENT_RAL_TOOLS: ToolName[] = ["ral_inject", "ral_abort", "delegate_f
 /** Pairing tools - auto-injected when hasActivePairings is true */
 const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
 
+/** File editing tools - auto-injected when write_file is available */
+const FILE_EDIT_TOOLS: ToolName[] = ["edit"];
+
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
@@ -276,6 +279,15 @@ export function getToolsObject(
         for (const pairingToolName of PAIRING_TOOLS) {
             if (!regularTools.includes(pairingToolName)) {
                 regularTools.push(pairingToolName);
+            }
+        }
+    }
+
+    // Auto-inject edit tool when write_file is available
+    if (regularTools.includes("write_file")) {
+        for (const editToolName of FILE_EDIT_TOOLS) {
+            if (!regularTools.includes(editToolName)) {
+                regularTools.push(editToolName);
             }
         }
     }
