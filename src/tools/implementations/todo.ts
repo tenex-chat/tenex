@@ -16,15 +16,11 @@ import { z } from "zod";
 // Helper functions
 // ============================================================================
 
-function slugify(title: string): string {
-    return title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .substring(0, 50);
+function getCurrentTimestamp(): number {
+    return Date.now();
 }
 
-function getOrCreateTodoList(conversation: Conversation, agentPubkey: string): TodoItem[] {
+function ensureTodoListExistsAndGet(conversation: Conversation, agentPubkey: string): TodoItem[] {
     let todos = conversation.agentTodos.get(agentPubkey);
     if (!todos) {
         todos = [];
@@ -37,24 +33,24 @@ function addTodosToConversation(
     conversation: Conversation,
     agentPubkey: string,
     items: Array<{
+        id: string;
         title: string;
         description: string;
         position?: number;
-        delegationInstructions?: string;
     }>
 ): { added: TodoItem[]; duplicates: string[] } {
-    const todos = getOrCreateTodoList(conversation, agentPubkey);
+    const todos = ensureTodoListExistsAndGet(conversation, agentPubkey);
 
     const added: TodoItem[] = [];
     const duplicates: string[] = [];
-    const now = Date.now();
+    const now = getCurrentTimestamp();
 
     for (const item of items) {
-        const id = slugify(item.title);
+        const id = item.id;
 
         // Check for duplicate ID
         if (todos.some((t) => t.id === id)) {
-            duplicates.push(item.title);
+            duplicates.push(id);
             continue;
         }
 
@@ -64,19 +60,13 @@ function addTodosToConversation(
             title: item.title,
             description: item.description,
             status: "pending",
-            delegationInstructions: item.delegationInstructions,
             position,
             createdAt: now,
             updatedAt: now,
         };
 
-        // Insert at position (clamped to valid range)
-        const clampedPosition = Math.max(0, Math.min(position, todos.length));
-        todos.splice(clampedPosition, 0, todoItem);
-
-        // Reindex positions
-        todos.forEach((t, idx) => (t.position = idx));
-
+        // Append to the list (no re-indexing of existing items)
+        todos.push(todoItem);
         added.push(todoItem);
     }
 
@@ -88,12 +78,12 @@ function updateTodoStatusInConversation(
     agentPubkey: string,
     updates: Array<{ id: string; status: TodoStatus; skipReason?: string }>
 ): { updated: TodoItem[]; notFound: string[]; errors: string[] } {
-    const todos = getOrCreateTodoList(conversation, agentPubkey);
+    const todos = ensureTodoListExistsAndGet(conversation, agentPubkey);
 
     const updated: TodoItem[] = [];
     const notFound: string[] = [];
     const errors: string[] = [];
-    const now = Date.now();
+    const now = getCurrentTimestamp();
 
     for (const update of updates) {
         const todo = todos.find((t) => t.id === update.id);
@@ -122,7 +112,8 @@ function updateTodoStatusInConversation(
 // ============================================================================
 
 const todoAddItemSchema = z.object({
-    title: z.string().describe("Short title for the todo item (becomes the ID as a slug)"),
+    id: z.string().describe("Unique identifier for the todo item (e.g., 'implement-auth', 'fix-bug-123')"),
+    title: z.string().describe("Short human-readable title for the todo item"),
     description: z.string().describe("Detailed description of what needs to be done"),
     position: z
         .number()
@@ -161,6 +152,7 @@ async function executeTodoAdd(
         conversation,
         context.agent.pubkey,
         input.items.map((item) => ({
+            id: item.id,
             title: item.title,
             description: item.description,
             position: item.position,
@@ -180,16 +172,9 @@ async function executeTodoAdd(
 export function createTodoAddTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-        `## Task Management
-You have access to the todo_add and todo_update tools to help you manage and plan tasks. Use these tools VERY frequently to ensure that you are tracking your tasks and giving the user visibility into your progress.
-These tools are also EXTREMELY helpful for planning tasks, and for breaking down larger complex tasks into smaller steps. If you do not use this tool when planning, you may forget to do important tasks - and that is unacceptable.
-
-## Task Execution Rules
-- Exactly ONE task must be in_progress at any time (not less, not more)
-- Complete current tasks before starting new ones
-- Mark todos as done IMMEDIATELY after finishing (don't batch completions)
-- If a new request comes in while working: add it as pending, acknowledge it, finish current task first
-- Exception: if new request is blocking or urgent, ask about priority rather than just queuing`,
+            "Add one or more todo items to track tasks. Each item requires an id (unique identifier), " +
+            "title (short label), and description (details). Optionally specify position to insert at a " +
+            "specific index; otherwise items are appended. Returns the added items and any duplicate IDs skipped.",
         inputSchema: todoAddSchema,
         execute: async (input: TodoAddInput) => {
             return await executeTodoAdd(input, context);
