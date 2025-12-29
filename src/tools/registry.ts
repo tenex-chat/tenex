@@ -59,9 +59,6 @@ import { createBugListTool } from "./implementations/bug_list";
 import { createBugReportAddTool } from "./implementations/bug_report_add";
 import { createBugReportCreateTool } from "./implementations/bug_report_create";
 
-// Backend management tools
-import { createRestartTenexBackendTool } from "./implementations/restart_tenex_backend";
-
 // Pairing tools
 import { createStopPairingTool } from "./implementations/stop_pairing";
 
@@ -155,9 +152,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     bug_list: createBugListTool,
     bug_report_create: createBugReportCreateTool,
     bug_report_add: createBugReportAddTool,
-
-    // Backend management tools
-    restart_tenex_backend: createRestartTenexBackendTool,
 
     // Pairing tools
     stop_pairing: createStopPairingTool,

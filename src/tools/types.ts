@@ -53,7 +53,6 @@ export type ToolName =
     | "bug_list"
     | "bug_report_create"
     | "bug_report_add"
-    | "restart_tenex_backend"
     | "stop_pairing"
     | "todo_add"
     | "todo_update";
