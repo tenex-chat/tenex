@@ -11,6 +11,7 @@ import type {
     ToolWillExecuteEvent,
 } from "@/llm/service";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import { homedir } from "os";
@@ -461,11 +462,37 @@ export class AgentExecutor {
         // Register RAL in ConversationStore
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
-        // Build messages from ConversationStore (single source of truth)
-        const messages = conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
+        // Build conversation messages from ConversationStore (single source of truth)
+        const conversationMessages = conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
+
+        // Build system prompt with agent identity, context, and instructions
+        const projectContext = getProjectContext();
+        const conversation = context.getConversation();
+        if (!conversation) {
+            throw new Error(`Conversation ${context.conversationId} not found`);
+        }
+
+        const systemPromptMessages = await buildSystemPromptMessages({
+            agent: context.agent,
+            project: projectContext.project,
+            conversation,
+            projectBasePath: context.projectBasePath,
+            workingDirectory: context.workingDirectory,
+            currentBranch: context.currentBranch,
+            availableAgents: Array.from(projectContext.agents.values()),
+        });
+
+        // Combine system prompt with conversation messages
+        const messages: ModelMessage[] = [
+            ...systemPromptMessages.map(sm => sm.message),
+            ...conversationMessages,
+        ];
+
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
             "ral.number": ralNumber,
             "message.count": messages.length,
+            "system_prompt.count": systemPromptMessages.length,
+            "conversation.count": conversationMessages.length,
         });
 
         const abortSignal = llmOpsRegistry.registerOperation(context);
