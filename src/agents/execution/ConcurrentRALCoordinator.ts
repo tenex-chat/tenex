@@ -8,7 +8,6 @@
  */
 
 import type { RALSummary } from "@/services/ral";
-import type { ModelMessage } from "ai";
 
 export interface StepInfo {
   stepNumber: number;
@@ -36,84 +35,6 @@ export interface RALToolAvailability {
   ralNumber: number;
   canAbort: boolean;
   abortReason?: string;
-}
-
-/**
- * Format a ModelMessage for display in concurrent RAL context
- */
-function formatMessageForContext(msg: ModelMessage): string {
-  if (msg.role === "system") {
-    const content = String(msg.content);
-    if (content.length > 200) {
-      return `[system] ${content.substring(0, 200)}...`;
-    }
-    return `[system] ${content}`;
-  }
-
-  if (msg.role === "user") {
-    const content = String(msg.content);
-    if (content.length > 300) {
-      return `[user] ${content.substring(0, 300)}...`;
-    }
-    return `[user] ${content}`;
-  }
-
-  if (msg.role === "assistant") {
-    const parts: string[] = [];
-
-    if (typeof msg.content === "string" && msg.content.trim()) {
-      const text = msg.content.length > 300
-        ? msg.content.substring(0, 300) + "..."
-        : msg.content;
-      parts.push(`[assistant] ${text}`);
-    } else if (Array.isArray(msg.content)) {
-      for (const part of msg.content) {
-        if (part.type === "text" && part.text.trim()) {
-          const text = part.text.length > 300
-            ? part.text.substring(0, 300) + "..."
-            : part.text;
-          parts.push(`[assistant] ${text}`);
-        } else if (part.type === "tool-call") {
-          const inputStr = part.input !== undefined ? JSON.stringify(part.input) : "";
-          const inputPreview = inputStr.substring(0, 100);
-          parts.push(`[tool-call] ${part.toolName}(${inputPreview}${inputStr.length > 100 ? "..." : ""})`);
-        }
-      }
-    }
-
-    return parts.join("\n");
-  }
-
-  if (msg.role === "tool") {
-    if (Array.isArray(msg.content)) {
-      return msg.content.map(result => {
-        if (result.type !== "tool-result") return "";
-        const resultStr = typeof result.output === "string"
-          ? result.output
-          : JSON.stringify(result.output);
-        const preview = resultStr.length > 200
-          ? resultStr.substring(0, 200) + "..."
-          : resultStr;
-        return `[tool-result] ${preview}`;
-      }).filter(s => s.length > 0).join("\n");
-    }
-  }
-
-  return `[${msg.role}] (content omitted)`;
-}
-
-/**
- * Format RAL's unique message history for context
- */
-function formatRALHistory(uniqueMessages: ModelMessage[]): string {
-  if (uniqueMessages.length === 0) return "(no messages yet)";
-
-  const lastMessages = uniqueMessages.slice(-10);
-
-  return lastMessages
-    .map(formatMessageForContext)
-    .filter(s => s.length > 0)
-    .join("\n");
 }
 
 export class ConcurrentRALCoordinator {
@@ -182,12 +103,8 @@ export class ConcurrentRALCoordinator {
         delegationInfo = `\n  Pending delegations:\n    ${delegationList}`;
       }
 
-      const history = formatRALHistory(ral.uniqueMessages);
-
       return `RAL #${ral.ralNumber} (${status}, started ${ageMinutes}m ago):
-  Current tool: ${ral.currentTool || "none"}${delegationInfo}
-  Message history:
-${history.split("\n").map(line => "    " + line).join("\n")}`;
+  Current tool: ${ral.currentTool || "none"}${delegationInfo}`;
     }).join("\n\n");
 
     // Build tool instructions based on availability

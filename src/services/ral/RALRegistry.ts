@@ -1,4 +1,3 @@
-import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import type {
@@ -13,8 +12,6 @@ export interface RALSummary {
   ralId: string;
   isStreaming: boolean;
   currentTool?: string;
-  /** Messages unique to this RAL (starting from triggering event, excludes shared conversation history) */
-  uniqueMessages: ModelMessage[];
   pendingDelegations: Array<{ recipientSlug?: string; prompt: string; eventId: string }>;
   createdAt: number;
   hasPendingDelegations: boolean;
@@ -132,8 +129,6 @@ export class RALRegistry {
       ralNumber,
       agentPubkey,
       conversationId,
-      messages: [],
-      uniqueMessagesStartIndex: 0,
       pendingDelegations: [],
       completedDelegations: [],
       queuedInjections: [],
@@ -176,7 +171,7 @@ export class RALRegistry {
 
   /**
    * Get summaries of other active RALs (excluding the specified one)
-   * Used to inject context about concurrent executions
+   * Used for concurrent RAL coordination (pausing/resuming)
    */
   getOtherRALSummaries(agentPubkey: string, conversationId: string, excludeRalNumber: number): RALSummary[] {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
@@ -187,8 +182,6 @@ export class RALRegistry {
         ralId: r.id,
         isStreaming: r.isStreaming,
         currentTool: r.currentTool,
-        // Only include messages unique to this RAL (from triggering event onward)
-        uniqueMessages: r.messages.slice(r.uniqueMessagesStartIndex),
         pendingDelegations: r.pendingDelegations.map(d => ({
           recipientSlug: d.recipientSlug,
           prompt: d.prompt.substring(0, 100) + (d.prompt.length > 100 ? "..." : ""),
@@ -247,72 +240,17 @@ export class RALRegistry {
   }
 
   /**
-   * Save/update messages for a specific RAL
-   * @param uniqueContentStartsAt - Index where this RAL's unique content starts (typically the triggering event).
-   *                                Only needs to be set on first save. Subsequent saves will preserve the original value.
+   * Set pending delegations for a specific RAL (delegation tracking only, not message storage)
    */
-  saveMessages(
+  setPendingDelegations(
     agentPubkey: string,
     conversationId: string,
     ralNumber: number,
-    messages: ModelMessage[],
-    uniqueContentStartsAt?: number
-  ): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] No RAL found to save messages", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        ralNumber,
-      });
-      return;
-    }
-
-    // Only update the start index on first save (when it's still 0 and we have a value)
-    if (ral.uniqueMessagesStartIndex === 0 && uniqueContentStartsAt !== undefined) {
-      ral.uniqueMessagesStartIndex = uniqueContentStartsAt;
-    }
-
-    ral.messages = messages;
-    ral.lastActivityAt = Date.now();
-
-    trace.getActiveSpan()?.addEvent("ral.messages_saved", {
-      "ral.id": ral.id,
-      "ral.number": ralNumber,
-      "message.count": messages.length,
-    });
-  }
-
-  /**
-   * Get messages for a specific RAL
-   */
-  getMessages(agentPubkey: string, conversationId: string, ralNumber: number): ModelMessage[] {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral || ral.messages.length === 0) return [];
-    return [...ral.messages];
-  }
-
-  /**
-   * Check if RAL has saved messages
-   */
-  hasMessages(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return !!ral && ral.messages.length > 0;
-  }
-
-  /**
-   * Save messages and pending delegations for a specific RAL
-   */
-  saveState(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number,
-    messages: ModelMessage[],
     pendingDelegations: PendingDelegation[]
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
-      logger.warn("[RALRegistry] No RAL found to save state", {
+      logger.warn("[RALRegistry] No RAL found to set pending delegations", {
         agentPubkey: agentPubkey.substring(0, 8),
         conversationId: conversationId.substring(0, 8),
         ralNumber,
@@ -321,19 +259,17 @@ export class RALRegistry {
     }
 
     const key = this.makeKey(agentPubkey, conversationId);
-    ral.messages = messages;
     ral.pendingDelegations = pendingDelegations;
     ral.lastActivityAt = Date.now();
 
-    // Register delegation event ID -> RAL mappings
+    // Register delegation event ID -> RAL mappings (for routing delegation responses)
     for (const d of pendingDelegations) {
       this.delegationToRal.set(d.eventId, { key, ralNumber });
     }
 
-    trace.getActiveSpan()?.addEvent("ral.state_saved", {
+    trace.getActiveSpan()?.addEvent("ral.delegations_set", {
       "ral.id": ral.id,
       "ral.number": ralNumber,
-      "message.count": messages.length,
       "delegation.pending_count": pendingDelegations.length,
     });
   }
@@ -498,9 +434,10 @@ export class RALRegistry {
   }
 
   /**
-   * Get and persist queued injections for a specific RAL
+   * Get and consume queued injections for a specific RAL
+   * Injections are persisted to ConversationStore by the caller
    */
-  getAndPersistInjections(agentPubkey: string, conversationId: string, ralNumber: number): QueuedInjection[] {
+  getAndConsumeInjections(agentPubkey: string, conversationId: string, ralNumber: number): QueuedInjection[] {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return [];
 
@@ -508,24 +445,16 @@ export class RALRegistry {
       return [];
     }
 
-    const newInjections = [...ral.queuedInjections];
+    const injections = [...ral.queuedInjections];
     ral.queuedInjections = [];
 
-    for (const injection of newInjections) {
-      ral.messages.push({
-        role: injection.role,
-        content: injection.content,
-      });
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.injections_persisted", {
+    trace.getActiveSpan()?.addEvent("ral.injections_consumed", {
       "ral.id": ral.id,
       "ral.number": ralNumber,
-      "injection.count": newInjections.length,
-      "total_messages": ral.messages.length,
+      "injection.count": injections.length,
     });
 
-    return newInjections;
+    return injections;
   }
 
   /**
@@ -608,25 +537,6 @@ export class RALRegistry {
   }
 
   /**
-   * Get summary of a specific RAL for context
-   */
-  getStateSummary(agentPubkey: string, conversationId: string, ralNumber: number): string {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return "No active execution";
-
-    const toolInfo = ral.currentTool
-      ? `Running tool: ${ral.currentTool} for ${Date.now() - (ral.toolStartedAt || 0)}ms`
-      : "Between tool calls";
-
-    const recentMessages = ral.messages
-      .slice(-4)
-      .map((m) => `${m.role}: ${String(m.content).substring(0, 80)}...`)
-      .join("\n");
-
-    return `${toolInfo}\n\nRecent context:\n${recentMessages}`;
-  }
-
-  /**
    * Find the RAL that has a pending delegation
    */
   findStateWaitingForDelegation(delegationEventId: string): RALState | undefined {
@@ -670,8 +580,7 @@ export class RALRegistry {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
     return rals.find(ral =>
       ral.completedDelegations.length > 0 &&
-      ral.pendingDelegations.length === 0 &&
-      ral.messages.length > 0
+      ral.pendingDelegations.length === 0
     );
   }
 
@@ -682,10 +591,7 @@ export class RALRegistry {
    */
   findRALWithInjections(agentPubkey: string, conversationId: string): RALState | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals.find(ral =>
-      ral.queuedInjections.length > 0 &&
-      ral.messages.length > 0
-    );
+    return rals.find(ral => ral.queuedInjections.length > 0);
   }
 
   /**

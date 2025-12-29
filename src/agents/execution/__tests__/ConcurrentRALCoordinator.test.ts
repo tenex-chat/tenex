@@ -12,7 +12,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -32,7 +31,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123",
           recipientPubkey: "pubkey",
@@ -58,7 +56,6 @@ describe("ConcurrentRALCoordinator", () => {
           ralId: "ral-1",
           isStreaming: true,
           currentTool: undefined,
-          uniqueMessages: [],
           pendingDelegations: [],
           hasPendingDelegations: false,
           createdAt: Date.now(),
@@ -68,7 +65,6 @@ describe("ConcurrentRALCoordinator", () => {
           ralId: "ral-2",
           isStreaming: false,
           currentTool: undefined,
-          uniqueMessages: [],
           pendingDelegations: [{
             eventId: "del-456",
             recipientPubkey: "pubkey",
@@ -254,7 +250,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -273,10 +268,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: "write_file",
-        uniqueMessages: [
-          { role: "user", content: "Write poems" },
-          { role: "assistant", content: "I will write poems" },
-        ],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now() - 60000, // 1 minute ago
@@ -286,7 +277,7 @@ describe("ConcurrentRALCoordinator", () => {
 
       expect(result).toContain("RAL #1");
       expect(result).toContain("write_file");
-      expect(result).toContain("Write poems");
+      expect(result).toContain("actively streaming");
     });
 
     it("should mention ral_abort for RALs without delegations", () => {
@@ -295,7 +286,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -313,7 +303,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123",
           recipientPubkey: "pubkey",
@@ -336,7 +325,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -353,7 +341,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -372,7 +359,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
@@ -391,7 +377,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123456789",
           recipientPubkey: "pubkey",

@@ -71,7 +71,7 @@ describe("RAL Delegation Flow", () => {
             expect(stateB?.conversationId).toBe(conversationB);
         });
 
-        it("should save state with pending delegations", () => {
+        it("should set pending delegations", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
 
             const pendingDelegations: PendingDelegation[] = [
@@ -83,17 +83,11 @@ describe("RAL Delegation Flow", () => {
                 },
             ];
 
-            const messages = [
-                { role: "user" as const, content: "Hello" },
-                { role: "assistant" as const, content: "I will delegate this" },
-            ];
-
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, messages, pendingDelegations);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             const state = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
             expect(state?.pendingDelegations).toHaveLength(1);
             expect(state?.pendingDelegations[0].eventId).toBe("delegation-event-123");
-            expect(state?.messages).toHaveLength(2);
         });
 
         it("should find state waiting for a specific delegation via event ID lookup", () => {
@@ -107,7 +101,7 @@ describe("RAL Delegation Flow", () => {
                 },
             ];
 
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], pendingDelegations);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             const waitingState = registry.findStateWaitingForDelegation("delegation-event-456");
             expect(waitingState).toBeDefined();
@@ -129,7 +123,7 @@ describe("RAL Delegation Flow", () => {
                 },
             ];
 
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], pendingDelegations);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             const completion: CompletedDelegation = {
                 eventId: "delegation-event-789",
@@ -163,7 +157,7 @@ describe("RAL Delegation Flow", () => {
                 },
             ];
 
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], pendingDelegations);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             // Complete first delegation
             const state1 = registry.recordCompletion({
@@ -190,14 +184,14 @@ describe("RAL Delegation Flow", () => {
             expect(state2?.completedDelegations).toHaveLength(2);
         });
 
-        it("should not affect isStreaming when saving pending delegations", () => {
+        it("should not affect isStreaming when setting pending delegations", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
 
             const initialState = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
             expect(initialState?.isStreaming).toBe(false);
 
-            // Save with pending delegations - isStreaming is not affected
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], [
+            // Set pending delegations - isStreaming is not affected
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     eventId: "del-1",
                     recipientPubkey: mockAgent2.pubkey,
@@ -246,7 +240,7 @@ describe("RAL Delegation Flow", () => {
         it("should detect delegation completion via e-tag matching", async () => {
             // Setup: Create RAL with pending delegation
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], [
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     eventId: "original-delegation-event-id",
                     recipientPubkey: mockAgent2.pubkey,
@@ -310,7 +304,7 @@ describe("RAL Delegation Flow", () => {
         it("should not record completion for unrelated events", async () => {
             // Setup: Create RAL with pending delegation
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], [
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     eventId: "my-delegation-id",
                     recipientPubkey: mockAgent2.pubkey,
@@ -357,7 +351,7 @@ describe("RAL Delegation Flow", () => {
         it("should record each completion independently (routing via p-tags)", async () => {
             // Setup: Create RAL with multiple pending delegations
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [], [
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     eventId: "delegation-1",
                     recipientPubkey: mockAgent2.pubkey,
@@ -458,12 +452,7 @@ describe("RAL Delegation Flow", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
             expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)?.isStreaming).toBe(false);
 
-            // 2. Agent calls delegate tool, which saves state and pauses
-            const messages = [
-                { role: "user" as const, content: "Please get help from agent2" },
-                { role: "assistant" as const, content: "I'll delegate this task" },
-            ];
-
+            // 2. Agent calls delegate tool, which sets pending delegations
             const pendingDelegations: PendingDelegation[] = [
                 {
                     eventId: "delegation-full-flow-test",
@@ -473,11 +462,10 @@ describe("RAL Delegation Flow", () => {
                 },
             ];
 
-            registry.saveState(mockAgent.pubkey, CONVERSATION_ID, ralNumber, messages, pendingDelegations);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             // 3. Verify state with pending delegations
             const stateWithPending = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
-            expect(stateWithPending?.messages).toHaveLength(2);
             expect(stateWithPending?.pendingDelegations).toHaveLength(1);
 
             // 4. Agent2 completes and responds
@@ -530,29 +518,13 @@ describe("RAL Delegation Flow", () => {
                 "I have completed the subtask. Here are the results."
             );
 
-            // 8. AgentExecutor detects RAL with completions and injects them
-            // (simulating what AgentExecutor does)
+            // 8. AgentExecutor detects RAL with completions
             const ralState = registry.getState(mockAgent.pubkey, CONVERSATION_ID)!;
             expect(ralState.completedDelegations.length).toBeGreaterThan(0);
 
-            // Add completed responses as user messages (what AgentExecutor does)
-            for (const completion of ralState.completedDelegations) {
-                const agentName = completion.recipientSlug || completion.recipientPubkey.substring(0, 8);
-                ralState.messages.push({
-                    role: "user",
-                    content: `[Response from ${agentName}]: ${completion.response}`,
-                });
-            }
-
-            // Clear completed delegations after injecting
+            // Clear completed delegations after processing
             registry.clearCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
             expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)?.completedDelegations).toHaveLength(0);
-
-            // Verify messages include the response as user message
-            const finalState = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
-            expect(finalState?.messages).toHaveLength(3); // original 2 + response
-            expect(finalState?.messages[2].role).toBe("user");
-            expect(finalState?.messages[2].content).toContain("Response from agent2");
         });
     });
 });

@@ -17,19 +17,16 @@ import {
     type ErrorIntent,
     type EventContext,
     type LessonIntent,
-    type StreamingIntent,
     type ToolUseIntent,
 } from "./AgentEventEncoder";
 
 /**
  * Comprehensive publisher for all agent-related Nostr events.
  * Handles agent creation, responses, completions, and delegations.
- * Also manages streaming buffer to ensure correct event ordering.
  */
 export class AgentPublisher {
     private agent: AgentInstance;
     private encoder: AgentEventEncoder;
-    private streamSequence = 0;
 
     constructor(agent: AgentInstance) {
         this.agent = agent;
@@ -85,7 +82,7 @@ export class AgentPublisher {
     ): Promise<string> {
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
-        event.kind = 1111;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = params.content;
 
         // Add recipient p-tag
@@ -140,7 +137,7 @@ export class AgentPublisher {
     ): Promise<string> {
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
-        event.kind = 1111;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = params.content;
 
         // Add recipient p-tag
@@ -195,7 +192,7 @@ export class AgentPublisher {
     ): Promise<string> {
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
-        event.kind = 1111;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = params.content;
 
         // Add recipient p-tag
@@ -264,20 +261,6 @@ export class AgentPublisher {
     }
 
     /**
-     * Publish a streaming progress event.
-     */
-    async streaming(intent: StreamingIntent, context: EventContext): Promise<NDKEvent> {
-        // Note: Don't flush stream for streaming events as they ARE the stream
-        const event = this.encoder.encodeStreamingContent(intent, context);
-
-        // Sign and publish
-        await this.agent.sign(event);
-        await this.safePublish(event, "streaming event");
-
-        return event;
-    }
-
-    /**
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
@@ -311,34 +294,6 @@ export class AgentPublisher {
         });
 
         return event;
-    }
-
-    /**
-     * Publish streaming delta from LLMService.
-     * Content is already throttled by the middleware, so we publish immediately as TenexStreamingResponse.
-     */
-    async publishStreamingDelta(
-        delta: string,
-        context: EventContext,
-        isReasoning = false
-    ): Promise<void> {
-        // Content is already buffered/throttled by the middleware
-        // Just publish it immediately as a streaming event
-        const streamingIntent: StreamingIntent = {
-            content: delta,
-            sequence: ++this.streamSequence,
-            isReasoning,
-        };
-
-        await this.streaming(streamingIntent, context);
-    }
-
-    /**
-     * Reset streaming sequence counter.
-     * Should be called when streaming is complete.
-     */
-    resetStreamingSequence(): void {
-        this.streamSequence = 0;
     }
 
     /**

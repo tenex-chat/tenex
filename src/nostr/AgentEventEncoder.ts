@@ -53,12 +53,6 @@ export interface ErrorIntent {
     errorType?: string;
 }
 
-export interface StreamingIntent {
-    content: string;
-    sequence: number;
-    isReasoning?: boolean;
-}
-
 export interface LessonIntent {
     title: string;
     lesson: string;
@@ -79,6 +73,7 @@ export interface ToolUseIntent {
     toolName: string;
     content: string; // e.g., "Reading $path"
     args?: unknown; // Tool arguments to be serialized
+    referencedEventIds?: string[]; // Event IDs to reference (e.g., delegation event IDs)
 }
 
 export type AgentIntent =
@@ -87,7 +82,6 @@ export type AgentIntent =
     | AskIntent
     | ConversationIntent
     | ErrorIntent
-    | StreamingIntent
     | LessonIntent
     | StatusIntent
     | ToolUseIntent;
@@ -183,7 +177,7 @@ export class AgentEventEncoder {
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = 1111;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags (E, K, P for root)
@@ -291,7 +285,7 @@ export class AgentEventEncoder {
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
         return intent.delegations.map((delegation) => {
             const event = new NDKEvent(getNDK());
-            event.kind = 1111; // NIP-22 comment/conversation kind
+            event.kind = NDKKind.Text; // kind:1 - unified conversation format
 
             // Prepend recipient to the content
             event.content = this.prependRecipientsToContent(delegation.request, [
@@ -350,7 +344,7 @@ export class AgentEventEncoder {
      */
     encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = 1111; // NIP-22 comment/conversation kind
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags
@@ -395,7 +389,7 @@ export class AgentEventEncoder {
      */
     encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags
@@ -455,7 +449,7 @@ export class AgentEventEncoder {
      */
     encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.message;
 
         // Add conversation tags
@@ -465,35 +459,6 @@ export class AgentEventEncoder {
         event.tag(["error", intent.errorType || "system"]);
 
         // Add standard metadata
-        this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
-        return event;
-    }
-
-    /**
-     * Encode a streaming progress intent.
-     */
-    encodeStreamingContent(intent: StreamingIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.TenexStreamingResponse;
-        event.content = intent.content;
-
-        // Add conversation tags for proper threading
-        this.addConversationTags(event, context);
-
-        // Add streaming-specific tags
-        event.tag(["streaming", "true"]);
-        event.tag(["sequence", intent.sequence.toString()]);
-
-        // Add reasoning tag if this is reasoning content
-        if (intent.isReasoning) {
-            event.tag(["reasoning"]);
-        }
-
-        // Add standard metadata tags
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
@@ -653,7 +618,7 @@ export class AgentEventEncoder {
      */
     encodeToolUse(intent: ToolUseIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags
@@ -676,6 +641,13 @@ export class AgentEventEncoder {
             } catch {
                 // If serialization fails, add empty tag
                 event.tag(["tool-args"]);
+            }
+        }
+
+        // Add e-tags for referenced events (e.g., delegation event IDs)
+        if (intent.referencedEventIds) {
+            for (const eventId of intent.referencedEventIds) {
+                event.tag(["e", eventId]);
             }
         }
 

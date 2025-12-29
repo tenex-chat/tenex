@@ -1,6 +1,7 @@
 import type { Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { Conversation, ConversationCoordinator } from "@/conversations";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
@@ -36,6 +37,7 @@ export interface ExecutionContext {
     hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools
     hasActivePairings?: boolean; // True when this agent has active pairing sessions - enables stop_pairing tool
     ralNumber?: number; // The RAL number for this execution - set by AgentExecutor during execution
+    conversationStore?: ConversationStore; // Single source of truth for conversation state - injected by AgentExecutor during execution
 
     /**
      * Reference to the active tools object used by the LLM service.

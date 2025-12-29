@@ -40,7 +40,8 @@ function createContextFromNostrEvent(event: NDKEvent): {
     traceId: string;
 } {
     // 1. Determine conversationId (becomes traceID)
-    const conversationId = AgentEventDecoder.getConversationRoot(event) || event.id;
+    // For root events (no e tag), use the event's own ID as conversation root
+    const conversationId = AgentEventDecoder.getReplyTarget(event) || event.id;
     if (!conversationId) {
         return { context: ROOT_CONTEXT, parentSpanId: undefined, traceId: "" };
     }
@@ -82,7 +83,7 @@ export function createEventSpan(event: NDKEvent): Span {
     const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
 
     let parentContext = ROOT_CONTEXT;
-    let conversationId = AgentEventDecoder.getConversationRoot(event);
+    let conversationId = AgentEventDecoder.getReplyTarget(event);
     let derivedTraceId: string | undefined;
 
     if (traceContextTag) {
@@ -119,7 +120,7 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.has_trace_context": !!traceContextTag,
                 "event.reply_to": replyToEventId || "",
                 "conversation.id": conversationId || "unknown",
-                "conversation.is_root": !AgentEventDecoder.getConversationRoot(event),
+                "conversation.is_root": !AgentEventDecoder.getReplyTarget(event),
                 "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,
             },
         },
