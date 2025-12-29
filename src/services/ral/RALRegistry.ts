@@ -20,6 +20,13 @@ export interface RALSummary {
   hasPendingDelegations: boolean;
 }
 
+/**
+ * RAL = Reason-Act Loop
+ *
+ * Manages state for concurrent agent executions within conversations.
+ * Each RAL represents one execution cycle where the agent reasons about
+ * input and takes actions via tool calls.
+ */
 export class RALRegistry {
   private static instance: RALRegistry;
 

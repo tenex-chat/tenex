@@ -265,7 +265,7 @@ export class LLMServiceFactory {
                 config.model,
                 config.temperature,
                 config.maxTokens,
-                providerFunction as any,
+                providerFunction,
                 context?.sessionId,
                 agentSlug
             );

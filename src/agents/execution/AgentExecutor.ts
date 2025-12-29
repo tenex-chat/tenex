@@ -834,6 +834,21 @@ export class AgentExecutor {
             await agentPublisher.publishStreamingDelta("", eventContext, false);
             await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
         } catch (streamError) {
+            // Check if this was an abort from a stop signal (kind 24134)
+            if (abortSignal.aborted) {
+                executionSpan?.addEvent("executor.aborted_by_stop_signal", {
+                    "ral.number": ralNumber,
+                    "agent.slug": context.agent.slug,
+                    "conversation.id": context.conversationId,
+                });
+                logger.info(`[AgentExecutor] Execution aborted by stop signal`, {
+                    agent: context.agent.slug,
+                    ralNumber,
+                    conversationId: context.conversationId.substring(0, 8),
+                });
+                throw streamError;
+            }
+
             try {
                 const { message: errorMessage, errorType } = formatStreamError(streamError);
                 await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
