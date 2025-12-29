@@ -163,8 +163,15 @@ async function handleReplyLogic(
         await conversationCoordinator.addEvent(conversation.id, event);
     }
 
-    // Record any delegation completion (side effect only)
-    await handleDelegationCompletion(event, conversation, conversationCoordinator);
+    // Check for delegation completion - if this is a response to a delegation, don't route to agents
+    const delegationResult = await handleDelegationCompletion(event, conversation, conversationCoordinator);
+    if (delegationResult.recorded) {
+        trace.getActiveSpan()?.addEvent("reply.delegation_completion_recorded", {
+            "delegation.agent_slug": delegationResult.agentSlug || "",
+            "delegation.conversation_id": delegationResult.conversationId || "",
+        });
+        return;
+    }
     trace.getActiveSpan()?.addEvent("reply.delegation_completion_handled");
 
     // If sender is whitelisted, they can unblock any blocked agents they're messaging
