@@ -21,7 +21,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Agents Runtime (`src/agents`)
 - **Registry & Storage**: `AgentRegistry`, `AgentStorage`, and `constants` describe built-in agent definitions, dynamic injection, and on-disk metadata.
-- **Execution (`execution/*`)**: `AgentExecutor`, `AgentSupervisor`, and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/services`, `nostr/AgentPublisher`, and `services/DelegationService`.
+- **Execution (`execution/*`)**: `AgentExecutor` and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/services`, `nostr/AgentPublisher`, and `services/DelegationService`.
 - **Utilities & Types**: Provide normalization, context building, and shared typings for consumers such as `event-handler`.
 - **Guideline**: Agents should never import `commands/*`. For configuration, import `{ config }` from `@/services` and use `config.getConfigPath(subdir)` for paths or `config.loadConfig()` for configuration data; pass loaded config through constructors when needed.
 

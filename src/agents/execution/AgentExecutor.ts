@@ -2,7 +2,6 @@ import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type {
-    ChunkTypeChangeEvent,
     CompleteEvent,
     ContentEvent,
     ReasoningEvent,
@@ -479,33 +478,14 @@ export class AgentExecutor {
         }
         const eventContext = createEventContext(context, llmService.model);
 
-        let reasoningBuffer = "";
         let completionEvent: CompleteEvent | undefined;
 
-        const flushReasoningBuffer = async (): Promise<void> => {
-            if (reasoningBuffer.trim().length > 0) {
-                await agentPublisher.conversation(
-                    { content: reasoningBuffer, isReasoning: true },
-                    eventContext
-                );
-                reasoningBuffer = "";
-            }
-        };
-
-        llmService.on("content", async (event: ContentEvent) => {
+        llmService.on("content", (event: ContentEvent) => {
             process.stdout.write(chalk.white(event.delta));
-            await agentPublisher.conversation({ content: event.delta }, eventContext);
         });
 
-        llmService.on("reasoning", async (event: ReasoningEvent) => {
+        llmService.on("reasoning", (event: ReasoningEvent) => {
             process.stdout.write(chalk.gray(event.delta));
-            await agentPublisher.conversation({ content: event.delta, isReasoning: true }, eventContext);
-        });
-
-        llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
-            if (event.from === "reasoning-delta") {
-                await flushReasoningBuffer();
-            }
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
@@ -813,10 +793,6 @@ export class AgentExecutor {
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
-        }
-
-        if (reasoningBuffer.trim().length > 0) {
-            await flushReasoningBuffer();
         }
 
         if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {

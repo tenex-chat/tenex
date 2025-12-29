@@ -3,7 +3,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
-import { context as otelContext, propagation, trace } from "@opentelemetry/api";
+import { context as otelContext, propagation, trace, SpanStatusCode } from "@opentelemetry/api";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
@@ -49,22 +49,64 @@ export class AgentPublisher {
      * Safely publish an event with error handling and trace context injection
      */
     private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
-        try {
-            injectTraceContext(event);
-            await event.publish();
-            trace.getActiveSpan()?.addEvent("nostr.event_published", {
-                "event.id": event.id || "",
-                "event.kind": event.kind || 0,
-                "event.type": eventType,
-                "agent.slug": this.agent.slug,
-            });
-        } catch (error) {
-            logger.warn(`Failed to publish ${eventType}`, {
-                error,
-                eventId: event.id?.substring(0, 8),
-                agent: this.agent.slug,
-            });
-        }
+        const tracer = trace.getTracer("tenex.nostr");
+        const rawEvent = event.rawEvent();
+
+        await tracer.startActiveSpan(`nostr.publish.${eventType}`, async (span) => {
+            try {
+                span.setAttributes({
+                    "event.id": event.id || "",
+                    "event.kind": event.kind || 0,
+                    "event.type": eventType,
+                    "event.pubkey": rawEvent.pubkey,
+                    "event.content_length": rawEvent.content?.length || 0,
+                    "event.content_preview": rawEvent.content?.substring(0, 200) || "",
+                    "event.tags": JSON.stringify(rawEvent.tags),
+                    "event.sig": rawEvent.sig || "unsigned",
+                    "event.created_at": rawEvent.created_at || 0,
+                    "agent.slug": this.agent.slug,
+                });
+
+                const relaySet = await event.publish();
+
+                // Log relay responses
+                const successRelays: string[] = [];
+                for (const relay of relaySet) {
+                    successRelays.push(relay.url);
+                }
+
+                span.setAttributes({
+                    "publish.success_count": successRelays.length,
+                    "publish.success_relays": successRelays.join(", "),
+                });
+
+                if (successRelays.length === 0) {
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: "0 relays accepted event" });
+                    logger.warn(`Event published to 0 relays`, {
+                        eventId: event.id?.substring(0, 8),
+                        eventType,
+                        agent: this.agent.slug,
+                        rawEvent: JSON.stringify(rawEvent),
+                    });
+                } else {
+                    span.setStatus({ code: SpanStatusCode.OK });
+                }
+            } catch (error) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+                span.setAttributes({
+                    "error": String(error),
+                    "event.raw": JSON.stringify(rawEvent),
+                });
+                logger.warn(`Failed to publish ${eventType}`, {
+                    error,
+                    eventId: event.id?.substring(0, 8),
+                    agent: this.agent.slug,
+                    rawEvent: JSON.stringify(rawEvent),
+                });
+            } finally {
+                span.end();
+            }
+        });
     }
 
     /**
@@ -74,6 +116,7 @@ export class AgentPublisher {
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeCompletion(intent, context);
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "completion");
 
@@ -120,6 +163,7 @@ export class AgentPublisher {
             event.tags.push(["branch", params.branch]);
         }
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "delegation");
 
@@ -163,6 +207,7 @@ export class AgentPublisher {
             }
         }
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "ask");
 
@@ -197,6 +242,7 @@ export class AgentPublisher {
             event.tags.push(["e", params.replyToEventId]);
         }
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "followup");
 
@@ -211,6 +257,7 @@ export class AgentPublisher {
         const event = this.encoder.encodeConversation(intent, context);
 
         // Sign and publish
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "conversation event");
 
@@ -224,6 +271,7 @@ export class AgentPublisher {
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeError(intent, context);
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "error");
 
@@ -236,6 +284,7 @@ export class AgentPublisher {
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
         const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
+        injectTraceContext(lessonEvent);
         await this.agent.sign(lessonEvent);
         await this.safePublish(lessonEvent, "lesson");
 
@@ -249,6 +298,7 @@ export class AgentPublisher {
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeToolUse(intent, context);
 
+        injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, `tool:${intent.toolName}`);
 
@@ -269,6 +319,7 @@ export class AgentPublisher {
         const task = this.encoder.encodeTask(title, content, context, claudeSessionId);
 
         // Sign with agent's signer
+        injectTraceContext(task);
         await this.agent.sign(task);
         await this.safePublish(task, "task event");
 
@@ -295,6 +346,7 @@ export class AgentPublisher {
         this.encoder.addStandardTags(update, context);
 
         update.tag(["status", status]);
+        injectTraceContext(update);
         await this.agent.sign(update);
         await this.safePublish(update, "task update");
 
