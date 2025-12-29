@@ -101,9 +101,9 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add e-tag for triggering event (reply threading)
-        if (context.triggeringEvent?.id) {
-            event.tags.push(["e", context.triggeringEvent.id]);
+        // Add e-tag for conversation root
+        if (context.rootEvent?.id) {
+            event.tags.push(["e", context.rootEvent.id]);
         }
 
         // Add project a-tag (required for event routing)
@@ -145,9 +145,9 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add e-tag for triggering event (reply threading)
-        if (context.triggeringEvent?.id) {
-            event.tags.push(["e", context.triggeringEvent.id]);
+        // Add e-tag for conversation root
+        if (context.rootEvent?.id) {
+            event.tags.push(["e", context.rootEvent.id]);
         }
 
         // Add project a-tag (required for event routing)

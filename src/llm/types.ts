@@ -96,14 +96,6 @@ export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 export type LLMProvider = AISdkProvider;
 
 /**
- * Provider configuration
- */
-export interface ProviderConfig {
-    provider: AISdkProvider;
-    streaming?: boolean; // Whether this provider supports true streaming
-}
-
-/**
  * Model configuration
  */
 export interface ModelConfig {

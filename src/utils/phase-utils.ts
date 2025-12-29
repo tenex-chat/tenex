@@ -47,7 +47,6 @@ export function createEventContext(context: ExecutionContext, model?: string): E
     const phaseContext = extractPhaseContext(context.triggeringEvent);
 
     return {
-        triggeringEvent: context.triggeringEvent,
         rootEvent: conversation?.history[0] ?? context.triggeringEvent,
         conversationId: context.conversationId,
         model: model ?? context.agent.llmConfig,

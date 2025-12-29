@@ -26,7 +26,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet } from "ai";
 import chalk from "chalk";
-import { AgentSupervisor } from "./AgentSupervisor";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
@@ -218,7 +217,7 @@ export class AgentExecutor {
                 };
 
                 // Prepare execution context with all necessary components
-                const { fullContext, supervisor, toolTracker, agentPublisher, cleanup } =
+                const { fullContext, toolTracker, agentPublisher, cleanup } =
                     this.prepareExecution(contextWithRal);
 
                 // Add execution context to span
@@ -248,9 +247,8 @@ export class AgentExecutor {
                 });
 
                 try {
-                    const result = await this.executeWithSupervisor(
+                    const result = await this.executeOnce(
                         fullContext,
-                        supervisor,
                         toolTracker,
                         agentPublisher,
                         ralNumber
@@ -283,7 +281,6 @@ export class AgentExecutor {
                                 errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                             },
                             {
-                                triggeringEvent: context.triggeringEvent,
                                 rootEvent: conversation.history[0],
                                 conversationId: conversation.id,
                             }
@@ -318,13 +315,11 @@ export class AgentExecutor {
      */
     private prepareExecution(context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] }): {
         fullContext: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] };
-        supervisor: AgentSupervisor;
         toolTracker: ToolExecutionTracker;
         agentPublisher: AgentPublisher;
         cleanup: () => Promise<void>;
     } {
         const toolTracker = new ToolExecutionTracker();
-        const supervisor = new AgentSupervisor(context.agent, context, toolTracker);
         const agentPublisher = new AgentPublisher(context.agent);
 
         // Initialize ConversationStore for this conversation (required)
@@ -367,15 +362,14 @@ export class AgentExecutor {
             toolTracker.clear();
         };
 
-        return { fullContext, supervisor, toolTracker, agentPublisher, cleanup };
+        return { fullContext, toolTracker, agentPublisher, cleanup };
     }
 
     /**
-     * Execute with supervisor oversight and retry capability
+     * Execute streaming and publish result
      */
-    private async executeWithSupervisor(
+    private async executeOnce(
         context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
-        supervisor: AgentSupervisor,
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentPublisher,
         ralNumber: number
@@ -385,7 +379,7 @@ export class AgentExecutor {
         try {
             completionEvent = await this.executeStreaming(context, toolTracker, ralNumber);
         } catch (streamError) {
-            logger.error("[AgentExecutor] Streaming failed in executeWithSupervisor", {
+            logger.error("[AgentExecutor] Streaming failed", {
                 agent: context.agent.slug,
                 error: formatAnyError(streamError),
             });
@@ -412,29 +406,6 @@ export class AgentExecutor {
         }
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
-
-        const isComplete = await supervisor.isExecutionComplete(
-            completionEvent,
-            agentPublisher,
-            eventContext
-        );
-
-        if (!isComplete) {
-            trace.getActiveSpan()?.addEvent("executor.recursion", {
-                "reason": supervisor.getContinuationPrompt().substring(0, 200),
-            });
-
-            if (completionEvent?.message?.trim()) {
-                await agentPublisher.conversation(
-                    { content: completionEvent.message },
-                    eventContext
-                );
-            }
-
-            context.additionalSystemMessage = supervisor.getContinuationPrompt();
-            supervisor.reset();
-            return this.executeWithSupervisor(context, supervisor, toolTracker, agentPublisher, ralNumber);
-        }
 
         trace.getActiveSpan()?.addEvent("executor.complete", {
             "message.length": completionEvent?.message?.length || 0,
@@ -492,25 +463,13 @@ export class AgentExecutor {
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
         // Build messages from ConversationStore (single source of truth)
-        let messages = conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
+        const messages = conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
             "ral.number": ralNumber,
             "message.count": messages.length,
         });
 
         const abortSignal = llmOpsRegistry.registerOperation(context);
-
-        // Add continuation message from supervisor
-        if (context.additionalSystemMessage) {
-            messages = [
-                ...messages,
-                {
-                    role: "user",
-                    content: context.additionalSystemMessage,
-                },
-            ];
-            context.additionalSystemMessage = undefined;
-        }
 
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
 

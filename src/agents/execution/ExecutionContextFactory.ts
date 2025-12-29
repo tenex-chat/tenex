@@ -30,7 +30,6 @@ export async function createExecutionContext(params: {
     conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher;
     isDelegationCompletion?: boolean;
-    additionalSystemMessage?: string;
     debug?: boolean;
 }): Promise<ExecutionContext> {
     // Extract branch tag from event
@@ -101,7 +100,6 @@ export async function createExecutionContext(params: {
         conversationCoordinator: params.conversationCoordinator,
         agentPublisher: params.agentPublisher,
         isDelegationCompletion: params.isDelegationCompletion,
-        additionalSystemMessage: params.additionalSystemMessage,
         debug: params.debug,
         alphaMode: isAlphaMode(),
         getConversation: () => params.conversationCoordinator.getConversation(params.conversationId),

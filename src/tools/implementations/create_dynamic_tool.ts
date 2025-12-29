@@ -178,7 +178,6 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                         await context.agentPublisher.conversation(
                             { content: `🔧 Created dynamic tool: ${name}` },
                             {
-                                triggeringEvent: context.triggeringEvent,
                                 rootEvent: conversation.history[0],
                                 conversationId: context.conversationId,
                             }

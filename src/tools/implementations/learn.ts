@@ -66,10 +66,9 @@ async function executeLessonLearn(
 
     // Create event context
     const eventContext: EventContext = {
-        triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation?.history[0] ?? context.triggeringEvent, // Use triggering event as fallback
+        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
         conversationId: context.conversationId,
-        model: context.agent.llmConfig, // Include LLM configuration
+        model: context.agent.llmConfig,
     };
 
     // Use shared AgentPublisher instance from context to create and publish the lesson

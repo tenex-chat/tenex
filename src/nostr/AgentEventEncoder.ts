@@ -88,8 +88,7 @@ export type AgentIntent =
 
 // Execution context provided by RAL
 export interface EventContext {
-    triggeringEvent: NDKEvent;
-    rootEvent: NDKEvent; // Now mandatory for better type safety
+    rootEvent: NDKEvent; // The conversation root event
     conversationId: string; // Required for conversation lookup
     executionTime?: number;
     model?: string;
@@ -121,39 +120,11 @@ export class AgentEventEncoder {
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
-        // Add conversation tags (E, K, P for root)
-        
-        // if the triggering event is authored by the same as the root event
-        // and the triggering event is e-tagging the root event, let's also e-tag the root
-        // event. This is so that this completion event also shows up in the main thread.
-        // const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
-        // const authorIsProductOwner = context.triggeringEvent.pubkey === projectCtx?.project?.pubkey;
+        // Add conversation e-tag
+        this.addConversationTags(event, context);
 
-        // console.log('encode completion', {
-        //     pTagsMatch, authorIsProductOwner, eTagValue,
-        //     productOwner: projectCtx?.project?.pubkey,
-        //     triggeringEventPubkey: context.triggeringEvent.pubkey
-        // })
-
-        // // This hack is to make the in-thread replies to the product owner (typically the human) appear
-        // // inline instead of threaded-in. This is probably not right.
-        // if (pTagsMatch && authorIsProductOwner && eTagValue) {
-        //     event.tag(["e", eTagValue, "", "reply"]);
-        // } else {
-        //     event.tag(["e", context.triggeringEvent.id, "", "reply"]);
-        // }
-
-        // const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
-
-        // if (pTagsMatch && triggerTagsRoot) {
-        //     event.tag(["e", context.rootEvent.id, "", "root"]);
-        // }
-
-        
-        // Always p-tag the triggering event author - they are the one we're responding to.
-        // When resuming after delegation, the event handler should restore the original
-        // triggering event so we p-tag the correct requester (not the delegatee).
-        event.tag(["p", context.triggeringEvent.pubkey]);
+        // P-tag the conversation root author
+        event.tag(["p", context.rootEvent.pubkey]);
 
         // Mark as natural completion
         event.tag(["status", "completed"]);
@@ -163,15 +134,12 @@ export class AgentEventEncoder {
             this.addLLMUsageTags(event, intent.usage);
         }
 
-        // Add standard metadata (without usage, which is now handled above)
+        // Add standard metadata
         this.addStandardTags(event, context);
 
-        // Forward branch tag from triggering event
-        
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            completingTo: context.triggeringEvent.id?.substring(0, 8),
-            completingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            rootEventId: context.rootEvent.id?.substring(0, 8),
         });
 
         return event;
@@ -232,12 +200,9 @@ export class AgentEventEncoder {
 
             event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
-            // Add root conversation tags (E, K, P)
-            
-            // Always e-tag the triggering event for delegations
-            // This is critical for threading - the delegated agent needs to know which event triggered the delegation
-            if (context.triggeringEvent.id) {
-                event.tag(["e", context.triggeringEvent.id]);
+            // E-tag the conversation root
+            if (context.rootEvent.id) {
+                event.tag(["e", context.rootEvent.id]);
             }
 
             // Add recipient as p-tag

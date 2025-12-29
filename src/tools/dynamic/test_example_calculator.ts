@@ -67,7 +67,6 @@ const createCalculatorTool = (context: ExecutionContext): AISdkTool => {
                         await context.agentPublisher.conversation(
                             { content: `🧮 Calculated: ${a} ${operation} ${b} = ${result}` },
                             {
-                                triggeringEvent: context.triggeringEvent,
                                 rootEvent: conversation.history[0],
                                 conversationId: context.conversationId,
                             }

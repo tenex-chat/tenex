@@ -26,8 +26,6 @@ import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
-import { providerSupportsStreaming } from "./provider-configs";
-import { isAISdkProvider } from "./type-guards";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import {
     compileMessagesForClaudeCode,
@@ -116,7 +114,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     ) => LanguageModel;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
-    private contentPublishTimeout?: NodeJS.Timeout;
     private cachedContentForComplete = "";
 
     constructor(
@@ -661,13 +658,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     }
                 }
 
-                // Cancel any pending content publish timeout for non-streaming providers
-                if (this.contentPublishTimeout) {
-                    clearTimeout(this.contentPublishTimeout);
-                    this.contentPublishTimeout = undefined;
-                }
-
-                // For non-streaming providers, use cached content; for streaming, use e.text
+                // For streaming, use cached content or e.text
                 const finalMessage =
                     this.cachedContentForComplete
                         ? this.cachedContentForComplete
@@ -736,29 +727,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     }
 
     private handleTextDelta(text: string): void {
-        // Check if provider supports streaming
-        const supportsStreaming = isAISdkProvider(this.provider)
-            ? providerSupportsStreaming(this.provider)
-            : true;
-
-        if (supportsStreaming) {
-            // Streaming providers: emit immediately
-            this.emit("content", { delta: text });
-            this.cachedContentForComplete += text;
-        } else {
-            // Non-streaming providers: cache content and delay emission
-            this.cachedContentForComplete = text;
-
-            // Clear any existing timeout
-            if (this.contentPublishTimeout) {
-                clearTimeout(this.contentPublishTimeout);
-            }
-
-            // Set new timeout to emit after 250ms
-            this.contentPublishTimeout = setTimeout(() => {
-                this.emit("content", { delta: this.cachedContentForComplete });
-            }, 250);
-        }
+        this.emit("content", { delta: text });
+        this.cachedContentForComplete += text;
     }
 
     private handleReasoningDelta(text: string): void {
