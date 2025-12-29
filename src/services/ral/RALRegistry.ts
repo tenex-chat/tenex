@@ -596,6 +596,7 @@ export class RALRegistry {
 
   /**
    * Build a message containing delegation results for injection into the RAL.
+   * Includes delegation event ID so agent can match with delegate() tool output.
    */
   buildDelegationResultsMessage(completions: CompletedDelegation[]): string {
     if (completions.length === 0) {
@@ -605,12 +606,12 @@ export class RALRegistry {
     if (completions.length === 1) {
       const c = completions[0];
       const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      return `[Delegation completed: ${agent}]\n\n${c.response}`;
+      return `[Delegation ${c.eventId} completed: ${agent}]\n\n${c.response}`;
     }
 
     const parts = completions.map(c => {
       const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      return `[Response from ${agent}]\n${c.response}`;
+      return `[Delegation ${c.eventId} from ${agent}]\n${c.response}`;
     });
 
     return `[All ${completions.length} delegations completed]\n\n${parts.join("\n\n")}`;

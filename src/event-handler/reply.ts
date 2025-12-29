@@ -163,13 +163,29 @@ async function handleReplyLogic(
         await conversationCoordinator.addEvent(conversation.id, event);
     }
 
-    // Check for delegation completion - if this is a response to a delegation, don't route to agents
+    // Check for delegation completion - if this is a response to a delegation,
+    // route to the waiting agent in the ORIGINAL conversation (not this one)
     const delegationResult = await handleDelegationCompletion(event, conversation, conversationCoordinator);
-    if (delegationResult.recorded) {
-        trace.getActiveSpan()?.addEvent("reply.delegation_completion_recorded", {
-            "delegation.agent_slug": delegationResult.agentSlug || "",
-            "delegation.conversation_id": delegationResult.conversationId || "",
+    const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
+
+    if (delegationTarget) {
+        trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
+            "delegation.agent_slug": delegationTarget.agent.slug,
+            "delegation.original_conversation_id": delegationTarget.conversationId,
+            "delegation.current_conversation_id": conversation.id,
         });
+
+        // Create execution context for the ORIGINAL conversation where the RAL is waiting
+        const executionContext = await createExecutionContext({
+            agent: delegationTarget.agent,
+            conversationId: delegationTarget.conversationId,
+            projectBasePath: projectCtx.agentRegistry.getBasePath(),
+            triggeringEvent: event,
+            conversationCoordinator,
+        });
+
+        // Execute - AgentExecutor will find the resumable RAL via findResumableRAL
+        await agentExecutor.execute(executionContext);
         return;
     }
     trace.getActiveSpan()?.addEvent("reply.delegation_completion_handled");
