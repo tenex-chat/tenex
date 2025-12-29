@@ -67,19 +67,12 @@ async function executeDelegateFollowup(
     recipientPubkey: previousDelegation.recipientPubkey.substring(0, 8),
   });
 
-  const eventId = await context.agentPublisher.delegateFollowup(
-    {
-      recipient: previousDelegation.recipientPubkey,
-      content: message,
-      delegationEventId: delegation_event_id,
-      replyToEventId: previousDelegation.responseEventId,
-    },
-    {
-      triggeringEvent: context.triggeringEvent,
-      rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
-      conversationId: context.conversationId,
-    }
-  );
+  const eventId = await context.agentPublisher.delegateFollowup({
+    recipient: previousDelegation.recipientPubkey,
+    content: message,
+    delegationEventId: delegation_event_id,
+    replyToEventId: previousDelegation.responseEventId,
+  });
 
   return {
     __stopExecution: true,

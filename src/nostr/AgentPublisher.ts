@@ -3,7 +3,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
-import { trace } from "@opentelemetry/api";
+import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
@@ -21,6 +21,18 @@ import {
 } from "./AgentEventEncoder";
 
 /**
+ * Inject W3C trace context into an event's tags.
+ * This allows the daemon to link incoming events back to their parent span.
+ */
+function injectTraceContext(event: NDKEvent): void {
+    const carrier: Record<string, string> = {};
+    propagation.inject(otelContext.active(), carrier);
+    if (carrier.traceparent) {
+        event.tags.push(["trace_context", carrier.traceparent]);
+    }
+}
+
+/**
  * Comprehensive publisher for all agent-related Nostr events.
  * Handles agent creation, responses, completions, and delegations.
  */
@@ -34,13 +46,20 @@ export class AgentPublisher {
     }
 
     /**
-     * Safely publish an event with error handling
+     * Safely publish an event with error handling and trace context injection
      */
-    private async safePublish(event: NDKEvent, context: string): Promise<void> {
+    private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
         try {
+            injectTraceContext(event);
             await event.publish();
+            trace.getActiveSpan()?.addEvent("nostr.event_published", {
+                "event.id": event.id || "",
+                "event.kind": event.kind || 0,
+                "event.type": eventType,
+                "agent.slug": this.agent.slug,
+            });
         } catch (error) {
-            logger.warn(`Failed to publish ${context}`, {
+            logger.warn(`Failed to publish ${eventType}`, {
                 error,
                 eventId: event.id?.substring(0, 8),
                 agent: this.agent.slug,
@@ -55,14 +74,8 @@ export class AgentPublisher {
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeCompletion(intent, context);
 
-        // Sign and publish
         await this.agent.sign(event);
-        await this.safePublish(event, "completion event");
-
-        trace.getActiveSpan()?.addEvent("publisher.completion_published", {
-            "event.id": event.id || "",
-            "content.length": intent.content.length,
-        });
+        await this.safePublish(event, "completion");
 
         return event;
     }
@@ -88,13 +101,6 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add conversation threading
-        if (context.rootEvent) {
-            event.tags.push(["E", context.rootEvent.id]);
-            event.tags.push(["K", String(context.rootEvent.kind)]);
-            event.tags.push(["P", context.rootEvent.pubkey]);
-        }
-
         // Add e-tag for triggering event (reply threading)
         if (context.triggeringEvent?.id) {
             event.tags.push(["e", context.triggeringEvent.id]);
@@ -115,11 +121,7 @@ export class AgentPublisher {
         }
 
         await this.agent.sign(event);
-        await event.publish();
-
-        trace.getActiveSpan()?.addEvent("publisher.delegation_published", {
-            "event.id": event.id || "",
-        });
+        await this.safePublish(event, "delegation");
 
         return event.id;
     }
@@ -143,13 +145,6 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add conversation threading
-        if (context.rootEvent) {
-            event.tags.push(["E", context.rootEvent.id]);
-            event.tags.push(["K", String(context.rootEvent.kind)]);
-            event.tags.push(["P", context.rootEvent.pubkey]);
-        }
-
         // Add e-tag for triggering event (reply threading)
         if (context.triggeringEvent?.id) {
             event.tags.push(["e", context.triggeringEvent.id]);
@@ -169,11 +164,7 @@ export class AgentPublisher {
         }
 
         await this.agent.sign(event);
-        await event.publish();
-
-        trace.getActiveSpan()?.addEvent("publisher.ask_published", {
-            "event.id": event.id || "",
-        });
+        await this.safePublish(event, "ask");
 
         return event.id;
     }
@@ -181,15 +172,12 @@ export class AgentPublisher {
     /**
      * Publish a delegation follow-up event
      */
-    async delegateFollowup(
-        params: {
-            recipient: string;
-            content: string;
-            delegationEventId: string;
-            replyToEventId?: string;
-        },
-        context: EventContext
-    ): Promise<string> {
+    async delegateFollowup(params: {
+        recipient: string;
+        content: string;
+        delegationEventId: string;
+        replyToEventId?: string;
+    }): Promise<string> {
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -201,13 +189,6 @@ export class AgentPublisher {
         // Add reference to the original delegation event
         event.tags.push(["e", params.delegationEventId]);
 
-        // Add conversation threading
-        if (context.rootEvent) {
-            event.tags.push(["E", context.rootEvent.id]);
-            event.tags.push(["K", String(context.rootEvent.kind)]);
-            event.tags.push(["P", context.rootEvent.pubkey]);
-        }
-
         // Add project a-tag (required for event routing)
         this.encoder.aTagProject(event);
 
@@ -217,12 +198,7 @@ export class AgentPublisher {
         }
 
         await this.agent.sign(event);
-        await event.publish();
-
-        trace.getActiveSpan()?.addEvent("publisher.followup_published", {
-            "event.id": event.id || "",
-            "delegation.event_id": params.delegationEventId,
-        });
+        await this.safePublish(event, "followup");
 
         return event.id;
     }
@@ -248,14 +224,8 @@ export class AgentPublisher {
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeError(intent, context);
 
-        // Sign and publish
         await this.agent.sign(event);
-        await this.safePublish(event, "error event");
-
-        trace.getActiveSpan()?.addEvent("publisher.error_published", {
-            "event.id": event.id || "",
-            "error.message": intent.message.substring(0, 100),
-        });
+        await this.safePublish(event, "error");
 
         return event;
     }
@@ -266,13 +236,8 @@ export class AgentPublisher {
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
         const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
-        // Sign and publish
         await this.agent.sign(lessonEvent);
-        await this.safePublish(lessonEvent, "lesson event");
-
-        trace.getActiveSpan()?.addEvent("publisher.lesson_published", {
-            "event.id": lessonEvent.id || "",
-        });
+        await this.safePublish(lessonEvent, "lesson");
 
         return lessonEvent;
     }
@@ -284,14 +249,8 @@ export class AgentPublisher {
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
         const event = this.encoder.encodeToolUse(intent, context);
 
-        // Sign and publish
         await this.agent.sign(event);
-        await this.safePublish(event, "tool use event");
-
-        trace.getActiveSpan()?.addEvent("publisher.tool_published", {
-            "event.id": event.id || "",
-            "tool.name": intent.toolName,
-        });
+        await this.safePublish(event, `tool:${intent.toolName}`);
 
         return event;
     }

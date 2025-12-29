@@ -127,12 +127,10 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Tags the root of the conversation
+     * Tags the root of the conversation (placeholder - uppercase E/K/P tags removed)
      */
-    tagConversation(event: NDKEvent, rootEvent: NDKEvent): void {
-        event.tag(["E", rootEvent.id]);
-        event.tag(["K", rootEvent.kind.toString()]);
-        event.tag(["P", rootEvent.pubkey]);
+    tagConversation(_event: NDKEvent, _rootEvent: NDKEvent): void {
+        // No-op: Uppercase E/K/P tags are no longer used
     }
 
     /**
@@ -644,10 +642,11 @@ export class AgentEventEncoder {
             }
         }
 
-        // Add e-tags for referenced events (e.g., delegation event IDs)
+        // Add q-tags for referenced events (e.g., delegation event IDs)
+        // Using "q" (quote) tag to indicate these are referenced/quoted events
         if (intent.referencedEventIds) {
             for (const eventId of intent.referencedEventIds) {
-                event.tag(["e", eventId]);
+                event.tag(["q", eventId]);
             }
         }
 
