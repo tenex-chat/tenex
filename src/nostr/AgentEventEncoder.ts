@@ -104,68 +104,11 @@ export interface EventContext {
 export class AgentEventEncoder {
     /**
      * Add conversation tags consistently to any event.
-     * Centralizes conversation tagging logic for all agent events.
+     * Just e-tags the root event - no reply threading.
      */
     private addConversationTags(event: NDKEvent, context: EventContext): void {
-        this.tagConversation(event, context.rootEvent);
-        this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
-    }
-
-    /**
-     * Forward branch tag from triggering event to reply event.
-     * Ensures agents carry forward the branch context from the message they're replying to.
-     */
-    private forwardBranchTag(event: NDKEvent, triggeringEvent: NDKEvent): void {
-        const branchTag = triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
-        if (branchTag) {
-            event.tag(["branch", branchTag[1]]);
-            logger.debug("Forwarding branch tag", {
-                branch: branchTag[1],
-                fromEvent: triggeringEvent.id?.substring(0, 8),
-            });
-        }
-    }
-
-    /**
-     * Tags the root of the conversation (placeholder - uppercase E/K/P tags removed)
-     */
-    tagConversation(_event: NDKEvent, _rootEvent: NDKEvent): void {
-        // No-op: Uppercase E/K/P tags are no longer used
-    }
-
-    /**
-     * "e"-tags this reply in the proper context.
-     *
-     * When the triggering event has the same author as the conversation root AND
-     * when the triggering event, we want to publish to the root, and not thread it in
-     * the triggering event; otherwise we thread inside the triggering event.
-     */
-    eTagParentEvent(event: NDKEvent, rootEvent: NDKEvent, triggeringEvent: NDKEvent): void {
-        const projectCtx = getProjectContext();
-        const ownerPubkey = projectCtx?.project?.pubkey ?? rootEvent.pubkey;
-
-        const triggeringPubkeyIsOwner = triggeringEvent.pubkey === ownerPubkey;
-        const eTagValue = triggeringEvent.tagValue("e");
-
-        let replyToEventId = triggeringEvent.id;
-
-        if (triggeringPubkeyIsOwner && eTagValue) {
-            // if the triggering pubkey is the owner of the project
-            // (or of the thread if there is no projet)
-
-            replyToEventId = eTagValue; // reply inside the same parent
-        }
-
-        // Only add the e-tag if we have a valid event ID
-        if (replyToEventId && replyToEventId.length > 0) {
-            event.tag(["e", replyToEventId]);
-        } else {
-            // Fallback to root event if we have it
-            if (rootEvent.id && rootEvent.id.length > 0) {
-                event.tag(["e", rootEvent.id]);
-            }
-            // If neither is available, skip the e-tag entirely
-            // rather than creating an invalid one
+        if (context.rootEvent.id) {
+            event.tag(["e", context.rootEvent.id]);
         }
     }
 
@@ -179,8 +122,7 @@ export class AgentEventEncoder {
         event.content = intent.content;
 
         // Add conversation tags (E, K, P for root)
-        this.tagConversation(event, context.rootEvent);
-
+        
         // if the triggering event is authored by the same as the root event
         // and the triggering event is e-tagging the root event, let's also e-tag the root
         // event. This is so that this completion event also shows up in the main thread.
@@ -207,8 +149,7 @@ export class AgentEventEncoder {
         //     event.tag(["e", context.rootEvent.id, "", "root"]);
         // }
 
-        this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
-
+        
         // Always p-tag the triggering event author - they are the one we're responding to.
         // When resuming after delegation, the event handler should restore the original
         // triggering event so we p-tag the correct requester (not the delegatee).
@@ -226,8 +167,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
+        
         logger.debug("Encoded completion event", {
             eventId: event.id,
             completingTo: context.triggeringEvent.id?.substring(0, 8),
@@ -293,8 +233,7 @@ export class AgentEventEncoder {
             event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
             // Add root conversation tags (E, K, P)
-            this.tagConversation(event, context.rootEvent);
-
+            
             // Always e-tag the triggering event for delegations
             // This is critical for threading - the delegated agent needs to know which event triggered the delegation
             if (context.triggeringEvent.id) {
@@ -324,8 +263,7 @@ export class AgentEventEncoder {
 
             // Forward branch tag from triggering event if not explicitly set
             if (!delegation.branch) {
-                this.forwardBranchTag(event, context.triggeringEvent);
-            }
+                            }
 
             logger.debug("Encoded delegation request", {
                 phase: delegation.phase,
@@ -370,8 +308,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
+        
         logger.debug("Encoded ask event", {
             content: intent.content,
             suggestions: intent.suggestions,
@@ -402,8 +339,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
+        
         return event;
     }
 
@@ -460,8 +396,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
+        
         return event;
     }
 
@@ -605,8 +540,7 @@ export class AgentEventEncoder {
         this.addStandardTags(followUpEvent, context);
 
         // Forward branch tag from response event
-        this.forwardBranchTag(followUpEvent, responseEvent);
-
+        
         return followUpEvent;
     }
 
@@ -654,8 +588,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
+        
         return event;
     }
 }
