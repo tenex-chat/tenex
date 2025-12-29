@@ -12,6 +12,7 @@ export interface BuildSystemPromptOptions {
     // Required data
     agent: AgentInstance;
     project: NDKProject;
+    conversation: Conversation;
 
     /**
      * Project directory (normal git repository root).
@@ -36,7 +37,6 @@ export interface BuildSystemPromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    conversation?: Conversation;
     agentLessons?: Map<string, NDKAgentLesson[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
@@ -192,12 +192,10 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     systemPromptBuilder.add("agent-phases", { agent });
 
     // Add agent todos status (conversation-scoped, shared across all RALs)
-    if (conversation) {
-        systemPromptBuilder.add("agent-todos", {
-            conversation,
-            agentPubkey: agent.pubkey,
-        });
-    }
+    systemPromptBuilder.add("agent-todos", {
+        conversation,
+        agentPubkey: agent.pubkey,
+    });
 
     // Add worktree context if we have the necessary information
     if (workingDirectory && currentBranch && projectBasePath) {
