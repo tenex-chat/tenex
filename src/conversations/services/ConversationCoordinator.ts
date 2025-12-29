@@ -4,12 +4,12 @@ import type { TodoItem } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ensureExecutionTimeInitialized } from "../executionTime";
-import { FileSystemAdapter } from "../persistence";
 import type { ConversationPersistenceAdapter } from "../persistence/types";
 import type { AgentState, Conversation, ConversationMetadata } from "../types";
 import { ConversationEventProcessor } from "./ConversationEventProcessor";
 import {
     ConversationPersistenceService,
+    InMemoryPersistenceAdapter,
     type IConversationPersistenceService,
 } from "./ConversationPersistenceService";
 import { ConversationStore } from "./ConversationStore";
@@ -46,7 +46,7 @@ export class ConversationCoordinator {
         // Create services
         this.store = new ConversationStore();
         this.persistence = new ConversationPersistenceService(
-            persistence || new FileSystemAdapter(projectPath)
+            persistence || new InMemoryPersistenceAdapter()
         );
         this.eventProcessor = new ConversationEventProcessor();
 

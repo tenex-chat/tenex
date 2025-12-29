@@ -57,13 +57,12 @@ export class ConversationStore {
         if (!this.projectId || !this.conversationId) {
             throw new Error("Must call load() before accessing file");
         }
-        // Use .ral.json suffix to avoid conflict with FileSystemAdapter's conversation files
         return join(
             this.basePath,
             "projects",
             this.projectId,
             "conversations",
-            `${this.conversationId}.ral.json`
+            `${this.conversationId}.json`
         );
     }
 
