@@ -439,7 +439,7 @@ export class AgentPublisher {
                 Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
             const avatarStyle = avatarFamilies[familyIndex];
             const seed = signer.pubkey; // Use pubkey as seed for consistent avatar
-            const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/svg?seed=${seed}`;
+            const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
 
             const profile = {
                 name: agentName,
