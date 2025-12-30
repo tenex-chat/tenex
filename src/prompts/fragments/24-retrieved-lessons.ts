@@ -1,5 +1,4 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { formatLessonsForAgent } from "@/utils/lessonFormatter";
 import { logger } from "@/utils/logger";
@@ -12,8 +11,6 @@ const lessonTracer = trace.getTracer("tenex.lessons");
 // Retrieved lessons fragment - formats lessons from ProjectContext
 interface RetrievedLessonsArgs {
     agent: AgentInstance;
-    phase: string;
-    conversation: Conversation;
     agentLessons: Map<string, NDKAgentLesson[]>;
 }
 

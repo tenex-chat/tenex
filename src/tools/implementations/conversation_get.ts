@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -98,36 +98,28 @@ function safeCopy<T>(data: T): T {
  * Uses safeCopy for nested objects and strict primitive enforcement for fields
  * that should always be primitives (preventing accidental circular object serialization).
  */
-function serializeConversation(conversation: Conversation): Record<string, unknown> {
-    // Convert agentStates Map to object first, then safeCopy
-    const agentStatesObj = conversation.agentStates
-        ? Object.fromEntries(conversation.agentStates.entries())
-        : {};
+function serializeConversation(conversation: ConversationStore): Record<string, unknown> {
+    const messages = conversation.getAllMessages();
 
     return {
         // Strictly enforce primitive types for top-level fields
         id: String(conversation.id),
         title: conversation.title ? String(conversation.title) : undefined,
         phase: conversation.phase ? String(conversation.phase) : undefined,
-        phaseStartedAt: typeof conversation.phaseStartedAt === 'number'
-            ? conversation.phaseStartedAt
+        phaseStartedAt: typeof conversation.metadata.phaseStartedAt === 'number'
+            ? conversation.metadata.phaseStartedAt
             : undefined,
         metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
-        executionTime: conversation.executionTime ? safeCopy(conversation.executionTime) : {
-            totalSeconds: 0,
-            isActive: false,
-            lastUpdated: Date.now()
-        },
-        agentStates: safeCopy(agentStatesObj),
-        history: conversation.history.map(event => ({
-            // Strictly enforce primitive types for event fields
-            id: String(event.id),
-            kind: Number(event.kind),
-            pubkey: String(event.pubkey),
-            content: String(event.content),
-            created_at: Number(event.created_at),
-            tags: safeCopy(event.tags),
-            sig: event.sig ? String(event.sig) : undefined
+        executionTime: safeCopy(conversation.executionTime),
+        messageCount: messages.length,
+        messages: messages.map(entry => ({
+            role: entry.message.role,
+            content: typeof entry.message.content === 'string'
+                ? entry.message.content
+                : JSON.stringify(entry.message.content),
+            pubkey: entry.pubkey,
+            eventId: entry.eventId,
+            timestamp: entry.timestamp,
         }))
     };
 }
@@ -168,7 +160,7 @@ async function executeConversationGet(
     logger.info("✅ Conversation retrieved successfully", {
         conversationId: conversation.id,
         title: conversation.title,
-        messageCount: conversation.history.length,
+        messageCount: conversation.getMessageCount(),
         phase: conversation.phase,
         agent: context.agent.name,
     });

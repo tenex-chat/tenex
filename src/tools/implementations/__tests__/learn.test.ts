@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKSigner } from "@nostr-dev-kit/ndk";
@@ -61,7 +61,7 @@ type MockLesson = {
 describe("Learn Tool", () => {
     let mockContext: ExecutionContext;
     let mockAgent: AgentInstance;
-    let mockConversation: Conversation;
+    let mockConversation: ConversationStore;
     let mockNDK: NDK;
     let mockLesson: MockLesson;
 
@@ -87,7 +87,7 @@ describe("Learn Tool", () => {
         // Setup mock conversation
         mockConversation = {
             id: "mock-conversation-id",
-        } as Conversation;
+        } as unknown as ConversationStore;
 
         // Setup mock context
         mockContext = {

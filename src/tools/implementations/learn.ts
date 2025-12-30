@@ -67,7 +67,7 @@ async function executeLessonLearn(
     // Create event context
     const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+        rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: context.agent.llmConfig,
     };

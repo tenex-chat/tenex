@@ -6,7 +6,7 @@
  */
 
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { TodoItem, TodoStatus } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { tool } from "ai";
@@ -20,17 +20,8 @@ function getCurrentTimestamp(): number {
     return Date.now();
 }
 
-function ensureTodoListExistsAndGet(conversation: Conversation, agentPubkey: string): TodoItem[] {
-    let todos = conversation.agentTodos.get(agentPubkey);
-    if (!todos) {
-        todos = [];
-        conversation.agentTodos.set(agentPubkey, todos);
-    }
-    return todos;
-}
-
 function addTodosToConversation(
-    conversation: Conversation,
+    conversation: ConversationStore,
     agentPubkey: string,
     items: Array<{
         id: string;
@@ -39,7 +30,7 @@ function addTodosToConversation(
         position?: number;
     }>
 ): { added: TodoItem[]; duplicates: string[] } {
-    const todos = ensureTodoListExistsAndGet(conversation, agentPubkey);
+    const todos = [...conversation.getTodos(agentPubkey)];
 
     const added: TodoItem[] = [];
     const duplicates: string[] = [];
@@ -49,7 +40,7 @@ function addTodosToConversation(
         const id = item.id;
 
         // Check for duplicate ID
-        if (todos.some((t) => t.id === id)) {
+        if (todos.some((t: TodoItem) => t.id === id)) {
             duplicates.push(id);
             continue;
         }
@@ -70,15 +61,18 @@ function addTodosToConversation(
         added.push(todoItem);
     }
 
+    // Persist the updated list
+    conversation.setTodos(agentPubkey, todos);
+
     return { added, duplicates };
 }
 
 function updateTodoStatusInConversation(
-    conversation: Conversation,
+    conversation: ConversationStore,
     agentPubkey: string,
     updates: Array<{ id: string; status: TodoStatus; skipReason?: string }>
 ): { updated: TodoItem[]; notFound: string[]; errors: string[]; debug?: { conversationId: string; agentPubkey: string; existingTodoIds: string[] } } {
-    const todos = ensureTodoListExistsAndGet(conversation, agentPubkey);
+    const todos = [...conversation.getTodos(agentPubkey)];
 
     const updated: TodoItem[] = [];
     const notFound: string[] = [];
@@ -86,7 +80,7 @@ function updateTodoStatusInConversation(
     const now = getCurrentTimestamp();
 
     for (const update of updates) {
-        const todo = todos.find((t) => t.id === update.id);
+        const todo = todos.find((t: TodoItem) => t.id === update.id);
         if (!todo) {
             notFound.push(update.id);
             continue;
@@ -104,6 +98,9 @@ function updateTodoStatusInConversation(
         updated.push(todo);
     }
 
+    // Persist the updated list
+    conversation.setTodos(agentPubkey, todos);
+
     // Include debug info when there are notFound items to help diagnose issues
     if (notFound.length > 0) {
         return {
@@ -113,7 +110,7 @@ function updateTodoStatusInConversation(
             debug: {
                 conversationId: conversation.id,
                 agentPubkey,
-                existingTodoIds: todos.map(t => t.id),
+                existingTodoIds: todos.map((t: TodoItem) => t.id),
             },
         };
     }
@@ -181,11 +178,11 @@ async function executeTodoAdd(
         }))
     );
 
-    const todos = conversation.agentTodos.get(context.agent.pubkey) || [];
+    const todos = conversation.getTodos(context.agent.pubkey);
 
     return {
         success: result.added.length > 0,
-        added: result.added.map((t) => ({ id: t.id, title: t.title, position: t.position })),
+        added: result.added.map((t: TodoItem) => ({ id: t.id, title: t.title, position: t.position })),
         duplicates: result.duplicates,
         totalItems: todos.length,
         debug: {
@@ -280,12 +277,12 @@ async function executeTodoUpdate(
         }))
     );
 
-    const todos = conversation.agentTodos.get(context.agent.pubkey) || [];
-    const pendingCount = todos.filter((t) => t.status === "pending").length;
+    const todos = conversation.getTodos(context.agent.pubkey);
+    const pendingCount = todos.filter((t: TodoItem) => t.status === "pending").length;
 
     return {
         success: result.updated.length > 0 && result.errors.length === 0,
-        updated: result.updated.map((t) => ({ id: t.id, status: t.status })),
+        updated: result.updated.map((t: TodoItem) => ({ id: t.id, status: t.status })),
         notFound: result.notFound,
         errors: result.errors,
         pendingCount,

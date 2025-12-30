@@ -4,7 +4,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { AgentRouter } from "../AgentRouter";
 import type { ProjectContext } from "@/services/projects";
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 
 /**
@@ -36,23 +36,20 @@ describe("Stop Signal (kind 24134)", () => {
     };
 
     let mockProjectContext: ProjectContext;
-    let mockConversation: Conversation;
+    let blockedAgents: Set<string>;
+
+    function createMockConversationStore(id: string, blocked: Set<string>): ConversationStore {
+        return {
+            id,
+            isAgentBlocked: (pubkey: string) => blocked.has(pubkey),
+            blockAgent: (pubkey: string) => { blocked.add(pubkey); },
+            unblockAgent: (pubkey: string) => { blocked.delete(pubkey); },
+        } as unknown as ConversationStore;
+    }
 
     beforeEach(() => {
-        // Create fresh mocks for each test
-        mockConversation = {
-            id: conversationId,
-            history: [],
-            agentStates: new Map(),
-            agentTodos: new Map(),
-            metadata: {},
-            blockedAgents: new Set<string>(),
-            executionTime: {
-                totalSeconds: 0,
-                isActive: false,
-                lastUpdated: Date.now(),
-            },
-        };
+        // Create fresh blocked agents set for each test
+        blockedAgents = new Set<string>();
 
         mockProjectContext = {
             agents: new Map([[agentPubkey, mockAgent]]),
@@ -73,8 +70,9 @@ describe("Stop Signal (kind 24134)", () => {
                 ["e", conversationId],
             ];
 
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
+
             // When: The stop signal is processed
-            // (This is the function we need to create)
             const result = AgentRouter.processStopSignal(
                 stopEvent,
                 mockConversation,
@@ -83,14 +81,15 @@ describe("Stop Signal (kind 24134)", () => {
 
             // Then: The agent should be blocked in this conversation
             expect(result.blocked).toBe(true);
-            expect(mockConversation.blockedAgents.has(agentPubkey)).toBe(true);
+            expect(blockedAgents.has(agentPubkey)).toBe(true);
         });
     });
 
     describe("Blocked agent routing", () => {
         it("does not route to a blocked agent", () => {
             // Given: An agent that is blocked in the conversation
-            mockConversation.blockedAgents.add(agentPubkey);
+            blockedAgents.add(agentPubkey);
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A chat message p-tagging that agent
             const chatEvent = new NDKEvent();
@@ -127,7 +126,8 @@ describe("Stop Signal (kind 24134)", () => {
             };
 
             // Block only the first agent
-            mockConversation.blockedAgents.add(agentPubkey);
+            blockedAgents.add(agentPubkey);
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A chat message p-tagging both agents
             const chatEvent = new NDKEvent();
@@ -154,7 +154,8 @@ describe("Stop Signal (kind 24134)", () => {
     describe("Whitelisted pubkey unblocking", () => {
         it("allows whitelisted pubkey to unblock an agent", () => {
             // Given: An agent is blocked in a conversation
-            mockConversation.blockedAgents.add(agentPubkey);
+            blockedAgents.add(agentPubkey);
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A whitelist is configured
             const whitelist = new Set([whitelistedPubkey]);
@@ -174,12 +175,13 @@ describe("Stop Signal (kind 24134)", () => {
             );
 
             expect(result.unblocked).toBe(true);
-            expect(mockConversation.blockedAgents.has(agentPubkey)).toBe(false);
+            expect(blockedAgents.has(agentPubkey)).toBe(false);
         });
 
         it("does not allow non-whitelisted pubkey to unblock an agent", () => {
             // Given: An agent is blocked in a conversation
-            mockConversation.blockedAgents.add(agentPubkey);
+            blockedAgents.add(agentPubkey);
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A whitelist that does NOT include the sender
             const whitelist = new Set([whitelistedPubkey]);
@@ -199,29 +201,18 @@ describe("Stop Signal (kind 24134)", () => {
             );
 
             expect(result.unblocked).toBe(false);
-            expect(mockConversation.blockedAgents.has(agentPubkey)).toBe(true);
+            expect(blockedAgents.has(agentPubkey)).toBe(true);
         });
     });
 
     describe("Conversation isolation", () => {
         it("blocked agent in one conversation can still work in other conversations", () => {
             // Given: Agent is blocked in conversation 1
-            mockConversation.blockedAgents.add(agentPubkey);
+            blockedAgents.add(agentPubkey);
 
             // And: A second conversation where agent is NOT blocked
-            const conversation2: Conversation = {
-                id: conversationId2,
-                history: [],
-                agentStates: new Map(),
-                agentTodos: new Map(),
-                metadata: {},
-                blockedAgents: new Set<string>(), // Empty - agent not blocked here
-                executionTime: {
-                    totalSeconds: 0,
-                    isActive: false,
-                    lastUpdated: Date.now(),
-                },
-            };
+            const blockedAgents2 = new Set<string>(); // Empty - agent not blocked here
+            const conversation2 = createMockConversationStore(conversationId2, blockedAgents2);
 
             // When: Routing in conversation 2
             const chatEvent = new NDKEvent();
@@ -251,6 +242,8 @@ describe("Stop Signal (kind 24134)", () => {
             const abortController = new AbortController();
             const ralNumber = ralRegistry.create(agentPubkey, conversationId, "trigger-event-id");
             ralRegistry.registerAbortController(agentPubkey, conversationId, ralNumber, abortController);
+
+            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // When: Stop signal is processed
             const stopEvent = new NDKEvent();
