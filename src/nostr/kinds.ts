@@ -12,8 +12,11 @@ import { NDKKind as BaseNDKKind } from "@nostr-dev-kit/ndk";
 export const NDKKind = {
     ...BaseNDKKind,
 
+    // Standard NIP kinds
+    Text: 1 as BaseNDKKind, // Regular text note (kind:1) - unified conversation format
+
     // Standard NIP kinds not in NDK
-    ConversationRoot: 11 as BaseNDKKind, // Agent request (conversation root)
+    ConversationRoot: 11 as BaseNDKKind, // Agent request (conversation root) - DEPRECATED, use Text
     EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
     GenericReply: 1111 as BaseNDKKind, // Generic reply (NOT kind 1)
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
@@ -22,7 +25,6 @@ export const NDKKind = {
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
 
     // Tenex custom kinds (2xxxx range)
-    TenexStreamingResponse: 21111 as BaseNDKKind,
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexOperationsStatus: 24133 as BaseNDKKind,

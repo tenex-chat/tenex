@@ -1,5 +1,3 @@
-import type { ModelMessage } from "ai";
-
 /** Role types that can be used for message injection */
 export type InjectionRole = "user" | "system";
 
@@ -36,7 +34,6 @@ interface BasePendingDelegation {
   eventId: string;
   recipientPubkey: string;
   recipientSlug?: string;
-  prompt: string;
 }
 
 interface StandardDelegation extends BasePendingDelegation {
@@ -85,9 +82,6 @@ export interface RALState {
   agentPubkey: string;
   /** The conversation this RAL belongs to - RAL is scoped per agent+conversation */
   conversationId: string;
-  messages: ModelMessage[];
-  /** Index in messages where this RAL's unique content starts (after shared conversation history) */
-  uniqueMessagesStartIndex: number;
   pendingDelegations: PendingDelegation[];
   completedDelegations: CompletedDelegation[];
   queuedInjections: QueuedInjection[];

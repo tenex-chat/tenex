@@ -214,7 +214,6 @@ describe("ExecutionContextFactory Integration", () => {
             conversationCoordinator: mockCoordinator,
             agentPublisher: mockPublisher as any,
             isDelegationCompletion: true,
-            additionalSystemMessage: "Test message",
             debug: true,
         });
 
@@ -225,7 +224,6 @@ describe("ExecutionContextFactory Integration", () => {
         expect(context.triggeringEvent).toBe(event);
         expect(context.agentPublisher).toBe(mockPublisher);
         expect(context.isDelegationCompletion).toBe(true);
-        expect(context.additionalSystemMessage).toBe("Test message");
         expect(context.debug).toBe(true);
         expect(context.currentBranch).toBe(featureBranch);
     });

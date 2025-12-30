@@ -1,10 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { ConcurrentRALCoordinator } from "../ConcurrentRALCoordinator";
+import { getToolAvailability, shouldReleasePausedRALs, buildContext } from "../ConcurrentRALCoordinator";
 import type { RALSummary } from "@/services/ral";
 
 describe("ConcurrentRALCoordinator", () => {
-  const coordinator = new ConcurrentRALCoordinator();
-
   describe("getToolAvailability", () => {
     it("should allow abort for RAL with no pending delegations", () => {
       const rals: RALSummary[] = [{
@@ -12,13 +10,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const availability = coordinator.getToolAvailability(rals);
+      const availability = getToolAvailability(rals);
 
       expect(availability).toHaveLength(1);
       expect(availability[0].ralNumber).toBe(1);
@@ -32,7 +29,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123",
           recipientPubkey: "pubkey",
@@ -43,7 +39,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const availability = coordinator.getToolAvailability(rals);
+      const availability = getToolAvailability(rals);
 
       expect(availability).toHaveLength(1);
       expect(availability[0].ralNumber).toBe(1);
@@ -58,7 +54,6 @@ describe("ConcurrentRALCoordinator", () => {
           ralId: "ral-1",
           isStreaming: true,
           currentTool: undefined,
-          uniqueMessages: [],
           pendingDelegations: [],
           hasPendingDelegations: false,
           createdAt: Date.now(),
@@ -68,7 +63,6 @@ describe("ConcurrentRALCoordinator", () => {
           ralId: "ral-2",
           isStreaming: false,
           currentTool: undefined,
-          uniqueMessages: [],
           pendingDelegations: [{
             eventId: "del-456",
             recipientPubkey: "pubkey",
@@ -80,7 +74,7 @@ describe("ConcurrentRALCoordinator", () => {
         },
       ];
 
-      const availability = coordinator.getToolAvailability(rals);
+      const availability = getToolAvailability(rals);
 
       expect(availability).toHaveLength(2);
       expect(availability[0].canAbort).toBe(true);
@@ -90,7 +84,7 @@ describe("ConcurrentRALCoordinator", () => {
 
   describe("shouldReleasePausedRALs", () => {
     it("should not release when no steps completed", () => {
-      const result = coordinator.shouldReleasePausedRALs([]);
+      const result = shouldReleasePausedRALs([]);
       expect(result).toBe(false);
     });
 
@@ -102,7 +96,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: "I need to think about this...",
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(false);
     });
 
@@ -114,7 +108,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(false);
     });
 
@@ -126,7 +120,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(false);
     });
 
@@ -138,7 +132,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(false);
     });
 
@@ -152,13 +146,13 @@ describe("ConcurrentRALCoordinator", () => {
         },
         {
           stepNumber: 1,
-          toolCalls: [{ toolName: "read_path" }, { toolName: "read_file" }],
+          toolCalls: [{ toolName: "read_path" }, { toolName: "codebase_search" }],
           text: "",
           reasoningText: undefined,
         },
       ];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(false);
     });
 
@@ -170,7 +164,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(true);
     });
 
@@ -182,7 +176,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(true);
     });
 
@@ -194,7 +188,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(true);
     });
 
@@ -220,7 +214,7 @@ describe("ConcurrentRALCoordinator", () => {
         },
       ];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(true);
     });
 
@@ -235,7 +229,7 @@ describe("ConcurrentRALCoordinator", () => {
         reasoningText: undefined,
       }];
 
-      const result = coordinator.shouldReleasePausedRALs(steps);
+      const result = shouldReleasePausedRALs(steps);
       expect(result).toBe(true);
     });
   });
@@ -244,7 +238,7 @@ describe("ConcurrentRALCoordinator", () => {
     const currentRALNumber = 2; // The RAL receiving the context
 
     it("should return empty string when no other RALs", () => {
-      const result = coordinator.buildContext([], currentRALNumber);
+      const result = buildContext([], currentRALNumber);
       expect(result).toBe("");
     });
 
@@ -254,13 +248,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("YOU ARE RAL #2");
       expect(result).toContain("NEW execution");
@@ -273,20 +266,16 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: "write_file",
-        uniqueMessages: [
-          { role: "user", content: "Write poems" },
-          { role: "assistant", content: "I will write poems" },
-        ],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now() - 60000, // 1 minute ago
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("RAL #1");
       expect(result).toContain("write_file");
-      expect(result).toContain("Write poems");
+      expect(result).toContain("actively streaming");
     });
 
     it("should mention ral_abort for RALs without delegations", () => {
@@ -295,13 +284,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("ral_abort");
       expect(result).toContain("available for: #1");
@@ -313,7 +301,6 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123",
           recipientPubkey: "pubkey",
@@ -324,7 +311,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("cannot be aborted directly");
       expect(result).toContain("pending delegation");
@@ -336,13 +323,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("ral_inject");
     });
@@ -353,13 +339,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("PAUSED");
       expect(result).toContain("must coordinate");
@@ -372,13 +357,12 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: true,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [],
         hasPendingDelegations: false,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("CONFLICTS");
       expect(result).toContain("CHANGES");
@@ -391,22 +375,19 @@ describe("ConcurrentRALCoordinator", () => {
         ralId: "ral-1",
         isStreaming: false,
         currentTool: undefined,
-        uniqueMessages: [],
         pendingDelegations: [{
           eventId: "del-123456789",
-          recipientPubkey: "pubkey",
           recipientSlug: "researcher",
-          prompt: "Research the topic",
         }],
         hasPendingDelegations: true,
         createdAt: Date.now(),
       }];
 
-      const result = coordinator.buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber);
 
       expect(result).toContain("Pending delegations");
       expect(result).toContain("researcher");
-      expect(result).toContain("Research the topic");
+      expect(result).toContain("del-1234"); // truncated event ID
     });
   });
 });

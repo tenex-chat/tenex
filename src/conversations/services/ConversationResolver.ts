@@ -21,72 +21,72 @@ export class ConversationResolver {
 
     /**
      * Resolve the conversation for an incoming event.
-     * This may find an existing conversation, create a new one for orphaned replies,
-     * or use delegation context to find parent conversations.
+     * This may find an existing conversation, create a new one for new conversations,
+     * or fetch orphaned threads from the network.
      */
     async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
         const activeSpan = trace.getActiveSpan();
+        const replyTarget = AgentEventDecoder.getReplyTarget(event);
 
-        // Try standard conversation resolution
-        const result = await this.findConversationForReply(event);
-
-        if (activeSpan) {
-            if (result.conversation) {
-                activeSpan.addEvent("conversation.resolved", {
+        // If event has an 'e' tag (reply), try to find existing conversation
+        if (replyTarget) {
+            const conversation = this.conversationCoordinator.getConversationByEvent(replyTarget);
+            if (conversation) {
+                activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "found_existing",
-                    "conversation.id": result.conversation.id,
-                    "conversation.message_count": result.conversation.history.length,
+                    "conversation.id": conversation.id,
+                    "conversation.message_count": conversation.history.length,
                 });
+                return { conversation };
             }
-        }
 
-        // If no conversation found and this could be an orphaned reply, try to create one
-        if (!result.conversation && AgentEventDecoder.isOrphanedReply(event)) {
+            // Has e tag but conversation not found - try orphaned reply handling
             const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-
-            if (activeSpan) {
-                activeSpan.addEvent("conversation.orphaned_reply_detected", {
-                    "orphaned.mentioned_pubkeys_count": mentionedPubkeys.length,
-                });
-            }
-
-            const newConversation = await this.handleOrphanedReply(event, mentionedPubkeys);
+            const newConversation = await this.handleOrphanedReply(event, replyTarget, mentionedPubkeys);
             if (newConversation) {
-                if (activeSpan) {
-                    activeSpan.addEvent("conversation.resolved", {
-                        "resolution.type": "created_from_orphan",
-                        "conversation.id": newConversation.id,
-                        "conversation.message_count": newConversation.history.length,
-                    });
-                }
-
-                return {
-                    conversation: newConversation,
-                    isNew: true,
-                };
+                activeSpan?.addEvent("conversation.resolved", {
+                    "resolution.type": "created_from_orphan",
+                    "conversation.id": newConversation.id,
+                    "conversation.message_count": newConversation.history.length,
+                });
+                return { conversation: newConversation, isNew: true };
             }
-        }
 
-        if (!result.conversation && activeSpan) {
-            activeSpan.addEvent("conversation.resolution_failed", {
-                reason: "no_conversation_found",
+            activeSpan?.addEvent("conversation.resolution_failed", {
+                reason: "conversation_not_found_for_reply_target",
+                "reply_target.id": replyTarget,
             });
+            return { conversation: undefined };
         }
 
-        return result;
-    }
+        // No 'e' tag - this is a NEW conversation, create it
+        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+        const projectCtx = getProjectContext();
+        const isDirectedToAgent = mentionedPubkeys.some((pubkey) =>
+            Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+        );
 
-    /**
-     * Find the conversation for a reply event using various strategies
-     */
-    private async findConversationForReply(event: NDKEvent): Promise<ConversationResolutionResult> {
-        const convRoot = AgentEventDecoder.getConversationRoot(event);
+        if (!isDirectedToAgent) {
+            activeSpan?.addEvent("conversation.resolution_failed", {
+                reason: "not_directed_to_agent",
+            });
+            return { conversation: undefined };
+        }
 
-        const conversation = convRoot
-            ? this.conversationCoordinator.getConversationByEvent(convRoot)
-            : undefined;
+        const conversation = await this.conversationCoordinator.createConversation(event);
+        if (conversation) {
+            logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
+            activeSpan?.addEvent("conversation.resolved", {
+                "resolution.type": "created_new",
+                "conversation.id": conversation.id,
+            });
+            return { conversation, isNew: true };
+        }
 
-        return { conversation };
+        activeSpan?.addEvent("conversation.resolution_failed", {
+            reason: "failed_to_create_conversation",
+        });
+        return { conversation: undefined };
     }
 
     /**
@@ -94,9 +94,10 @@ export class ConversationResolver {
      */
     private async handleOrphanedReply(
         event: NDKEvent,
+        replyTargetId: string,
         mentionedPubkeys: string[]
     ): Promise<Conversation | undefined> {
-        if (AgentEventDecoder.getReferencedKind(event) !== "11" || mentionedPubkeys.length === 0) {
+        if (mentionedPubkeys.length === 0) {
             return undefined;
         }
 
@@ -109,58 +110,45 @@ export class ConversationResolver {
             return undefined;
         }
 
-        const rootEventId = event.tagValue("E");
-        if (!rootEventId) {
-            logger.warn(chalk.yellow("Orphaned reply has no E tag, cannot fetch thread"));
-            return undefined;
-        }
-
         logger.info(
             chalk.yellow(
-                `Fetching conversation thread for orphaned reply, root event: ${rootEventId}`
+                `Fetching conversation thread for orphaned reply, target: ${replyTargetId.substring(0, 8)}`
             )
         );
 
         const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
-            activeSpan.addEvent("conversation.fetching_orphaned_thread", {
-                root_event_id: rootEventId,
-            });
-        }
+        activeSpan?.addEvent("conversation.fetching_orphaned_thread", {
+            reply_target_id: replyTargetId,
+        });
 
         const { getNDK } = await import("@/nostr/ndkClient");
         const ndk = getNDK();
 
+        // Fetch the reply target event and any events that also reply to it
         const events = await ndk.fetchEvents([
-            { ids: [rootEventId] },
-            { "#E": [rootEventId] },
-            { "#e": [rootEventId] },
+            { ids: [replyTargetId] },
+            { "#e": [replyTargetId] },
         ]);
 
         const eventsArray = Array.from(events);
-        const rootEvent = eventsArray.find((e) => e.id === rootEventId);
+        const rootEvent = eventsArray.find((e) => e.id === replyTargetId);
 
         if (!rootEvent) {
-            logger.warn(chalk.yellow(`Could not fetch root event ${rootEventId} from network`));
-            if (activeSpan) {
-                activeSpan.addEvent("conversation.fetch_failed", {
-                    reason: "root_event_not_found",
-                    root_event_id: rootEventId,
-                });
-            }
+            logger.warn(chalk.yellow(`Could not fetch target event ${replyTargetId.substring(0, 8)} from network`));
+            activeSpan?.addEvent("conversation.fetch_failed", {
+                reason: "target_event_not_found",
+                reply_target_id: replyTargetId,
+            });
             return undefined;
         }
 
-        const replies = eventsArray.filter((e) => e.id !== rootEventId);
+        const replies = eventsArray.filter((e) => e.id !== replyTargetId);
 
-        logger.info(chalk.green(`Fetched root event and ${replies.length} replies`));
-
-        if (activeSpan) {
-            activeSpan.addEvent("conversation.thread_fetched", {
-                "fetched.reply_count": replies.length,
-                "fetched.total_events": eventsArray.length,
-            });
-        }
+        logger.info(chalk.green(`Fetched target event and ${replies.length} replies`));
+        activeSpan?.addEvent("conversation.thread_fetched", {
+            "fetched.reply_count": replies.length,
+            "fetched.total_events": eventsArray.length,
+        });
 
         const conversation = await this.conversationCoordinator.createConversation(rootEvent);
         if (!conversation) {

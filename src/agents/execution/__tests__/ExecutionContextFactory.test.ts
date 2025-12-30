@@ -137,14 +137,12 @@ describe("ExecutionContextFactory", () => {
                 conversationCoordinator: mockCoordinator,
                 agentPublisher: mockPublisher as any,
                 isDelegationCompletion: true,
-                additionalSystemMessage: "Test message",
                 debug: true,
             });
 
             // Assert
             expect(context.agentPublisher).toBe(mockPublisher);
             expect(context.isDelegationCompletion).toBe(true);
-            expect(context.additionalSystemMessage).toBe("Test message");
             expect(context.debug).toBe(true);
         });
 
