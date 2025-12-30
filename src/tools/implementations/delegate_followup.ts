@@ -65,7 +65,6 @@ async function executeDelegateFollowup(
         type: "followup" as const,
         eventId,
         recipientPubkey,
-        prompt: message,
       },
     ],
   };

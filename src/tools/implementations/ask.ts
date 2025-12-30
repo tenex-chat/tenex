@@ -45,6 +45,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
       suggestions,
     },
     {
+      triggeringEvent: context.triggeringEvent,
       rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
       conversationId: context.conversationId,
     }
@@ -57,7 +58,6 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         type: "ask" as const,
         eventId,
         recipientPubkey: ownerPubkey,
-        prompt: content,
         suggestions,
       },
     ],

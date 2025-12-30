@@ -12,14 +12,32 @@ describe("delegationCompletionFragment", () => {
         expect(result).toBe("");
     });
 
-    it("should return delegation completion instructions when enabled", () => {
-        const result = delegationCompletionFragment.template({ isDelegationCompletion: true });
-        expect(result).toContain("CRITICAL: DELEGATION COMPLETION NOTIFICATION");
-        expect(result).toContain("STOP! A delegated task has JUST BEEN COMPLETED");
-        expect(result).toContain("Pass the result back to the user");
-        expect(result).toContain("Do NOT use ANY tools");
-        expect(result).toContain("Do NOT delegate again");
-        expect(result).toContain("THE TASK IS COMPLETE. DO NOT REPEAT IT");
-        expect(result).toContain("DO NOT use delegate() or any other tool");
+    it("should return all-complete instructions when no pending delegations", () => {
+        const result = delegationCompletionFragment.template({
+            isDelegationCompletion: true,
+            hasPendingDelegations: false,
+        });
+        expect(result).toContain("ALL DELEGATIONS COMPLETE");
+        expect(result).toContain("All delegated tasks have completed");
+        expect(result).toContain("Synthesize the results and respond to the user");
+    });
+
+    it("should return partial-completion instructions when pending delegations exist", () => {
+        const result = delegationCompletionFragment.template({
+            isDelegationCompletion: true,
+            hasPendingDelegations: true,
+        });
+        expect(result).toContain("DELEGATION UPDATE");
+        expect(result).toContain("One or more delegated tasks have completed");
+        expect(result).toContain("still waiting for other delegations");
+        expect(result).toContain("Acknowledge receipt of partial results");
+        expect(result).toContain("Wait silently for remaining delegations");
+    });
+
+    it("should default to all-complete when hasPendingDelegations is undefined", () => {
+        const result = delegationCompletionFragment.template({
+            isDelegationCompletion: true,
+        });
+        expect(result).toContain("ALL DELEGATIONS COMPLETE");
     });
 });

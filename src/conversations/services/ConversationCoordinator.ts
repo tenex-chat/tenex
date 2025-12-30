@@ -76,9 +76,24 @@ export class ConversationCoordinator {
     }
 
     /**
-     * Create a new conversation from an event
+     * Create a new conversation from an event.
+     * Returns existing conversation if one with the same ID already exists.
      */
     async createConversation(event: NDKEvent): Promise<Conversation> {
+        const eventId = event.id;
+        if (!eventId) {
+            throw new Error("Event must have an ID to create a conversation");
+        }
+
+        // Check if conversation already exists (event may arrive from multiple relays)
+        const existing = this.store.get(eventId);
+        if (existing) {
+            logger.debug(
+                `Conversation ${eventId.substring(0, 8)} already exists, returning existing`
+            );
+            return existing;
+        }
+
         const conversation = await this.eventProcessor.createConversationFromEvent(event);
 
         // Log conversation start

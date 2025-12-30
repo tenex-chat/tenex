@@ -21,7 +21,7 @@ const mockAgent2 = {
 
 const CONVERSATION_ID = "conv-test-123";
 
-mock.module("@/services/ProjectContext", () => ({
+mock.module("@/services/projects", () => ({
     getProjectContext: () => ({
         getAgentByPubkey: (pubkey: string) => {
             if (pubkey === mockAgent.pubkey) return mockAgent;
@@ -29,6 +29,7 @@ mock.module("@/services/ProjectContext", () => ({
             return undefined;
         },
     }),
+    isProjectContextInitialized: () => true,
 }));
 
 describe("RAL Delegation Flow", () => {
@@ -522,9 +523,13 @@ describe("RAL Delegation Flow", () => {
             const ralState = registry.getState(mockAgent.pubkey, CONVERSATION_ID)!;
             expect(ralState.completedDelegations.length).toBeGreaterThan(0);
 
-            // Clear completed delegations after processing
-            registry.clearCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
-            expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)?.completedDelegations).toHaveLength(0);
+            // Completions remain in RAL until it's cleared at the end of execution
+            // (no early clearing - this allows subsequent executions to see all completions)
+            expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)?.completedDelegations).toHaveLength(1);
+
+            // Completions are cleared when RAL ends
+            registry.clearRAL(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
+            expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)).toBeUndefined();
         });
     });
 });

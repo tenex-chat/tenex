@@ -18,6 +18,9 @@ export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
     summary?: string;
+    /** If true, this is an intermediate response (e.g., partial delegation completion).
+     *  Intermediate responses don't p-tag the recipient to avoid notification spam. */
+    isIntermediate?: boolean;
 }
 
 export interface DelegationIntent {
@@ -41,11 +44,6 @@ export interface DelegationIntent {
 export interface AskIntent {
     content: string;
     suggestions?: string[];
-}
-
-export interface ConversationIntent {
-    content: string;
-    isReasoning?: boolean;
 }
 
 export interface ErrorIntent {
@@ -80,7 +78,6 @@ export type AgentIntent =
     | CompletionIntent
     | DelegationIntent
     | AskIntent
-    | ConversationIntent
     | ErrorIntent
     | LessonIntent
     | StatusIntent
@@ -88,6 +85,7 @@ export type AgentIntent =
 
 // Execution context provided by RAL
 export interface EventContext {
+    triggeringEvent: NDKEvent; // The event that triggered this execution (for reply threading)
     rootEvent: NDKEvent; // The conversation root event
     conversationId: string; // Required for conversation lookup
     executionTime?: number;
@@ -112,6 +110,21 @@ export class AgentEventEncoder {
     }
 
     /**
+     * Forward branch tag from triggering event to reply event.
+     * Ensures agents carry forward the branch context from the message they're replying to.
+     */
+    private forwardBranchTag(event: NDKEvent, context: EventContext): void {
+        const branchTag = context.triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
+        if (branchTag) {
+            event.tag(["branch", branchTag[1]]);
+            logger.debug("Forwarding branch tag", {
+                branch: branchTag[1],
+                fromEvent: context.triggeringEvent.id?.substring(0, 8),
+            });
+        }
+    }
+
+    /**
      * Encode a completion intent into a tagged event.
      * Handles both regular completions and delegation completions.
      */
@@ -123,11 +136,15 @@ export class AgentEventEncoder {
         // Add conversation e-tag
         this.addConversationTags(event, context);
 
-        // P-tag the conversation root author
-        event.tag(["p", context.rootEvent.pubkey]);
-
-        // Mark as natural completion
-        event.tag(["status", "completed"]);
+        // Only p-tag for final completions (not intermediate responses)
+        // Intermediate responses (e.g., partial delegation completions) skip p-tag
+        // to avoid notification spam while delegations are still pending
+        if (!intent.isIntermediate) {
+            event.tag(["p", context.triggeringEvent.pubkey]);
+            event.tag(["status", "completed"]);
+        } else {
+            event.tag(["status", "intermediate"]);
+        }
 
         // Add usage information if provided
         if (intent.usage) {
@@ -137,9 +154,14 @@ export class AgentEventEncoder {
         // Add standard metadata
         this.addStandardTags(event, context);
 
+        // Forward branch tag from triggering event
+        this.forwardBranchTag(event, context);
+
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            rootEventId: context.rootEvent.id?.substring(0, 8),
+            replyingTo: context.triggeringEvent.id?.substring(0, 8),
+            replyingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            isIntermediate: intent.isIntermediate,
         });
 
         return event;
@@ -200,10 +222,8 @@ export class AgentEventEncoder {
 
             event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
-            // E-tag the conversation root
-            if (context.rootEvent.id) {
-                event.tag(["e", context.rootEvent.id]);
-            }
+            // No e-tag: delegation events are separate conversations
+            // The recipient starts a fresh conversation thread
 
             // Add recipient as p-tag
             event.tag(["p", delegation.recipient]);
@@ -228,7 +248,8 @@ export class AgentEventEncoder {
 
             // Forward branch tag from triggering event if not explicitly set
             if (!delegation.branch) {
-                            }
+                this.forwardBranchTag(event, context);
+            }
 
             logger.debug("Encoded delegation request", {
                 phase: delegation.phase,
@@ -273,38 +294,14 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        
+        this.forwardBranchTag(event, context);
+
         logger.debug("Encoded ask event", {
             content: intent.content,
             suggestions: intent.suggestions,
             recipient: ownerPubkey?.substring(0, 8),
         });
 
-        return event;
-    }
-
-    /**
-     * Encode a conversation intent into a response event.
-     * Standard agent response without flow termination semantics.
-     */
-    encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.Text; // kind:1 - unified conversation format
-        event.content = intent.content;
-
-        // Add conversation tags
-        this.addConversationTags(event, context);
-
-        // Add reasoning tag if this is reasoning content
-        if (intent.isReasoning) {
-            event.tag(["reasoning"]);
-        }
-
-        // Add standard metadata
-        this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        
         return event;
     }
 
@@ -361,7 +358,8 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        
+        this.forwardBranchTag(event, context);
+
         return event;
     }
 
@@ -505,7 +503,11 @@ export class AgentEventEncoder {
         this.addStandardTags(followUpEvent, context);
 
         // Forward branch tag from response event
-        
+        const branchTag = responseEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
+        if (branchTag) {
+            followUpEvent.tag(["branch", branchTag[1]]);
+        }
+
         return followUpEvent;
     }
 
@@ -553,7 +555,8 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        
+        this.forwardBranchTag(event, context);
+
         return event;
     }
 }

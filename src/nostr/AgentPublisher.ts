@@ -3,7 +3,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { logger } from "@/utils/logger";
-import { context as otelContext, propagation, trace, SpanStatusCode } from "@opentelemetry/api";
+import { context as otelContext, propagation, trace, SpanStatusCode, type Context } from "@opentelemetry/api";
 import {
     NDKEvent,
     NDKPrivateKeySigner,
@@ -13,7 +13,6 @@ import {
 import {
     AgentEventEncoder,
     type CompletionIntent,
-    type ConversationIntent,
     type ErrorIntent,
     type EventContext,
     type LessonIntent,
@@ -46,13 +45,17 @@ export class AgentPublisher {
     }
 
     /**
-     * Safely publish an event with error handling and trace context injection
+     * Safely publish an event with error handling and trace context injection.
+     * Accepts an optional parentContext to ensure span parenting is preserved
+     * across async boundaries (like sign() operations that may lose context).
      */
-    private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
+    private async safePublish(event: NDKEvent, eventType: string, parentContext?: Context): Promise<void> {
         const tracer = trace.getTracer("tenex.nostr");
         const rawEvent = event.rawEvent();
+        const ctx = parentContext ?? otelContext.active();
 
-        await tracer.startActiveSpan(`nostr.publish.${eventType}`, async (span) => {
+        await otelContext.with(ctx, async () => {
+            await tracer.startActiveSpan(`nostr.publish.${eventType}`, async (span) => {
             try {
                 span.setAttributes({
                     "event.id": event.id || "",
@@ -106,6 +109,7 @@ export class AgentPublisher {
             } finally {
                 span.end();
             }
+            });
         });
     }
 
@@ -114,11 +118,13 @@ export class AgentPublisher {
      * Creates and publishes a properly tagged completion event.
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const event = this.encoder.encodeCompletion(intent, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, "completion");
+        await this.safePublish(event, "completion", parentContext);
 
         return event;
     }
@@ -126,16 +132,15 @@ export class AgentPublisher {
     /**
      * Publish a delegation event
      */
-    async delegate(
-        params: {
-            recipient: string;
-            content: string;
-            phase?: string;
-            phaseInstructions?: string;
-            branch?: string;
-        },
-        context: EventContext
-    ): Promise<string> {
+    async delegate(params: {
+        recipient: string;
+        content: string;
+        phase?: string;
+        phaseInstructions?: string;
+        branch?: string;
+    }): Promise<string> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -144,10 +149,7 @@ export class AgentPublisher {
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add e-tag for conversation root
-        if (context.rootEvent?.id) {
-            event.tags.push(["e", context.rootEvent.id]);
-        }
+        // No e-tag: delegation events start separate conversations
 
         // Add project a-tag (required for event routing)
         this.encoder.aTagProject(event);
@@ -165,7 +167,7 @@ export class AgentPublisher {
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, "delegation");
+        await this.safePublish(event, "delegation", parentContext);
 
         return event.id;
     }
@@ -181,6 +183,8 @@ export class AgentPublisher {
         },
         context: EventContext
     ): Promise<string> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -209,7 +213,7 @@ export class AgentPublisher {
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, "ask");
+        await this.safePublish(event, "ask", parentContext);
 
         return event.id;
     }
@@ -223,6 +227,8 @@ export class AgentPublisher {
         delegationEventId: string;
         replyToEventId?: string;
     }): Promise<string> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -244,24 +250,9 @@ export class AgentPublisher {
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, "followup");
+        await this.safePublish(event, "followup", parentContext);
 
         return event.id;
-    }
-
-    /**
-     * Publish a conversation response.
-     * Creates and publishes a standard response event.
-     */
-    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        const event = this.encoder.encodeConversation(intent, context);
-
-        // Sign and publish
-        injectTraceContext(event);
-        await this.agent.sign(event);
-        await this.safePublish(event, "conversation event");
-
-        return event;
     }
 
     /**
@@ -269,11 +260,13 @@ export class AgentPublisher {
      * Creates and publishes an error notification event.
      */
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const event = this.encoder.encodeError(intent, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, "error");
+        await this.safePublish(event, "error", parentContext);
 
         return event;
     }
@@ -282,11 +275,13 @@ export class AgentPublisher {
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
 
         injectTraceContext(lessonEvent);
         await this.agent.sign(lessonEvent);
-        await this.safePublish(lessonEvent, "lesson");
+        await this.safePublish(lessonEvent, "lesson", parentContext);
 
         return lessonEvent;
     }
@@ -296,11 +291,13 @@ export class AgentPublisher {
      * Creates and publishes an event with tool name and output tags.
      */
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const event = this.encoder.encodeToolUse(intent, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
-        await this.safePublish(event, `tool:${intent.toolName}`);
+        await this.safePublish(event, `tool:${intent.toolName}`, parentContext);
 
         return event;
     }
@@ -315,13 +312,15 @@ export class AgentPublisher {
         context: EventContext,
         claudeSessionId?: string
     ): Promise<NDKTask> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         // Use encoder to create task with proper tagging
         const task = this.encoder.encodeTask(title, content, context, claudeSessionId);
 
         // Sign with agent's signer
         injectTraceContext(task);
         await this.agent.sign(task);
-        await this.safePublish(task, "task event");
+        await this.safePublish(task, "task event", parentContext);
 
         return task;
     }
@@ -336,6 +335,8 @@ export class AgentPublisher {
         context: EventContext,
         status = "in-progress"
     ): Promise<NDKEvent> {
+        // Capture context before async operations that may lose it
+        const parentContext = otelContext.active();
         const update = task.reply();
         update.content = content;
 
@@ -348,7 +349,7 @@ export class AgentPublisher {
         update.tag(["status", status]);
         injectTraceContext(update);
         await this.agent.sign(update);
-        await this.safePublish(update, "task update");
+        await this.safePublish(update, "task update", parentContext);
 
         return update;
     }

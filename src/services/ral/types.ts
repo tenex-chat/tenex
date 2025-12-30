@@ -34,7 +34,6 @@ interface BasePendingDelegation {
   eventId: string;
   recipientPubkey: string;
   recipientSlug?: string;
-  prompt: string;
 }
 
 interface StandardDelegation extends BasePendingDelegation {

@@ -169,6 +169,31 @@ async function handleReplyLogic(
     const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
 
     if (delegationTarget) {
+        // Look up the original triggering event from the RAL
+        // This ensures we p-tag the original requester, not the delegatee
+        const ralRegistry = RALRegistry.getInstance();
+        const resumableRal = ralRegistry.findResumableRAL(
+            delegationTarget.agent.pubkey,
+            delegationTarget.conversationId
+        );
+
+        // Get the original conversation to find the triggering event
+        const originalConversation = conversationCoordinator.getConversation(delegationTarget.conversationId);
+        let triggeringEventForContext = event; // fallback to completion event
+
+        if (resumableRal?.originalTriggeringEventId && originalConversation) {
+            const originalEvent = originalConversation.history.find(
+                e => e.id === resumableRal.originalTriggeringEventId
+            );
+            if (originalEvent) {
+                triggeringEventForContext = originalEvent;
+                trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
+                    "original.event_id": resumableRal.originalTriggeringEventId,
+                    "completion.event_id": event.id || "",
+                });
+            }
+        }
+
         trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
             "delegation.agent_slug": delegationTarget.agent.slug,
             "delegation.original_conversation_id": delegationTarget.conversationId,
@@ -176,12 +201,15 @@ async function handleReplyLogic(
         });
 
         // Create execution context for the ORIGINAL conversation where the RAL is waiting
+        const hasPendingDelegations = (delegationResult.pendingCount ?? 0) > 0;
         const executionContext = await createExecutionContext({
             agent: delegationTarget.agent,
             conversationId: delegationTarget.conversationId,
             projectBasePath: projectCtx.agentRegistry.getBasePath(),
-            triggeringEvent: event,
+            triggeringEvent: triggeringEventForContext,
             conversationCoordinator,
+            isDelegationCompletion: true,
+            hasPendingDelegations,
         });
 
         // Execute - AgentExecutor will find the resumable RAL via findResumableRAL

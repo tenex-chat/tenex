@@ -12,7 +12,7 @@ export interface RALSummary {
   ralId: string;
   isStreaming: boolean;
   currentTool?: string;
-  pendingDelegations: Array<{ recipientSlug?: string; prompt: string; eventId: string }>;
+  pendingDelegations: Array<{ recipientSlug?: string; eventId: string }>;
   createdAt: number;
   hasPendingDelegations: boolean;
 }
@@ -184,7 +184,6 @@ export class RALRegistry {
         currentTool: r.currentTool,
         pendingDelegations: r.pendingDelegations.map(d => ({
           recipientSlug: d.recipientSlug,
-          prompt: d.prompt.substring(0, 100) + (d.prompt.length > 100 ? "..." : ""),
           eventId: d.eventId,
         })),
         createdAt: r.createdAt,
@@ -573,15 +572,14 @@ export class RALRegistry {
   }
 
   /**
-   * Find a RAL that should be resumed (has completed delegations, no pending ones).
+   * Find a RAL that should be resumed (has completed delegations).
    * Used when a delegation response arrives to continue the delegator's execution.
+   * The RAL is resumable regardless of pending delegation count - the agent
+   * decides what to do (wait, acknowledge, follow-up, etc.)
    */
   findResumableRAL(agentPubkey: string, conversationId: string): RALState | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals.find(ral =>
-      ral.completedDelegations.length > 0 &&
-      ral.pendingDelegations.length === 0
-    );
+    return rals.find(ral => ral.completedDelegations.length > 0);
   }
 
   /**
@@ -596,25 +594,44 @@ export class RALRegistry {
 
   /**
    * Build a message containing delegation results for injection into the RAL.
-   * Includes delegation event ID so agent can match with delegate() tool output.
+   * Shows complete status of all delegations - both completed and pending.
+   * Uses short event IDs (8 chars) for readability while maintaining reference ability.
    */
-  buildDelegationResultsMessage(completions: CompletedDelegation[]): string {
+  buildDelegationResultsMessage(completions: CompletedDelegation[], pending: PendingDelegation[] = []): string {
     if (completions.length === 0) {
       return "";
     }
 
-    if (completions.length === 1) {
-      const c = completions[0];
+    const lines: string[] = [];
+    lines.push("=== DELEGATION STATUS ===");
+    lines.push("");
+
+    // Format completed delegations
+    lines.push(`## Completed (${completions.length})`);
+    lines.push("");
+
+    for (const c of completions) {
       const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      return `[Delegation ${c.eventId} completed: ${agent}]\n\n${c.response}`;
+      const shortId = c.eventId.substring(0, 8);
+      lines.push(`### ${agent} (${shortId})`);
+      lines.push(c.response);
+      lines.push("");
     }
 
-    const parts = completions.map(c => {
-      const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      return `[Delegation ${c.eventId} from ${agent}]\n${c.response}`;
-    });
+    // Format pending delegations
+    lines.push("## Pending");
+    if (pending.length === 0) {
+      lines.push("None (all delegations complete)");
+    } else {
+      const pendingAgents = pending.map(p =>
+        p.recipientSlug ? `@${p.recipientSlug}` : p.recipientPubkey.substring(0, 8)
+      ).join(", ");
+      lines.push(pendingAgents);
+    }
+    lines.push("");
+    lines.push("=== END STATUS ===");
 
-    return `[All ${completions.length} delegations completed]\n\n${parts.join("\n\n")}`;
+    return lines.join("\n");
   }
 
   // === RAL Pause/Resume for concurrent execution coordination ===

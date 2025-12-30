@@ -31,6 +31,7 @@ export interface ExecutionContext {
     conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher; // Injected by AgentExecutor - shared publisher instance for consistent event ordering
     isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
+    hasPendingDelegations?: boolean; // True when there are still pending delegations (partial completion)
     debug?: boolean; // True when running in debug mode - enables additional output like event IDs
     alphaMode?: boolean; // True when running in alpha mode - enables bug reporting tools
     hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools

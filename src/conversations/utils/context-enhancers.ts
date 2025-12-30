@@ -13,7 +13,7 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
-import { getConcurrentRALCoordinator } from "@/agents/execution/ConcurrentRALCoordinator";
+import { buildContext } from "@/agents/execution/ConcurrentRALCoordinator";
 
 /**
  * Add voice mode context if applicable
@@ -79,18 +79,21 @@ export async function addDebugModeContext(
  * Add delegation completion context
  * @param messages - The messages array to add to
  * @param isDelegationCompletion - Whether this is a delegation completion
+ * @param hasPendingDelegations - Whether there are still pending delegations
  * @param agentName - Name of the agent for logging
  * @returns True if delegation context was added
  */
 export async function addDelegationCompletionContext(
     messages: ModelMessage[],
     isDelegationCompletion: boolean,
+    hasPendingDelegations: boolean,
     agentName?: string
 ): Promise<boolean> {
     if (isDelegationCompletion) {
         const contextBuilder = new PromptBuilder();
         contextBuilder.add("delegation-completion", {
             isDelegationCompletion: true,
+            hasPendingDelegations,
         });
 
         const delegationInstructions = await contextBuilder.build();
@@ -101,6 +104,7 @@ export async function addDelegationCompletionContext(
         if (agentName) {
             logger.debug("[CONTEXT_ENHANCER] Added delegation completion context", {
                 agent: agentName,
+                hasPendingDelegations,
             });
         }
 
@@ -141,6 +145,7 @@ export async function addRespondingToContext(
  * @param messages - The messages array to add to
  * @param triggeringEvent - The event to check for special modes
  * @param isDelegationCompletion - Whether this is a delegation completion
+ * @param hasPendingDelegations - Whether there are still pending delegations
  * @param agentName - Name of the agent for logging
  * @returns Object indicating which contexts were added
  */
@@ -148,12 +153,13 @@ export async function addAllSpecialContexts(
     messages: ModelMessage[],
     triggeringEvent: NDKEvent,
     isDelegationCompletion: boolean,
+    hasPendingDelegations: boolean,
     agentName?: string
 ): Promise<{ voiceMode: boolean; debugMode: boolean; delegationMode: boolean }> {
     const result = {
         voiceMode: await addVoiceModeContext(messages, triggeringEvent, agentName),
         debugMode: await addDebugModeContext(messages, triggeringEvent, agentName),
-        delegationMode: await addDelegationCompletionContext(messages, isDelegationCompletion, agentName),
+        delegationMode: await addDelegationCompletionContext(messages, isDelegationCompletion, hasPendingDelegations, agentName),
     };
 
     // Add context about who the agent is responding to
@@ -187,7 +193,7 @@ export function addConcurrentRALContext(
         return false;
     }
 
-    const concurrentContext = getConcurrentRALCoordinator().buildContext(
+    const concurrentContext = buildContext(
         otherRALSummaries,
         currentRALNumber
     );

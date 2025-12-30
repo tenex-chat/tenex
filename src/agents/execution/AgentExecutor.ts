@@ -11,6 +11,7 @@ import type {
     ToolWillExecuteEvent,
 } from "@/llm/service";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
@@ -29,7 +30,7 @@ import chalk from "chalk";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
-import { getConcurrentRALCoordinator } from "./ConcurrentRALCoordinator";
+import { shouldReleasePausedRALs } from "./ConcurrentRALCoordinator";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -120,8 +121,10 @@ export class AgentExecutor {
                     isResumption = true;
 
                     // Inject delegation results into the RAL as user message
+                    // Include pending delegations so agent knows what's still outstanding
                     const resultsMessage = ralRegistry.buildDelegationResultsMessage(
-                        resumableRal.completedDelegations
+                        resumableRal.completedDelegations,
+                        resumableRal.pendingDelegations
                     );
                     if (resultsMessage) {
                         ralRegistry.queueUserMessage(
@@ -132,16 +135,13 @@ export class AgentExecutor {
                         );
                     }
 
-                    // Clear completed delegations now that we've queued them for processing
-                    ralRegistry.clearCompletedDelegations(
-                        context.agent.pubkey,
-                        context.conversationId,
-                        ralNumber
-                    );
+                    // Don't clear completedDelegations here - they'll be cleared when the RAL ends.
+                    // This allows subsequent executions to see all completions, not just new ones.
 
                     span.addEvent("executor.ral_resumed", {
                         "ral.number": ralNumber,
                         "delegation.completed_count": resumableRal.completedDelegations.length,
+                        "delegation.pending_count": resumableRal.pendingDelegations.length,
                     });
                 } else if (injectionRal) {
                     // Resume RAL with queued injections (pairing checkpoint)
@@ -281,6 +281,7 @@ export class AgentExecutor {
                                 errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                             },
                             {
+                                triggeringEvent: context.triggeringEvent,
                                 rootEvent: conversation.history[0],
                                 conversationId: conversation.id,
                             }
@@ -386,17 +387,28 @@ export class AgentExecutor {
             throw streamError;
         }
 
-        // Check if we have pending delegations
+        // Determine if we should wait for more delegations
+        // Use context.hasPendingDelegations (captured at completion time) for delegation completions
+        // This avoids race conditions where pendingDelegations array is modified by concurrent completions
         const ralRegistry = RALRegistry.getInstance();
         const ralState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
-        if (ralState?.pendingDelegations.length) {
-            trace.getActiveSpan()?.addEvent("executor.pending_delegations", {
+        // For non-delegation-completion executions, check current RAL state
+        // For delegation completions, use the flag captured at completion time
+        const hasPendingDelegations = context.isDelegationCompletion
+            ? context.hasPendingDelegations
+            : (ralState?.pendingDelegations.length ?? 0) > 0;
+
+        // If agent generated no meaningful response and we're waiting for delegations, don't publish anything
+        // This handles the case where the agent only called delegate() without outputting any text
+        const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
+        if (!hasMessageContent && hasPendingDelegations) {
+            trace.getActiveSpan()?.addEvent("executor.awaiting_delegations", {
                 "ral.number": ralNumber,
-                "delegation.pending_count": ralState.pendingDelegations.length,
+                "delegation.pending_count": ralState?.pendingDelegations.length ?? 0,
             });
 
-            console.log(chalk.yellow(`\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting ${ralState.pendingDelegations.length} delegation(s)`));
+            console.log(chalk.yellow(`\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting delegations`));
 
             return undefined;
         }
@@ -409,12 +421,16 @@ export class AgentExecutor {
 
         trace.getActiveSpan()?.addEvent("executor.complete", {
             "message.length": completionEvent?.message?.length || 0,
+            "has_pending_delegations": hasPendingDelegations,
         });
 
+        // Publish as intermediate (no p-tag) if there are still pending delegations
+        // Otherwise publish as final completion (with p-tag)
         const finalResponseEvent = await agentPublisher.complete(
             {
                 content: completionEvent?.message || "",
                 usage: completionEvent?.usage,
+                isIntermediate: hasPendingDelegations,
             },
             eventContext
         );
@@ -426,10 +442,15 @@ export class AgentExecutor {
             await context.conversationCoordinator.addEvent(context.conversationId, finalResponseEvent);
         }
 
-        console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
+        if (hasPendingDelegations) {
+            console.log(chalk.cyan(`\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting more delegations)`));
+        } else {
+            console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
+        }
 
         trace.getActiveSpan()?.addEvent("executor.final_published", {
             "event.id": finalResponseEvent?.id || "",
+            "is_intermediate": hasPendingDelegations,
         });
 
         return finalResponseEvent;
@@ -487,6 +508,19 @@ export class AgentExecutor {
             ...systemPromptMessages.map(sm => sm.message),
             ...conversationMessages,
         ];
+
+        // Append todo list as a late system message (after conversation history)
+        // This ensures the agent sees its current todos near the end of the context
+        const todoContent = await agentTodosFragment.template({
+            conversation,
+            agentPubkey: context.agent.pubkey,
+        });
+        if (todoContent) {
+            messages.push({
+                role: "system",
+                content: todoContent,
+            });
+        }
 
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
             "ral.number": ralNumber,
@@ -615,7 +649,7 @@ export class AgentExecutor {
                         reasoningText: s.reasoningText,
                     }));
 
-                    if (getConcurrentRALCoordinator().shouldReleasePausedRALs(stepsInfo)) {
+                    if (shouldReleasePausedRALs(stepsInfo)) {
                         hasReleasedPausedRALs = true;
 
                         // Log what tool calls triggered the release
