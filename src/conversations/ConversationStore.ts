@@ -364,12 +364,12 @@ export class ConversationStore {
                     result.push(entry.message);
                 }
             } else {
-                // Other agent - include only text outputs
-                const textContent = this.extractTextContent(entry.message);
-                if (textContent) {
+                // Other agent - preserve original role (user for targeted, system for broadcast)
+                const content = this.extractOtherAgentContent(entry.message);
+                if (content) {
                     result.push({
-                        role: "assistant",
-                        content: textContent,
+                        role: entry.message.role as "user" | "assistant" | "system",
+                        content,
                     });
                 }
             }
@@ -419,9 +419,7 @@ export class ConversationStore {
         return lines.join("\n");
     }
 
-    private extractTextContent(message: ModelMessage): string | null {
-        if (message.role !== "assistant") return null;
-
+    private extractOtherAgentContent(message: ModelMessage): string | null {
         const content = message.content;
         if (typeof content === "string") {
             return content;
@@ -429,8 +427,9 @@ export class ConversationStore {
 
         if (Array.isArray(content)) {
             const textParts = content
-                .filter((part): part is { type: "text"; text: string } =>
-                    part.type === "text"
+                .filter(
+                    (part): part is { type: "text"; text: string } =>
+                        part.type === "text"
                 )
                 .map((part) => part.text);
 
