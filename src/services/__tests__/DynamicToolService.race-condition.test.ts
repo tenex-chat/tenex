@@ -135,13 +135,8 @@ describe("DynamicToolService Race Condition Bug", () => {
                 "nonexistent_tool", // Not loaded - will be dropped with warning
             ];
 
-            const agent = {
-                slug: "test-agent",
-                phases: undefined as Record<string, string> | undefined,
-            };
-
             // Process tools (this is called during createAgentInstance)
-            const finalTools = processAgentTools(requestedTools, agent);
+            const finalTools = processAgentTools(requestedTools, "test-agent");
 
             // The nonexistent tool is not in the final list (and a warning was logged)
             expect(finalTools).not.toContain("nonexistent_tool");

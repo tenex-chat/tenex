@@ -28,10 +28,7 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
     const pubkey = signer.pubkey;
 
     // Process tools using pure functions
-    const validToolNames = processAgentTools(storedAgent.tools || [], {
-        slug: storedAgent.slug,
-        phases: storedAgent.phases,
-    });
+    const validToolNames = processAgentTools(storedAgent.tools || [], storedAgent.slug);
 
     const agent: AgentInstance = {
         name: storedAgent.name,

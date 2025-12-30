@@ -37,7 +37,7 @@ describe("Agent Phase Self-Reply", () => {
                 planning: "Planning phase instructions",
                 execution: "Execution phase instructions",
             },
-            tools: ["delegate", "phase_add", "phase_remove"], // Has phases so can self-delegate
+            tools: ["delegate"], // Has phases so can self-delegate
         };
 
         const regularAgent = {
