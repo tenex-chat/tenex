@@ -30,7 +30,7 @@ export class LLMOperationsRegistry {
     registerOperation(context: ExecutionContext): AbortSignal {
         const operationId = crypto.randomUUID();
         const conversation = context.getConversation();
-        const rootEventId = conversation?.history[0]?.id || context.triggeringEvent.id;
+        const rootEventId = conversation?.getRootEventId() || context.triggeringEvent.id;
 
         // Create operation with metadata
         const operation: LLMOperation = {

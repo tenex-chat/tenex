@@ -1,4 +1,5 @@
-import type { Conversation, ConversationCoordinator } from "@/conversations";
+import type { ConversationCoordinator } from "@/conversations";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -30,7 +31,7 @@ export interface DelegationCompletionResult {
  */
 export async function handleDelegationCompletion(
     event: NDKEvent,
-    _conversation: Conversation,
+    _conversation: ConversationStore,
     _conversationCoordinator: ConversationCoordinator
 ): Promise<DelegationCompletionResult> {
     const span = tracer.startSpan("tenex.delegation.completion_check", {

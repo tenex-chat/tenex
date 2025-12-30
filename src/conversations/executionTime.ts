@@ -1,14 +1,14 @@
 /**
  * Utility functions for managing conversation execution time
- * Works directly with Conversation objects, following DRY principle
+ * Works directly with ConversationStore objects, following DRY principle
  */
 
-import type { Conversation } from "./types";
+import type { ConversationStore } from "./ConversationStore";
 
 /**
  * Start tracking execution time for a conversation
  */
-export function startExecutionTime(conversation: Conversation): void {
+export function startExecutionTime(conversation: ConversationStore): void {
     if (conversation.executionTime.isActive) {
         // Already active - don't restart
         return;
@@ -23,7 +23,7 @@ export function startExecutionTime(conversation: Conversation): void {
  * Stop tracking execution time and add duration to total
  * @returns Duration of this session in milliseconds
  */
-export function stopExecutionTime(conversation: Conversation): number {
+export function stopExecutionTime(conversation: ConversationStore): number {
     if (!conversation.executionTime.isActive || !conversation.executionTime.currentSessionStart) {
         return 0;
     }
@@ -42,11 +42,7 @@ export function stopExecutionTime(conversation: Conversation): number {
 /**
  * Get total execution time in seconds including any active session
  */
-export function getTotalExecutionTimeSeconds(conversation: Conversation): number {
-    if (!conversation.executionTime) {
-        return 0;
-    }
-
+export function getTotalExecutionTimeSeconds(conversation: ConversationStore): number {
     let total = conversation.executionTime.totalSeconds;
 
     // Add current active session time if any
@@ -61,42 +57,6 @@ export function getTotalExecutionTimeSeconds(conversation: Conversation): number
 /**
  * Check if execution is currently active
  */
-export function isExecutionActive(conversation: Conversation): boolean {
+export function isExecutionActive(conversation: ConversationStore): boolean {
     return conversation.executionTime?.isActive ?? false;
-}
-
-/**
- * Initialize execution time structure (alias for ensureExecutionTimeInitialized)
- */
-export function initializeExecutionTime(conversation: Conversation): void {
-    ensureExecutionTimeInitialized(conversation);
-}
-
-/**
- * Ensure conversation has execution time initialized (for loaded conversations)
- */
-export function ensureExecutionTimeInitialized(conversation: Conversation): void {
-    if (!conversation.executionTime) {
-        conversation.executionTime = {
-            totalSeconds: 0,
-            currentSessionStart: undefined,
-            isActive: false,
-            lastUpdated: Date.now(),
-        };
-        return;
-    }
-
-    // Crash recovery: if execution was active but daemon restarted,
-    // reset the active state as the session was lost
-    if (conversation.executionTime.isActive) {
-        const timeSinceLastUpdate = Date.now() - conversation.executionTime.lastUpdated;
-        const maxSessionTime = 30 * 60 * 1000; // 30 minutes max reasonable session
-
-        if (timeSinceLastUpdate > maxSessionTime) {
-            // Consider the session lost and reset state
-            conversation.executionTime.isActive = false;
-            conversation.executionTime.currentSessionStart = undefined;
-            conversation.executionTime.lastUpdated = Date.now();
-        }
-    }
 }

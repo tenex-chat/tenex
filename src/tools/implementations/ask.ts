@@ -46,7 +46,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
     },
     {
       triggeringEvent: context.triggeringEvent,
-      rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
+      rootEvent: { id: context.getConversation()?.getRootEventId() ?? context.triggeringEvent.id },
       conversationId: context.conversationId,
     }
   );

@@ -120,35 +120,38 @@ async function handleReplyLogic(
                 conversationStore.load(projectId, conversation.id);
 
                 // Check for duplicate event (our own published event coming back)
-                if (conversationStore.hasEventId(event.id)) {
+                // Skip check if isNew - the event was just added in createConversation
+                if (!isNew && conversationStore.hasEventId(event.id)) {
                     trace.getActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
                         "event.id": event.id,
                         "conversation.id": conversation.id,
                     });
                     // Still add to coordinator for consistency, but don't trigger agent
-                    if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
+                    if (!AgentEventDecoder.isAgentInternalMessage(event)) {
                         await conversationCoordinator.addEvent(conversation.id, event);
                     }
                     return;
                 }
 
-                // Hydrate store with this event
-                const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
-                conversationStore.addMessage({
-                    pubkey: event.pubkey,
-                    message: {
-                        role: isFromAgent ? "assistant" : "user",
-                        content: event.content,
-                    },
-                    eventId: event.id,
-                });
-                await conversationStore.save();
+                // Hydrate store with this event (skip if isNew - already added in createConversation)
+                if (!isNew) {
+                    const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
+                    conversationStore.addMessage({
+                        pubkey: event.pubkey,
+                        message: {
+                            role: isFromAgent ? "assistant" : "user",
+                            content: event.content,
+                        },
+                        eventId: event.id,
+                    });
+                    await conversationStore.save();
 
-                trace.getActiveSpan()?.addEvent("reply.hydrated_conversation_store", {
-                    "event.id": event.id,
-                    "conversation.id": conversation.id,
-                    "message.role": isFromAgent ? "assistant" : "user",
-                });
+                    trace.getActiveSpan()?.addEvent("reply.hydrated_conversation_store", {
+                        "event.id": event.id,
+                        "conversation.id": conversation.id,
+                        "message.role": isFromAgent ? "assistant" : "user",
+                    });
+                }
             } catch (err) {
                 trace.getActiveSpan()?.addEvent("reply.conversation_store_error", {
                     "error": formatAnyError(err),
@@ -177,14 +180,11 @@ async function handleReplyLogic(
             delegationTarget.conversationId
         );
 
-        // Get the original conversation to find the triggering event
-        const originalConversation = conversationCoordinator.getConversation(delegationTarget.conversationId);
+        // Get the original triggering event for delegation resumption
         let triggeringEventForContext = event; // fallback to completion event
 
-        if (resumableRal?.originalTriggeringEventId && originalConversation) {
-            const originalEvent = originalConversation.history.find(
-                e => e.id === resumableRal.originalTriggeringEventId
-            );
+        if (resumableRal?.originalTriggeringEventId) {
+            const originalEvent = conversationCoordinator.getEventById(resumableRal.originalTriggeringEventId);
             if (originalEvent) {
                 triggeringEventForContext = originalEvent;
                 trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
@@ -271,9 +271,7 @@ async function handleReplyLogic(
         const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversation.id);
 
         if (resumableRal?.originalTriggeringEventId) {
-            const originalEvent = conversation.history.find(
-                e => e.id === resumableRal.originalTriggeringEventId
-            );
+            const originalEvent = conversationCoordinator.getEventById(resumableRal.originalTriggeringEventId);
             if (originalEvent) {
                 triggeringEventForContext = originalEvent;
                 trace.getActiveSpan()?.addEvent("reply.restored_original_trigger", {

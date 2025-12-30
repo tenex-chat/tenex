@@ -316,37 +316,10 @@ export class AgentEventDecoder {
         if (this.isNeverRouteKind(event)) return "never_route";
         if (this.isProjectEvent(event)) return "project";
         if (this.isLessonEvent(event)) return "lesson";
-        if (event.kind === NDKKind.GenericReply || event.kind === NDKKind.Thread) {
+        if (event.kind === NDKKind.Text) {
             return "conversation";
         }
         return "unknown";
-    }
-
-    /**
-     * Check if an event is a conversation root
-     * @param event - The event to check
-     * @returns True if this is a conversation root event
-     */
-    static isConversationRoot(event: NDKEvent): boolean {
-        return event.kind === NDKKind.ConversationRoot;
-    }
-
-    /**
-     * Check if an event is a thread event
-     * @param event - The event to check
-     * @returns True if this is a thread event
-     */
-    static isThreadEvent(event: NDKEvent): boolean {
-        return event.kind === NDKKind.Thread;
-    }
-
-    /**
-     * Check if an event is a generic reply
-     * @param event - The event to check
-     * @returns True if this is a generic reply event
-     */
-    static isGenericReply(event: NDKEvent): boolean {
-        return event.kind === NDKKind.GenericReply;
     }
 
     /**

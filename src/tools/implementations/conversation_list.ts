@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -29,17 +29,18 @@ interface ConversationListOutput {
     total: number;
 }
 
-function summarizeConversation(conversation: Conversation): ConversationSummary {
-    const firstEvent = conversation.history[0];
-    const lastEvent = conversation.history[conversation.history.length - 1];
+function summarizeConversation(conversation: ConversationStore): ConversationSummary {
+    const messages = conversation.getAllMessages();
+    const firstMessage = messages[0];
+    const lastMessage = messages[messages.length - 1];
 
     return {
         id: conversation.id,
         title: conversation.title,
         phase: conversation.phase,
-        messageCount: conversation.history.length,
-        createdAt: firstEvent?.created_at,
-        lastActivity: lastEvent?.created_at,
+        messageCount: messages.length,
+        createdAt: firstMessage?.timestamp,
+        lastActivity: lastMessage?.timestamp,
     };
 }
 
@@ -58,9 +59,7 @@ async function executeConversationList(
 
     // Sort by last activity (most recent first)
     const sorted = [...allConversations].sort((a, b) => {
-        const aLast = a.history[a.history.length - 1]?.created_at ?? 0;
-        const bLast = b.history[b.history.length - 1]?.created_at ?? 0;
-        return bLast - aLast;
+        return b.getLastActivityTime() - a.getLastActivityTime();
     });
 
     const limited = sorted.slice(0, limit);

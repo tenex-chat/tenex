@@ -226,7 +226,7 @@ export class AgentExecutor {
                 if (conversation) {
                     span.setAttributes({
                         "conversation.phase": conversation.phase,
-                        "conversation.message_count": conversation.history.length,
+                        "conversation.message_count": conversation.getMessageCount(),
                     });
                 }
 
@@ -283,7 +283,7 @@ export class AgentExecutor {
                             },
                             {
                                 triggeringEvent: context.triggeringEvent,
-                                rootEvent: conversation.history[0],
+                                rootEvent: { id: conversation.getRootEventId() },
                                 conversationId: conversation.id,
                             }
                         );
