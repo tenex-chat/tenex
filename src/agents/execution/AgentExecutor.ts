@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type {
+    ChunkTypeChangeEvent,
     CompleteEvent,
     ContentEvent,
     ReasoningEvent,
@@ -419,41 +420,38 @@ export class AgentExecutor {
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
-        trace.getActiveSpan()?.addEvent("executor.complete", {
+        trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
             "has_pending_delegations": hasPendingDelegations,
         });
 
-        // Publish as intermediate (no p-tag) if there are still pending delegations
-        // Otherwise publish as final completion (with p-tag)
-        const finalResponseEvent = await agentPublisher.complete(
-            {
-                content: completionEvent?.message || "",
-                usage: completionEvent?.usage,
-                isIntermediate: hasPendingDelegations,
-            },
-            eventContext
-        );
-
-        // Add completion event to conversation history immediately
-        // This prevents race conditions where user sends another message before
-        // the completion event comes back through the Nostr subscription
-        if (finalResponseEvent) {
-            await context.conversationCoordinator.addEvent(context.conversationId, finalResponseEvent);
-        }
+        let responseEvent: NDKEvent;
 
         if (hasPendingDelegations) {
-            console.log(chalk.cyan(`\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting more delegations)`));
+            // Mid-loop response - use conversation() (kind:1, no p-tag)
+            responseEvent = await agentPublisher.conversation(
+                { content: completionEvent.message },
+                eventContext
+            );
+            console.log(chalk.cyan(`\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting delegations)`));
         } else {
+            // Final completion - use complete() (kind:1, with p-tag)
+            responseEvent = await agentPublisher.complete(
+                { content: completionEvent.message, usage: completionEvent.usage },
+                eventContext
+            );
             console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
         }
 
-        trace.getActiveSpan()?.addEvent("executor.final_published", {
-            "event.id": finalResponseEvent?.id || "",
-            "is_intermediate": hasPendingDelegations,
+        // Add event to conversation history immediately
+        await context.conversationCoordinator.addEvent(context.conversationId, responseEvent);
+
+        trace.getActiveSpan()?.addEvent("executor.published", {
+            "event.id": responseEvent.id || "",
+            "is_completion": !hasPendingDelegations,
         });
 
-        return finalResponseEvent;
+        return responseEvent;
     }
 
     /**
@@ -539,14 +537,41 @@ export class AgentExecutor {
         }
         const eventContext = createEventContext(context, llmService.model);
 
+        let contentBuffer = "";
+        let reasoningBuffer = "";
         let completionEvent: CompleteEvent | undefined;
+
+        const flushReasoningBuffer = async (): Promise<void> => {
+            if (reasoningBuffer.trim().length > 0) {
+                await agentPublisher.conversation(
+                    { content: reasoningBuffer, isReasoning: true },
+                    eventContext
+                );
+                reasoningBuffer = "";
+            }
+        };
 
         llmService.on("content", (event: ContentEvent) => {
             process.stdout.write(chalk.white(event.delta));
+            contentBuffer += event.delta;
         });
 
         llmService.on("reasoning", (event: ReasoningEvent) => {
             process.stdout.write(chalk.gray(event.delta));
+            reasoningBuffer += event.delta;
+        });
+
+        llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
+            // Flush reasoning buffer when switching away from reasoning
+            if (event.from === "reasoning-delta") {
+                await flushReasoningBuffer();
+            }
+
+            // Flush content buffer when switching away from text
+            if (event.from === "text-delta" && contentBuffer.trim().length > 0) {
+                await agentPublisher.conversation({ content: contentBuffer }, eventContext);
+                contentBuffer = "";
+            }
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
@@ -854,6 +879,11 @@ export class AgentExecutor {
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
+        }
+
+        // Flush any remaining reasoning buffer
+        if (reasoningBuffer.trim().length > 0) {
+            await flushReasoningBuffer();
         }
 
         if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {

@@ -18,9 +18,11 @@ export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
     summary?: string;
-    /** If true, this is an intermediate response (e.g., partial delegation completion).
-     *  Intermediate responses don't p-tag the recipient to avoid notification spam. */
-    isIntermediate?: boolean;
+}
+
+export interface ConversationIntent {
+    content: string;
+    isReasoning?: boolean;
 }
 
 export interface DelegationIntent {
@@ -76,6 +78,7 @@ export interface ToolUseIntent {
 
 export type AgentIntent =
     | CompletionIntent
+    | ConversationIntent
     | DelegationIntent
     | AskIntent
     | ErrorIntent
@@ -126,43 +129,52 @@ export class AgentEventEncoder {
 
     /**
      * Encode a completion intent into a tagged event.
-     * Handles both regular completions and delegation completions.
+     * Completions have p-tag (triggers notification) and status=completed.
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.Text; // kind:1 - unified conversation format
+        event.kind = NDKKind.Text; // kind:1
         event.content = intent.content;
 
-        // Add conversation e-tag
         this.addConversationTags(event, context);
+        event.tag(["p", context.triggeringEvent.pubkey]);
+        event.tag(["status", "completed"]);
 
-        // Only p-tag for final completions (not intermediate responses)
-        // Intermediate responses (e.g., partial delegation completions) skip p-tag
-        // to avoid notification spam while delegations are still pending
-        if (!intent.isIntermediate) {
-            event.tag(["p", context.triggeringEvent.pubkey]);
-            event.tag(["status", "completed"]);
-        } else {
-            event.tag(["status", "intermediate"]);
-        }
-
-        // Add usage information if provided
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }
 
-        // Add standard metadata
         this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
         this.forwardBranchTag(event, context);
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
             replyingTo: context.triggeringEvent.id?.substring(0, 8),
             replyingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
-            isIntermediate: intent.isIntermediate,
         });
+
+        return event;
+    }
+
+    /**
+     * Encode a conversation intent into a tagged event.
+     * Conversations have NO p-tag (no notification) - used for mid-loop responses.
+     */
+    encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.Text; // kind:1 - same as completion
+        event.content = intent.content;
+
+        this.addConversationTags(event, context);
+        // NO p-tag - that's the difference from completion
+        // NO status tag
+
+        if (intent.isReasoning) {
+            event.tag(["reasoning"]);
+        }
+
+        this.addStandardTags(event, context);
+        this.forwardBranchTag(event, context);
 
         return event;
     }

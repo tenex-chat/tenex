@@ -13,6 +13,7 @@ import {
 import {
     AgentEventEncoder,
     type CompletionIntent,
+    type ConversationIntent,
     type ErrorIntent,
     type EventContext,
     type LessonIntent,
@@ -115,16 +116,30 @@ export class AgentPublisher {
 
     /**
      * Publish a completion event.
-     * Creates and publishes a properly tagged completion event.
+     * Creates and publishes a properly tagged completion event with p-tag.
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-        // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const event = this.encoder.encodeCompletion(intent, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "completion", parentContext);
+
+        return event;
+    }
+
+    /**
+     * Publish a conversation event (mid-loop response without p-tag).
+     * Used when agent has text output but delegations are still pending.
+     */
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+        const parentContext = otelContext.active();
+        const event = this.encoder.encodeConversation(intent, context);
+
+        injectTraceContext(event);
+        await this.agent.sign(event);
+        await this.safePublish(event, "conversation", parentContext);
 
         return event;
     }
