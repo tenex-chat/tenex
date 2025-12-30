@@ -52,9 +52,7 @@ The RAL (Request-Agent Loop) is the **single source of truth** for:
 
 | Kind | Name | Purpose |
 |------|------|---------|
-| 1111 | GenericReply | Delegation requests, responses, conversations |
-| 21111 | TenexStreamingResponse | Streaming LLM output chunks |
-| 513 | Delegation | Explicit delegation marker (deprecated, now uses 1111) |
+| 1 | Text | Conversations, delegations, completions |
 
 ---
 

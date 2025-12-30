@@ -20,6 +20,7 @@ import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { alphaModeFragment } from "./alpha-mode";
+import { concurrentRALContextFragment } from "./concurrent-ral-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -35,6 +36,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(agentPhasesFragment);
     fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(alphaModeFragment);
+    fragmentRegistry.register(concurrentRALContextFragment);
     fragmentRegistry.register(delegatedTaskContextFragment);
     fragmentRegistry.register(debugModeFragment);
     fragmentRegistry.register(delegationCompletionFragment);

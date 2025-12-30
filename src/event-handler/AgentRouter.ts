@@ -5,6 +5,7 @@ import type { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
+import type { DelegationCompletionResult } from "./DelegationCompletionHandler";
 
 /**
  * AgentRouter is a static utility class that determines which agent
@@ -152,4 +153,43 @@ export class AgentRouter {
         });
     }
 
+    /**
+     * Resolve routing target for a delegation completion.
+     * Returns the agent and conversation ID where the waiting RAL lives,
+     * or null if the delegation wasn't recorded or agent not found.
+     */
+    static resolveDelegationTarget(
+        delegationResult: DelegationCompletionResult,
+        projectContext: ProjectContext
+    ): { agent: AgentInstance; conversationId: string } | null {
+        if (!delegationResult.recorded) {
+            return null;
+        }
+
+        const { agentSlug, conversationId } = delegationResult;
+        if (!agentSlug || !conversationId) {
+            logger.warn(
+                chalk.yellow(
+                    `[AgentRouter] Delegation recorded but missing agentSlug or conversationId`
+                )
+            );
+            return null;
+        }
+
+        const waitingAgent = projectContext.getAgent(agentSlug);
+        if (!waitingAgent) {
+            logger.warn(
+                chalk.yellow(`[AgentRouter] Waiting agent not found: ${agentSlug}`)
+            );
+            return null;
+        }
+
+        logger.info(
+            chalk.gray(
+                `Routing delegation completion to ${agentSlug} in conversation ${conversationId.substring(0, 8)}`
+            )
+        );
+
+        return { agent: waitingAgent, conversationId };
+    }
 }

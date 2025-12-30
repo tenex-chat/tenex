@@ -20,6 +20,11 @@ export interface CompletionIntent {
     summary?: string;
 }
 
+export interface ConversationIntent {
+    content: string;
+    isReasoning?: boolean;
+}
+
 export interface DelegationIntent {
     delegations: Array<{
         recipient: string;
@@ -43,20 +48,9 @@ export interface AskIntent {
     suggestions?: string[];
 }
 
-export interface ConversationIntent {
-    content: string;
-    isReasoning?: boolean;
-}
-
 export interface ErrorIntent {
     message: string;
     errorType?: string;
-}
-
-export interface StreamingIntent {
-    content: string;
-    sequence: number;
-    isReasoning?: boolean;
 }
 
 export interface LessonIntent {
@@ -79,23 +73,23 @@ export interface ToolUseIntent {
     toolName: string;
     content: string; // e.g., "Reading $path"
     args?: unknown; // Tool arguments to be serialized
+    referencedEventIds?: string[]; // Event IDs to reference (e.g., delegation event IDs)
 }
 
 export type AgentIntent =
     | CompletionIntent
+    | ConversationIntent
     | DelegationIntent
     | AskIntent
-    | ConversationIntent
     | ErrorIntent
-    | StreamingIntent
     | LessonIntent
     | StatusIntent
     | ToolUseIntent;
 
 // Execution context provided by RAL
 export interface EventContext {
-    triggeringEvent: NDKEvent;
-    rootEvent: NDKEvent; // Now mandatory for better type safety
+    triggeringEvent: NDKEvent; // The event that triggered this execution (for reply threading)
+    rootEvent: NDKEvent; // The conversation root event
     conversationId: string; // Required for conversation lookup
     executionTime?: number;
     model?: string;
@@ -110,137 +104,77 @@ export interface EventContext {
 export class AgentEventEncoder {
     /**
      * Add conversation tags consistently to any event.
-     * Centralizes conversation tagging logic for all agent events.
+     * Just e-tags the root event - no reply threading.
      */
     private addConversationTags(event: NDKEvent, context: EventContext): void {
-        this.tagConversation(event, context.rootEvent);
-        this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
+        if (context.rootEvent.id) {
+            event.tag(["e", context.rootEvent.id]);
+        }
     }
 
     /**
      * Forward branch tag from triggering event to reply event.
      * Ensures agents carry forward the branch context from the message they're replying to.
      */
-    private forwardBranchTag(event: NDKEvent, triggeringEvent: NDKEvent): void {
-        const branchTag = triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
+    private forwardBranchTag(event: NDKEvent, context: EventContext): void {
+        const branchTag = context.triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
         if (branchTag) {
             event.tag(["branch", branchTag[1]]);
             logger.debug("Forwarding branch tag", {
                 branch: branchTag[1],
-                fromEvent: triggeringEvent.id?.substring(0, 8),
+                fromEvent: context.triggeringEvent.id?.substring(0, 8),
             });
         }
     }
 
     /**
-     * Tags the root of the conversation
-     */
-    tagConversation(event: NDKEvent, rootEvent: NDKEvent): void {
-        event.tag(["E", rootEvent.id]);
-        event.tag(["K", rootEvent.kind.toString()]);
-        event.tag(["P", rootEvent.pubkey]);
-    }
-
-    /**
-     * "e"-tags this reply in the proper context.
-     *
-     * When the triggering event has the same author as the conversation root AND
-     * when the triggering event, we want to publish to the root, and not thread it in
-     * the triggering event; otherwise we thread inside the triggering event.
-     */
-    eTagParentEvent(event: NDKEvent, rootEvent: NDKEvent, triggeringEvent: NDKEvent): void {
-        const projectCtx = getProjectContext();
-        const ownerPubkey = projectCtx?.project?.pubkey ?? rootEvent.pubkey;
-
-        const triggeringPubkeyIsOwner = triggeringEvent.pubkey === ownerPubkey;
-        const eTagValue = triggeringEvent.tagValue("e");
-
-        let replyToEventId = triggeringEvent.id;
-
-        if (triggeringPubkeyIsOwner && eTagValue) {
-            // if the triggering pubkey is the owner of the project
-            // (or of the thread if there is no projet)
-
-            replyToEventId = eTagValue; // reply inside the same parent
-        }
-
-        // Only add the e-tag if we have a valid event ID
-        if (replyToEventId && replyToEventId.length > 0) {
-            event.tag(["e", replyToEventId]);
-        } else {
-            // Fallback to root event if we have it
-            if (rootEvent.id && rootEvent.id.length > 0) {
-                event.tag(["e", rootEvent.id]);
-            }
-            // If neither is available, skip the e-tag entirely
-            // rather than creating an invalid one
-        }
-    }
-
-    /**
      * Encode a completion intent into a tagged event.
-     * Handles both regular completions and delegation completions.
+     * Completions have p-tag (triggers notification) and status=completed.
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = 1111;
+        event.kind = NDKKind.Text; // kind:1
         event.content = intent.content;
 
-        // Add conversation tags (E, K, P for root)
-        this.tagConversation(event, context.rootEvent);
-
-        // if the triggering event is authored by the same as the root event
-        // and the triggering event is e-tagging the root event, let's also e-tag the root
-        // event. This is so that this completion event also shows up in the main thread.
-        // const pTagsMatch = context.triggeringEvent.pubkey === context.rootEvent.pubkey;
-        // const authorIsProductOwner = context.triggeringEvent.pubkey === projectCtx?.project?.pubkey;
-
-        // console.log('encode completion', {
-        //     pTagsMatch, authorIsProductOwner, eTagValue,
-        //     productOwner: projectCtx?.project?.pubkey,
-        //     triggeringEventPubkey: context.triggeringEvent.pubkey
-        // })
-
-        // // This hack is to make the in-thread replies to the product owner (typically the human) appear
-        // // inline instead of threaded-in. This is probably not right.
-        // if (pTagsMatch && authorIsProductOwner && eTagValue) {
-        //     event.tag(["e", eTagValue, "", "reply"]);
-        // } else {
-        //     event.tag(["e", context.triggeringEvent.id, "", "reply"]);
-        // }
-
-        // const triggerTagsRoot = context.triggeringEvent.tagValue("e") === context.rootEvent.id;
-
-        // if (pTagsMatch && triggerTagsRoot) {
-        //     event.tag(["e", context.rootEvent.id, "", "root"]);
-        // }
-
-        this.eTagParentEvent(event, context.rootEvent, context.triggeringEvent);
-
-        // Always p-tag the triggering event author - they are the one we're responding to.
-        // When resuming after delegation, the event handler should restore the original
-        // triggering event so we p-tag the correct requester (not the delegatee).
+        this.addConversationTags(event, context);
         event.tag(["p", context.triggeringEvent.pubkey]);
-
-        // Mark as natural completion
         event.tag(["status", "completed"]);
 
-        // Add usage information if provided
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }
 
-        // Add standard metadata (without usage, which is now handled above)
         this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
+        this.forwardBranchTag(event, context);
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            completingTo: context.triggeringEvent.id?.substring(0, 8),
-            completingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            replyingTo: context.triggeringEvent.id?.substring(0, 8),
+            replyingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
         });
+
+        return event;
+    }
+
+    /**
+     * Encode a conversation intent into a tagged event.
+     * Conversations have NO p-tag (no notification) - used for mid-loop responses.
+     */
+    encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.Text; // kind:1 - same as completion
+        event.content = intent.content;
+
+        this.addConversationTags(event, context);
+        // NO p-tag - that's the difference from completion
+        // NO status tag
+
+        if (intent.isReasoning) {
+            event.tag(["reasoning"]);
+        }
+
+        this.addStandardTags(event, context);
+        this.forwardBranchTag(event, context);
 
         return event;
     }
@@ -291,7 +225,7 @@ export class AgentEventEncoder {
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
         return intent.delegations.map((delegation) => {
             const event = new NDKEvent(getNDK());
-            event.kind = 1111; // NIP-22 comment/conversation kind
+            event.kind = NDKKind.Text; // kind:1 - unified conversation format
 
             // Prepend recipient to the content
             event.content = this.prependRecipientsToContent(delegation.request, [
@@ -300,14 +234,8 @@ export class AgentEventEncoder {
 
             event.created_at = Math.floor(Date.now() / 1000) + 1; // we publish one second into the future because it looks more natural when the agent says "I will delegate to..." and then the delegation shows up
 
-            // Add root conversation tags (E, K, P)
-            this.tagConversation(event, context.rootEvent);
-
-            // Always e-tag the triggering event for delegations
-            // This is critical for threading - the delegated agent needs to know which event triggered the delegation
-            if (context.triggeringEvent.id) {
-                event.tag(["e", context.triggeringEvent.id]);
-            }
+            // No e-tag: delegation events are separate conversations
+            // The recipient starts a fresh conversation thread
 
             // Add recipient as p-tag
             event.tag(["p", delegation.recipient]);
@@ -332,7 +260,7 @@ export class AgentEventEncoder {
 
             // Forward branch tag from triggering event if not explicitly set
             if (!delegation.branch) {
-                this.forwardBranchTag(event, context.triggeringEvent);
+                this.forwardBranchTag(event, context);
             }
 
             logger.debug("Encoded delegation request", {
@@ -350,7 +278,7 @@ export class AgentEventEncoder {
      */
     encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = 1111; // NIP-22 comment/conversation kind
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags
@@ -378,39 +306,13 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
+        this.forwardBranchTag(event, context);
 
         logger.debug("Encoded ask event", {
             content: intent.content,
             suggestions: intent.suggestions,
             recipient: ownerPubkey?.substring(0, 8),
         });
-
-        return event;
-    }
-
-    /**
-     * Encode a conversation intent into a response event.
-     * Standard agent response without flow termination semantics.
-     */
-    encodeConversation(intent: ConversationIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
-        event.content = intent.content;
-
-        // Add conversation tags
-        this.addConversationTags(event, context);
-
-        // Add reasoning tag if this is reasoning content
-        if (intent.isReasoning) {
-            event.tag(["reasoning"]);
-        }
-
-        // Add standard metadata
-        this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
 
         return event;
     }
@@ -455,7 +357,7 @@ export class AgentEventEncoder {
      */
     encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.message;
 
         // Add conversation tags
@@ -468,36 +370,7 @@ export class AgentEventEncoder {
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
-
-        return event;
-    }
-
-    /**
-     * Encode a streaming progress intent.
-     */
-    encodeStreamingContent(intent: StreamingIntent, context: EventContext): NDKEvent {
-        const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.TenexStreamingResponse;
-        event.content = intent.content;
-
-        // Add conversation tags for proper threading
-        this.addConversationTags(event, context);
-
-        // Add streaming-specific tags
-        event.tag(["streaming", "true"]);
-        event.tag(["sequence", intent.sequence.toString()]);
-
-        // Add reasoning tag if this is reasoning content
-        if (intent.isReasoning) {
-            event.tag(["reasoning"]);
-        }
-
-        // Add standard metadata tags
-        this.addStandardTags(event, context);
-
-        // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
+        this.forwardBranchTag(event, context);
 
         return event;
     }
@@ -642,7 +515,10 @@ export class AgentEventEncoder {
         this.addStandardTags(followUpEvent, context);
 
         // Forward branch tag from response event
-        this.forwardBranchTag(followUpEvent, responseEvent);
+        const branchTag = responseEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
+        if (branchTag) {
+            followUpEvent.tag(["branch", branchTag[1]]);
+        }
 
         return followUpEvent;
     }
@@ -653,7 +529,7 @@ export class AgentEventEncoder {
      */
     encodeToolUse(intent: ToolUseIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
-        event.kind = NDKKind.GenericReply;
+        event.kind = NDKKind.Text; // kind:1 - unified conversation format
         event.content = intent.content;
 
         // Add conversation tags
@@ -679,11 +555,19 @@ export class AgentEventEncoder {
             }
         }
 
+        // Add q-tags for referenced events (e.g., delegation event IDs)
+        // Using "q" (quote) tag to indicate these are referenced/quoted events
+        if (intent.referencedEventIds) {
+            for (const eventId of intent.referencedEventIds) {
+                event.tag(["q", eventId]);
+            }
+        }
+
         // Add standard metadata
         this.addStandardTags(event, context);
 
         // Forward branch tag from triggering event
-        this.forwardBranchTag(event, context.triggeringEvent);
+        this.forwardBranchTag(event, context);
 
         return event;
     }

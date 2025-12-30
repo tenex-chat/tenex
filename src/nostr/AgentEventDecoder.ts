@@ -59,28 +59,11 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Get conversation root from event
+     * Get the event ID this event is replying to (if any).
+     * For kind:1 events, this is the 'e' tag value.
      */
-    static getConversationRoot(event: NDKEvent): string | undefined {
-        return event.tagValue("E") || event.tagValue("A");
-    }
-
-    /**
-     * Check if event is an orphaned reply (reply without findable root)
-     */
-    static isOrphanedReply(event: NDKEvent): boolean {
-        // Must be a kind 11 (text note reply)
-        if (event.tagValue("K") !== "11") {
-            return false;
-        }
-
-        // Must have a conversation root reference
-        const hasRoot = !!(event.tagValue("E") || event.tagValue("A"));
-
-        // Must have p-tags (directed to someone)
-        const hasPTags = event.tags.some((tag) => tag[0] === "p");
-
-        return hasRoot && hasPTags;
+    static getReplyTarget(event: NDKEvent): string | undefined {
+        return event.tagValue("e");
     }
 
     /**
@@ -118,14 +101,14 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Check if event is a delegation request (kind:1111 from agent to agent)
+     * Check if event is a delegation request (kind:1 or kind:1111 from agent to agent)
      */
     static isDelegationRequest(
         event: NDKEvent,
         systemAgents?: Map<string, AgentInstance>
     ): boolean {
-        // Must be kind:1111
-        if (event.kind !== 1111) return false;
+        // Must be kind:1 or kind:1111 (for backwards compatibility)
+        if (event.kind !== 1 && event.kind !== 1111) return false;
 
         // If we have system agents, verify it's from an agent
         if (systemAgents) {
@@ -146,10 +129,11 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Check if event is a delegation completion (kind:1111 with tool:complete)
+     * Check if event is a delegation completion (kind:1 or kind:1111 with status:completed)
      */
     static isDelegationCompletion(event: NDKEvent): boolean {
-        return event.kind === 1111 && event.tagValue("status") === "completed";
+        // Accept both kind:1 and kind:1111 for backwards compatibility
+        return (event.kind === 1 || event.kind === 1111) && event.tagValue("status") === "completed";
     }
 
     /**
@@ -184,13 +168,6 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Get the K tag value (referenced event kind)
-     */
-    static getReferencedKind(event: NDKEvent): string | undefined {
-        return event.tagValue("K");
-    }
-
-    /**
      * Check if event has a specific tool tag
      */
     static hasTool(event: NDKEvent, toolName: string): boolean {
@@ -207,13 +184,6 @@ export class AgentEventDecoder {
                 name: tag[1],
                 args: tag[2] ? JSON.parse(tag[2]) : undefined,
             }));
-    }
-
-    /**
-     * Check if this is a streaming event
-     */
-    static isStreamingEvent(event: NDKEvent): boolean {
-        return event.kind === NDKKind.TenexStreamingResponse;
     }
 
     /**
@@ -248,7 +218,6 @@ export class AgentEventDecoder {
      */
     private static readonly NEVER_ROUTE_EVENT_KINDS = [
         NDKKind.TenexProjectStatus,
-        NDKKind.TenexStreamingResponse,
         NDKKind.TenexOperationsStatus,
     ];
 

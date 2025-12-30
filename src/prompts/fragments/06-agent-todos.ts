@@ -15,7 +15,7 @@ function formatTodoItem(item: TodoItem): string {
         skipped: "[-]",
     };
 
-    let line = `${statusMarker[item.status]} ${item.title}`;
+    let line = `${statusMarker[item.status]} ${item.title} (id: ${item.id})`;
 
     if (item.status === "skipped" && item.skipReason) {
         line += ` (skipped: ${item.skipReason})`;

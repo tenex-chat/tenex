@@ -170,25 +170,6 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                 );
             }
 
-            // Publish status
-            if (context.agentPublisher && context.triggeringEvent) {
-                try {
-                    const conversation = context.getConversation();
-                    if (conversation?.history?.[0]) {
-                        await context.agentPublisher.conversation(
-                            { content: `🔧 Created dynamic tool: ${name}` },
-                            {
-                                triggeringEvent: context.triggeringEvent,
-                                rootEvent: conversation.history[0],
-                                conversationId: context.conversationId,
-                            }
-                        );
-                    }
-                } catch (error) {
-                    console.warn("Failed to publish status:", error);
-                }
-            }
-
             return {
                 success: true,
                 toolName: name,

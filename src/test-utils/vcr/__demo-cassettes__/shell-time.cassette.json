@@ -190,17 +190,6 @@
           },
           {
             "type": "function",
-            "name": "restart_tenex_backend",
-            "description": "Restart the TENEX backend process.\n\nThis tool will:\n1. Find and gracefully stop any currently running TENEX backend processes\n2. Start a new TENEX backend process in the background\n3. Log output to /tmp/tenex-backend.log\n\nThe tool uses robust process management:\n- Uses pgrep for reliable process detection\n- Sends SIGTERM for graceful shutdown\n- Falls back to SIGKILL if processes don't terminate\n- Spawns new process using child_process.spawn for reliability\n- Detaches the new process so it continues after tool completion\n\nUse this tool to quickly apply bug fixes during alpha testing.",
-            "inputSchema": {
-              "$schema": "http://json-schema.org/draft-07/schema#",
-              "type": "object",
-              "properties": {},
-              "additionalProperties": false
-            }
-          },
-          {
-            "type": "function",
             "name": "ask",
             "description": "Ask a question to the project owner and wait for their response. Supports open-ended questions (no suggestions), yes/no questions (suggestions=['Yes', 'No']), or multiple choice questions (custom suggestions list). Use criteria: ONLY use this tool when you need clarification or help FROM A HUMAN, do not use this to ask questions to other agents.",
             "inputSchema": {

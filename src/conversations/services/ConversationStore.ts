@@ -34,13 +34,6 @@ export class ConversationStore {
     /**
      * Check if a conversation exists
      */
-    exists(id: string): boolean {
-        return this.conversations.has(id);
-    }
-
-    /**
-     * Check if a conversation exists
-     */
     has(id: string): boolean {
         return this.conversations.has(id);
     }

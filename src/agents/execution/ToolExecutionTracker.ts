@@ -63,6 +63,16 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
 /**
+ * Tools that publish delegation/ask events and need delayed tool use event publishing.
+ * These tools return a StopExecutionSignal with pendingDelegations containing event IDs.
+ */
+const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_external"];
+
+function isDelegationTool(toolName: string): boolean {
+    return DELEGATION_TOOLS.includes(toolName);
+}
+
+/**
  * Represents a tracked tool execution
  */
 interface TrackedExecution {
@@ -70,7 +80,7 @@ interface TrackedExecution {
     toolCallId: string;
     /** Name of the tool being executed */
     toolName: string;
-    /** Nostr event ID published when tool started */
+    /** Nostr event ID published when tool started (empty string for delegation tools with delayed publishing) */
     toolEventId: string;
     /** Input arguments passed to the tool */
     input: unknown;
@@ -80,6 +90,12 @@ interface TrackedExecution {
     error?: boolean;
     /** Whether the tool has completed execution */
     completed: boolean;
+    /** Human-readable content for the tool event (stored for delayed publishing) */
+    humanContent?: string;
+    /** Event context for publishing (stored for delayed publishing) */
+    eventContext?: EventContext;
+    /** Agent publisher instance (stored for delayed publishing) */
+    agentPublisher?: AgentPublisher;
 }
 
 /**
@@ -150,15 +166,18 @@ export class ToolExecutionTracker {
      *
      * This method is called when the LLM decides to execute a tool. It:
      * 1. Generates human-readable content for the tool execution
-     * 2. Publishes a Nostr event announcing the tool execution
+     * 2. Publishes a Nostr event announcing the tool execution (unless delegation tool)
      * 3. Stores the execution state for later correlation with results
      *
+     * For delegation tools (delegate, delegate_followup, ask, delegate_external),
+     * publishing is delayed until completeExecution so the delegation event IDs can be included.
+     *
      * @param options - Configuration for tracking the execution
-     * @returns Promise that resolves with the published Nostr event
+     * @returns Promise that resolves with the published Nostr event, or null for delegation tools
      *
      * @throws Will throw if Nostr event publishing fails
      */
-    async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent> {
+    async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent | null> {
         const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
@@ -186,16 +205,31 @@ export class ToolExecutionTracker {
         const humanContent = this.getHumanReadableContent(toolName, args, toolsObject);
 
         // Store the execution state BEFORE async operations to prevent race conditions
-        // Use a placeholder event ID that will be updated after publishing
         const execution: TrackedExecution = {
             toolCallId,
             toolName,
-            toolEventId: "", // Will be updated after publish
+            toolEventId: "", // Will be updated after publish (empty for delayed delegation tools)
             input: args,
             completed: false,
         };
 
         this.executions.set(toolCallId, execution);
+
+        // For delegation tools, delay publishing until completion so we have the delegation event IDs
+        if (isDelegationTool(toolName)) {
+            // Store context for delayed publishing in completeExecution
+            execution.humanContent = humanContent;
+            execution.eventContext = eventContext;
+            execution.agentPublisher = agentPublisher;
+
+            logger.debug("[ToolExecutionTracker] Delegation tool tracked (delayed publishing)", {
+                toolCallId,
+                toolName,
+                totalTracked: this.executions.size,
+            });
+
+            return null;
+        }
 
         // Publish the tool execution event to Nostr (async operation)
         const toolEvent = await agentPublisher.toolUse(
@@ -277,6 +311,37 @@ export class ToolExecutionTracker {
         execution.output = result;
         execution.error = error;
         execution.completed = true;
+
+        // For delegation tools with delayed publishing, publish the tool use event now
+        // with references to the delegation event IDs
+        if (execution.toolEventId === "" && execution.agentPublisher && execution.eventContext) {
+            // Extract event IDs from result.pendingDelegations
+            const pendingDelegations = (
+                result as { pendingDelegations?: Array<{ eventId: string }> }
+            )?.pendingDelegations;
+            const referencedEventIds =
+                pendingDelegations?.map((d) => d.eventId).filter((id): id is string => !!id) ?? [];
+
+            // Publish the delayed tool use event with references
+            const toolEvent = await execution.agentPublisher.toolUse(
+                {
+                    toolName: execution.toolName,
+                    content: execution.humanContent || `Executed ${execution.toolName}`,
+                    args: execution.input,
+                    referencedEventIds,
+                },
+                execution.eventContext
+            );
+
+            execution.toolEventId = toolEvent.id;
+
+            logger.debug("[ToolExecutionTracker] Delegation tool event published with references", {
+                toolCallId,
+                toolName: execution.toolName,
+                toolEventId: toolEvent.id,
+                referencedEventIds,
+            });
+        }
 
         // Add telemetry for tool completion
         const activeSpan = trace.getActiveSpan();

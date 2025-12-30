@@ -15,6 +15,8 @@ export interface DelegationCompletionResult {
     agentSlug?: string;
     /** The conversation ID where the delegation was made */
     conversationId?: string;
+    /** Number of pending delegations remaining */
+    pendingCount?: number;
 }
 
 /**
@@ -100,7 +102,12 @@ export async function handleDelegationCompletion(
             pendingCount: state.pendingDelegations.length,
         });
 
-        return { recorded: true, agentSlug, conversationId: state.conversationId };
+        return {
+            recorded: true,
+            agentSlug,
+            conversationId: state.conversationId,
+            pendingCount: state.pendingDelegations.length,
+        };
     } catch (error) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

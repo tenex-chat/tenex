@@ -233,7 +233,7 @@ export class Daemon {
 
         // Filter out agent events without p-tags (but allow root events)
         // Root events are conversation starters and don't need p-tags
-        const isRootEvent = !AgentEventDecoder.getConversationRoot(event);
+        const isRootEvent = !AgentEventDecoder.getReplyTarget(event);
         if (
             DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
             !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects) &&

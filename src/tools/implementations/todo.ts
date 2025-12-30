@@ -77,7 +77,7 @@ function updateTodoStatusInConversation(
     conversation: Conversation,
     agentPubkey: string,
     updates: Array<{ id: string; status: TodoStatus; skipReason?: string }>
-): { updated: TodoItem[]; notFound: string[]; errors: string[] } {
+): { updated: TodoItem[]; notFound: string[]; errors: string[]; debug?: { conversationId: string; agentPubkey: string; existingTodoIds: string[] } } {
     const todos = ensureTodoListExistsAndGet(conversation, agentPubkey);
 
     const updated: TodoItem[] = [];
@@ -102,6 +102,20 @@ function updateTodoStatusInConversation(
         todo.skipReason = update.skipReason;
         todo.updatedAt = now;
         updated.push(todo);
+    }
+
+    // Include debug info when there are notFound items to help diagnose issues
+    if (notFound.length > 0) {
+        return {
+            updated,
+            notFound,
+            errors,
+            debug: {
+                conversationId: conversation.id,
+                agentPubkey,
+                existingTodoIds: todos.map(t => t.id),
+            },
+        };
     }
 
     return { updated, notFound, errors };
@@ -132,6 +146,10 @@ interface TodoAddOutput {
     added: Array<{ id: string; title: string; position: number }>;
     duplicates: string[];
     totalItems: number;
+    debug: {
+        conversationId: string;
+        agentPubkey: string;
+    };
 }
 
 async function executeTodoAdd(
@@ -145,6 +163,10 @@ async function executeTodoAdd(
             added: [],
             duplicates: [],
             totalItems: 0,
+            debug: {
+                conversationId: "no-conversation",
+                agentPubkey: context.agent.pubkey,
+            },
         };
     }
 
@@ -166,6 +188,10 @@ async function executeTodoAdd(
         added: result.added.map((t) => ({ id: t.id, title: t.title, position: t.position })),
         duplicates: result.duplicates,
         totalItems: todos.length,
+        debug: {
+            conversationId: conversation.id,
+            agentPubkey: context.agent.pubkey,
+        },
     };
 }
 
@@ -222,6 +248,11 @@ interface TodoUpdateOutput {
     notFound: string[];
     errors: string[];
     pendingCount: number;
+    debug?: {
+        conversationId: string;
+        agentPubkey: string;
+        existingTodoIds: string[];
+    };
 }
 
 async function executeTodoUpdate(
@@ -258,6 +289,7 @@ async function executeTodoUpdate(
         notFound: result.notFound,
         errors: result.errors,
         pendingCount,
+        debug: result.debug,
     };
 }
 

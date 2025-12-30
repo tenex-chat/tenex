@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { RALRegistry } from "@/services/ral";
+import { getNDK } from "@/nostr";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -24,36 +24,21 @@ async function executeDelegateFollowup(
 ): Promise<DelegateFollowupOutput> {
   const { delegation_event_id, message } = input;
 
-  // Find the delegation by event ID in RAL state
-  const registry = RALRegistry.getInstance();
+  // Fetch the original delegation event to get the recipient p-tag
+  const ndk = getNDK();
+  const delegationEvent = await ndk.fetchEvent(delegation_event_id);
 
-  // Search all active RALs for this agent+conversation
-  const activeRALs = registry.getActiveRALs(context.agent.pubkey, context.conversationId);
-
-  let previousDelegation: { recipientPubkey: string; recipientSlug?: string; responseEventId?: string } | undefined;
-
-  for (const ral of activeRALs) {
-    // Check completed delegations
-    const completed = ral.completedDelegations.find(d => d.eventId === delegation_event_id);
-    if (completed) {
-      previousDelegation = completed;
-      break;
-    }
-
-    // Also check pending delegations (for following up before completion)
-    const pending = ral.pendingDelegations.find(d => d.eventId === delegation_event_id);
-    if (pending) {
-      previousDelegation = {
-        recipientPubkey: pending.recipientPubkey,
-        recipientSlug: pending.recipientSlug,
-      };
-      break;
-    }
+  if (!delegationEvent) {
+    throw new Error(
+      `Could not fetch delegation event ${delegation_event_id}. Check the delegationEventIds from your delegate call.`
+    );
   }
 
-  if (!previousDelegation) {
+  // Get the recipient from the p-tag of the delegation event
+  const recipientPubkey = delegationEvent.tagValue("p");
+  if (!recipientPubkey) {
     throw new Error(
-      `No delegation found with event ID ${delegation_event_id}. Check the delegationEventIds from your delegate call.`
+      `Delegation event ${delegation_event_id} has no p-tag. Cannot determine recipient.`
     );
   }
 
@@ -64,22 +49,14 @@ async function executeDelegateFollowup(
   logger.info("[delegate_followup] Publishing follow-up", {
     fromAgent: context.agent.slug,
     delegationEventId: delegation_event_id,
-    recipientPubkey: previousDelegation.recipientPubkey.substring(0, 8),
+    recipientPubkey: recipientPubkey.substring(0, 8),
   });
 
-  const eventId = await context.agentPublisher.delegateFollowup(
-    {
-      recipient: previousDelegation.recipientPubkey,
-      content: message,
-      delegationEventId: delegation_event_id,
-      replyToEventId: previousDelegation.responseEventId,
-    },
-    {
-      triggeringEvent: context.triggeringEvent,
-      rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
-      conversationId: context.conversationId,
-    }
-  );
+  const eventId = await context.agentPublisher.delegateFollowup({
+    recipient: recipientPubkey,
+    content: message,
+    delegationEventId: delegation_event_id,
+  });
 
   return {
     __stopExecution: true,
@@ -87,9 +64,7 @@ async function executeDelegateFollowup(
       {
         type: "followup" as const,
         eventId,
-        recipientPubkey: previousDelegation.recipientPubkey,
-        recipientSlug: previousDelegation.recipientSlug,
-        prompt: message,
+        recipientPubkey,
       },
     ],
   };

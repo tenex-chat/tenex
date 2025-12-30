@@ -1,7 +1,7 @@
 # Modules
 * **Entrypoints & CLI (`src/tenex.ts`, `src/cli.ts`, `src/index.ts`)**: Wire telemetry, Commander commands, and binary exports. Dependency-light, delegate to commands/*.
 * **Command Layer (`src/commands/`)**: User-facing CLI subcommands (agent/, daemon/, setup/, debug/). Orchestrate higher-level modules without business logic.
-* **Agents Runtime (`src/agents/`)**: Registry, storage, execution (AgentExecutor, AgentSupervisor), utilities. Handles prompt construction, tool calls, session lifecycle.
+* **Agents Runtime (`src/agents/`)**: Registry, storage, execution (AgentExecutor), utilities. Handles prompt construction, tool calls, session lifecycle.
 * **Conversations (`src/conversations/`)**: Persistence (FileSystemAdapter), services (ConversationCoordinator, ThreadService), formatters, processors. Single source of truth for context.
 * **Event Handling (`src/event-handler/`)**: Orchestrates workflows from Nostr events (AgentRouter, reply handlers). Depends on agents, conversations, execution.
 * **Nostr Integration (`src/nostr/`)**: NDK client, AgentPublisher, encoders/decoders, kinds. Encapsulates all Nostr interactions.
@@ -44,7 +44,7 @@
 - Detailed service catalog in MODULE_INVENTORY.md table.
 
 # High-complexity modules
-**Agents Runtime (`src/agents/`)**: Core of multi-agent system. AgentRegistry manages definitions from Nostr/local. Execution pipeline (AgentExecutor, AgentSupervisor) builds context from conversations, compiles prompts via prompts/, selects tools via registry, executes via LLM services, handles delegation loops via DelegationService. Tracks sessions, enforces phases (PLAN, EXECUTE, etc.). Integrates telemetry for spans. Critical for routing and parallel execution.
+**Agents Runtime (`src/agents/`)**: Core of multi-agent system. AgentRegistry manages definitions from Nostr/local. Execution pipeline (AgentExecutor) builds context from conversations, compiles prompts via prompts/, selects tools via registry, executes via LLM services, handles delegation loops via DelegationService. Tracks sessions, enforces phases (PLAN, EXECUTE, etc.). Integrates telemetry for spans. Critical for routing and parallel execution.
 
 **Services Layer (`src/services/`)**: 15+ services managing cross-cutting concerns. ConfigService centralizes all config paths (~/.tenex/), LLM init. DelegationService publishes/wait for responses on Nostr. RAG services (LanceDB collections, embedding via EmbeddingProvider). SchedulerService for cron jobs/nudges. DynamicToolService loads user TS tools. NDKAgentDiscovery caches external agents. OperationsStatusPublisher broadcasts progress. High coordination density; each service is stateless where possible, persists via conversations/ or dedicated stores.
 

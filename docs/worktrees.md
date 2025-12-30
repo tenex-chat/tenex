@@ -40,8 +40,7 @@ Branch names with slashes are sanitized for directory names:
 - Metadata stored in `~/tenex/{project}/worktrees.json`
 
 **Cleanup:**
-- AgentSupervisor prompts creator when task completes
-- Options: MERGE, DELETE, or KEEP
+- Manual via git commands or merge tools
 - Metadata tracks merged/deleted state
 
 ### Architecture
@@ -106,4 +105,3 @@ See:
 - `src/utils/git/gitignore.ts` - Automatic .gitignore management
 - `src/tools/implementations/delegate_phase.ts` - Worktree creation
 - `src/agents/execution/ExecutionContextFactory.ts` - Working directory resolution
-- `src/agents/execution/AgentSupervisor.ts` - Cleanup validation

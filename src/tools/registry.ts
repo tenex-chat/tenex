@@ -59,14 +59,39 @@ import { createBugListTool } from "./implementations/bug_list";
 import { createBugReportAddTool } from "./implementations/bug_report_add";
 import { createBugReportCreateTool } from "./implementations/bug_report_create";
 
-// Backend management tools
-import { createRestartTenexBackendTool } from "./implementations/restart_tenex_backend";
-
 // Pairing tools
 import { createStopPairingTool } from "./implementations/stop_pairing";
 
 // Todo tools
 import { createTodoAddTool, createTodoUpdateTool } from "./implementations/todo";
+
+/**
+ * Metadata about tools that doesn't require instantiation.
+ * Tools declare hasSideEffects: false if they are read-only operations.
+ * Default (not listed) = true (has side effects).
+ */
+const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
+    // Read-only tools - these don't modify any state
+    read_path: { hasSideEffects: false },
+    codebase_search: { hasSideEffects: false },
+    conversation_get: { hasSideEffects: false },
+    conversation_list: { hasSideEffects: false },
+    search_conversations: { hasSideEffects: false },
+    lesson_get: { hasSideEffects: false },
+    agents_list: { hasSideEffects: false },
+    agents_read: { hasSideEffects: false },
+    agents_discover: { hasSideEffects: false },
+    project_list: { hasSideEffects: false },
+    reports_list: { hasSideEffects: false },
+    report_read: { hasSideEffects: false },
+    schedule_tasks_list: { hasSideEffects: false },
+    rag_list_collections: { hasSideEffects: false },
+    rag_query: { hasSideEffects: false },
+    rag_subscription_list: { hasSideEffects: false },
+    rag_subscription_get: { hasSideEffects: false },
+    bug_list: { hasSideEffects: false },
+    discover_capabilities: { hasSideEffects: false },
+};
 
 /**
  * Registry of tool factories
@@ -155,9 +180,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     bug_list: createBugListTool,
     bug_report_create: createBugReportCreateTool,
     bug_report_add: createBugReportAddTool,
-
-    // Backend management tools
-    restart_tenex_backend: createRestartTenexBackendTool,
 
     // Pairing tools
     stop_pairing: createStopPairingTool,
@@ -372,4 +394,21 @@ export function getAllAvailableToolNames(): string[] {
     const staticTools = getAllToolNames();
     const dynamicTools = Array.from(dynamicToolService.getDynamicTools().keys());
     return [...staticTools, ...dynamicTools];
+}
+
+/**
+ * Check if a tool has side effects.
+ * Returns true (has side effects) by default for unknown tools (safe default).
+ * @param toolName - The tool name to check
+ * @returns true if the tool has side effects, false if it's read-only
+ */
+export function toolHasSideEffects(toolName: string): boolean {
+    // Check static tools
+    if (toolName in toolMetadata) {
+        return toolMetadata[toolName as ToolName]?.hasSideEffects !== false;
+    }
+
+    // Dynamic tools and MCP tools are assumed to have side effects by default
+    // This is the safe default - assume side effects unless explicitly declared otherwise
+    return true;
 }

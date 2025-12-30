@@ -20,11 +20,6 @@ export enum NostrTag {
     PUBKEY = "p",
     REPLACEABLE = "a",
 
-    // Extended tags (uppercase convention for root references)
-    ROOT_EVENT = "E",
-    ROOT_KIND = "K",
-    ROOT_PUBKEY = "P",
-
     // Application-specific tags
     MODE = "mode",
     PARTICIPANT = "participant",
@@ -32,7 +27,6 @@ export enum NostrTag {
     PHASE_INSTRUCTIONS = "phase-instructions",
     REASON = "reason",
     TOOL = "tool",
-    NOT_CHOSEN = "not-chosen", // Legacy - to be removed
 }
 
 /**

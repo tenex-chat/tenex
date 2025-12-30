@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
-import type { ModelMessage } from "ai";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 
 describe("RALRegistry", () => {
@@ -40,7 +39,6 @@ describe("RALRegistry", () => {
       expect(state?.agentPubkey).toBe(agentPubkey);
       expect(state?.conversationId).toBe(conversationId);
       expect(state?.isStreaming).toBe(false);
-      expect(state?.messages).toEqual([]);
       expect(state?.pendingDelegations).toEqual([]);
       expect(state?.completedDelegations).toEqual([]);
       expect(state?.queuedInjections).toEqual([]);
@@ -158,14 +156,9 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("saveState", () => {
-    it("should save messages and pending delegations", () => {
+  describe("setPendingDelegations", () => {
+    it("should set pending delegations", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const messages: ModelMessage[] = [
-        { role: "user", content: "Hello" },
-        { role: "assistant", content: "Hi there" },
-      ];
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -181,10 +174,9 @@ describe("RALRegistry", () => {
         },
       ];
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, messages, pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.messages).toEqual(messages);
       expect(state?.pendingDelegations).toEqual(pendingDelegations);
     });
 
@@ -204,7 +196,7 @@ describe("RALRegistry", () => {
         },
       ];
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       expect(registry.getRalKeyForDelegation("del-event-1")).toBeDefined();
       expect(registry.getRalKeyForDelegation("del-event-2")).toBeDefined();
@@ -215,7 +207,7 @@ describe("RALRegistry", () => {
       const delegations: PendingDelegation[] = [];
 
       expect(() => {
-        registry.saveState("nonexistent", conversationId, 1, messages, delegations);
+        registry.setPendingDelegations("nonexistent", conversationId, 1, delegations);
       }).not.toThrow();
     });
 
@@ -228,7 +220,7 @@ describe("RALRegistry", () => {
       const start = Date.now();
       while (Date.now() - start < 2) {}
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], []);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
       const updatedState = registry.getState(agentPubkey, conversationId);
 
       expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
@@ -251,7 +243,7 @@ describe("RALRegistry", () => {
         },
       ];
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], delegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
 
       expect(registry.getRalKeyForDelegation("del-123")).toBeDefined();
     });
@@ -274,7 +266,7 @@ describe("RALRegistry", () => {
         },
       ];
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const completion: CompletedDelegation = {
         eventId: "del-event-1",
@@ -315,7 +307,7 @@ describe("RALRegistry", () => {
           prompt: "Task",
         },
       ];
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
@@ -357,19 +349,19 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("getAndPersistInjections", () => {
+  describe("getAndConsumeInjections", () => {
     it("should return empty array for non-existent RAL", () => {
-      const injections = registry.getAndPersistInjections("nonexistent", conversationId, 1);
+      const injections = registry.getAndConsumeInjections("nonexistent", conversationId, 1);
       expect(injections).toEqual([]);
     });
 
-    it("should return and persist queued injections to messages", () => {
+    it("should return and consume queued injections", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "User message");
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "System message");
 
-      const injections = registry.getAndPersistInjections(agentPubkey, conversationId, ralNumber);
+      const injections = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
 
       expect(injections).toHaveLength(2);
       expect(injections[0].role).toBe("user");
@@ -379,7 +371,6 @@ describe("RALRegistry", () => {
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.queuedInjections).toEqual([]);
-      expect(state?.messages).toHaveLength(2);
     });
 
     it("should return copy of injections, not original array", () => {
@@ -387,8 +378,8 @@ describe("RALRegistry", () => {
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "Test");
 
-      const injections1 = registry.getAndPersistInjections(agentPubkey, conversationId, ralNumber);
-      const injections2 = registry.getAndPersistInjections(agentPubkey, conversationId, ralNumber);
+      const injections1 = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
+      const injections2 = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
 
       expect(injections1).toHaveLength(1);
       expect(injections2).toEqual([]);
@@ -494,7 +485,7 @@ describe("RALRegistry", () => {
         },
       ];
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       expect(registry.getRalKeyForDelegation("del-pending-1")).toBeDefined();
 
@@ -521,71 +512,6 @@ describe("RALRegistry", () => {
       expect(() => {
         registry.clear("nonexistent", conversationId);
       }).not.toThrow();
-    });
-  });
-
-  describe("getStateSummary", () => {
-    it("should return 'No active execution' for non-existent RAL", () => {
-      const summary = registry.getStateSummary("nonexistent", conversationId, 1);
-      expect(summary).toBe("No active execution");
-    });
-
-    it("should return summary when between tool calls", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const messages: ModelMessage[] = [
-        { role: "user", content: "What is the weather?" },
-        { role: "assistant", content: "Let me check that for you." },
-      ];
-
-      registry.saveState(agentPubkey, conversationId, ralNumber, messages, []);
-
-      const summary = registry.getStateSummary(agentPubkey, conversationId, ralNumber);
-      expect(summary).toContain("Between tool calls");
-      expect(summary).toContain("user:");
-      expect(summary).toContain("assistant:");
-    });
-
-    it("should return summary when running a tool", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "read_path");
-
-      const summary = registry.getStateSummary(agentPubkey, conversationId, ralNumber);
-      expect(summary).toContain("Running tool: read_path");
-    });
-
-    it("should include recent messages in summary", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const messages: ModelMessage[] = [
-        { role: "user", content: "Message 1" },
-        { role: "assistant", content: "Message 2" },
-        { role: "user", content: "Message 3" },
-        { role: "assistant", content: "Message 4" },
-        { role: "user", content: "Message 5" },
-      ];
-
-      registry.saveState(agentPubkey, conversationId, ralNumber, messages, []);
-
-      const summary = registry.getStateSummary(agentPubkey, conversationId, ralNumber);
-      // Should include last 4 messages
-      expect(summary).not.toContain("Message 1");
-      expect(summary).toContain("Message 2");
-      expect(summary).toContain("Message 5");
-    });
-
-    it("should truncate long message content", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const longContent = "a".repeat(200);
-      const messages: ModelMessage[] = [{ role: "user", content: longContent }];
-
-      registry.saveState(agentPubkey, conversationId, ralNumber, messages, []);
-
-      const summary = registry.getStateSummary(agentPubkey, conversationId, ralNumber);
-      expect(summary.length).toBeLessThan(longContent.length + 100);
-      expect(summary).toContain("...");
     });
   });
 
@@ -634,7 +560,7 @@ describe("RALRegistry", () => {
           prompt: "Task for conv1",
         },
       ];
-      registry.saveState(agentPubkey, conversationId, ralNumber1, [], delegations1);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber1, delegations1);
 
       const delegations2: PendingDelegation[] = [
         {
@@ -643,7 +569,7 @@ describe("RALRegistry", () => {
           prompt: "Task for conv2",
         },
       ];
-      registry.saveState(agentPubkey, conversationId2, ralNumber2, [], delegations2);
+      registry.setPendingDelegations(agentPubkey, conversationId2, ralNumber2, delegations2);
 
       // Complete delegation for conversation 1
       const completion: CompletedDelegation = {
@@ -675,31 +601,6 @@ describe("RALRegistry", () => {
       const activeRALs = registry.getActiveRALs(agentPubkey, conversationId);
       expect(activeRALs).toHaveLength(3);
       expect(activeRALs.map(r => r.ralNumber).sort()).toEqual([1, 2, 3]);
-    });
-
-    it("should get summaries of other RALs with unique message history", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
-
-      // Save messages to RAL 1 with unique content starting at index 2 (simulating shared history + triggering event)
-      const messages: ModelMessage[] = [
-        { role: "system", content: "You are a helpful assistant" },  // Shared
-        { role: "user", content: "Previous question" },              // Shared history
-        { role: "user", content: "What is 2+2?" },                   // Triggering event (unique)
-        { role: "assistant", content: "4" },                          // Response (unique)
-      ];
-      // Triggering event is at index 2
-      registry.saveMessages(agentPubkey, conversationId, ralNumber1, messages, 2);
-      registry.setStreaming(agentPubkey, conversationId, ralNumber1, true);
-
-      const summaries = registry.getOtherRALSummaries(agentPubkey, conversationId, ralNumber2);
-      expect(summaries).toHaveLength(1);
-      expect(summaries[0].ralNumber).toBe(ralNumber1);
-      // Should only include unique messages (from index 2 onward)
-      expect(summaries[0].uniqueMessages).toHaveLength(2);
-      expect(summaries[0].uniqueMessages[0].content).toBe("What is 2+2?");
-      expect(summaries[0].uniqueMessages[1].content).toBe("4");
-      expect(summaries[0].isStreaming).toBe(true);
     });
 
     it("should inject messages to specific RALs", () => {
@@ -734,7 +635,7 @@ describe("RALRegistry", () => {
       const delegations: PendingDelegation[] = [
         { eventId: "del-1", recipientPubkey: "recipient", prompt: "Task" },
       ];
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], delegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
 
       const result = registry.abortRAL(agentPubkey, conversationId, ralNumber);
       expect(result.success).toBe(false);
@@ -743,31 +644,12 @@ describe("RALRegistry", () => {
   });
 
   describe("edge cases", () => {
-    it("should handle empty message arrays", () => {
+    it("should handle empty pending delegations array", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], []);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
 
       const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.messages).toEqual([]);
-    });
-
-    it("should handle messages with complex content", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      const messages: ModelMessage[] = [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Hello" },
-            { type: "text", text: "World" },
-          ],
-        },
-      ];
-
-      registry.saveState(agentPubkey, conversationId, ralNumber, messages, []);
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.messages).toEqual(messages);
+      expect(state?.pendingDelegations).toEqual([]);
     });
 
     it("should handle pending delegation without optional fields", () => {
@@ -779,7 +661,7 @@ describe("RALRegistry", () => {
         prompt: "Task",
       };
 
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], [delegation]);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.pendingDelegations[0]).toEqual(delegation);
@@ -795,7 +677,7 @@ describe("RALRegistry", () => {
           prompt: "Task",
         },
       ];
-      registry.saveState(agentPubkey, conversationId, ralNumber, [], pendingDelegations);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const completion: CompletedDelegation = {
         eventId: "del-123",

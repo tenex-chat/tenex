@@ -3,7 +3,6 @@
 export { AgentEventDecoder } from "./AgentEventDecoder";
 export type {
     CompletionIntent,
-    ConversationIntent,
     DelegationIntent,
     EventContext,
 } from "./AgentEventEncoder";

@@ -15,7 +15,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 
 /**
- * MockNostrEvent class that implements the serialize method required by FileSystemAdapter
+ * MockNostrEvent class that implements the serialize method for NDKEvent
  */
 export class MockNostrEvent implements Partial<NDKEvent> {
     id: string;

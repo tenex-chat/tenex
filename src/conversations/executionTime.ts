@@ -40,6 +40,39 @@ export function stopExecutionTime(conversation: Conversation): number {
 }
 
 /**
+ * Get total execution time in seconds including any active session
+ */
+export function getTotalExecutionTimeSeconds(conversation: Conversation): number {
+    if (!conversation.executionTime) {
+        return 0;
+    }
+
+    let total = conversation.executionTime.totalSeconds;
+
+    // Add current active session time if any
+    if (conversation.executionTime.isActive && conversation.executionTime.currentSessionStart) {
+        const activeSeconds = Math.round((Date.now() - conversation.executionTime.currentSessionStart) / 1000);
+        total += activeSeconds;
+    }
+
+    return total;
+}
+
+/**
+ * Check if execution is currently active
+ */
+export function isExecutionActive(conversation: Conversation): boolean {
+    return conversation.executionTime?.isActive ?? false;
+}
+
+/**
+ * Initialize execution time structure (alias for ensureExecutionTimeInitialized)
+ */
+export function initializeExecutionTime(conversation: Conversation): void {
+    ensureExecutionTimeInitialized(conversation);
+}
+
+/**
  * Ensure conversation has execution time initialized (for loaded conversations)
  */
 export function ensureExecutionTimeInitialized(conversation: Conversation): void {
