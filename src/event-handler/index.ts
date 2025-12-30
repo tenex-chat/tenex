@@ -220,6 +220,9 @@ export class EventHandler {
             // Get the agent registry from ProjectContext (single source of truth)
             const agentRegistry = projectContext.agentRegistry;
 
+            // Track if any update was made
+            let configUpdated = false;
+
             // Check for model configuration change
             const newModel = event.tagValue("model");
             if (newModel) {
@@ -229,6 +232,7 @@ export class EventHandler {
                 if (updated) {
                     // Reload agent to pick up changes
                     await agentRegistry.reloadAgent(agentPubkey);
+                    configUpdated = true;
                 } else {
                     logger.warn("Failed to update model configuration", {
                         agentName: agent.slug,
@@ -238,32 +242,30 @@ export class EventHandler {
                 }
             }
 
-            // Check for tools configuration change
+            // Update tools configuration
             // Extract all tool tags - these represent the exhaustive list of tools the agent should have
+            // Empty list means agent should have no tools (beyond core/delegate tools added during normalization)
             const toolTags = TagExtractor.getToolTags(event);
-            if (toolTags.length > 0) {
-                // Extract tool names from tags
-                const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
+            const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
 
-                // Update in storage then reload into registry
-                const updated = await agentStorage.updateAgentTools(agentPubkey, newToolNames);
+            const toolsUpdated = await agentStorage.updateAgentTools(agentPubkey, newToolNames);
 
-                if (updated) {
-                    // Reload agent to pick up changes
-                    await agentRegistry.reloadAgent(agentPubkey);
-                } else {
-                    logger.warn("Failed to update tools configuration", {
-                        agent: agent.slug,
-                        reason: "update returned false",
-                    });
-                }
+            if (toolsUpdated) {
+                await agentRegistry.reloadAgent(agentPubkey);
+                configUpdated = true;
+            } else {
+                logger.warn("Failed to update tools configuration", {
+                    agent: agent.slug,
+                    reason: "update returned false",
+                });
             }
 
-            // If neither model nor tools were provided, log a warning
-            if (!newModel && toolTags.length === 0) {
-                logger.warn("AGENT_CONFIG_UPDATE event has neither model nor tool tags", {
-                    eventId: event.id,
-                    agentPubkey,
+            // Immediately publish updated project status if config was changed
+            if (configUpdated && projectContext.statusPublisher) {
+                await projectContext.statusPublisher.publishImmediately();
+                logger.info("Published updated project status after agent config change", {
+                    agentSlug: agent.slug,
+                    agentPubkey: agentPubkey.substring(0, 8),
                 });
             }
         } catch (error) {

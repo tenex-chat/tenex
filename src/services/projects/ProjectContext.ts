@@ -3,6 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { PairingManager } from "@/services/pairing";
+import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -64,6 +65,11 @@ export class ProjectContext {
      * PairingManager for real-time delegation supervision (optional, initialized when needed)
      */
     public pairingManager?: PairingManager;
+
+    /**
+     * Status publisher for immediately publishing project status updates
+     */
+    public statusPublisher?: ProjectStatusService;
 
     constructor(project: NDKProject, agentRegistry: AgentRegistry) {
         this.project = project;
