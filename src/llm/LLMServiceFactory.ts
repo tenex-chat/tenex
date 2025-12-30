@@ -80,6 +80,10 @@ export class LLMServiceFactory {
                             name,
                             createOpenRouter({
                                 apiKey: config.apiKey,
+                                headers: {
+                                    "X-Title": "TENEX",
+                                    "HTTP-Referer": "https://tenex.chat/",
+                                },
                             })
                         );
                         break;
