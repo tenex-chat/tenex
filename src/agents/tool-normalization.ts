@@ -2,12 +2,7 @@ import { mcpService } from "@/services/mcp/MCPManager";
 import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import {
-    CORE_AGENT_TOOLS,
-    DELEGATE_TOOLS,
-    PHASE_MANAGEMENT_TOOLS,
-    getDelegateToolsForAgent,
-} from "./constants";
+import { CORE_AGENT_TOOLS, DELEGATE_TOOLS, getDelegateToolsForAgent } from "./constants";
 
 /**
  * tool-normalization - Pure functions for processing agent tool lists
@@ -20,8 +15,8 @@ import {
  *
  * ## What it does
  * Takes a raw tool list + agent context → returns final validated tool list:
- * 1. Filter out delegate/phase management tools (managed separately)
- * 2. Add appropriate delegate tools based on agent phases
+ * 1. Filter out delegate tools (managed separately)
+ * 2. Add appropriate delegate tools
  * 3. Add core tools (all agents get these)
  * 4. Validate tool names
  * 5. Resolve MCP tools (check availability)
@@ -37,10 +32,7 @@ import {
  * ## Usage
  * Called during AgentInstance creation in agent-loader.ts:
  * ```typescript
- * const finalTools = processAgentTools(storedAgent.tools, {
- *   slug: storedAgent.slug,
- *   phases: storedAgent.phases
- * });
+ * const finalTools = processAgentTools(storedAgent.tools, storedAgent.slug);
  * ```
  *
  * @see agent-loader for usage in instance creation
@@ -48,22 +40,19 @@ import {
 
 /**
  * Normalize agent tools by applying business rules:
- * 1. Filter out delegate and phase management tools (they're managed separately)
- * 2. Add appropriate delegate tools based on phases
+ * 1. Filter out delegate tools (they're managed separately)
+ * 2. Add appropriate delegate tools
  * 3. Ensure all core tools are included
  */
-export function normalizeAgentTools(
-    requestedTools: string[],
-    agent: { phases?: Record<string, string> }
-): string[] {
-    // Filter out delegation and phase management tools
+export function normalizeAgentTools(requestedTools: string[]): string[] {
+    // Filter out delegation tools
     const toolNames = requestedTools.filter((tool) => {
         const typedTool = tool as ToolName;
-        return !DELEGATE_TOOLS.includes(typedTool) && !PHASE_MANAGEMENT_TOOLS.includes(typedTool);
+        return !DELEGATE_TOOLS.includes(typedTool);
     });
 
-    // Add delegation tools based on phases (pass requestedTools to allow phase tool bootstrapping)
-    const delegateTools = getDelegateToolsForAgent(agent, requestedTools);
+    // Add delegation tools
+    const delegateTools = getDelegateToolsForAgent();
     toolNames.push(...delegateTools);
 
     // Ensure core tools are included
@@ -145,18 +134,15 @@ export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string): s
  * 3. Resolve MCP tools
  * Returns final list of valid, available tool names
  */
-export function processAgentTools(
-    requestedTools: string[],
-    agent: { slug: string; phases?: Record<string, string> }
-): string[] {
+export function processAgentTools(requestedTools: string[], agentSlug: string): string[] {
     // Step 1: Normalize
-    const normalized = normalizeAgentTools(requestedTools, agent);
+    const normalized = normalizeAgentTools(requestedTools);
 
     // Step 2: Validate and separate
     const { validTools, mcpToolRequests } = validateAndSeparateTools(normalized);
 
     // Step 3: Resolve MCP tools
-    const mcpTools = resolveMCPTools(mcpToolRequests, agent.slug);
+    const mcpTools = resolveMCPTools(mcpToolRequests, agentSlug);
 
     // Combine and return
     return [...validTools, ...mcpTools];

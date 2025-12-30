@@ -59,10 +59,6 @@ export const DELEGATE_TOOLS: ToolName[] = [
     "delegate_followup",
 ] as const;
 
-/**
- * Phase management tools
- */
-export const PHASE_MANAGEMENT_TOOLS: ToolName[] = ["phase_add", "phase_remove"];
 
 /**
  * Context-sensitive tools that are auto-injected based on runtime conditions.
@@ -87,13 +83,10 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
 ];
 
 /**
- * Get the correct delegate tools for an agent based on whether they have phases defined
+ * Get the delegate tools for an agent
  * This is the SINGLE source of truth for delegate tool assignment
  */
-export function getDelegateToolsForAgent(
-    agent: AgentPhaseInfo,
-    requestedTools?: string[]
-): ToolName[] {
+export function getDelegateToolsForAgent(): ToolName[] {
     const tools: ToolName[] = [];
 
     // All agents get ask tool
@@ -101,18 +94,6 @@ export function getDelegateToolsForAgent(
 
     // All agents get the unified delegate tool
     tools.push("delegate");
-
-    // Check if agent has phases defined
-    const hasPhases = agent.phases && Object.keys(agent.phases).length > 0;
-
-    // Check if phase tools were explicitly requested (allows bootstrapping phases)
-    const phaseToolsRequested =
-        requestedTools?.includes("phase_add") || requestedTools?.includes("phase_remove");
-
-    if (hasPhases || phaseToolsRequested) {
-        // Agents with phases (or explicitly requesting phase tools) get phase management tools
-        tools.push("phase_add", "phase_remove");
-    }
 
     // All agents get delegate_external and delegate_followup
     tools.push("delegate_external");

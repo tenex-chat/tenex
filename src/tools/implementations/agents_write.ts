@@ -21,7 +21,7 @@ const agentsWriteSchema = z.object({
         .array(z.string())
         .nullable()
         .describe(
-            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_external, delegate_followup) and phase management tools (phase_add, phase_remove) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
+            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_external, delegate_followup) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
         ),
     phases: z
         .record(z.string(), z.string())

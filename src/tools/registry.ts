@@ -9,7 +9,6 @@ import { dynamicToolService } from "@/services/DynamicToolService";
 import { mcpService } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
 import type { AISdkTool, ToolFactory, ToolName } from "./types";
-import { createAddPhaseTool } from "./implementations/add_phase";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
@@ -30,7 +29,6 @@ import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createProjectListTool } from "./implementations/project_list";
-import { createRemovePhaseTool } from "./implementations/phase_remove";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
 import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
@@ -132,10 +130,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Lesson tools
     lesson_get: createLessonGetTool,
     lesson_learn: createLessonLearnTool,
-
-    // Phase management tools
-    phase_add: createAddPhaseTool,
-    phase_remove: createRemovePhaseTool,
 
     read_path: createReadPathTool,
     write_file: createWriteFileTool,

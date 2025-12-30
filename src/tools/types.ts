@@ -33,8 +33,6 @@ export type ToolName =
     | "report_read"
     | "reports_list"
     | "report_delete"
-    | "phase_add"
-    | "phase_remove"
     | "schedule_task"
     | "schedule_tasks_list"
     | "schedule_task_cancel"
