@@ -8,7 +8,8 @@
  * File location: ~/.tenex/projects/{projectId}/conversations/{conversationId}.json
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFile } from "fs/promises";
 import { join } from "path";
 import type { ModelMessage } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -206,7 +207,7 @@ export class ConversationStore {
     async save(): Promise<void> {
         this.ensureDirectory();
         const filePath = this.getFilePath();
-        writeFileSync(filePath, JSON.stringify(this.state, null, 2));
+        await writeFile(filePath, JSON.stringify(this.state, null, 2));
     }
 
     // RAL Lifecycle
@@ -238,10 +239,10 @@ export class ConversationStore {
         if (!this.isRalActive(agentPubkey, ralNumber)) {
             this.state.activeRal[agentPubkey].push({ id: ralNumber });
 
-            // Update nextRalNumber if this number is higher
+            // Update nextRalNumber if this number is higher (set to ralNumber + 1 to avoid collision)
             const currentNext = this.state.nextRalNumber[agentPubkey] || 0;
             if (ralNumber >= currentNext) {
-                this.state.nextRalNumber[agentPubkey] = ralNumber;
+                this.state.nextRalNumber[agentPubkey] = ralNumber + 1;
             }
         }
     }

@@ -123,7 +123,6 @@ export class ProjectRuntime {
             // Initialize conversation coordinator with metadata path and context
             this.conversationCoordinator = new ConversationCoordinator(
                 this.metadataPath,
-                undefined,
                 this.context
             );
             await this.conversationCoordinator.initialize();

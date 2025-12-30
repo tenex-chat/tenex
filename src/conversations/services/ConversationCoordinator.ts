@@ -22,11 +22,7 @@ export class ConversationCoordinator {
     // Cache of NDKEvents by ID for delegation resumption lookups
     private eventCache: Map<string, NDKEvent> = new Map();
 
-    constructor(
-        projectPath: string,
-        _persistence?: unknown, // Kept for backwards compat, ignored
-        context?: ProjectContext
-    ) {
+    constructor(projectPath: string, context?: ProjectContext) {
         if (!projectPath || projectPath === "undefined") {
             throw new Error(
                 `ConversationCoordinator requires a valid projectPath. Received: ${String(projectPath)}`
