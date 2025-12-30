@@ -373,6 +373,54 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(0);
         });
+
+        it("should preserve 'user' role for targeted agent-to-agent messages", () => {
+            // Agent2 sends a targeted message to Agent1 via p-tag
+            // EventToModelMessage produces role "user" with prefix [@agent2 -> @agent1]
+            store.createRal(AGENT2_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT2_PUBKEY,
+                ral: 1,
+                message: {
+                    role: "user", // Targeted message = role "user"
+                    content:
+                        "[@agent2 -> @agent1] What is your role in this project?",
+                },
+            });
+            store.completeRal(AGENT2_PUBKEY, 1);
+
+            // Agent1 builds messages for its RAL
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            // BUG: Currently returns role "assistant", should be "user"
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toContain("[@agent2 -> @agent1]");
+        });
+
+        it("should preserve 'system' role for broadcast agent messages", () => {
+            // Agent2 broadcasts (no specific target)
+            // EventToModelMessage produces role "system" with prefix [@agent2]
+            store.createRal(AGENT2_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT2_PUBKEY,
+                ral: 1,
+                message: {
+                    role: "system", // Broadcast = role "system"
+                    content: "[@agent2] I have completed my analysis.",
+                },
+            });
+            store.completeRal(AGENT2_PUBKEY, 1);
+
+            // Agent1 builds messages for its RAL
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("system");
+            expect(messages[0].content).toContain("[@agent2]");
+        });
     });
 
     describe("RAL Summary Generation", () => {
