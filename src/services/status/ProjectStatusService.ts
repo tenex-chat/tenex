@@ -69,6 +69,33 @@ export class ProjectStatusService {
     }
 
     /**
+     * Publish a status event immediately.
+     * Use this after agent configuration changes to immediately reflect the new state.
+     */
+    async publishImmediately(): Promise<void> {
+        if (!this.projectContext) {
+            logger.warn("Cannot publish immediately - no project context available");
+            return;
+        }
+
+        // Get project path from context
+        const projectPath = this.projectContext.project.tagValue("d");
+        if (!projectPath) {
+            logger.warn("Cannot publish immediately - no project path available");
+            return;
+        }
+
+        // Get the actual project base path from config
+        const projectBasePath = `${config.getConfig().projectsBase}/${projectPath}`;
+
+        await projectContextStore.run(this.projectContext, async () => {
+            await this.publishStatusEvent(projectBasePath);
+        });
+
+        logger.debug("Published status event immediately after config change");
+    }
+
+    /**
      * Create a status event from the intent.
      * Directly creates the event without depending on AgentPublisher.
      */
@@ -320,6 +347,19 @@ export class ProjectStatusService {
                 }
             }
 
+            // Add all MCP tools (with empty agent sets initially)
+            // Agents will be added to their MCP tools in the loop below
+            try {
+                const mcpTools = mcpService.getCachedTools();
+                for (const toolName of Object.keys(mcpTools)) {
+                    if (toolName && !toolAgentMap.has(toolName)) {
+                        toolAgentMap.set(toolName, new Set());
+                    }
+                }
+            } catch {
+                // MCP tools might not be available yet, that's okay
+            }
+
             // Then build a map of tool name -> set of agent slugs that have access
             for (const [agentSlug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
                 // Get the agent's configured tools
@@ -346,32 +386,16 @@ export class ProjectStatusService {
                     }
                 }
 
-                // Add all MCP tools for this agent
-                try {
-                    const mcpTools = mcpService.getCachedTools();
-                    for (const [toolNameKey] of Object.entries(mcpTools)) {
-                        // Tool name is the key
-
-                        // Skip if somehow there's no tool name (shouldn't happen with object keys)
-                        if (!toolNameKey) {
-                            continue;
-                        }
-
-                        const toolName = toolNameKey;
-
+                // Add MCP tools that this agent has
+                // MCP tools aren't in the initial toolAgentMap (built from static tools),
+                // so we need to add them here based on what's in agentTools
+                for (const toolName of agentTools) {
+                    if (toolName.startsWith("mcp__")) {
                         if (!toolAgentMap.has(toolName)) {
                             toolAgentMap.set(toolName, new Set());
                         }
-                        const toolAgents = toolAgentMap.get(toolName);
-                        if (toolAgents) {
-                            toolAgents.add(agentSlug);
-                        }
+                        toolAgentMap.get(toolName)!.add(agentSlug);
                     }
-                } catch (err) {
-                    // MCP tools might not be available yet, that's okay
-                    logger.warn(
-                        `Could not get MCP tools for status event: ${formatAnyError(err)}`
-                    );
                 }
             }
 

@@ -146,6 +146,7 @@ export class ProjectRuntime {
 
             // Start status publisher
             this.statusPublisher = new ProjectStatusService();
+            this.context.statusPublisher = this.statusPublisher;
             await projectContextStore.run(this.context, async () => {
                 await this.statusPublisher?.startPublishing(
                     this.projectBasePath,
