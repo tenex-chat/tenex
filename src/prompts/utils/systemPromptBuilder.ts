@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -12,7 +12,7 @@ export interface BuildSystemPromptOptions {
     // Required data
     agent: AgentInstance;
     project: NDKProject;
-    conversation: Conversation;
+    conversation: ConversationStore;
 
     /**
      * Project directory (normal git repository root).
@@ -49,7 +49,7 @@ export interface BuildStandalonePromptOptions {
 
     // Optional runtime data
     availableAgents?: AgentInstance[];
-    conversation?: Conversation;
+    conversation?: ConversationStore;
     agentLessons?: Map<string, NDKAgentLesson[]>;
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
@@ -68,7 +68,7 @@ export interface SystemMessage {
 async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
-    conversation?: Conversation,
+    conversation?: ConversationStore,
     agentLessons?: Map<string, NDKAgentLesson[]>
 ): Promise<void> {
     // Add referenced article context if present
@@ -79,7 +79,6 @@ async function addCoreAgentFragments(
     // Add retrieved lessons
     builder.add("retrieved-lessons", {
         agent,
-        conversation,
         agentLessons: agentLessons || new Map(),
     });
 

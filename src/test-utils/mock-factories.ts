@@ -1,12 +1,11 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
-import type { ParticipationIndex } from "@/conversations/services/ParticipationIndex";
-import type { ThreadService } from "@/conversations/services/ThreadService";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { ToolCall } from "@/llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { NDKKind } from "@/nostr/kinds";
+import type { TodoItem } from "@/services/ral/types";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -90,28 +89,51 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
     } as AgentInstance;
 }
 
-export function createMockConversation(overrides?: Partial<Conversation>): Conversation {
+/**
+ * Create a mock ConversationStore with the required interface
+ */
+export function createMockConversationStore(overrides?: {
+    id?: string;
+    title?: string;
+    phase?: string;
+}): ConversationStore {
     const id = overrides?.id || `mock-conv-${Math.random().toString(36).substr(2, 9)}`;
+    const agentTodos = new Map<string, TodoItem[]>();
+    const blockedAgents = new Set<string>();
+
     return {
         id,
-        title: "Mock Conversation",
-        phase: "CHAT",
-        history: [],
-        agentStates: new Map(),
-        agentTodos: new Map(),
-        blockedAgents: new Set(),
-        phaseStartedAt: Date.now(),
-        metadata: {
-            summary: "Mock conversation summary",
-            requirements: "Mock requirements",
+        get title() { return overrides?.title || "Mock Conversation"; },
+        get phase() { return overrides?.phase || "CHAT"; },
+        get metadata() {
+            return {
+                summary: "Mock conversation summary",
+                requirements: "Mock requirements",
+            };
         },
-        executionTime: {
-            totalSeconds: 0,
-            isActive: false,
-            lastUpdated: Date.now(),
+        get executionTime() {
+            return {
+                totalSeconds: 0,
+                isActive: false,
+                lastUpdated: Date.now(),
+            };
         },
-        ...overrides,
-    };
+        getAllMessages: () => [],
+        getMessageCount: () => 0,
+        getLastActivityTime: () => Date.now(),
+        getRootEventId: () => id,
+        hasEventId: () => false,
+        getTodos: (pubkey: string) => agentTodos.get(pubkey) || [],
+        setTodos: (pubkey: string, todos: TodoItem[]) => { agentTodos.set(pubkey, todos); },
+        isAgentBlocked: (pubkey: string) => blockedAgents.has(pubkey),
+        blockAgent: (pubkey: string) => { blockedAgents.add(pubkey); },
+        unblockAgent: (pubkey: string) => { blockedAgents.delete(pubkey); },
+        getTitle: () => overrides?.title || "Mock Conversation",
+        setTitle: () => {},
+        updateMetadata: () => {},
+        save: async () => {},
+        load: () => {},
+    } as unknown as ConversationStore;
 }
 
 export function createMockExecutionContext(
@@ -122,11 +144,9 @@ export function createMockExecutionContext(
     const conversationId =
         overrides?.conversationId || `mock-conv-${Math.random().toString(36).substr(2, 9)}`;
 
-    const mockConversation = createMockConversation({ id: conversationId });
+    const mockConversation = createMockConversationStore({ id: conversationId });
 
-    const mockConversationCoordinator: ConversationCoordinator = {
-        threadService: {} as ThreadService,
-        participationIndex: {} as ParticipationIndex,
+    const mockConversationCoordinator: Partial<ConversationCoordinator> = {
         initialize: async () => {},
         createConversation: async () => mockConversation,
         getConversation: () => mockConversation,
@@ -135,7 +155,7 @@ export function createMockExecutionContext(
         getAllConversations: () => [mockConversation],
     };
 
-    const mockPublisher: AgentPublisher = {
+    const mockPublisher: Partial<AgentPublisher> = {
         agent,
         reply: async () => mockEvent,
         thinking: async () => mockEvent,
@@ -153,11 +173,11 @@ export function createMockExecutionContext(
         workingDirectory: "/mock/project",
         currentBranch: "main",
         triggeringEvent: mockEvent,
-        conversationCoordinator: mockConversationCoordinator,
-        agentPublisher: mockPublisher,
-        getConversation: () => mockConversationCoordinator.getConversation(conversationId),
+        conversationCoordinator: mockConversationCoordinator as ConversationCoordinator,
+        agentPublisher: mockPublisher as AgentPublisher,
+        getConversation: () => mockConversation,
         ...overrides,
-    };
+    } as ExecutionContext;
 }
 
 export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {

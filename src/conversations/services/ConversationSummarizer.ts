@@ -1,4 +1,4 @@
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
@@ -10,7 +10,7 @@ import { z } from "zod";
 export class ConversationSummarizer {
     constructor(private context: ProjectContext) {}
 
-    async summarizeAndPublish(conversation: Conversation): Promise<void> {
+    async summarizeAndPublish(conversation: ConversationStore): Promise<void> {
         try {
             // Get LLM configuration - use summarization config if set, otherwise default
             const { llms } = await config.loadConfig();
@@ -31,12 +31,16 @@ export class ConversationSummarizer {
                 }
             );
 
-            // Prepare conversation content
-            const conversationContent = conversation.history
-                .filter((event) => event.kind !== NDKKind.EventMetadata) // Exclude metadata events
-                .map((event) => {
-                    const role = event.kind === NDKKind.ConversationRoot ? "User" : "Agent";
-                    return `${role}: ${event.content}`;
+            // Prepare conversation content from stored messages
+            const messages = conversation.getAllMessages();
+            const conversationContent = messages
+                .filter((entry) => entry.message.role !== "system")
+                .map((entry) => {
+                    const role = entry.message.role === "user" ? "User" : "Agent";
+                    const content = typeof entry.message.content === "string"
+                        ? entry.message.content
+                        : JSON.stringify(entry.message.content);
+                    return `${role}: ${content}`;
                 })
                 .join("\n\n");
 

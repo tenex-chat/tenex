@@ -1,8 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import { ThreadedConversationFormatter } from "@/conversations/formatters/ThreadedConversationFormatter";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { logger } from "./logger";
 
 export interface PhaseContext {
     phase?: string;
@@ -48,55 +46,9 @@ export function createEventContext(context: ExecutionContext, model?: string): E
 
     return {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: conversation?.history[0] ?? context.triggeringEvent,
+        rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: model ?? context.agent.llmConfig,
         phase: phaseContext?.phase,
     };
-}
-
-/**
- * Format a conversation as a compact string for phase validation.
- * Shows the conversation flow with agents, their messages, and tool executions.
- */
-export async function formatConversationSnapshot(context: ExecutionContext): Promise<string> {
-    const conversation = context.getConversation();
-
-    if (!conversation) {
-        logger.warn("[formatConversationSnapshot] No conversation found in context");
-        return "<no conversation history>";
-    }
-
-    try {
-        const formatter = new ThreadedConversationFormatter();
-
-        // Build the thread tree from conversation history
-        const threadTree = await formatter.buildThreadTree(conversation.history);
-
-        if (threadTree.length === 0) {
-            return "<empty conversation>";
-        }
-
-        // Format with compact options optimized for LLM consumption
-        const formatted: string[] = [];
-
-        for (const root of threadTree) {
-            const threadString = formatter.formatThread(root, {
-                includeTimestamps: false, // Don't need timestamps for phase validation
-                timestampFormat: "time-only",
-                includeToolCalls: true, // Important to see what tools were used
-                treeStyle: "ascii", // Simple ASCII tree
-                compactMode: true, // Single-line per message
-                currentAgentPubkey: context.agent.pubkey, // Mark current agent as "you"
-            });
-            formatted.push(threadString);
-        }
-
-        return formatted.join(`\n\n${"─".repeat(60)}\n\n`);
-    } catch (error) {
-        logger.error("[formatConversationSnapshot] Failed to format conversation", {
-            error: error instanceof Error ? error.message : String(error),
-        });
-        return "<error formatting conversation>";
-    }
 }

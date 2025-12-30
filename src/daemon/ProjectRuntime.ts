@@ -350,8 +350,9 @@ export class ProjectRuntime {
                 return;
             }
 
-            // Use root event as triggering context
-            const rootEvent = conversation.history[0];
+            // Get root event from cache (populated when events are added to conversation)
+            const rootEventId = conversation.getRootEventId();
+            const rootEvent = rootEventId ? coordinator.getEventById(rootEventId) : undefined;
             if (!rootEvent) {
                 logger.error("[ProjectRuntime] No root event in conversation", {
                     conversationId: conversationId.substring(0, 8),

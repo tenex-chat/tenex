@@ -1,6 +1,6 @@
 import type { Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation, ConversationCoordinator } from "@/conversations";
+import type { ConversationCoordinator } from "@/conversations";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -49,9 +49,9 @@ export interface ExecutionContext {
     activeToolsObject?: Record<string, CoreTool<unknown, unknown>>;
 
     /**
-     * Helper method to get the conversation for this context
+     * Helper method to get the conversation store for this context
      */
-    getConversation(): Conversation | undefined;
+    getConversation(): ConversationStore | undefined;
 }
 
 /**

@@ -74,12 +74,11 @@ export function extractCachedConversations(
         const cachedConversations = context.conversationCoordinator.getAllConversations();
 
         for (const conv of cachedConversations) {
-            const lastEvent = conv.history[conv.history.length - 1];
             conversations.push({
                 id: conv.id,
                 title: conv.title || conv.metadata.summary || "Untitled Conversation",
                 summary: conv.metadata.summary,
-                lastActivity: lastEvent?.created_at || 0,
+                lastActivity: conv.getLastActivityTime(),
                 projectId,
             });
         }

@@ -11,12 +11,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { ModelMessage } from "ai";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { TodoItem } from "@/services/ral/types";
 
 export interface ConversationEntry {
     pubkey: string;
     ral?: number; // Only for agent messages
     message: ModelMessage;
     eventId?: string; // If published to Nostr
+    timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
 }
 
 export interface Injection {
@@ -26,8 +29,32 @@ export interface Injection {
     queuedAt: number;
 }
 
+export interface ConversationMetadata {
+    title?: string;
+    phase?: string;
+    phaseStartedAt?: number;
+    branch?: string;
+    summary?: string;
+    requirements?: string;
+    plan?: string;
+    projectPath?: string;
+    last_user_message?: string;
+    referencedArticle?: {
+        title: string;
+        content: string;
+        dTag: string;
+    };
+}
+
 interface RalTracker {
     id: number;
+}
+
+export interface ExecutionTime {
+    totalSeconds: number;
+    currentSessionStart?: number;
+    isActive: boolean;
+    lastUpdated: number;
 }
 
 interface ConversationState {
@@ -35,6 +62,10 @@ interface ConversationState {
     nextRalNumber: Record<string, number>;
     injections: Injection[];
     messages: ConversationEntry[];
+    metadata: ConversationMetadata;
+    agentTodos: Record<string, TodoItem[]>;
+    blockedAgents: string[];
+    executionTime: ExecutionTime;
 }
 
 export class ConversationStore {
@@ -46,8 +77,13 @@ export class ConversationStore {
         nextRalNumber: {},
         injections: [],
         messages: [],
+        metadata: {},
+        agentTodos: {},
+        blockedAgents: [],
+        executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
     };
     private eventIdSet: Set<string> = new Set();
+    private blockedAgentsSet: Set<string> = new Set();
 
     constructor(basePath: string) {
         this.basePath = basePath;
@@ -92,6 +128,10 @@ export class ConversationStore {
                 nextRalNumber: loaded.nextRalNumber ?? {},
                 injections: loaded.injections ?? [],
                 messages: loaded.messages ?? [],
+                metadata: loaded.metadata ?? {},
+                agentTodos: loaded.agentTodos ?? {},
+                blockedAgents: loaded.blockedAgents ?? [],
+                executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
             // Rebuild eventId set
             this.eventIdSet = new Set(
@@ -99,15 +139,68 @@ export class ConversationStore {
                     .filter((m) => m.eventId)
                     .map((m) => m.eventId!)
             );
+            // Rebuild blockedAgents set
+            this.blockedAgentsSet = new Set(this.state.blockedAgents);
         } else {
             this.state = {
                 activeRal: {},
                 nextRalNumber: {},
                 injections: [],
                 messages: [],
+                metadata: {},
+                agentTodos: {},
+                blockedAgents: [],
+                executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
             this.eventIdSet = new Set();
+            this.blockedAgentsSet = new Set();
         }
+    }
+
+    getId(): string {
+        if (!this.conversationId) {
+            throw new Error("Must call load() before accessing conversation ID");
+        }
+        return this.conversationId;
+    }
+
+    get id(): string {
+        return this.getId();
+    }
+
+    // Convenience property accessors for compatibility
+
+    get title(): string | undefined {
+        return this.state.metadata.title;
+    }
+
+    get phase(): string | undefined {
+        return this.state.metadata.phase;
+    }
+
+    get metadata(): ConversationMetadata {
+        return this.state.metadata;
+    }
+
+    get executionTime(): ExecutionTime {
+        return this.state.executionTime;
+    }
+
+    getMessageCount(): number {
+        return this.state.messages.length;
+    }
+
+    getLastActivityTime(): number {
+        const lastMessage = this.state.messages[this.state.messages.length - 1];
+        return lastMessage?.timestamp || 0;
+    }
+
+    /**
+     * Get the event ID of the first message (root event).
+     * Used for threading/tagging purposes.
+     */
+    getRootEventId(): string | undefined {
+        return this.state.messages[0]?.eventId;
     }
 
     async save(): Promise<void> {
@@ -359,5 +452,90 @@ export class ConversationStore {
             }
         }
         return pairs.join(", ");
+    }
+
+    // Metadata Operations
+
+    getMetadata(): ConversationMetadata {
+        return this.state.metadata;
+    }
+
+    updateMetadata(updates: Partial<ConversationMetadata>): void {
+        this.state.metadata = { ...this.state.metadata, ...updates };
+    }
+
+    getTitle(): string | undefined {
+        return this.state.metadata.title;
+    }
+
+    setTitle(title: string): void {
+        this.state.metadata.title = title;
+    }
+
+    getPhase(): string | undefined {
+        return this.state.metadata.phase;
+    }
+
+    setPhase(phase: string): void {
+        this.state.metadata.phase = phase;
+        this.state.metadata.phaseStartedAt = Date.now();
+    }
+
+    // Todo Operations
+
+    getTodos(agentPubkey: string): TodoItem[] {
+        return this.state.agentTodos[agentPubkey] ?? [];
+    }
+
+    setTodos(agentPubkey: string, todos: TodoItem[]): void {
+        this.state.agentTodos[agentPubkey] = todos;
+    }
+
+    // Blocked Agents Operations
+
+    isAgentBlocked(agentPubkey: string): boolean {
+        return this.blockedAgentsSet.has(agentPubkey);
+    }
+
+    blockAgent(agentPubkey: string): void {
+        this.blockedAgentsSet.add(agentPubkey);
+        this.state.blockedAgents = Array.from(this.blockedAgentsSet);
+    }
+
+    unblockAgent(agentPubkey: string): void {
+        this.blockedAgentsSet.delete(agentPubkey);
+        this.state.blockedAgents = Array.from(this.blockedAgentsSet);
+    }
+
+    getBlockedAgents(): Set<string> {
+        return this.blockedAgentsSet;
+    }
+
+    // Event Message Operations
+
+    /**
+     * Add an NDKEvent as a message entry.
+     * Converts the event to ModelMessage format and tracks the eventId.
+     */
+    addEventMessage(event: NDKEvent, isFromAgent: boolean): void {
+        if (!event.id) return;
+
+        // Skip if already added
+        if (this.hasEventId(event.id)) return;
+
+        this.addMessage({
+            pubkey: event.pubkey,
+            message: {
+                role: isFromAgent ? "assistant" : "user",
+                content: event.content,
+            },
+            eventId: event.id,
+            timestamp: event.created_at,
+        });
+
+        // Track last user message for metadata
+        if (!isFromAgent) {
+            this.state.metadata.last_user_message = event.content;
+        }
     }
 }

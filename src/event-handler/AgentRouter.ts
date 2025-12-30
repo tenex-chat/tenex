@@ -1,5 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import type { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -21,7 +21,7 @@ export class AgentRouter {
      */
     static processStopSignal(
         event: NDKEvent,
-        conversation: Conversation,
+        conversation: ConversationStore,
         projectContext: ProjectContext
     ): { blocked: boolean } {
         const pTags = event.getMatchingTags("p");
@@ -29,7 +29,7 @@ export class AgentRouter {
         for (const [, agentPubkey] of pTags) {
             const agent = projectContext.getAgentByPubkey(agentPubkey);
             if (agent) {
-                conversation.blockedAgents.add(agentPubkey);
+                conversation.blockAgent(agentPubkey);
                 logger.info(
                     chalk.yellow(
                         `Blocked agent ${agent.slug} in conversation ${conversation.id.substring(0, 8)}`
@@ -53,7 +53,7 @@ export class AgentRouter {
     static resolveTargetAgents(
         event: NDKEvent,
         projectContext: ProjectContext,
-        conversation?: Conversation
+        conversation?: ConversationStore
     ): AgentInstance[] {
         const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
 
@@ -66,7 +66,7 @@ export class AgentRouter {
             const targetAgents: AgentInstance[] = [];
             for (const pubkey of mentionedPubkeys) {
                 // Skip blocked agents
-                if (conversation?.blockedAgents?.has(pubkey)) {
+                if (conversation?.isAgentBlocked(pubkey)) {
                     const agent = projectContext.getAgentByPubkey(pubkey);
                     logger.info(
                         chalk.yellow(
@@ -111,7 +111,7 @@ export class AgentRouter {
      */
     static unblockAgent(
         event: NDKEvent,
-        conversation: Conversation,
+        conversation: ConversationStore,
         projectContext: ProjectContext,
         whitelist: Set<string>
     ): { unblocked: boolean } {
@@ -124,8 +124,8 @@ export class AgentRouter {
         let unblocked = false;
 
         for (const [, agentPubkey] of pTags) {
-            if (conversation.blockedAgents.has(agentPubkey)) {
-                conversation.blockedAgents.delete(agentPubkey);
+            if (conversation.isAgentBlocked(agentPubkey)) {
+                conversation.unblockAgent(agentPubkey);
                 const agent = projectContext.getAgentByPubkey(agentPubkey);
                 logger.info(
                     chalk.green(

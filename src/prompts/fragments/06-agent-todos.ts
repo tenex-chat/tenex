@@ -1,9 +1,9 @@
-import type { Conversation } from "@/conversations/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { TodoItem } from "@/services/ral/types";
 import type { PromptFragment } from "../core/types";
 
 interface AgentTodosArgs {
-    conversation: Conversation;
+    conversation: ConversationStore;
     agentPubkey: string;
 }
 
@@ -32,7 +32,7 @@ export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
     id: "agent-todos",
     priority: 6, // After phases (5), before other context
     template: ({ conversation, agentPubkey }) => {
-        const todos = conversation.agentTodos.get(agentPubkey) || [];
+        const todos = conversation.getTodos(agentPubkey);
 
         if (todos.length === 0) {
             return "";

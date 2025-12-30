@@ -1,7 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { PendingDelegation, StopExecutionSignal } from "@/services/ral/types";
+import type { PendingDelegation, StopExecutionSignal, TodoItem } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -113,9 +113,9 @@ async function executeDelegate(
     if (!phaseInstructions) {
       const conversation = context.getConversation();
       if (conversation) {
-        const todos = conversation.agentTodos.get(context.agent.pubkey) || [];
+        const todos = conversation.getTodos(context.agent.pubkey);
         const inProgressTodos = todos.filter(
-          (t) => t.status === "in_progress" && t.delegationInstructions
+          (t: TodoItem) => t.status === "in_progress" && t.delegationInstructions
         );
 
         if (inProgressTodos.length > 0) {

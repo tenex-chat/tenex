@@ -1,4 +1,5 @@
-import type { Conversation, ConversationCoordinator } from "@/conversations";
+import type { ConversationCoordinator } from "./ConversationCoordinator";
+import type { ConversationStore } from "../ConversationStore";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -7,22 +8,19 @@ import { trace } from "@opentelemetry/api";
 import chalk from "chalk";
 
 export interface ConversationResolutionResult {
-    conversation: Conversation | undefined;
+    conversation: ConversationStore | undefined;
     isNew?: boolean;
 }
 
 /**
  * ConversationResolver encapsulates all logic for finding or creating conversations
- * based on incoming Nostr events. This centralizes the complex resolution logic
- * that was previously scattered throughout reply.ts.
+ * based on incoming Nostr events.
  */
 export class ConversationResolver {
     constructor(private conversationCoordinator: ConversationCoordinator) {}
 
     /**
      * Resolve the conversation for an incoming event.
-     * This may find an existing conversation, create a new one for new conversations,
-     * or fetch orphaned threads from the network.
      */
     async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
         const activeSpan = trace.getActiveSpan();
@@ -35,7 +33,7 @@ export class ConversationResolver {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "found_existing",
                     "conversation.id": conversation.id,
-                    "conversation.message_count": conversation.history.length,
+                    "conversation.message_count": conversation.getAllMessages().length,
                 });
                 return { conversation };
             }
@@ -47,7 +45,7 @@ export class ConversationResolver {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "created_from_orphan",
                     "conversation.id": newConversation.id,
-                    "conversation.message_count": newConversation.history.length,
+                    "conversation.message_count": newConversation.getAllMessages().length,
                 });
                 return { conversation: newConversation, isNew: true };
             }
@@ -96,7 +94,7 @@ export class ConversationResolver {
         event: NDKEvent,
         replyTargetId: string,
         mentionedPubkeys: string[]
-    ): Promise<Conversation | undefined> {
+    ): Promise<ConversationStore | undefined> {
         if (mentionedPubkeys.length === 0) {
             return undefined;
         }

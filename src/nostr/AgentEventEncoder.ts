@@ -89,7 +89,7 @@ export type AgentIntent =
 // Execution context provided by RAL
 export interface EventContext {
     triggeringEvent: NDKEvent; // The event that triggered this execution (for reply threading)
-    rootEvent: NDKEvent; // The conversation root event
+    rootEvent: { id?: string }; // The conversation root event (only ID is used for tagging)
     conversationId: string; // Required for conversation lookup
     executionTime?: number;
     model?: string;
