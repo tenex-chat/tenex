@@ -453,6 +453,199 @@ describe("ToolExecutionTracker", () => {
         });
     });
 
+    describe("Delegation tool delayed publishing", () => {
+        it("should return null and not publish for delegate tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "delegate-call",
+                toolName: "delegate",
+                args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return null for delegation tools
+            expect(result).toBeNull();
+
+            // Should NOT have published yet
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+
+            // Should still be tracking
+            expect(tracker.isTracking("delegate-call")).toBe(true);
+
+            // Should have empty toolEventId
+            const execution = tracker.getExecution("delegate-call");
+            expect(execution?.toolEventId).toBe("");
+        });
+
+        it("should return null for ask tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "ask-call",
+                toolName: "ask",
+                args: { content: "What should I do?" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should return null for delegate_followup tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "followup-call",
+                toolName: "delegate_followup",
+                args: { message: "Continue with this" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should return null for delegate_external tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "external-call",
+                toolName: "delegate_external",
+                args: { content: "External task", recipient: "external-pubkey" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should publish with referenced event IDs on completion", async () => {
+            // Track delegation tool
+            await tracker.trackExecution({
+                toolCallId: "delegate-complete",
+                toolName: "delegate",
+                args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Simulate result with pendingDelegations from delegate tool
+            const delegationResult = {
+                __stopExecution: true,
+                pendingDelegations: [
+                    { eventId: "delegation-event-123", recipientPubkey: "pubkey1", prompt: "Do X" },
+                ],
+                delegationEventIds: { pubkey1: "delegation-event-123" },
+                message: "Delegated",
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "delegate-complete",
+                result: delegationResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should have published with referencedEventIds
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    toolName: "delegate",
+                    referencedEventIds: ["delegation-event-123"],
+                }),
+                mockEventContext
+            );
+
+            // toolEventId should be updated
+            const execution = tracker.getExecution("delegate-complete");
+            expect(execution?.toolEventId).toBe("mock-event-id-123");
+        });
+
+        it("should include multiple event IDs for multi-delegation", async () => {
+            await tracker.trackExecution({
+                toolCallId: "multi-delegate",
+                toolName: "delegate",
+                args: { delegations: [{ recipient: "agent1" }, { recipient: "agent2" }] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            const delegationResult = {
+                __stopExecution: true,
+                pendingDelegations: [
+                    { eventId: "delegation-1", recipientPubkey: "pubkey1", prompt: "Task 1" },
+                    { eventId: "delegation-2", recipientPubkey: "pubkey2", prompt: "Task 2" },
+                ],
+                delegationEventIds: { pubkey1: "delegation-1", pubkey2: "delegation-2" },
+                message: "Delegated",
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "multi-delegate",
+                result: delegationResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    referencedEventIds: ["delegation-1", "delegation-2"],
+                }),
+                mockEventContext
+            );
+        });
+
+        it("should handle missing pendingDelegations gracefully", async () => {
+            await tracker.trackExecution({
+                toolCallId: "no-pending",
+                toolName: "delegate",
+                args: {},
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Result without pendingDelegations
+            await tracker.completeExecution({
+                toolCallId: "no-pending",
+                result: { __stopExecution: true },
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    referencedEventIds: [],
+                }),
+                mockEventContext
+            );
+        });
+
+        it("should not affect non-delegation tools", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "normal-tool",
+                toolName: "search",
+                args: { query: "test" },
+                toolsObject: mockToolsObject,
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return the event (not null)
+            expect(result).not.toBeNull();
+            expect(result?.id).toBe("mock-event-id-123");
+
+            // Should have published immediately
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalled();
+
+            // toolEventId should be set immediately
+            const execution = tracker.getExecution("normal-tool");
+            expect(execution?.toolEventId).toBe("mock-event-id-123");
+        });
+    });
+
     describe("Edge cases and error scenarios", () => {
         it("should handle MCP tools with incorrect format", async () => {
             await tracker.trackExecution({

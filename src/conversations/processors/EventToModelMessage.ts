@@ -77,9 +77,24 @@ export class EventToModelMessage {
         targetAgentPubkey: string,
         conversationId?: string
     ): Promise<ModelMessage> {
-        // Agent's own message - simple case
+        const nameRepo = getPubkeyService();
+
+        // Agent's own message - format as assistant with prefix
         if (event.pubkey === targetAgentPubkey) {
-            return { role: "assistant", content: processedContent };
+            const senderName = await nameRepo.getName(event.pubkey);
+            const targetedPubkeys = getTargetedAgentPubkeys(event);
+
+            let prefix: string;
+            if (targetedPubkeys.length > 0) {
+                const recipientNames = await Promise.all(
+                    targetedPubkeys.map((pk) => nameRepo.getName(pk))
+                );
+                prefix = `[@${senderName} -> @${recipientNames.join(", @")}]`;
+            } else {
+                prefix = `[@${senderName}]`;
+            }
+
+            return { role: "assistant", content: `${prefix} ${processedContent}` };
         }
 
         // Check for delegation response
@@ -155,7 +170,7 @@ export class EventToModelMessage {
                 // System messages don't support multimodal content
                 return {
                     role: "system",
-                    content: `[User (${userName}) → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
+                    content: `[@${userName} -> @${targetedAgentNames.join(", @")}] ${processedContent}`,
                 };
             }
 
@@ -170,9 +185,20 @@ export class EventToModelMessage {
                 messageType: "user",
             });
 
+            // Build prefix: [@user -> @targets] or [@user] for broadcast
+            let prefix: string;
+            if (targetedAgentPubkeys.length > 0) {
+                const targetedAgentNames = await Promise.all(
+                    targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
+                );
+                prefix = `[@${userName} -> @${targetedAgentNames.join(", @")}]`;
+            } else {
+                prefix = `[@${userName}]`;
+            }
+
             // Build multimodal content for user messages (fetches images if present)
             const content = await EventToModelMessage.buildUserContent(
-                processedContent,
+                `${prefix} ${processedContent}`,
                 event.id
             );
             return { role: "user", content };
@@ -198,10 +224,13 @@ export class EventToModelMessage {
                     messageType: "user",
                 });
 
-                // Use 'user' role so the agent knows to respond, with clear sender → recipient format
+                // Use 'user' role so the agent knows to respond, with clear sender -> recipient format
                 // Build multimodal content for agent-to-agent messages too
+                const targetedAgentNames = await Promise.all(
+                    targetedAgentPubkeys.map((pk) => nameRepo.getName(pk))
+                );
                 const content = await EventToModelMessage.buildUserContent(
-                    `[${sendingAgentName} → @${targetAgentName}]: ${processedContent}`,
+                    `[@${sendingAgentName} -> @${targetedAgentNames.join(", @")}] ${processedContent}`,
                     event.id
                 );
                 return { role: "user", content };
@@ -226,7 +255,7 @@ export class EventToModelMessage {
             // System messages don't support multimodal content
             return {
                 role: "system",
-                content: `[${sendingAgentName} → ${targetedAgentNames.join(", ")}]: ${processedContent}`,
+                content: `[@${sendingAgentName} -> @${targetedAgentNames.join(", @")}] ${processedContent}`,
             };
         }
 
@@ -240,7 +269,7 @@ export class EventToModelMessage {
 
         // Use 'system' role for broadcast messages from other agents
         // System messages don't support multimodal content
-        return { role: "system", content: `[${sendingAgentName}]: ${processedContent}` };
+        return { role: "system", content: `[@${sendingAgentName}] ${processedContent}` };
     }
 
     /**

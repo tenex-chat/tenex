@@ -4,12 +4,10 @@ import { NDKKind } from "@/nostr/kinds";
 // Simple test that doesn't require mocking NDK
 describe("Reasoning Events with Tags", () => {
     describe("Event Kinds", () => {
-        it("should use the same event kinds for both content and reasoning", () => {
-            // Both reasoning and content use the same kinds
-
+        it("should use kind:1 for all conversation events", () => {
             // Verify we're using standard kinds
-            expect(NDKKind.GenericReply).toBe(1111);
-            expect(NDKKind.TenexStreamingResponse).toBe(21111);
+            expect(NDKKind.Text).toBe(1);
+            expect(NDKKind.GenericReply).toBe(1111); // deprecated, kept for backwards compatibility
         });
     });
 
@@ -17,20 +15,15 @@ describe("Reasoning Events with Tags", () => {
         it("should identify reasoning events by tag presence", () => {
             // Simulate event tags
             const reasoningEventTags = [
-                ["reasoning"],
-                ["streaming", "true"],
-                ["sequence", "1"]
+                ["reasoning"]
             ];
-            
-            const contentEventTags = [
-                ["streaming", "true"],
-                ["sequence", "2"]
-            ];
-            
+
+            const contentEventTags: string[][] = [];
+
             // Check for reasoning tag
-            const hasReasoningTag = (tags: string[][]) => 
+            const hasReasoningTag = (tags: string[][]) =>
                 tags.some(tag => tag[0] === "reasoning");
-            
+
             expect(hasReasoningTag(reasoningEventTags)).toBe(true);
             expect(hasReasoningTag(contentEventTags)).toBe(false);
         });

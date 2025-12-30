@@ -53,16 +53,21 @@ export type ToolName =
     | "bug_list"
     | "bug_report_create"
     | "bug_report_add"
-    | "restart_tenex_backend"
     | "stop_pairing"
     | "todo_add"
     | "todo_update";
 
 /**
- * AI SDK tool with optional human-readable formatter.
+ * AI SDK tool with optional human-readable formatter and side effect declaration.
  */
 export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
     getHumanReadableContent?: (args: TInput) => string;
+    /**
+     * Whether this tool has side effects (modifies state, writes files, sends messages, etc.)
+     * Default is true (assume side effects unless explicitly declared false).
+     * Read-only tools (queries, reads) should set this to false.
+     */
+    hasSideEffects?: boolean;
 };
 
 /**

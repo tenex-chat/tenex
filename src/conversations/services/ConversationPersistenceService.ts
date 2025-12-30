@@ -1,5 +1,4 @@
 import { logger } from "@/utils/logger";
-import { FileSystemAdapter } from "../persistence";
 import type {
     ConversationMetadata,
     ConversationPersistenceAdapter,
@@ -74,15 +73,6 @@ export class ConversationPersistenceService implements IConversationPersistenceS
 
         return conversations;
     }
-}
-
-/**
- * Factory function to create a file-based persistence service
- */
-export function createFileSystemPersistenceService(
-    projectPath: string
-): ConversationPersistenceService {
-    return new ConversationPersistenceService(new FileSystemAdapter(projectPath));
 }
 
 /**

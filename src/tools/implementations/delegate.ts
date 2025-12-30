@@ -48,12 +48,7 @@ interface DelegateInput {
   delegations: DelegationItem[];
 }
 
-interface DelegateOutput extends StopExecutionSignal {
-  /** Map of recipient pubkey to the event ID we published for their delegation */
-  delegationEventIds: Record<string, string>;
-  /** Human-readable message for the LLM */
-  message: string;
-}
+type DelegateOutput = StopExecutionSignal;
 
 async function executeDelegate(
   input: DelegateInput,
@@ -141,26 +136,18 @@ async function executeDelegate(
       throw new Error("AgentPublisher not available");
     }
 
-    const eventId = await context.agentPublisher.delegate(
-      {
-        recipient: pubkey,
-        content: delegation.prompt,
-        phase,
-        phaseInstructions,
-        branch: delegation.branch,
-      },
-      {
-        triggeringEvent: context.triggeringEvent,
-        rootEvent: context.getConversation()?.history?.[0] || context.triggeringEvent,
-        conversationId: context.conversationId,
-      }
-    );
+    const eventId = await context.agentPublisher.delegate({
+      recipient: pubkey,
+      content: delegation.prompt,
+      phase,
+      phaseInstructions,
+      branch: delegation.branch,
+    });
 
     pendingDelegations.push({
       eventId,
       recipientPubkey: pubkey,
       recipientSlug: delegation.recipient,
-      prompt: delegation.prompt,
     });
 
     // Start pairing supervision if requested
@@ -215,29 +202,14 @@ async function executeDelegate(
     throw new Error("No valid recipients provided.");
   }
 
-  // Build map of recipient pubkey to event ID
-  const delegationEventIds: Record<string, string> = {};
-  for (const d of pendingDelegations) {
-    delegationEventIds[d.recipientPubkey] = d.eventId;
-  }
-
-  // Build human-readable message for the LLM
-  const delegationLines = pendingDelegations.map(d => {
-    const recipient = d.recipientSlug ? `@${d.recipientSlug}` : d.recipientPubkey.substring(0, 8);
-    return `${recipient} -> ${d.eventId}`;
-  });
-  const message = `Delegated to:\n${delegationLines.join("\n")}`;
-
   const stopSignal: DelegateOutput = {
     __stopExecution: true as const,
     pendingDelegations,
-    delegationEventIds,
-    message,
   };
 
   logger.info("[delegate] Published delegations, returning stop signal", {
     count: pendingDelegations.length,
-    delegationEventIds,
+    eventIds: pendingDelegations.map(d => d.eventId),
   });
 
   return stopSignal;

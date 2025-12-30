@@ -19,7 +19,6 @@ const IGNORED_EVENT_KINDS = [
     NDKKind.Metadata,
     NDKKind.Contacts,
     NDKKind.TenexProjectStatus,
-    NDKKind.TenexStreamingResponse,
     NDKKind.TenexOperationsStatus,
 ];
 
@@ -124,14 +123,15 @@ export class EventHandler {
         });
 
         switch (event.kind) {
-            case NDKKind.GenericReply: // kind 1111
+            case NDKKind.Text: // kind 1 - unified conversation format
+            case NDKKind.GenericReply: // kind 1111 (deprecated, for backwards compatibility)
                 await handleChatMessage(event, {
                     conversationCoordinator: this.conversationCoordinator,
                     agentExecutor: this.agentExecutor,
                 });
                 break;
 
-            case NDKKind.Thread: // kind 11
+            case NDKKind.Thread: // kind 11 (deprecated, for backwards compatibility)
                 await handleNewConversation(event, {
                     conversationCoordinator: this.conversationCoordinator,
                     agentExecutor: this.agentExecutor,

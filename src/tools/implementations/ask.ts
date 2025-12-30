@@ -58,7 +58,6 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         type: "ask" as const,
         eventId,
         recipientPubkey: ownerPubkey,
-        prompt: content,
         suggestions,
       },
     ],

@@ -191,11 +191,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
 
-    // Add agent todos status (conversation-scoped, shared across all RALs)
-    systemPromptBuilder.add("agent-todos", {
-        conversation,
-        agentPubkey: agent.pubkey,
-    });
+    // NOTE: agent-todos is NOT included here - it's injected as a late system message
+    // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages
 
     // Add worktree context if we have the necessary information
     if (workingDirectory && currentBranch && projectBasePath) {

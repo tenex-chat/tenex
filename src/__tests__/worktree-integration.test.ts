@@ -14,7 +14,6 @@ describe("Worktree Integration", () => {
         // 6. Event handler extracts branch tag
         // 7. Event handler resolves workingDirectory from branch
         // 8. Agent executes in worktree context
-        // 9. AgentSupervisor validates cleanup
 
         expect(true).toBe(true); // Placeholder for workflow documentation
     });
