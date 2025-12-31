@@ -60,18 +60,23 @@ async function executeDelegate(
     throw new Error("At least one delegation is required");
   }
 
-  // Check if there are already pending delegations in the current RAL
+  // Check if there are already pending delegations in the CURRENT RAL execution
   // This prevents creating new delegations during checkpoint responses
+  // IMPORTANT: We must check the specific RAL number from context, not getState() which returns
+  // the highest-numbered RAL. Using getState() would block delegations in a new RAL when an
+  // unrelated previous RAL still has pending delegations.
   const ralRegistry = RALRegistry.getInstance();
-  const currentRal = ralRegistry.getState(context.agent.pubkey, context.conversationId);
-  if (currentRal && currentRal.pendingDelegations.length > 0) {
-    const pendingRecipients = currentRal.pendingDelegations
-      .map(d => d.recipientSlug || d.recipientPubkey.substring(0, 8))
-      .join(", ");
-    throw new Error(
-      `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
-      "Use delegate_followup to send guidance, or wait for the delegation to complete."
-    );
+  if (context.ralNumber !== undefined) {
+    const currentRal = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, context.ralNumber);
+    if (currentRal && currentRal.pendingDelegations.length > 0) {
+      const pendingRecipients = currentRal.pendingDelegations
+        .map(d => d.recipientSlug || d.recipientPubkey.substring(0, 8))
+        .join(", ");
+      throw new Error(
+        `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
+        "Use delegate_followup to send guidance, or wait for the delegation to complete."
+      );
+    }
   }
 
   const pendingDelegations: PendingDelegation[] = [];
@@ -145,7 +150,7 @@ async function executeDelegate(
     });
 
     pendingDelegations.push({
-      eventId,
+      delegationConversationId: eventId,
       recipientPubkey: pubkey,
       recipientSlug: delegation.recipient,
     });
@@ -209,7 +214,7 @@ async function executeDelegate(
 
   logger.info("[delegate] Published delegations, returning stop signal", {
     count: pendingDelegations.length,
-    eventIds: pendingDelegations.map(d => d.eventId),
+    delegationConversationIds: pendingDelegations.map(d => d.delegationConversationId),
   });
 
   return stopSignal;

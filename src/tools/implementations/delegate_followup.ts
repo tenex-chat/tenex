@@ -7,10 +7,10 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const delegateFollowupSchema = z.object({
-  delegation_event_id: z
+  delegation_conversation_id: z
     .string()
     .describe(
-      "The event ID of the delegation you want to follow up on (returned in delegationEventIds from the delegate tool)"
+      "The conversation ID of the delegation you want to follow up on (returned in delegationConversationIds from the delegate tool)"
     ),
   message: z.string().describe("Your follow-up question or clarification request"),
 });
@@ -22,15 +22,15 @@ async function executeDelegateFollowup(
   input: DelegateFollowupInput,
   context: ExecutionContext
 ): Promise<DelegateFollowupOutput> {
-  const { delegation_event_id, message } = input;
+  const { delegation_conversation_id, message } = input;
 
   // Fetch the original delegation event to get the recipient p-tag
   const ndk = getNDK();
-  const delegationEvent = await ndk.fetchEvent(delegation_event_id);
+  const delegationEvent = await ndk.fetchEvent(delegation_conversation_id);
 
   if (!delegationEvent) {
     throw new Error(
-      `Could not fetch delegation event ${delegation_event_id}. Check the delegationEventIds from your delegate call.`
+      `Could not fetch delegation conversation ${delegation_conversation_id}. Check the delegationConversationIds from your delegate call.`
     );
   }
 
@@ -38,7 +38,7 @@ async function executeDelegateFollowup(
   const recipientPubkey = delegationEvent.tagValue("p");
   if (!recipientPubkey) {
     throw new Error(
-      `Delegation event ${delegation_event_id} has no p-tag. Cannot determine recipient.`
+      `Delegation conversation ${delegation_conversation_id} has no p-tag. Cannot determine recipient.`
     );
   }
 
@@ -48,14 +48,14 @@ async function executeDelegateFollowup(
 
   logger.info("[delegate_followup] Publishing follow-up", {
     fromAgent: context.agent.slug,
-    delegationEventId: delegation_event_id,
+    delegationConversationId: delegation_conversation_id,
     recipientPubkey: recipientPubkey.substring(0, 8),
   });
 
   const eventId = await context.agentPublisher.delegateFollowup({
     recipient: recipientPubkey,
     content: message,
-    delegationEventId: delegation_event_id,
+    delegationEventId: delegation_conversation_id,
   });
 
   return {
@@ -63,7 +63,7 @@ async function executeDelegateFollowup(
     pendingDelegations: [
       {
         type: "followup" as const,
-        eventId,
+        delegationConversationId: eventId,
         recipientPubkey,
       },
     ],

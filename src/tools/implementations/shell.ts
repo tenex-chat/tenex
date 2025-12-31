@@ -140,7 +140,6 @@ WHEN NOT TO USE SHELL:
 OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
 - Commands run with timeout (default 2 minutes, max 10 minutes)
-- Restricted to project-manager agent only
 
 Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.`,
 

@@ -77,7 +77,7 @@ describe("RAL Delegation Flow", () => {
 
             const pendingDelegations: PendingDelegation[] = [
                 {
-                    eventId: "delegation-event-123",
+                    delegationConversationId: "delegation-event-123",
                     recipientPubkey: mockAgent2.pubkey,
                     recipientSlug: "agent2",
                     prompt: "Please help with this task",
@@ -88,7 +88,7 @@ describe("RAL Delegation Flow", () => {
 
             const state = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
             expect(state?.pendingDelegations).toHaveLength(1);
-            expect(state?.pendingDelegations[0].eventId).toBe("delegation-event-123");
+            expect(state?.pendingDelegations[0].delegationConversationId).toBe("delegation-event-123");
         });
 
         it("should find state waiting for a specific delegation via event ID lookup", () => {
@@ -96,7 +96,7 @@ describe("RAL Delegation Flow", () => {
 
             const pendingDelegations: PendingDelegation[] = [
                 {
-                    eventId: "delegation-event-456",
+                    delegationConversationId: "delegation-event-456",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task prompt",
                 },
@@ -118,7 +118,7 @@ describe("RAL Delegation Flow", () => {
 
             const pendingDelegations: PendingDelegation[] = [
                 {
-                    eventId: "delegation-event-789",
+                    delegationConversationId: "delegation-event-789",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task prompt",
                 },
@@ -127,7 +127,7 @@ describe("RAL Delegation Flow", () => {
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
             const completion: CompletedDelegation = {
-                eventId: "delegation-event-789",
+                delegationConversationId: "delegation-event-789",
                 recipientPubkey: mockAgent2.pubkey,
                 response: "Task completed successfully",
                 responseEventId: "response-event-abc",
@@ -147,12 +147,12 @@ describe("RAL Delegation Flow", () => {
 
             const pendingDelegations: PendingDelegation[] = [
                 {
-                    eventId: "delegation-1",
+                    delegationConversationId: "delegation-1",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task 1",
                 },
                 {
-                    eventId: "delegation-2",
+                    delegationConversationId: "delegation-2",
                     recipientPubkey: "agent3pubkey",
                     prompt: "Task 2",
                 },
@@ -162,7 +162,7 @@ describe("RAL Delegation Flow", () => {
 
             // Complete first delegation
             const state1 = registry.recordCompletion({
-                eventId: "delegation-1",
+                delegationConversationId: "delegation-1",
                 recipientPubkey: mockAgent2.pubkey,
                 response: "Done 1",
                 completedAt: Date.now(),
@@ -174,7 +174,7 @@ describe("RAL Delegation Flow", () => {
 
             // Complete second delegation
             const state2 = registry.recordCompletion({
-                eventId: "delegation-2",
+                delegationConversationId: "delegation-2",
                 recipientPubkey: "agent3pubkey",
                 response: "Done 2",
                 completedAt: Date.now(),
@@ -194,7 +194,7 @@ describe("RAL Delegation Flow", () => {
             // Set pending delegations - isStreaming is not affected
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
-                    eventId: "del-1",
+                    delegationConversationId: "del-1",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task",
                 },
@@ -212,7 +212,7 @@ describe("RAL Delegation Flow", () => {
                 __stopExecution: true,
                 pendingDelegations: [
                     {
-                        eventId: "del-123",
+                        delegationConversationId: "del-123",
                         recipientPubkey: "pubkey",
                         prompt: "task",
                     },
@@ -243,7 +243,7 @@ describe("RAL Delegation Flow", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
-                    eventId: "original-delegation-event-id",
+                    delegationConversationId: "original-delegation-event-id",
                     recipientPubkey: mockAgent2.pubkey,
                     recipientSlug: "agent2",
                     prompt: "Please complete this task",
@@ -307,7 +307,7 @@ describe("RAL Delegation Flow", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
-                    eventId: "my-delegation-id",
+                    delegationConversationId: "my-delegation-id",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task",
                 },
@@ -354,12 +354,12 @@ describe("RAL Delegation Flow", () => {
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
-                    eventId: "delegation-1",
+                    delegationConversationId: "delegation-1",
                     recipientPubkey: mockAgent2.pubkey,
                     prompt: "Task 1",
                 },
                 {
-                    eventId: "delegation-2",
+                    delegationConversationId: "delegation-2",
                     recipientPubkey: "agent3pubkey",
                     prompt: "Task 2",
                 },
@@ -456,7 +456,7 @@ describe("RAL Delegation Flow", () => {
             // 2. Agent calls delegate tool, which sets pending delegations
             const pendingDelegations: PendingDelegation[] = [
                 {
-                    eventId: "delegation-full-flow-test",
+                    delegationConversationId: "delegation-full-flow-test",
                     recipientPubkey: mockAgent2.pubkey,
                     recipientSlug: "agent2",
                     prompt: "Handle this subtask",

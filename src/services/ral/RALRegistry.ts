@@ -12,7 +12,7 @@ export interface RALSummary {
   ralId: string;
   isStreaming: boolean;
   currentTool?: string;
-  pendingDelegations: Array<{ recipientSlug?: string; eventId: string }>;
+  pendingDelegations: Array<{ recipientSlug?: string; delegationConversationId: string }>;
   createdAt: number;
   hasPendingDelegations: boolean;
 }
@@ -184,7 +184,7 @@ export class RALRegistry {
         currentTool: r.currentTool,
         pendingDelegations: r.pendingDelegations.map(d => ({
           recipientSlug: d.recipientSlug,
-          eventId: d.eventId,
+          delegationConversationId: d.delegationConversationId,
         })),
         createdAt: r.createdAt,
         hasPendingDelegations: r.pendingDelegations.length > 0,
@@ -261,9 +261,9 @@ export class RALRegistry {
     ral.pendingDelegations = pendingDelegations;
     ral.lastActivityAt = Date.now();
 
-    // Register delegation event ID -> RAL mappings (for routing delegation responses)
+    // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
     for (const d of pendingDelegations) {
-      this.delegationToRal.set(d.eventId, { key, ralNumber });
+      this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
     }
 
     trace.getActiveSpan()?.addEvent("ral.delegations_set", {
@@ -277,7 +277,7 @@ export class RALRegistry {
    * Record a delegation completion (looks up RAL from delegation event ID)
    */
   recordCompletion(completion: CompletedDelegation): RALState | undefined {
-    const location = this.delegationToRal.get(completion.eventId);
+    const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
 
     const ral = this.states.get(location.key)?.get(location.ralNumber);
@@ -288,13 +288,13 @@ export class RALRegistry {
 
     // Remove from pending
     ral.pendingDelegations = ral.pendingDelegations.filter(
-      (p) => p.eventId !== completion.eventId
+      (p) => p.delegationConversationId !== completion.delegationConversationId
     );
 
     trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
       "ral.id": ral.id,
       "ral.number": ral.ralNumber,
-      "delegation.completed_event_id": completion.eventId,
+      "delegation.completed_conversation_id": completion.delegationConversationId,
       "delegation.remaining_pending": ral.pendingDelegations.length,
     });
 
@@ -497,10 +497,10 @@ export class RALRegistry {
     if (ral) {
       // Clean up delegation mappings
       for (const d of ral.pendingDelegations) {
-        this.delegationToRal.delete(d.eventId);
+        this.delegationToRal.delete(d.delegationConversationId);
       }
       for (const d of ral.completedDelegations) {
-        this.delegationToRal.delete(d.eventId);
+        this.delegationToRal.delete(d.delegationConversationId);
       }
       // Clean up reverse lookup
       this.ralIdToLocation.delete(ral.id);
@@ -546,7 +546,7 @@ export class RALRegistry {
     if (!ral) return undefined;
 
     const hasPending = ral.pendingDelegations.some(
-      (d) => d.eventId === delegationEventId
+      (d) => d.delegationConversationId === delegationEventId
     );
     return hasPending ? ral : undefined;
   }
@@ -558,7 +558,7 @@ export class RALRegistry {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (ral) {
       for (const d of ral.completedDelegations) {
-        this.delegationToRal.delete(d.eventId);
+        this.delegationToRal.delete(d.delegationConversationId);
       }
       ral.completedDelegations = [];
     }
@@ -612,7 +612,7 @@ export class RALRegistry {
 
     for (const c of completions) {
       const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      const shortId = c.eventId.substring(0, 8);
+      const shortId = c.delegationConversationId.substring(0, 8);
       lines.push(`### ${agent} (${shortId})`);
       lines.push(c.response);
       lines.push("");

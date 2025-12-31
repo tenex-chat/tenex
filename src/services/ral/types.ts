@@ -31,7 +31,7 @@ export interface TodoItem {
 }
 
 interface BasePendingDelegation {
-  eventId: string;
+  delegationConversationId: string;
   recipientPubkey: string;
   recipientSlug?: string;
 }
@@ -61,7 +61,7 @@ export type PendingDelegation =
   | AskDelegation;
 
 export interface CompletedDelegation {
-  eventId: string;
+  delegationConversationId: string;
   recipientPubkey: string;
   recipientSlug?: string;
   response: string;

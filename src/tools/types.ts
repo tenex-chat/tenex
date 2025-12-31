@@ -53,7 +53,8 @@ export type ToolName =
     | "bug_report_add"
     | "stop_pairing"
     | "todo_add"
-    | "todo_update";
+    | "todo_update"
+    | "web_fetch";
 
 /**
  * AI SDK tool with optional human-readable formatter and side effect declaration.

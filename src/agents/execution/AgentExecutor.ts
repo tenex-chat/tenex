@@ -26,7 +26,7 @@ import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet } from "ai";
+import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet, ToolResultPart } from "ai";
 import chalk from "chalk";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -598,6 +598,21 @@ export class AgentExecutor {
             const argsPreview = argsStr.substring(0, 50);
             console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`));
 
+            // Add tool-call message to ConversationStore for persistence
+            conversationStore.addMessage({
+                pubkey: context.agent.pubkey,
+                ral: ralNumber,
+                message: {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        input: event.args ?? {},
+                    }],
+                },
+            });
+
             const toolEvent = await toolTracker.trackExecution({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
@@ -615,6 +630,23 @@ export class AgentExecutor {
         });
 
         llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
+            // Add tool-result message to ConversationStore for persistence
+            conversationStore.addMessage({
+                pubkey: context.agent.pubkey,
+                ral: ralNumber,
+                message: {
+                    role: "tool",
+                    content: [{
+                        type: "tool-result" as const,
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        output: event.result !== undefined
+                            ? { type: "json" as const, value: event.result }
+                            : { type: "text" as const, value: "" },
+                    }] as ToolResultPart[],
+                },
+            });
+
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
@@ -636,9 +668,6 @@ export class AgentExecutor {
             // Mark this RAL as streaming
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
 
-            // Track message count to detect new messages
-            let previousMessageCount = messages.length;
-
             // prepareStep: synchronous, handles injections and release of paused RALs
             const prepareStep = (
                 step: {
@@ -651,18 +680,8 @@ export class AgentExecutor {
                 // so step.messages includes all messages up to but not including the current step
                 latestAccumulatedMessages = step.messages;
 
-                // Add new messages to ConversationStore for persistence and concurrent RAL visibility
-                if (step.stepNumber > 0 && conversationStore) {
-                    const newMessages = step.messages.slice(previousMessageCount);
-                    for (const msg of newMessages) {
-                        conversationStore.addMessage({
-                            pubkey: context.agent.pubkey,
-                            ral: ralNumber,
-                            message: msg,
-                        });
-                    }
-                    previousMessageCount = step.messages.length;
-                }
+                // Note: Tool calls and results are now added to ConversationStore in real-time
+                // via tool-will-execute and tool-did-execute event handlers
 
                 // Check if we should release paused RALs based on completed steps
                 // Only release after a step with actual tool calls (agent made a decision)
@@ -811,20 +830,10 @@ export class AgentExecutor {
                             pendingDelegations
                         );
 
-                        // Also save to ConversationStore for persistence
-                        if (conversationStore) {
-                            // Add final messages to store
-                            const newMessages = messagesWithToolCalls.slice(previousMessageCount);
-                            for (const msg of newMessages) {
-                                conversationStore.addMessage({
-                                    pubkey: context.agent.pubkey,
-                                    ral: ralNumber,
-                                    message: msg,
-                                });
-                            }
-                            // Don't complete RAL (pending delegations), just save
-                            conversationStore.save();
-                        }
+                        // Tool calls and results are already added to ConversationStore
+                        // via tool-will-execute and tool-did-execute handlers.
+                        // Just save the store state (don't complete RAL - pending delegations).
+                        conversationStore.save();
 
                         return true;
                     }
@@ -898,10 +907,8 @@ export class AgentExecutor {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
             // Complete RAL in ConversationStore and persist
-            if (conversationStore) {
-                conversationStore.completeRal(context.agent.pubkey, ralNumber);
-                await conversationStore.save();
-            }
+            conversationStore.completeRal(context.agent.pubkey, ralNumber);
+            await conversationStore.save();
         }
 
         return completionEvent;

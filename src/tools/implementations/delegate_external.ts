@@ -68,7 +68,7 @@ async function executeDelegateExternal(
     pendingDelegations: [
       {
         type: "external" as const,
-        eventId: chatEvent.id,
+        delegationConversationId: chatEvent.id,
         recipientPubkey: pubkey,
         projectId: cleanProjectId,
       },
