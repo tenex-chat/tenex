@@ -10,15 +10,33 @@
  * - Nostr event hydration
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdir, rm, readFile } from "fs/promises";
 import { join } from "path";
-import type { ModelMessage } from "ai";
+import type { ToolCallPart, ToolResultPart } from "ai";
 import {
     ConversationStore,
     type ConversationEntry,
     type Injection,
 } from "../ConversationStore";
+import { buildRalSummary } from "../RalSummaryFormatter";
+
+// Mock PubkeyService for attribution tests
+const mockGetName = mock(async (pubkey: string) => {
+    const names: Record<string, string> = {
+        "transparent-pk": "transparent",
+        "agent1-pk": "agent1",
+        "agent2-pk": "agent2",
+        "pablo-pk": "Pablo",
+    };
+    return names[pubkey] ?? "Unknown";
+});
+
+mock.module("@/services/PubkeyService", () => ({
+    getPubkeyService: () => ({
+        getName: mockGetName,
+    }),
+}));
 
 describe("ConversationStore", () => {
     const TEST_DIR = "/tmp/tenex-test-conversations";
@@ -44,7 +62,8 @@ describe("ConversationStore", () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
             const entry: ConversationEntry = {
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "hello" },
+                content: "hello",
+                messageType: "text",
             };
             store.addMessage(entry);
             await store.save();
@@ -68,7 +87,8 @@ describe("ConversationStore", () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "hello" },
+                content: "hello",
+                messageType: "text",
             });
             await store.save();
 
@@ -162,264 +182,226 @@ describe("ConversationStore", () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
         });
 
-        it("should include all user messages for any agent", () => {
+        it("should include all user messages for any agent", async () => {
             // User message
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "hello" },
+                content: "hello",
+                messageType: "text",
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
         });
 
-        it("should include all messages from same agent completed RALs", () => {
+        it("should include all messages from same agent completed RALs", async () => {
             // RAL 1 - completed
             store.createRal(AGENT1_PUBKEY);
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [{ type: "text", text: "I will help" }],
-                },
+                content: "I will help",
+                messageType: "text",
             });
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: { path: "/tmp/test" },
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    input: { path: "/tmp/test" },
+                }] as ToolCallPart[],
             });
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "tool",
-                    content: [
-                        {
-                            type: "tool-result",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            result: "file content",
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-result",
+                toolData: [{
+                    type: "tool-result",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    output: { type: "text", value: "file content" },
+                }] as ToolResultPart[],
             });
             store.completeRal(AGENT1_PUBKEY, 1);
 
             // RAL 2 - current
             const ral2 = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral2);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral2);
 
             // Should include all messages from completed RAL 1
             expect(messages).toHaveLength(3);
         });
 
-        it("should exclude messages from other active RALs, add summary instead", () => {
+        it("should exclude messages from other active RALs", async () => {
             // RAL 1 - active (not completed)
             store.createRal(AGENT1_PUBKEY);
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [{ type: "text", text: "Working on it" }],
-                },
+                content: "Working on it",
+                messageType: "text",
             });
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: { path: "/tmp/test" },
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    input: { path: "/tmp/test" },
+                }] as ToolCallPart[],
             });
 
             // RAL 2 - current
             const ral2 = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral2);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral2);
 
-            // Should NOT include RAL 1 messages directly
-            // Should include a system message summarizing RAL 1
-            const systemMessages = messages.filter((m) => m.role === "system");
-            expect(systemMessages).toHaveLength(1);
-            expect(systemMessages[0].content).toContain(
-                "reason-act-loop (#1) executing"
-            );
-            expect(systemMessages[0].content).toContain("[text-output]");
-            expect(systemMessages[0].content).toContain("[tool read_path]");
+            // Should NOT include RAL 1 messages - they're excluded entirely
+            // (concurrent RAL context is added separately by AgentExecutor via addConcurrentRALContext)
+            expect(messages).toHaveLength(0);
         });
 
-        it("should include only text outputs from other agents", () => {
+        it("should include only text outputs from other agents", async () => {
             // Agent 2 messages
             store.createRal(AGENT2_PUBKEY);
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [{ type: "text", text: "I am agent 2" }],
-                },
+                content: "I am agent 2",
+                messageType: "text",
             });
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: {},
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    input: {},
+                }] as ToolCallPart[],
             });
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "tool",
-                    content: [
-                        {
-                            type: "tool-result",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            result: "content",
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-result",
+                toolData: [{
+                    type: "tool-result",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    output: { type: "text", value: "content" },
+                }] as ToolResultPart[],
             });
             store.completeRal(AGENT2_PUBKEY, 1);
 
             // Agent 1 RAL
             const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             // Should only include the text output, not tool calls/results
+            // Broadcasts from other agents - role will change with new implementation
             expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("assistant");
-            expect(messages[0].content).toBe("I am agent 2");
+            expect(messages[0].role).toBe("user"); // Changed: all non-self = user
+            expect(messages[0].content).toContain("I am agent 2");
         });
 
-        it("should filter mixed content to extract only text", () => {
+        it("should exclude messages with only tool calls from other agents", async () => {
             store.createRal(AGENT2_PUBKEY);
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        { type: "text", text: "Let me check" },
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: {},
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    input: {},
+                }] as ToolCallPart[],
             });
             store.completeRal(AGENT2_PUBKEY, 1);
 
             const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0].content).toBe("Let me check");
-        });
-
-        it("should exclude messages with only tool calls from other agents", () => {
-            store.createRal(AGENT2_PUBKEY);
-            store.addMessage({
-                pubkey: AGENT2_PUBKEY,
-                ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: {},
-                        },
-                    ],
-                },
-            });
-            store.completeRal(AGENT2_PUBKEY, 1);
-
-            const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             expect(messages).toHaveLength(0);
         });
 
-        it("should preserve 'user' role for targeted agent-to-agent messages", () => {
+        it("should use 'user' role for targeted agent-to-agent messages", async () => {
             // Agent2 sends a targeted message to Agent1 via p-tag
-            // EventToModelMessage produces role "user" with prefix [@agent2 -> @agent1]
             store.createRal(AGENT2_PUBKEY);
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "user", // Targeted message = role "user"
-                    content:
-                        "[@agent2 -> @agent1] What is your role in this project?",
-                },
+                content: "What is your role in this project?",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PUBKEY],
             });
             store.completeRal(AGENT2_PUBKEY, 1);
 
             // Agent1 builds messages for its RAL
             const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
-            // BUG: Currently returns role "assistant", should be "user"
+            // Targeted messages from other agents appear as "user" to the target
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toContain("[@agent2 -> @agent1]");
         });
 
-        it("should preserve 'system' role for broadcast agent messages", () => {
+        it("should use 'user' role for broadcast agent messages", async () => {
             // Agent2 broadcasts (no specific target)
-            // EventToModelMessage produces role "system" with prefix [@agent2]
+            // All non-self messages use "user" role
             store.createRal(AGENT2_PUBKEY);
             store.addMessage({
                 pubkey: AGENT2_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "system", // Broadcast = role "system"
-                    content: "[@agent2] I have completed my analysis.",
-                },
+                content: "I have completed my analysis.",
+                messageType: "text",
+                // No targetedPubkeys = broadcast
             });
             store.completeRal(AGENT2_PUBKEY, 1);
 
             // Agent1 builds messages for its RAL
             const ral = store.createRal(AGENT1_PUBKEY);
-            const messages = store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("system");
-            expect(messages[0].content).toContain("[@agent2]");
+            expect(messages[0].role).toBe("user"); // Changed: all non-self = user
+        });
+
+        it("should use 'user' role for observers of targeted messages", async () => {
+            // Agent2 sends a message targeted to Agent1
+            // A third agent (Agent3) observing should see as "user" (all non-self)
+            const AGENT3_PUBKEY = "agent3-pubkey-ghi";
+
+            store.createRal(AGENT2_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT2_PUBKEY,
+                ral: 1,
+                content: "Here is my analysis.",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PUBKEY],
+            });
+            store.completeRal(AGENT2_PUBKEY, 1);
+
+            // Agent3 builds messages - all non-self messages are "user"
+            const ral = store.createRal(AGENT3_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT3_PUBKEY, ral);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user"); // Changed: all non-self = user
         });
     });
 
@@ -433,28 +415,23 @@ describe("ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [{ type: "text", text: "I will research this" }],
-                },
+                content: "I will research this",
+                messageType: "text",
             });
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "read_path",
-                            args: { path: "/tmp/test.txt" },
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "read_path",
+                    input: { path: "/tmp/test.txt" },
+                }] as ToolCallPart[],
             });
 
-            const summary = store.buildRalSummary(AGENT1_PUBKEY, 1);
+            const summary = buildRalSummary(store.getAllMessages(), AGENT1_PUBKEY, 1);
 
             expect(summary).toContain("reason-act-loop (#1) executing");
             expect(summary).toContain("[text-output] I will research this");
@@ -466,23 +443,20 @@ describe("ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "call_1",
-                            toolName: "write_file",
-                            args: {
-                                path: "/tmp/out.txt",
-                                content: "hello world",
-                            },
-                        },
-                    ],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_1",
+                    toolName: "write_file",
+                    input: {
+                        path: "/tmp/out.txt",
+                        content: "hello world",
+                    },
+                }] as ToolCallPart[],
             });
 
-            const summary = store.buildRalSummary(AGENT1_PUBKEY, 1);
+            const summary = buildRalSummary(store.getAllMessages(), AGENT1_PUBKEY, 1);
 
             expect(summary).toContain("[tool write_file]");
             expect(summary).toContain('path="/tmp/out.txt"');
@@ -528,7 +502,7 @@ describe("ConversationStore", () => {
             // Should be in messages now
             const messages = store.getAllMessages();
             expect(messages).toHaveLength(1);
-            expect(messages[0].message.content).toBe("injected message");
+            expect(messages[0].content).toBe("injected message");
 
             // Should not be in queue anymore
             const remaining = store.getPendingInjections(AGENT1_PUBKEY, 1);
@@ -570,7 +544,8 @@ describe("ConversationStore", () => {
         it("should track event IDs", () => {
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "hello" },
+                content: "hello",
+                messageType: "text",
                 eventId: "event-123",
             });
 
@@ -582,7 +557,8 @@ describe("ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT1_PUBKEY,
                 ral: 1,
-                message: { role: "assistant", content: "response" },
+                content: "response",
+                messageType: "text",
             });
 
             const messages = store.getAllMessages();
@@ -640,6 +616,183 @@ describe("ConversationStore", () => {
             const nextRal = store2.createRal(AGENT1_PUBKEY);
 
             expect(nextRal).toBe(3);
+        });
+    });
+
+    describe("Message Attribution Formatting", () => {
+        // Use pubkeys that map to our mock names
+        const TRANSPARENT_PK = "transparent-pk";
+        const AGENT1_PK = "agent1-pk";
+        const AGENT2_PK = "agent2-pk";
+        const PABLO_PK = "pablo-pk";
+
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+            // Register agents so ConversationStore knows they're agents
+            ConversationStore.initialize("/test/project", [TRANSPARENT_PK, AGENT1_PK, AGENT2_PK]);
+            mockGetName.mockClear();
+        });
+
+        it("should prefix own message with [@self -> @recipient]", async () => {
+            // Transparent sends a message to Pablo
+            store.addMessage({
+                pubkey: TRANSPARENT_PK,
+                ral: 1,
+                content: "Hello Pablo!",
+                messageType: "text",
+                targetedPubkeys: [PABLO_PK],
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("assistant");
+            expect(messages[0].content).toBe("[@transparent -> @Pablo] Hello Pablo!");
+        });
+
+        it("should prefix own broadcast with [@self]", async () => {
+            // Transparent broadcasts (no recipient)
+            store.addMessage({
+                pubkey: TRANSPARENT_PK,
+                ral: 1,
+                content: "Announcement to all",
+                messageType: "text",
+                // No targetedPubkeys = broadcast
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("assistant");
+            expect(messages[0].content).toBe("[@transparent] Announcement to all");
+        });
+
+        it("should prefix message TO agent from user with [@sender -> @self]", async () => {
+            // Pablo sends message to Transparent
+            store.addMessage({
+                pubkey: PABLO_PK,
+                content: "Hello Transparent!",
+                messageType: "text",
+                targetedPubkeys: [TRANSPARENT_PK],
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toBe("[@Pablo -> @transparent] Hello Transparent!");
+        });
+
+        it("should prefix message TO agent from another agent with [@sender -> @self]", async () => {
+            // Agent1 sends message to Transparent
+            store.addMessage({
+                pubkey: AGENT1_PK,
+                ral: 1,
+                content: "Hey Transparent, can you help?",
+                messageType: "text",
+                targetedPubkeys: [TRANSPARENT_PK],
+            });
+            store.completeRal(AGENT1_PK, 1);
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toBe("[@agent1 -> @transparent] Hey Transparent, can you help?");
+        });
+
+        it("should prefix observed user-to-agent message with [@sender -> @recipient]", async () => {
+            // Pablo sends message to Agent1, Transparent is observing
+            store.addMessage({
+                pubkey: PABLO_PK,
+                content: "Agent1, what color?",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PK],
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user"); // All non-self messages are "user"
+            expect(messages[0].content).toBe("[@Pablo -> @agent1] Agent1, what color?");
+        });
+
+        it("should prefix observed agent-to-agent message with [@sender -> @recipient]", async () => {
+            // Agent1 sends to Agent2, Transparent is observing
+            store.addMessage({
+                pubkey: AGENT1_PK,
+                ral: 1,
+                content: "Agent2, I need your analysis",
+                messageType: "text",
+                targetedPubkeys: [AGENT2_PK],
+            });
+            store.completeRal(AGENT1_PK, 1);
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user"); // All non-self messages are "user"
+            expect(messages[0].content).toBe("[@agent1 -> @agent2] Agent2, I need your analysis");
+        });
+
+        it("should prefix user broadcast with [@sender]", async () => {
+            // Pablo broadcasts to all agents
+            store.addMessage({
+                pubkey: PABLO_PK,
+                content: "Everyone, listen up!",
+                messageType: "text",
+                // No targetedPubkeys = broadcast
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toBe("[@Pablo] Everyone, listen up!");
+        });
+
+        it("should format multiple recipients correctly", async () => {
+            // Pablo sends to both Agent1 and Agent2
+            store.addMessage({
+                pubkey: PABLO_PK,
+                content: "Both of you, collaborate!",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PK, AGENT2_PK],
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user"); // Observing
+            expect(messages[0].content).toBe("[@Pablo -> @agent1, @agent2] Both of you, collaborate!");
+        });
+
+        it("should exclude other active RAL messages from buildMessagesForRal", async () => {
+            // Create active RAL with messages
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+            store.addMessage({
+                pubkey: TRANSPARENT_PK,
+                ral: 1,
+                content: "Working on task 1",
+                messageType: "text",
+            });
+
+            // Create second RAL - should NOT see RAL 1 messages
+            // (concurrent RAL context is added separately by AgentExecutor)
+            store.ensureRalActive(TRANSPARENT_PK, 2);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 2);
+
+            // No messages from other active RALs should be included
+            expect(messages).toHaveLength(0);
         });
     });
 });

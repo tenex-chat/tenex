@@ -4,7 +4,7 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
-import type { ConversationCoordinator } from "../conversations";
+import { ConversationStore } from "../conversations/ConversationStore";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
@@ -31,16 +31,11 @@ export class EventHandler {
          * Project directory (normal git repository root).
          * Worktrees are in .worktrees/ subdirectory.
          */
-        private projectBasePath: string,
-        private conversationCoordinator: ConversationCoordinator
+        private projectBasePath: string
     ) {}
 
     async initialize(): Promise<void> {
         this.agentExecutor = new AgentExecutor();
-    }
-
-    getConversationCoordinator(): ConversationCoordinator {
-        return this.conversationCoordinator;
     }
 
     async handleEvent(event: NDKEvent): Promise<void> {
@@ -126,14 +121,12 @@ export class EventHandler {
             case NDKKind.Text: // kind 1 - unified conversation format
             case NDKKind.GenericReply: // kind 1111 (deprecated, for backwards compatibility)
                 await handleChatMessage(event, {
-                    conversationCoordinator: this.conversationCoordinator,
                     agentExecutor: this.agentExecutor,
                 });
                 break;
 
             case NDKKind.Thread: // kind 11 (deprecated, for backwards compatibility)
                 await handleNewConversation(event, {
-                    conversationCoordinator: this.conversationCoordinator,
                     agentExecutor: this.agentExecutor,
                     projectBasePath: this.projectBasePath,
                 });
@@ -186,10 +179,10 @@ export class EventHandler {
         }
 
         // Only update if we know this conversation
-        if (this.conversationCoordinator.hasConversation(conversationId)) {
+        if (ConversationStore.has(conversationId)) {
             const title = metadata.title;
             if (title) {
-                this.conversationCoordinator.setTitle(conversationId, title);
+                ConversationStore.setConversationTitle(conversationId, title);
             }
         }
     }
@@ -303,7 +296,7 @@ export class EventHandler {
             totalStopped += stopped;
 
             // Get the conversation
-            const conversation = this.conversationCoordinator.getConversation(conversationId);
+            const conversation = ConversationStore.get(conversationId);
             if (!conversation) {
                 continue;
             }
@@ -387,7 +380,7 @@ export class EventHandler {
 
     async cleanup(): Promise<void> {
         // Save all conversations before shutting down
-        await this.conversationCoordinator.cleanup();
+        await ConversationStore.cleanup();
     }
 
 }

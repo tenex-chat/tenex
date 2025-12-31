@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -58,7 +58,7 @@ async function executeSearchConversations(
         agent: context.agent.name,
     });
 
-    const results = await context.conversationCoordinator.searchConversations(query);
+    const results = ConversationStore.search(query);
 
     const limited = results.slice(0, limit);
     const summaries = limited.map(summarizeConversation);

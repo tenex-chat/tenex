@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import { ConversationCoordinator } from "@/conversations";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
@@ -41,7 +41,6 @@ export class ProjectRuntime {
     private eventHandler: EventHandler | null = null;
     private statusPublisher: ProjectStatusService | null = null;
     private operationsStatusPublisher: OperationsStatusService | null = null;
-    private conversationCoordinator: ConversationCoordinator | null = null;
 
     private isRunning = false;
     private startTime: Date | null = null;
@@ -120,15 +119,9 @@ export class ProjectRuntime {
             // Load MCP tools from project event
             await this.initializeMCPTools();
 
-            // Initialize conversation coordinator with metadata path and context
-            this.conversationCoordinator = new ConversationCoordinator(
-                this.metadataPath,
-                this.context
-            );
-            await this.conversationCoordinator.initialize();
-
-            // Set conversation coordinator in context
-            this.context.conversationCoordinator = this.conversationCoordinator;
+            // Initialize conversation store with project path and agent pubkeys
+            const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
+            ConversationStore.initialize(this.metadataPath, agentPubkeys);
 
             // Initialize pairing manager for real-time delegation supervision
             const { PairingManager } = await import("@/services/pairing");
@@ -137,11 +130,8 @@ export class ProjectRuntime {
             });
             this.context.pairingManager = pairingManager;
 
-            // Initialize event handler with the conversation coordinator
-            this.eventHandler = new EventHandler(
-                this.projectBasePath, // Base project path for worktree operations
-                this.conversationCoordinator // Shared conversation coordinator
-            );
+            // Initialize event handler
+            this.eventHandler = new EventHandler(this.projectBasePath);
             await this.eventHandler.initialize();
 
             // Start status publisher
@@ -249,10 +239,7 @@ export class ProjectRuntime {
         }
 
         // Save conversation state
-        if (this.conversationCoordinator) {
-            await this.conversationCoordinator.cleanup();
-            this.conversationCoordinator = null;
-        }
+        await ConversationStore.cleanup();
 
         // Stop all active pairings to clean up subscriptions
         if (this.context?.pairingManager) {
@@ -316,7 +303,7 @@ export class ProjectRuntime {
      * Used by PairingManager when it queues a checkpoint and needs to resume the supervisor.
      */
     async triggerAgentForCheckpoint(agentPubkey: string, conversationId: string): Promise<void> {
-        if (!this.isRunning || !this.context || !this.conversationCoordinator) {
+        if (!this.isRunning || !this.context) {
             logger.warn("[ProjectRuntime] Cannot trigger checkpoint - runtime not ready", {
                 projectId: this.projectId,
                 isRunning: this.isRunning,
@@ -325,11 +312,6 @@ export class ProjectRuntime {
         }
 
         const context = this.context;
-        const coordinator = this.conversationCoordinator;
-        if (!context || !coordinator) {
-            logger.error("[ProjectRuntime] Missing context or coordinator for checkpoint trigger");
-            return;
-        }
 
         await projectContextStore.run(context, async () => {
             const agent = context.getAgentByPubkey(agentPubkey);
@@ -341,7 +323,7 @@ export class ProjectRuntime {
                 return;
             }
 
-            const conversation = await coordinator.getConversation(conversationId);
+            const conversation = ConversationStore.get(conversationId);
             if (!conversation) {
                 logger.error("[ProjectRuntime] Conversation not found for checkpoint trigger", {
                     conversationId: conversationId.substring(0, 8),
@@ -352,7 +334,7 @@ export class ProjectRuntime {
 
             // Get root event from cache (populated when events are added to conversation)
             const rootEventId = conversation.getRootEventId();
-            const rootEvent = rootEventId ? coordinator.getEventById(rootEventId) : undefined;
+            const rootEvent = rootEventId ? ConversationStore.getCachedEvent(rootEventId) : undefined;
             if (!rootEvent) {
                 logger.error("[ProjectRuntime] No root event in conversation", {
                     conversationId: conversationId.substring(0, 8),
@@ -374,7 +356,6 @@ export class ProjectRuntime {
                 conversationId,
                 projectBasePath: this.projectBasePath,
                 triggeringEvent: rootEvent,
-                conversationCoordinator: coordinator,
             });
 
             const agentExecutor = new AgentExecutor();

@@ -2,22 +2,18 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
-import type { ConversationCoordinator } from "../conversations";
 import { ConversationStore } from "../conversations/ConversationStore";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "../services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { handleDelegationCompletion } from "./DelegationCompletionHandler";
-import { homedir } from "os";
-import { join } from "path";
 
 interface EventHandlerContext {
-    conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
 }
 
@@ -49,12 +45,12 @@ export const handleChatMessage = async (
         });
 
         // Try to find and update the conversation this event belongs to
-        const resolver = new ConversationResolver(context.conversationCoordinator);
+        const resolver = new ConversationResolver();
         const result = await resolver.resolveConversationForEvent(event);
 
         if (result.conversation) {
             // Add the event to conversation history without triggering any agent processing
-            await context.conversationCoordinator.addEvent(result.conversation.id, event);
+            await ConversationStore.addEvent(result.conversation.id, event);
             trace.getActiveSpan()?.addEvent("reply.added_to_history", {
                 "conversation.id": result.conversation.id,
             });
@@ -82,12 +78,12 @@ export const handleChatMessage = async (
  */
 async function handleReplyLogic(
     event: NDKEvent,
-    { conversationCoordinator, agentExecutor }: EventHandlerContext
+    { agentExecutor }: EventHandlerContext
 ): Promise<void> {
     const projectCtx = getProjectContext();
 
     // Resolve conversation for this event
-    const conversationResolver = new ConversationResolver(conversationCoordinator);
+    const conversationResolver = new ConversationResolver();
     const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(event);
 
     if (!conversation) {
@@ -98,77 +94,28 @@ async function handleReplyLogic(
         return;
     }
 
-    // Hydrate ConversationStore if available
-    let conversationStore: ConversationStore | undefined;
-    const projectContextInitialized = isProjectContextInitialized();
-    trace.getActiveSpan()?.addEvent("reply.project_context_check", {
-        "project_context.initialized": projectContextInitialized,
-    });
-
-    if (projectContextInitialized) {
-        const projectContext = getProjectContext();
-        const projectId = projectContext.project.tagValue("d");
-        trace.getActiveSpan()?.addEvent("reply.project_id_check", {
-            "project.id": projectId || "undefined",
-            "event.id": event.id || "undefined",
+    // Check for duplicate event (our own published event coming back)
+    // Skip check if isNew - the event was just added in create()
+    if (!isNew && event.id && conversation.hasEventId(event.id)) {
+        trace.getActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
+            "event.id": event.id,
+            "conversation.id": conversation.id,
         });
-
-        if (projectId && event.id) {
-            try {
-                const basePath = join(homedir(), ".tenex");
-                conversationStore = new ConversationStore(basePath);
-                conversationStore.load(projectId, conversation.id);
-
-                // Check for duplicate event (our own published event coming back)
-                // Skip check if isNew - the event was just added in createConversation
-                if (!isNew && conversationStore.hasEventId(event.id)) {
-                    trace.getActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
-                        "event.id": event.id,
-                        "conversation.id": conversation.id,
-                    });
-                    // Still add to coordinator for consistency, but don't trigger agent
-                    if (!AgentEventDecoder.isAgentInternalMessage(event)) {
-                        await conversationCoordinator.addEvent(conversation.id, event);
-                    }
-                    return;
-                }
-
-                // Hydrate store with this event (skip if isNew - already added in createConversation)
-                if (!isNew) {
-                    const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
-                    conversationStore.addMessage({
-                        pubkey: event.pubkey,
-                        message: {
-                            role: isFromAgent ? "assistant" : "user",
-                            content: event.content,
-                        },
-                        eventId: event.id,
-                    });
-                    await conversationStore.save();
-
-                    trace.getActiveSpan()?.addEvent("reply.hydrated_conversation_store", {
-                        "event.id": event.id,
-                        "conversation.id": conversation.id,
-                        "message.role": isFromAgent ? "assistant" : "user",
-                    });
-                }
-            } catch (err) {
-                trace.getActiveSpan()?.addEvent("reply.conversation_store_error", {
-                    "error": formatAnyError(err),
-                });
-                logger.error("ConversationStore error", { error: formatAnyError(err) });
-            }
+        // Still add to store for consistency, but don't trigger agent
+        if (!AgentEventDecoder.isAgentInternalMessage(event)) {
+            await ConversationStore.addEvent(conversation.id, event);
         }
+        return;
     }
 
     // Add event to conversation history immediately (if not new and not an internal message)
     if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
-        await conversationCoordinator.addEvent(conversation.id, event);
+        await ConversationStore.addEvent(conversation.id, event);
     }
 
     // Check for delegation completion - if this is a response to a delegation,
     // route to the waiting agent in the ORIGINAL conversation (not this one)
-    const delegationResult = await handleDelegationCompletion(event, conversation, conversationCoordinator);
+    const delegationResult = await handleDelegationCompletion(event);
     const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
 
     if (delegationTarget) {
@@ -184,7 +131,7 @@ async function handleReplyLogic(
         let triggeringEventForContext = event; // fallback to completion event
 
         if (resumableRal?.originalTriggeringEventId) {
-            const originalEvent = conversationCoordinator.getEventById(resumableRal.originalTriggeringEventId);
+            const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
             if (originalEvent) {
                 triggeringEventForContext = originalEvent;
                 trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
@@ -207,7 +154,6 @@ async function handleReplyLogic(
             conversationId: delegationTarget.conversationId,
             projectBasePath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: triggeringEventForContext,
-            conversationCoordinator,
             isDelegationCompletion: true,
             hasPendingDelegations,
         });
@@ -271,7 +217,7 @@ async function handleReplyLogic(
         const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversation.id);
 
         if (resumableRal?.originalTriggeringEventId) {
-            const originalEvent = conversationCoordinator.getEventById(resumableRal.originalTriggeringEventId);
+            const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
             if (originalEvent) {
                 triggeringEventForContext = originalEvent;
                 trace.getActiveSpan()?.addEvent("reply.restored_original_trigger", {
@@ -288,7 +234,6 @@ async function handleReplyLogic(
             conversationId: conversation.id,
             projectBasePath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: triggeringEventForContext,
-            conversationCoordinator,
         });
 
         // Execute agent (error handling is now in AgentExecutor)

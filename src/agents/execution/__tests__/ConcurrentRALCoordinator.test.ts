@@ -236,9 +236,10 @@ describe("ConcurrentRALCoordinator", () => {
 
   describe("buildContext", () => {
     const currentRALNumber = 2; // The RAL receiving the context
+    const emptyActionHistory = new Map<number, string>();
 
     it("should return empty string when no other RALs", () => {
-      const result = buildContext([], currentRALNumber);
+      const result = buildContext([], currentRALNumber, emptyActionHistory);
       expect(result).toBe("");
     });
 
@@ -253,7 +254,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("YOU ARE RAL #2");
       expect(result).toContain("NEW execution");
@@ -271,7 +272,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now() - 60000, // 1 minute ago
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("RAL #1");
       expect(result).toContain("write_file");
@@ -289,7 +290,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("ral_abort");
       expect(result).toContain("available for: #1");
@@ -311,7 +312,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("cannot be aborted directly");
       expect(result).toContain("pending delegation");
@@ -328,7 +329,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("ral_inject");
     });
@@ -344,7 +345,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("PAUSED");
       expect(result).toContain("must coordinate");
@@ -362,7 +363,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("CONFLICTS");
       expect(result).toContain("CHANGES");
@@ -383,7 +384,7 @@ describe("ConcurrentRALCoordinator", () => {
         createdAt: Date.now(),
       }];
 
-      const result = buildContext(rals, currentRALNumber);
+      const result = buildContext(rals, currentRALNumber, emptyActionHistory);
 
       expect(result).toContain("Pending delegations");
       expect(result).toContain("researcher");

@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { isAlphaMode } from "@/commands/daemon";
-import type { ConversationCoordinator } from "@/conversations";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
@@ -27,7 +27,6 @@ export async function createExecutionContext(params: {
      */
     projectBasePath: string;
     triggeringEvent: NDKEvent;
-    conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
@@ -98,12 +97,11 @@ export async function createExecutionContext(params: {
         workingDirectory,
         currentBranch,
         triggeringEvent: params.triggeringEvent,
-        conversationCoordinator: params.conversationCoordinator,
         agentPublisher: params.agentPublisher,
         isDelegationCompletion: params.isDelegationCompletion,
         hasPendingDelegations: params.hasPendingDelegations,
         debug: params.debug,
         alphaMode: isAlphaMode(),
-        getConversation: () => params.conversationCoordinator.getConversation(params.conversationId),
+        getConversation: () => ConversationStore.get(params.conversationId),
     };
 }

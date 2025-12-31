@@ -18,6 +18,7 @@ interface ScheduledTask {
     fromPubkey: string; // Who scheduled this task (the scheduler)
     toPubkey: string; // Target agent that should execute the task
     agentPubkey?: string; // Alias for toPubkey for backwards compatibility
+    projectId: string; // Project A-tag ID (format: "31933:authorPubkey:dTag")
 }
 
 export class SchedulerService {
@@ -64,11 +65,23 @@ export class SchedulerService {
         schedule: string,
         prompt: string,
         fromPubkey: string,
-        toPubkey: string
+        toPubkey: string,
+        projectId?: string
     ): Promise<string> {
         // Validate cron expression
         if (!cron.validate(schedule)) {
             throw new Error(`Invalid cron expression: ${schedule}`);
+        }
+
+        // If projectId not provided, try to get it from current context
+        let resolvedProjectId = projectId;
+        if (!resolvedProjectId) {
+            try {
+                const projectCtx = getProjectContext();
+                resolvedProjectId = projectCtx.project.tagId();
+            } catch {
+                throw new Error("projectId is required when scheduling tasks outside of a project context");
+            }
         }
 
         const taskId = this.generateTaskId();
@@ -80,6 +93,8 @@ export class SchedulerService {
             prompt,
             fromPubkey,
             toPubkey,
+            projectId: resolvedProjectId,
+            createdAt: new Date().toISOString(),
         };
 
         this.taskMetadata.set(taskId, task);
@@ -89,7 +104,11 @@ export class SchedulerService {
 
         await this.saveTasks();
 
-        logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`);
+        logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`, {
+            projectId: resolvedProjectId,
+            fromPubkey: fromPubkey.substring(0, 8),
+            toPubkey: toPubkey.substring(0, 8),
+        });
         return taskId;
     }
 
@@ -157,7 +176,7 @@ export class SchedulerService {
             task.lastRun = new Date().toISOString();
             await this.saveTasks();
 
-            // Publish kind:11 event to trigger the agent
+            // Publish kind:1 event to trigger the agent (unified conversation format)
             await this.publishAgentTriggerEvent(task);
 
             trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
@@ -173,15 +192,19 @@ export class SchedulerService {
             throw new Error("NDK not initialized");
         }
 
+        // Validate that we have a project ID
+        if (!task.projectId) {
+            throw new Error(`Scheduled task ${task.id} is missing projectId - cannot route event`);
+        }
+
         const event = new NDKEvent(this.ndk);
-        event.kind = 11; // Agent request event
+        event.kind = 1; // Unified conversation format (kind:1)
         event.content = task.prompt;
 
-        const projectCtx = await getProjectContext();
-
-        // Build tags
+        // Build tags - use stored projectId instead of getting from context
+        // The projectId is stored when the task is created (within project context)
         const tags: string[][] = [
-            ["a", projectCtx.project.tagId()], // Project reference
+            ["a", task.projectId], // Project reference (stored at task creation time)
             ["p", task.toPubkey], // Target agent that should handle this task
         ];
 
@@ -191,42 +214,30 @@ export class SchedulerService {
 
         event.tags = tags;
 
-        // Get the signer for the agent that scheduled this task (fromPubkey)
-        let signer: NDKPrivateKeySigner;
-
-        // Try to get the agent that scheduled this task
-        const schedulerAgent = projectCtx.getAgentByPubkey(task.fromPubkey);
-        if (schedulerAgent?.signer) {
-            signer = schedulerAgent.signer;
-        } else {
-            // If scheduler agent not found, try PM
-            const pmAgent = projectCtx.projectManager;
-            if (pmAgent?.signer && pmAgent.pubkey === task.fromPubkey) {
-                signer = pmAgent.signer;
-            } else {
-                // Fall back to backend key if fromPubkey matches backend
-                const privateKey = await config.ensureBackendPrivateKey();
-                const backendSigner = new NDKPrivateKeySigner(privateKey);
-                if (backendSigner.pubkey === task.fromPubkey) {
-                    signer = backendSigner;
-                } else {
-                    // If we can't find the original signer, log warning and use backend key
-                    logger.warn(
-                        `Could not find signer for fromPubkey ${task.fromPubkey}, using backend key`
-                    );
-                    signer = backendSigner;
-                }
-            }
-        }
+        // Use backend signer for scheduled tasks
+        // The backend key is always available and whitelisted
+        // We store fromPubkey for tracking but sign with backend key
+        const privateKey = await config.ensureBackendPrivateKey();
+        const signer = new NDKPrivateKeySigner(privateKey);
 
         // Sign and publish the event
         await event.sign(signer);
         await event.publish();
 
+        logger.info(`Published scheduled task event`, {
+            taskId: task.id,
+            projectId: task.projectId,
+            eventId: event.id?.substring(0, 8),
+            from: signer.pubkey.substring(0, 8),
+            to: task.toPubkey.substring(0, 8),
+        });
+
         trace.getActiveSpan()?.addEvent("scheduler.event_published", {
             "task.id": task.id,
+            "event.id": event.id || "unknown",
             "event.from": signer.pubkey.substring(0, 8),
             "event.to": task.toPubkey.substring(0, 8),
+            "project.id": task.projectId,
         });
     }
 

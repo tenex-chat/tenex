@@ -63,8 +63,9 @@ import { createStopPairingTool } from "./implementations/stop_pairing";
 // Todo tools
 import { createTodoAddTool, createTodoUpdateTool } from "./implementations/todo";
 
-// Web fetch tool
+// Web tools
 import { createWebFetchTool } from "./implementations/web_fetch";
+import { createWebSearchTool } from "./implementations/web_search";
 
 /**
  * Metadata about tools that doesn't require instantiation.
@@ -93,6 +94,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     bug_list: { hasSideEffects: false },
     discover_capabilities: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
+    web_search: { hasSideEffects: false },
 };
 
 /**
@@ -186,8 +188,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     todo_add: createTodoAddTool,
     todo_update: createTodoUpdateTool,
 
-    // Web fetch tool
+    // Web tools
     web_fetch: createWebFetchTool,
+    web_search: createWebSearchTool,
 };
 
 /**

@@ -1,5 +1,4 @@
-import type { ConversationCoordinator } from "./ConversationCoordinator";
-import type { ConversationStore } from "../ConversationStore";
+import { ConversationStore } from "../ConversationStore";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -17,7 +16,6 @@ export interface ConversationResolutionResult {
  * based on incoming Nostr events.
  */
 export class ConversationResolver {
-    constructor(private conversationCoordinator: ConversationCoordinator) {}
 
     /**
      * Resolve the conversation for an incoming event.
@@ -28,7 +26,7 @@ export class ConversationResolver {
 
         // If event has an 'e' tag (reply), try to find existing conversation
         if (replyTarget) {
-            const conversation = this.conversationCoordinator.getConversationByEvent(replyTarget);
+            const conversation = ConversationStore.findByEventId(replyTarget);
             if (conversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "found_existing",
@@ -71,7 +69,7 @@ export class ConversationResolver {
             return { conversation: undefined };
         }
 
-        const conversation = await this.conversationCoordinator.createConversation(event);
+        const conversation = await ConversationStore.create(event);
         if (conversation) {
             logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
             activeSpan?.addEvent("conversation.resolved", {
@@ -148,7 +146,7 @@ export class ConversationResolver {
             "fetched.total_events": eventsArray.length,
         });
 
-        const conversation = await this.conversationCoordinator.createConversation(rootEvent);
+        const conversation = await ConversationStore.create(rootEvent);
         if (!conversation) {
             return undefined;
         }
@@ -156,11 +154,11 @@ export class ConversationResolver {
         replies.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 
         for (const reply of replies) {
-            await this.conversationCoordinator.addEvent(conversation.id, reply);
+            await ConversationStore.addEvent(conversation.id, reply);
         }
 
         if (event.id !== rootEvent.id && !replies.some((r) => r.id === event.id)) {
-            await this.conversationCoordinator.addEvent(conversation.id, event);
+            await ConversationStore.addEvent(conversation.id, event);
         }
 
         return conversation;

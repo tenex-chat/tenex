@@ -1,1 +1,1 @@
-export { ConversationCoordinator } from "./ConversationCoordinator";
+export { ConversationResolver, type ConversationResolutionResult } from "./ConversationResolver";

@@ -1,4 +1,5 @@
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ProjectRuntime } from "../ProjectRuntime";
 import type { ConversationInfo, ProjectInfo } from "./types";
 
@@ -67,21 +68,26 @@ export function extractCachedConversations(
 ): ConversationInfo[] {
     const conversations: ConversationInfo[] = [];
 
-    for (const [projectId, runtime] of runtimes) {
-        const context = runtime.getContext();
-        if (!context?.conversationCoordinator) continue;
+    // Get all cached conversations from ConversationStore
+    const cachedConversations = ConversationStore.getAll();
 
-        const cachedConversations = context.conversationCoordinator.getAllConversations();
-
-        for (const conv of cachedConversations) {
-            conversations.push({
-                id: conv.id,
-                title: conv.title || conv.metadata.summary || "Untitled Conversation",
-                summary: conv.metadata.summary,
-                lastActivity: conv.getLastActivityTime(),
-                projectId,
-            });
+    for (const conv of cachedConversations) {
+        // Find which project this conversation belongs to
+        let projectId = "unknown";
+        for (const [pid, runtime] of runtimes) {
+            if (runtime.isActive()) {
+                projectId = pid;
+                break;
+            }
         }
+
+        conversations.push({
+            id: conv.id,
+            title: conv.getTitle() || conv.getMetadata().summary || "Untitled Conversation",
+            summary: conv.getMetadata().summary,
+            lastActivity: conv.getLastActivityTime(),
+            projectId,
+        });
     }
 
     // Sort by last activity (most recent first)

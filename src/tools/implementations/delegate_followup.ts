@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr";
+import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -24,21 +25,32 @@ async function executeDelegateFollowup(
 ): Promise<DelegateFollowupOutput> {
   const { delegation_conversation_id, message } = input;
 
-  // Fetch the original delegation event to get the recipient p-tag
-  const ndk = getNDK();
-  const delegationEvent = await ndk.fetchEvent(delegation_conversation_id);
+  // First, try to find the delegation in the local RALRegistry (faster and more reliable)
+  const ralRegistry = RALRegistry.getInstance();
+  const ralState = ralRegistry.findStateWaitingForDelegation(delegation_conversation_id);
+  const pendingDelegation = ralState?.pendingDelegations.find(
+    (d) => d.delegationConversationId === delegation_conversation_id
+  );
 
-  if (!delegationEvent) {
-    throw new Error(
-      `Could not fetch delegation conversation ${delegation_conversation_id}. Check the delegationConversationIds from your delegate call.`
-    );
+  let recipientPubkey = pendingDelegation?.recipientPubkey;
+
+  // Fall back to NDK fetch if not found locally (e.g., external delegations or stale state)
+  if (!recipientPubkey) {
+    const ndk = getNDK();
+    const delegationEvent = await ndk.fetchEvent(delegation_conversation_id);
+
+    if (!delegationEvent) {
+      throw new Error(
+        `Could not fetch delegation conversation ${delegation_conversation_id}. Check the delegationConversationIds from your delegate call.`
+      );
+    }
+
+    recipientPubkey = delegationEvent.tagValue("p") ?? undefined;
   }
 
-  // Get the recipient from the p-tag of the delegation event
-  const recipientPubkey = delegationEvent.tagValue("p");
   if (!recipientPubkey) {
     throw new Error(
-      `Delegation conversation ${delegation_conversation_id} has no p-tag. Cannot determine recipient.`
+      `Delegation conversation ${delegation_conversation_id} has no recipient. Cannot determine who to send follow-up to.`
     );
   }
 

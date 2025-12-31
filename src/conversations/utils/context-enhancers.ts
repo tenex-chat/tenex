@@ -178,6 +178,7 @@ export async function addAllSpecialContexts(
  * @param messages - The messages array to add to
  * @param otherRALSummaries - Summaries of other active RALs
  * @param currentRALNumber - The current RAL's number
+ * @param actionHistory - Map of RAL number to action history string
  * @param triggeringEventContent - Content of the triggering event for telemetry
  * @param agentName - Name of the agent for logging
  * @returns True if concurrent context was added
@@ -186,6 +187,7 @@ export function addConcurrentRALContext(
     messages: ModelMessage[],
     otherRALSummaries: RALSummary[],
     currentRALNumber: number,
+    actionHistory: Map<number, string>,
     triggeringEventContent?: string,
     agentName?: string
 ): boolean {
@@ -195,7 +197,8 @@ export function addConcurrentRALContext(
 
     const concurrentContext = buildContext(
         otherRALSummaries,
-        currentRALNumber
+        currentRALNumber,
+        actionHistory
     );
 
     messages.push({

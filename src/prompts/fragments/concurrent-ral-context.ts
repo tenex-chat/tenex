@@ -25,12 +25,14 @@ interface ConcurrentRALContextArgs {
     otherRALs: RALContextSummary[];
     currentRALNumber: number;
     toolAvailability: RALToolAvailability[];
+    /** Action history for each RAL (tool calls, text output) */
+    actionHistory: Map<number, string>;
 }
 
 /**
  * Build the RAL descriptions section
  */
-function buildRALDescriptions(rals: RALContextSummary[]): string {
+function buildRALDescriptions(rals: RALContextSummary[], actionHistory: Map<number, string>): string {
     return rals.map(ral => {
         const status = ral.isStreaming ? "actively streaming" :
             ral.hasPendingDelegations ? "waiting on delegations" : "idle";
@@ -45,8 +47,11 @@ function buildRALDescriptions(rals: RALContextSummary[]): string {
             delegationInfo = `\n  Pending delegations:\n    ${delegationList}`;
         }
 
+        const history = actionHistory.get(ral.ralNumber);
+        const historySection = history ? `\n  Actions taken:\n${history.split("\n").map(l => `    ${l}`).join("\n")}` : "";
+
         return `RAL #${ral.ralNumber} (${status}, started ${ageMinutes}m ago):
-  Current tool: ${ral.currentTool || "none"}${delegationInfo}`;
+  Current tool: ${ral.currentTool || "none"}${delegationInfo}${historySection}`;
     }).join("\n\n");
 }
 
@@ -83,10 +88,10 @@ Note: Some RALs cannot be aborted directly:
 export const concurrentRALContextFragment: PromptFragment<ConcurrentRALContextArgs> = {
     id: "concurrent-ral-context",
     priority: 90, // High priority for coordination context
-    template: ({ otherRALs, currentRALNumber, toolAvailability }) => {
+    template: ({ otherRALs, currentRALNumber, toolAvailability, actionHistory }) => {
         if (otherRALs.length === 0) return "";
 
-        const ralDescriptions = buildRALDescriptions(otherRALs);
+        const ralDescriptions = buildRALDescriptions(otherRALs, actionHistory);
         const toolInstructions = buildToolInstructions(toolAvailability);
 
         return `
@@ -125,7 +130,8 @@ The paused RALs will resume after you make your first tool call. Decide NOW.
         const a = args as Record<string, unknown>;
         return Array.isArray(a.otherRALs) &&
             typeof a.currentRALNumber === "number" &&
-            Array.isArray(a.toolAvailability);
+            Array.isArray(a.toolAvailability) &&
+            a.actionHistory instanceof Map;
     },
-    expectedArgs: "{ otherRALs: RALContextSummary[], currentRALNumber: number, toolAvailability: RALToolAvailability[] }",
+    expectedArgs: "{ otherRALs: RALContextSummary[], currentRALNumber: number, toolAvailability: RALToolAvailability[], actionHistory: Map<number, string> }",
 };

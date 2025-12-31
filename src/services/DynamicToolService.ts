@@ -191,7 +191,6 @@ export class DynamicToolService {
                 currentBranch: "main",
                 conversationId: "test",
                 triggeringEvent: {} as ExecutionContext["triggeringEvent"],
-                conversationCoordinator: {} as ExecutionContext["conversationCoordinator"],
                 agentPublisher: {} as ExecutionContext["agentPublisher"],
                 getConversation: () => undefined,
             } as ExecutionContext;

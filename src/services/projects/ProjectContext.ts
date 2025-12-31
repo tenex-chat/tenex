@@ -1,6 +1,5 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { PairingManager } from "@/services/pairing";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
@@ -55,11 +54,6 @@ export class ProjectContext {
      * Key: agent pubkey, Value: array of lessons (limited to most recent 50 per agent)
      */
     public readonly agentLessons: Map<string, NDKAgentLesson[]>;
-
-    /**
-     * Conversation manager for the project (optional, initialized when needed)
-     */
-    public conversationCoordinator?: ConversationCoordinator;
 
     /**
      * PairingManager for real-time delegation supervision (optional, initialized when needed)
