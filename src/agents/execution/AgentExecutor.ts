@@ -1,6 +1,8 @@
 import type { AgentInstance } from "@/agents/types";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { buildRalSummary } from "@/conversations/RalSummaryFormatter";
+import { addConcurrentRALContext } from "@/conversations/utils/context-enhancers";
 import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
@@ -15,9 +17,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
-import { homedir } from "os";
-import { join } from "path";
+import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -26,7 +26,7 @@ import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet, ToolResultPart } from "ai";
+import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet, ToolCallPart, ToolResultPart } from "ai";
 import chalk from "chalk";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -324,18 +324,10 @@ export class AgentExecutor {
         const toolTracker = new ToolExecutionTracker();
         const agentPublisher = new AgentPublisher(context.agent);
 
-        // Initialize ConversationStore for this conversation (required)
-        if (!isProjectContextInitialized()) {
-            throw new Error("Project context not initialized - cannot create ConversationStore");
-        }
+        // Get ConversationStore for this conversation (required)
+        // Uses static registry to ensure we get the cached store with all messages
+        const conversationStore = ConversationStore.getOrLoad(context.conversationId);
         const projectContext = getProjectContext();
-        const projectId = projectContext.project.tagValue("d");
-        if (!projectId) {
-            throw new Error("Project ID not found - cannot create ConversationStore");
-        }
-        const basePath = join(homedir(), ".tenex");
-        const conversationStore = new ConversationStore(basePath);
-        conversationStore.load(projectId, context.conversationId);
 
         // Check for active pairings for this agent
         const hasActivePairings = projectContext.pairingManager
@@ -344,12 +336,10 @@ export class AgentExecutor {
 
         const fullContext = {
             ...context,
-            conversationCoordinator: context.conversationCoordinator,
             agentPublisher,
             conversationStore,
             hasConcurrentRALs: context.otherRALSummaries.length > 0,
             hasActivePairings,
-            getConversation: () => context.conversationCoordinator.getConversation(context.conversationId),
         };
 
         const conversation = fullContext.getConversation();
@@ -444,7 +434,7 @@ export class AgentExecutor {
         }
 
         // Add event to conversation history immediately
-        await context.conversationCoordinator.addEvent(context.conversationId, responseEvent);
+        await ConversationStore.addEvent(context.conversationId, responseEvent);
 
         trace.getActiveSpan()?.addEvent("executor.published", {
             "event.id": responseEvent.id || "",
@@ -482,7 +472,7 @@ export class AgentExecutor {
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
         // Build conversation messages from ConversationStore (single source of truth)
-        const conversationMessages = conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
+        const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
 
         // Build system prompt with agent identity, context, and instructions
         const projectContext = getProjectContext();
@@ -506,6 +496,31 @@ export class AgentExecutor {
             ...systemPromptMessages.map(sm => sm.message),
             ...conversationMessages,
         ];
+
+        // Add concurrent RAL context if there are other active RALs
+        if (context.otherRALSummaries.length > 0) {
+            // Build action history for each other active RAL
+            const actionHistory = new Map<number, string>();
+            for (const ralSummary of context.otherRALSummaries) {
+                const storeMessages = conversationStore.getAllMessages();
+                // buildRalSummary returns the full summary with header, we just want the action lines
+                const summary = buildRalSummary(storeMessages, context.agent.pubkey, ralSummary.ralNumber);
+                // Extract just the action lines (skip the header "You have another reason-act-loop..." line)
+                const lines = summary.split("\n").slice(2).filter(l => l.trim());
+                if (lines.length > 0) {
+                    actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
+                }
+            }
+
+            addConcurrentRALContext(
+                messages,
+                context.otherRALSummaries,
+                ralNumber,
+                actionHistory,
+                context.triggeringEvent.content,
+                context.agent.name
+            );
+        }
 
         // Append todo list as a late system message (after conversation history)
         // This ensures the agent sees its current todos near the end of the context
@@ -602,15 +617,14 @@ export class AgentExecutor {
             conversationStore.addMessage({
                 pubkey: context.agent.pubkey,
                 ral: ralNumber,
-                message: {
-                    role: "assistant",
-                    content: [{
-                        type: "tool-call",
-                        toolCallId: event.toolCallId,
-                        toolName: event.toolName,
-                        input: event.args ?? {},
-                    }],
-                },
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    input: event.args ?? {},
+                }] as ToolCallPart[],
             });
 
             const toolEvent = await toolTracker.trackExecution({
@@ -625,7 +639,7 @@ export class AgentExecutor {
             // Add tool event to conversation history so it's visible in future turns
             // (delegation tools return null - they publish on completion with delegation event IDs)
             if (toolEvent) {
-                await context.conversationCoordinator.addEvent(context.conversationId, toolEvent);
+                await ConversationStore.addEvent(context.conversationId, toolEvent);
             }
         });
 
@@ -634,17 +648,16 @@ export class AgentExecutor {
             conversationStore.addMessage({
                 pubkey: context.agent.pubkey,
                 ral: ralNumber,
-                message: {
-                    role: "tool",
-                    content: [{
-                        type: "tool-result" as const,
-                        toolCallId: event.toolCallId,
-                        toolName: event.toolName,
-                        output: event.result !== undefined
-                            ? { type: "json" as const, value: event.result }
-                            : { type: "text" as const, value: "" },
-                    }] as ToolResultPart[],
-                },
+                content: "",
+                messageType: "tool-result",
+                toolData: [{
+                    type: "tool-result" as const,
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    output: event.result !== undefined
+                        ? { type: "json" as const, value: event.result }
+                        : { type: "text" as const, value: "" },
+                }] as ToolResultPart[],
             });
 
             await toolTracker.completeExecution({
@@ -668,20 +681,17 @@ export class AgentExecutor {
             // Mark this RAL as streaming
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
 
-            // prepareStep: synchronous, handles injections and release of paused RALs
-            const prepareStep = (
+            // prepareStep: async, rebuilds messages from ConversationStore on every step
+            // This ensures injections and tool results are always included
+            const prepareStep = async (
                 step: {
                     messages: ModelMessage[];
                     stepNumber: number;
                     steps: Array<{ toolCalls: Array<{ toolName: string }>; text: string; reasoningText?: string }>;
                 }
-            ): { messages?: ModelMessage[] } | undefined => {
-                // Update accumulated messages tracker - this is called BEFORE each step,
-                // so step.messages includes all messages up to but not including the current step
+            ): Promise<{ messages?: ModelMessage[] } | undefined> => {
+                // Update accumulated messages tracker
                 latestAccumulatedMessages = step.messages;
-
-                // Note: Tool calls and results are now added to ConversationStore in real-time
-                // via tool-will-execute and tool-did-execute event handlers
 
                 // Check if we should release paused RALs based on completed steps
                 // Only release after a step with actual tool calls (agent made a decision)
@@ -696,7 +706,6 @@ export class AgentExecutor {
                     if (shouldReleasePausedRALs(stepsInfo)) {
                         hasReleasedPausedRALs = true;
 
-                        // Log what tool calls triggered the release
                         const triggeringToolCalls = stepsInfo
                             .flatMap(s => s.toolCalls.map(tc => tc.toolName))
                             .join(", ");
@@ -718,29 +727,89 @@ export class AgentExecutor {
                     }
                 }
 
+                // Process any new injections - persist them to ConversationStore
                 const newInjections = ralRegistry.getAndConsumeInjections(
                     context.agent.pubkey,
                     context.conversationId,
                     ralNumber
                 );
 
-                if (newInjections.length === 0) {
-                    return undefined;
+                if (newInjections.length > 0) {
+                    // Persist injections to ConversationStore as user messages
+                    for (const injection of newInjections) {
+                        conversationStore.addMessage({
+                            pubkey: context.triggeringEvent.pubkey,
+                            ral: ralNumber,
+                            content: injection.content,
+                            messageType: "text",
+                            targetedPubkeys: [context.agent.pubkey],
+                        });
+                    }
+
+                    if (executionSpan) {
+                        executionSpan.addEvent("ral_injection.process", {
+                            "injection.message_count": newInjections.length,
+                            "ral.number": ralNumber,
+                        });
+                    }
                 }
 
-                const injectedMessages: ModelMessage[] = newInjections.map((q) => ({
-                    role: q.role,
-                    content: q.content,
-                }));
+                // Always rebuild messages from ConversationStore - the single source of truth
+                // This ensures injections, tool results, and any other updates are included
+                const conversationMessages = await conversationStore.buildMessagesForRal(
+                    context.agent.pubkey,
+                    ralNumber
+                );
 
-                if (executionSpan) {
-                    executionSpan.addEvent("ral_injection.process", {
-                        "injection.message_count": newInjections.length,
-                        "ral.number": ralNumber,
+                // Combine system prompt with fresh conversation messages
+                const rebuiltMessages: ModelMessage[] = [
+                    ...systemPromptMessages.map(sm => sm.message),
+                    ...conversationMessages,
+                ];
+
+                // Re-check for concurrent RALs and add context if any exist
+                // Must re-check every step since RALs can start/complete during execution
+                const currentOtherRALs = ralRegistry.getOtherRALSummaries(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                if (currentOtherRALs.length > 0) {
+                    // Build action history for each other active RAL
+                    const actionHistory = new Map<number, string>();
+                    for (const ralSummary of currentOtherRALs) {
+                        const storeMessages = conversationStore.getAllMessages();
+                        const summary = buildRalSummary(storeMessages, context.agent.pubkey, ralSummary.ralNumber);
+                        const lines = summary.split("\n").slice(2).filter(l => l.trim());
+                        if (lines.length > 0) {
+                            actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
+                        }
+                    }
+
+                    addConcurrentRALContext(
+                        rebuiltMessages,
+                        currentOtherRALs,
+                        ralNumber,
+                        actionHistory,
+                        context.triggeringEvent.content,
+                        context.agent.name
+                    );
+                }
+
+                // Re-add todo list (tools may have modified it)
+                const todoContent = await agentTodosFragment.template({
+                    conversation,
+                    agentPubkey: context.agent.pubkey,
+                });
+                if (todoContent) {
+                    rebuiltMessages.push({
+                        role: "system",
+                        content: todoContent,
                     });
                 }
 
-                return { messages: [...step.messages, ...injectedMessages] };
+                return { messages: rebuiltMessages };
             };
 
             const onStopCheck = async (steps: any[]): Promise<boolean> => {

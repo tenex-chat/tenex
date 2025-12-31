@@ -406,9 +406,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | {
-                      messages?: ModelMessage[];
-                  }
+                | PromiseLike<{ messages?: ModelMessage[] } | undefined>
+                | { messages?: ModelMessage[] }
                 | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;

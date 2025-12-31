@@ -68,8 +68,13 @@ export function shouldReleasePausedRALs(steps: StepInfo[]): boolean {
  * Build the context message for an agent about other active RALs
  * @param otherRALs - Summaries of other active RALs
  * @param currentRALNumber - The RAL number of the agent receiving this context
+ * @param actionHistory - Map of RAL number to action history string (tool calls, text output)
  */
-export function buildContext(otherRALs: RALSummary[], currentRALNumber: number): string {
+export function buildContext(
+  otherRALs: RALSummary[],
+  currentRALNumber: number,
+  actionHistory: Map<number, string>
+): string {
   if (otherRALs.length === 0) return "";
 
   const toolAvailability = getToolAvailability(otherRALs);
@@ -79,5 +84,6 @@ export function buildContext(otherRALs: RALSummary[], currentRALNumber: number):
     otherRALs,
     currentRALNumber,
     toolAvailability,
+    actionHistory,
   }) as string;
 }

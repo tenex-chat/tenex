@@ -54,7 +54,8 @@ export type ToolName =
     | "stop_pairing"
     | "todo_add"
     | "todo_update"
-    | "web_fetch";
+    | "web_fetch"
+    | "web_search";
 
 /**
  * AI SDK tool with optional human-readable formatter and side effect declaration.

@@ -34,13 +34,13 @@ export class ConversationSummarizer {
             // Prepare conversation content from stored messages
             const messages = conversation.getAllMessages();
             const conversationContent = messages
-                .filter((entry) => entry.message.role !== "system")
+                // Only include text messages (skip tool-call and tool-result)
+                .filter((entry) => entry.messageType === "text")
                 .map((entry) => {
-                    const role = entry.message.role === "user" ? "User" : "Agent";
-                    const content = typeof entry.message.content === "string"
-                        ? entry.message.content
-                        : JSON.stringify(entry.message.content);
-                    return `${role}: ${content}`;
+                    // Determine display role based on pubkey
+                    const isFromAgent = entry.ral !== undefined;
+                    const role = isFromAgent ? "Agent" : "User";
+                    return `${role}: ${entry.content}`;
                 })
                 .join("\n\n");
 

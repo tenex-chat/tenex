@@ -6,21 +6,31 @@
  * is used to build messages for agent execution.
  *
  * File location: ~/.tenex/projects/{projectId}/conversations/{conversationId}.json
+ *
+ * Static methods provide the global registry for all conversation stores.
  */
 
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
+import { homedir } from "os";
 import { join } from "path";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
+import { getPubkeyService } from "@/services/PubkeyService";
+import { logger } from "@/utils/logger";
+
+export type MessageType = "text" | "tool-call" | "tool-result";
 
 export interface ConversationEntry {
     pubkey: string;
     ral?: number; // Only for agent messages
-    message: ModelMessage;
+    content: string; // Text content (for text messages) or empty for tool messages
+    messageType: MessageType;
+    toolData?: ToolCallPart[] | ToolResultPart[]; // Only for tool-call and tool-result
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
+    targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
 }
 
 export interface Injection {
@@ -70,6 +80,277 @@ interface ConversationState {
 }
 
 export class ConversationStore {
+    // ========== STATIC REGISTRY ==========
+    // Global registry of all conversation stores
+    private static stores: Map<string, ConversationStore> = new Map();
+    private static eventCache: Map<string, NDKEvent> = new Map();
+    private static basePath: string = join(homedir(), ".tenex");
+    private static projectId: string | null = null;
+    private static agentPubkeys: Set<string> = new Set();
+
+    /**
+     * Initialize the global conversation store registry.
+     * Must be called once at startup before using any stores.
+     */
+    static initialize(projectPath: string, agentPubkeys?: Iterable<string>): void {
+        // Extract project ID from path (last segment)
+        const segments = projectPath.split("/").filter(Boolean);
+        ConversationStore.projectId = segments[segments.length - 1] || "unknown";
+
+        // Build set of agent pubkeys
+        ConversationStore.agentPubkeys = new Set(agentPubkeys ?? []);
+
+        logger.info(`[ConversationStore] Initialized for project ${ConversationStore.projectId}`);
+    }
+
+    /**
+     * Get or load a conversation store by ID.
+     * Loads from disk if not already in memory.
+     */
+    static getOrLoad(conversationId: string): ConversationStore {
+        let store = ConversationStore.stores.get(conversationId);
+        if (!store) {
+            if (!ConversationStore.projectId) {
+                throw new Error("ConversationStore.initialize() must be called before getOrLoad()");
+            }
+            store = new ConversationStore(ConversationStore.basePath);
+            store.load(ConversationStore.projectId, conversationId);
+            ConversationStore.stores.set(conversationId, store);
+        }
+        return store;
+    }
+
+    /**
+     * Get a conversation store if it exists in memory or on disk.
+     * Returns undefined if conversation doesn't exist.
+     */
+    static get(conversationId: string): ConversationStore | undefined {
+        const cached = ConversationStore.stores.get(conversationId);
+        if (cached) return cached;
+
+        // Try to load from disk
+        if (!ConversationStore.projectId) return undefined;
+
+        const store = new ConversationStore(ConversationStore.basePath);
+        try {
+            store.load(ConversationStore.projectId, conversationId);
+            // Check if it actually has data
+            if (store.getAllMessages().length > 0) {
+                ConversationStore.stores.set(conversationId, store);
+                return store;
+            }
+        } catch {
+            // Store doesn't exist
+        }
+        return undefined;
+    }
+
+    /**
+     * Check if a conversation exists (in memory or on disk).
+     */
+    static has(conversationId: string): boolean {
+        return ConversationStore.get(conversationId) !== undefined;
+    }
+
+    /**
+     * Create a new conversation from an NDKEvent.
+     * Returns existing store if conversation already exists.
+     */
+    static async create(event: NDKEvent): Promise<ConversationStore> {
+        const eventId = event.id;
+        if (!eventId) {
+            throw new Error("Event must have an ID to create a conversation");
+        }
+
+        // Check if already exists
+        const existing = ConversationStore.stores.get(eventId);
+        if (existing) {
+            logger.debug(`Conversation ${eventId.substring(0, 8)} already exists`);
+            return existing;
+        }
+
+        if (!ConversationStore.projectId) {
+            throw new Error("ConversationStore.initialize() must be called before create()");
+        }
+
+        // Create new store
+        const store = new ConversationStore(ConversationStore.basePath);
+        store.load(ConversationStore.projectId, eventId);
+
+        // Add the initial event
+        const isFromAgent = ConversationStore.agentPubkeys.has(event.pubkey);
+        store.addEventMessage(event, isFromAgent);
+
+        // Cache the event
+        ConversationStore.eventCache.set(eventId, event);
+
+        // Set initial title from content preview
+        if (event.content) {
+            store.setTitle(event.content.substring(0, 50) + (event.content.length > 50 ? "..." : ""));
+        }
+
+        await store.save();
+        ConversationStore.stores.set(eventId, store);
+
+        logger.info(`Starting conversation ${eventId.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`);
+
+        return store;
+    }
+
+    /**
+     * Find a conversation by an event ID it contains.
+     */
+    static findByEventId(eventId: string): ConversationStore | undefined {
+        for (const store of ConversationStore.stores.values()) {
+            if (store.hasEventId(eventId)) {
+                return store;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Get all loaded conversation stores.
+     */
+    static getAll(): ConversationStore[] {
+        return Array.from(ConversationStore.stores.values());
+    }
+
+    /**
+     * Cache an NDKEvent for later retrieval.
+     */
+    static cacheEvent(event: NDKEvent): void {
+        if (event.id) {
+            ConversationStore.eventCache.set(event.id, event);
+        }
+    }
+
+    /**
+     * Get a cached NDKEvent by ID.
+     */
+    static getCachedEvent(eventId: string): NDKEvent | undefined {
+        return ConversationStore.eventCache.get(eventId);
+    }
+
+    /**
+     * Add an event to a conversation.
+     */
+    static async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
+        const store = ConversationStore.getOrLoad(conversationId);
+        const isFromAgent = ConversationStore.agentPubkeys.has(event.pubkey);
+        store.addEventMessage(event, isFromAgent);
+
+        // Cache the event
+        if (event.id) {
+            ConversationStore.eventCache.set(event.id, event);
+        }
+
+        await store.save();
+    }
+
+    /**
+     * Set the title of a conversation.
+     */
+    static setConversationTitle(conversationId: string, title: string): void {
+        const store = ConversationStore.get(conversationId);
+        if (store) {
+            store.setTitle(title);
+        }
+    }
+
+    /**
+     * Update metadata of a conversation.
+     */
+    static async updateConversationMetadata(
+        conversationId: string,
+        metadata: Partial<ConversationMetadata>
+    ): Promise<void> {
+        const store = ConversationStore.get(conversationId);
+        if (!store) {
+            throw new Error(`Conversation ${conversationId} not found`);
+        }
+        store.updateMetadata(metadata);
+        await store.save();
+    }
+
+    /**
+     * Archive a conversation (remove from memory).
+     */
+    static archive(conversationId: string): void {
+        const store = ConversationStore.stores.get(conversationId);
+        if (store) {
+            // Clean up event cache for this conversation's events
+            for (const entry of store.getAllMessages()) {
+                if (entry.eventId) {
+                    ConversationStore.eventCache.delete(entry.eventId);
+                }
+            }
+        }
+        ConversationStore.stores.delete(conversationId);
+    }
+
+    /**
+     * Complete a conversation (save and remove from memory).
+     */
+    static async complete(conversationId: string): Promise<void> {
+        const store = ConversationStore.stores.get(conversationId);
+        if (store) {
+            await store.save();
+            // Clean up event cache
+            for (const entry of store.getAllMessages()) {
+                if (entry.eventId) {
+                    ConversationStore.eventCache.delete(entry.eventId);
+                }
+            }
+            ConversationStore.stores.delete(conversationId);
+        }
+    }
+
+    /**
+     * Save all loaded stores and clean up.
+     */
+    static async cleanup(): Promise<void> {
+        const promises: Promise<void>[] = [];
+        for (const store of ConversationStore.stores.values()) {
+            promises.push(store.save());
+        }
+        await Promise.all(promises);
+    }
+
+    /**
+     * Search conversations by title.
+     */
+    static search(query: string): ConversationStore[] {
+        const results: ConversationStore[] = [];
+        const queryLower = query.toLowerCase();
+        for (const store of ConversationStore.stores.values()) {
+            const title = store.getTitle();
+            if (title && title.toLowerCase().includes(queryLower)) {
+                results.push(store);
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Check if a pubkey belongs to an agent.
+     */
+    static isAgentPubkey(pubkey: string): boolean {
+        return ConversationStore.agentPubkeys.has(pubkey);
+    }
+
+    /**
+     * Reset static state (for testing).
+     */
+    static reset(): void {
+        ConversationStore.stores.clear();
+        ConversationStore.eventCache.clear();
+        ConversationStore.projectId = null;
+        ConversationStore.agentPubkeys.clear();
+    }
+
+    // ========== INSTANCE MEMBERS ==========
+
     private basePath: string;
     private projectId: string | null = null;
     private conversationId: string | null = null;
@@ -239,10 +520,10 @@ export class ConversationStore {
         if (!this.isRalActive(agentPubkey, ralNumber)) {
             this.state.activeRal[agentPubkey].push({ id: ralNumber });
 
-            // Update nextRalNumber if this number is higher (set to ralNumber + 1 to avoid collision)
+            // Update nextRalNumber if this number is higher (createRal adds 1)
             const currentNext = this.state.nextRalNumber[agentPubkey] || 0;
             if (ralNumber >= currentNext) {
-                this.state.nextRalNumber[agentPubkey] = ralNumber + 1;
+                this.state.nextRalNumber[agentPubkey] = ralNumber;
             }
         }
     }
@@ -316,12 +597,16 @@ export class ConversationStore {
                 )
         );
 
-        // Add to messages
+        // Add to messages - injections are text messages with targeting based on role
         for (const injection of toConsume) {
             this.addMessage({
                 pubkey: agentPubkey, // Injection appears as coming from the target agent context
                 ral: ralNumber,
-                message: { role: injection.role, content: injection.content },
+                content: injection.content,
+                messageType: "text",
+                // If injection role is "user", it's targeted to this agent
+                // If "system", it's a broadcast
+                targetedPubkeys: injection.role === "user" ? [agentPubkey] : undefined,
             });
         }
 
@@ -330,21 +615,91 @@ export class ConversationStore {
 
     // Message Building
 
-    buildMessagesForRal(
+    /**
+     * Derive the appropriate role for a message based on viewer perspective.
+     *
+     * Rules:
+     * - assistant: Only for the viewing agent's own messages
+     * - user: All other messages (regardless of targeting)
+     * - tool: Tool results (fixed)
+     *
+     * The [@sender -> @recipient] prefix provides attribution context,
+     * so role no longer needs to distinguish between targeted and observing.
+     */
+    private deriveRole(
+        entry: ConversationEntry,
+        viewingAgentPubkey: string
+    ): "user" | "assistant" | "tool" {
+        // Tool messages have fixed roles
+        if (entry.messageType === "tool-call") return "assistant";
+        if (entry.messageType === "tool-result") return "tool";
+
+        // Text messages - assistant for own, user for everything else
+        if (entry.pubkey === viewingAgentPubkey) {
+            return "assistant"; // Own messages
+        }
+
+        return "user"; // All non-self messages
+    }
+
+    /**
+     * Format content with [@sender -> @recipient] attribution prefix.
+     */
+    private async formatWithAttribution(
+        entry: ConversationEntry,
+        content: string
+    ): Promise<string> {
+        const pubkeyService = getPubkeyService();
+        const senderName = await pubkeyService.getName(entry.pubkey);
+
+        // Build recipient names if targeted
+        let prefix: string;
+        if (entry.targetedPubkeys && entry.targetedPubkeys.length > 0) {
+            const recipientNames = await Promise.all(
+                entry.targetedPubkeys.map((pk) => pubkeyService.getName(pk))
+            );
+            prefix = `[@${senderName} -> @${recipientNames.join(", @")}]`;
+        } else {
+            // Broadcast - no recipient
+            prefix = `[@${senderName}]`;
+        }
+
+        return `${prefix} ${content}`;
+    }
+
+    /**
+     * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+     */
+    private async entryToMessage(
+        entry: ConversationEntry,
+        viewingAgentPubkey: string
+    ): Promise<ModelMessage> {
+        const role = this.deriveRole(entry, viewingAgentPubkey);
+
+        if (entry.messageType === "tool-call" && entry.toolData) {
+            return { role: "assistant", content: entry.toolData as ToolCallPart[] };
+        }
+
+        if (entry.messageType === "tool-result" && entry.toolData) {
+            return { role: "tool", content: entry.toolData as ToolResultPart[] };
+        }
+
+        // Text message - add attribution prefix
+        const formattedContent = await this.formatWithAttribution(entry, entry.content);
+        return { role, content: formattedContent } as ModelMessage;
+    }
+
+    async buildMessagesForRal(
         agentPubkey: string,
         ralNumber: number
-    ): ModelMessage[] {
+    ): Promise<ModelMessage[]> {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const result: ModelMessage[] = [];
 
-        // Collect messages from other active RALs for summaries
-        const otherActiveRalMessages: Map<number, ConversationEntry[]> =
-            new Map();
-
         for (const entry of this.state.messages) {
-            // User messages - include all
+            // User messages (no RAL) - include with derived role
             if (!entry.ral) {
-                result.push(entry.message);
+                result.push(await this.entryToMessage(entry, agentPubkey));
                 continue;
             }
 
@@ -352,106 +707,23 @@ export class ConversationStore {
             if (entry.pubkey === agentPubkey) {
                 if (entry.ral === ralNumber) {
                     // Current RAL - include
-                    result.push(entry.message);
+                    result.push(await this.entryToMessage(entry, agentPubkey));
                 } else if (activeRals.has(entry.ral)) {
-                    // Other active RAL - collect for summary
-                    if (!otherActiveRalMessages.has(entry.ral)) {
-                        otherActiveRalMessages.set(entry.ral, []);
-                    }
-                    otherActiveRalMessages.get(entry.ral)!.push(entry);
+                    // Other active RAL - skip (context added separately via addConcurrentRALContext)
+                    continue;
                 } else {
                     // Completed RAL - include all
-                    result.push(entry.message);
+                    result.push(await this.entryToMessage(entry, agentPubkey));
                 }
             } else {
-                // Other agent - preserve original role (user for targeted, system for broadcast)
-                const content = this.extractOtherAgentContent(entry.message);
-                if (content) {
-                    result.push({
-                        role: entry.message.role as "user" | "assistant" | "system",
-                        content,
-                    });
+                // Other agent's message - only include text content
+                if (entry.messageType === "text" && entry.content) {
+                    result.push(await this.entryToMessage(entry, agentPubkey));
                 }
             }
-        }
-
-        // Add summaries for other active RALs
-        for (const [ral] of otherActiveRalMessages) {
-            const summary = this.buildRalSummary(agentPubkey, ral);
-            result.push({
-                role: "system",
-                content: summary,
-            });
         }
 
         return result;
-    }
-
-    buildRalSummary(agentPubkey: string, ralNumber: number): string {
-        const lines: string[] = [
-            `You have another reason-act-loop (#${ralNumber}) executing:`,
-            "",
-        ];
-
-        for (const entry of this.state.messages) {
-            if (entry.pubkey !== agentPubkey || entry.ral !== ralNumber) {
-                continue;
-            }
-
-            const message = entry.message;
-            if (message.role !== "assistant") continue;
-
-            const content = message.content;
-            if (typeof content === "string") {
-                lines.push(`[text-output] ${content}`);
-            } else if (Array.isArray(content)) {
-                for (const part of content) {
-                    if (part.type === "text") {
-                        lines.push(`[text-output] ${part.text}`);
-                    } else if (part.type === "tool-call") {
-                        const args = this.formatToolArgs((part as any).args || (part as any).input);
-                        lines.push(`[tool ${part.toolName}] ${args}`);
-                    }
-                }
-            }
-        }
-
-        return lines.join("\n");
-    }
-
-    private extractOtherAgentContent(message: ModelMessage): string | null {
-        const content = message.content;
-        if (typeof content === "string") {
-            return content;
-        }
-
-        if (Array.isArray(content)) {
-            const textParts = content
-                .filter(
-                    (part): part is { type: "text"; text: string } =>
-                        part.type === "text"
-                )
-                .map((part) => part.text);
-
-            if (textParts.length === 0) return null;
-            return textParts.join("");
-        }
-
-        return null;
-    }
-
-    private formatToolArgs(args: unknown): string {
-        if (!args || typeof args !== "object") return "";
-
-        const pairs: string[] = [];
-        for (const [key, value] of Object.entries(args)) {
-            if (typeof value === "string") {
-                pairs.push(`${key}="${value}"`);
-            } else {
-                pairs.push(`${key}=${JSON.stringify(value)}`);
-            }
-        }
-        return pairs.join(", ");
     }
 
     // Metadata Operations
@@ -514,8 +786,26 @@ export class ConversationStore {
     // Event Message Operations
 
     /**
+     * Extract targeted pubkeys from an event's p-tags.
+     * Returns all p-tagged pubkeys (agents and users alike).
+     */
+    private static extractTargetedPubkeys(event: NDKEvent): string[] {
+        const pTags = event.getMatchingTags("p");
+        if (pTags.length === 0) return [];
+
+        const targeted: string[] = [];
+        for (const pTag of pTags) {
+            const pubkey = pTag[1];
+            if (pubkey) {
+                targeted.push(pubkey);
+            }
+        }
+        return targeted;
+    }
+
+    /**
      * Add an NDKEvent as a message entry.
-     * Converts the event to ModelMessage format and tracks the eventId.
+     * Stores the content and targeting info; role is derived during message building.
      */
     addEventMessage(event: NDKEvent, isFromAgent: boolean): void {
         if (!event.id) return;
@@ -523,14 +813,16 @@ export class ConversationStore {
         // Skip if already added
         if (this.hasEventId(event.id)) return;
 
+        // Extract targeted agent pubkeys from p-tags
+        const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
+
         this.addMessage({
             pubkey: event.pubkey,
-            message: {
-                role: isFromAgent ? "assistant" : "user",
-                content: event.content,
-            },
+            content: event.content,
+            messageType: "text",
             eventId: event.id,
             timestamp: event.created_at,
+            targetedPubkeys: targetedPubkeys.length > 0 ? targetedPubkeys : undefined,
         });
 
         // Track last user message for metadata

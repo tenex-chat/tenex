@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -112,15 +112,33 @@ function serializeConversation(conversation: ConversationStore): Record<string, 
         metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
         executionTime: safeCopy(conversation.executionTime),
         messageCount: messages.length,
-        messages: messages.map(entry => ({
-            role: entry.message.role,
-            content: typeof entry.message.content === 'string'
-                ? entry.message.content
-                : JSON.stringify(entry.message.content),
-            pubkey: entry.pubkey,
-            eventId: entry.eventId,
-            timestamp: entry.timestamp,
-        }))
+        messages: messages.map(entry => {
+            // Derive role for display based on messageType and context
+            let role: string;
+            if (entry.messageType === "tool-call") {
+                role = "assistant";
+            } else if (entry.messageType === "tool-result") {
+                role = "tool";
+            } else {
+                // Text message - use "assistant" for agent messages, "user" for others
+                role = entry.ral !== undefined ? "assistant" : "user";
+            }
+
+            // Get content
+            const content = entry.messageType === "text"
+                ? entry.content
+                : JSON.stringify(entry.toolData ?? []);
+
+            return {
+                role,
+                content,
+                messageType: entry.messageType,
+                pubkey: entry.pubkey,
+                eventId: entry.eventId,
+                timestamp: entry.timestamp,
+                targetedPubkeys: entry.targetedPubkeys,
+            };
+        })
     };
 }
 
@@ -139,11 +157,11 @@ async function executeConversationGet(
         agent: context.agent.name,
     });
 
-    // Get conversation from coordinator
+    // Get conversation from ConversationStore
     const conversation =
         targetConversationId === context.conversationId
             ? context.getConversation()
-            : context.conversationCoordinator.getConversation(targetConversationId);
+            : ConversationStore.get(targetConversationId);
 
     if (!conversation) {
         logger.info("📭 Conversation not found", {

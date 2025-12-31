@@ -1,5 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
-import type { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -55,7 +55,7 @@ async function executeConversationList(
         agent: context.agent.name,
     });
 
-    const allConversations = context.conversationCoordinator.getAllConversations();
+    const allConversations = ConversationStore.getAll();
 
     // Sort by last activity (most recent first)
     const sorted = [...allConversations].sort((a, b) => {

@@ -3,7 +3,7 @@ import { trace } from "@opentelemetry/api";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
-import type { ConversationCoordinator } from "../conversations";
+import { ConversationStore } from "../conversations/ConversationStore";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { formatAnyError } from "@/lib/error-formatter";
@@ -11,7 +11,6 @@ import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 
 interface EventHandlerContext {
-    conversationCoordinator: ConversationCoordinator;
     agentExecutor: AgentExecutor;
     /**
      * Project directory (normal git repository root).
@@ -26,7 +25,7 @@ export const handleNewConversation = async (
 ): Promise<void> => {
     try {
         // Create conversation
-        const conversation = await context.conversationCoordinator.createConversation(event);
+        const conversation = await ConversationStore.create(event);
 
         // Get project context
         const projectCtx = getProjectContext();
@@ -68,7 +67,6 @@ export const handleNewConversation = async (
             conversationId: conversation.id,
             projectBasePath: context.projectBasePath,
             triggeringEvent: event,
-            conversationCoordinator: context.conversationCoordinator,
         });
 
         // Execute with the appropriate agent

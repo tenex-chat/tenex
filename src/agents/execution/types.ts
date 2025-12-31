@@ -1,6 +1,5 @@
 import type { Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -28,7 +27,6 @@ export interface ExecutionContext {
      */
     currentBranch: string;
     triggeringEvent: NDKEvent;
-    conversationCoordinator: ConversationCoordinator;
     agentPublisher?: AgentPublisher; // Injected by AgentExecutor - shared publisher instance for consistent event ordering
     isDelegationCompletion?: boolean; // True when agent is reactivated after a delegated task completes
     hasPendingDelegations?: boolean; // True when there are still pending delegations (partial completion)
