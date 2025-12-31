@@ -317,10 +317,10 @@ export class ToolExecutionTracker {
         if (execution.toolEventId === "" && execution.agentPublisher && execution.eventContext) {
             // Extract event IDs from result.pendingDelegations
             const pendingDelegations = (
-                result as { pendingDelegations?: Array<{ eventId: string }> }
+                result as { pendingDelegations?: Array<{ delegationConversationId: string }> }
             )?.pendingDelegations;
             const referencedEventIds =
-                pendingDelegations?.map((d) => d.eventId).filter((id): id is string => !!id) ?? [];
+                pendingDelegations?.map((d) => d.delegationConversationId).filter((id): id is string => !!id) ?? [];
 
             // Publish the delayed tool use event with references
             const toolEvent = await execution.agentPublisher.toolUse(

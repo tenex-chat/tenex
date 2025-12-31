@@ -41,7 +41,7 @@ describe("onStopCheck tool result mapping - BUG REPRODUCTION", () => {
             input: { delegations: [{ recipient: "researcher", prompt: "research" }] },
             output: {  // The actual tool output is in 'output'
                 __stopExecution: true,
-                pendingDelegations: [{ eventId: "e1", recipientPubkey: "pk1" }],
+                pendingDelegations: [{ delegationConversationId: "e1", recipientPubkey: "pk1" }],
                 delegationEventIds: { pk1: "e1" },
                 message: "Delegated to researcher",
             },
@@ -70,7 +70,7 @@ describe("onStopCheck tool result mapping - BUG REPRODUCTION", () => {
             input: { delegations: [{ recipient: "researcher", prompt: "research" }] },
             output: {
                 __stopExecution: true,
-                pendingDelegations: [{ eventId: "e1", recipientPubkey: "pk1" }],
+                pendingDelegations: [{ delegationConversationId: "e1", recipientPubkey: "pk1" }],
                 delegationEventIds: { pk1: "e1" },
                 message: "Delegated to researcher",
             },
@@ -84,7 +84,7 @@ describe("onStopCheck tool result mapping - BUG REPRODUCTION", () => {
         // Now we get the actual output
         expect(correctOutput).toEqual({
             __stopExecution: true,
-            pendingDelegations: [{ eventId: "e1", recipientPubkey: "pk1" }],
+            pendingDelegations: [{ delegationConversationId: "e1", recipientPubkey: "pk1" }],
             delegationEventIds: { pk1: "e1" },
             message: "Delegated to researcher",
         });

@@ -28,7 +28,7 @@ describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
     let registry: RALRegistry;
 
-    const createMockContext = (): ExecutionContext => ({
+    const createMockContext = (ralNumber?: number): ExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -39,6 +39,11 @@ describe("Delegation tools - Self-delegation validation", () => {
         triggeringEvent: {} as any,
         agentPublisher: {} as any,
         phase: undefined,
+        ralNumber,
+        projectBasePath: "/tmp/test",
+        workingDirectory: "/tmp/test",
+        currentBranch: "main",
+        getConversation: () => undefined,
     });
 
     beforeEach(() => {
@@ -193,6 +198,136 @@ describe("Delegation tools - Self-delegation validation", () => {
                 // Should fail for a different reason (NDK mocking), not self-delegation
                 expect(error.message).not.toContain("Self-delegation is not permitted");
             }
+        });
+    });
+});
+
+describe("Delegation tools - RAL isolation", () => {
+    const conversationId = "test-conversation-id";
+    let registry: RALRegistry;
+
+    const createMockContext = (ralNumber?: number): ExecutionContext => ({
+        agent: {
+            slug: "self-agent",
+            name: "Self Agent",
+            pubkey: "agent-pubkey-123",
+        } as AgentInstance,
+        conversationId,
+        conversationCoordinator: {} as any,
+        triggeringEvent: {} as any,
+        agentPublisher: {
+            delegate: async () => "mock-delegation-id",
+        } as any,
+        phase: undefined,
+        ralNumber,
+        projectBasePath: "/tmp/test",
+        workingDirectory: "/tmp/test",
+        currentBranch: "main",
+        getConversation: () => undefined,
+    });
+
+    beforeEach(() => {
+        // Reset singleton for testing
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+        registry = RALRegistry.getInstance();
+    });
+
+    describe("delegate tool", () => {
+        it("should allow delegation when previous RAL has pending delegations but current RAL does not", async () => {
+            // Create RAL 1 with pending delegations (simulating previous execution)
+            const ral1Number = registry.create("agent-pubkey-123", conversationId);
+            registry.setPendingDelegations("agent-pubkey-123", conversationId, ral1Number, [
+                {
+                    delegationConversationId: "old-delegation-id",
+                    recipientPubkey: "some-other-agent",
+                    recipientSlug: "other-agent",
+                },
+            ]);
+
+            // Create RAL 2 (current execution) with NO pending delegations
+            const ral2Number = registry.create("agent-pubkey-123", conversationId);
+
+            // Verify RAL 1 still has pending delegations
+            const ral1 = registry.getRAL("agent-pubkey-123", conversationId, ral1Number);
+            expect(ral1?.pendingDelegations.length).toBe(1);
+
+            // Verify RAL 2 has no pending delegations
+            const ral2 = registry.getRAL("agent-pubkey-123", conversationId, ral2Number);
+            expect(ral2?.pendingDelegations.length).toBe(0);
+
+            // Context with RAL 2 number should allow new delegation
+            const context = createMockContext(ral2Number);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "New task" }
+                ],
+            };
+
+            // This should NOT throw an error - the bug was that it would check RAL 1
+            // (because getState() returns highest RAL) and block the delegation
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
+        });
+
+        it("should block delegation when current RAL has pending delegations", async () => {
+            // Create a RAL with pending delegations
+            const ralNumber = registry.create("agent-pubkey-123", conversationId);
+            registry.setPendingDelegations("agent-pubkey-123", conversationId, ralNumber, [
+                {
+                    delegationConversationId: "pending-delegation-id",
+                    recipientPubkey: "some-other-agent",
+                    recipientSlug: "other-agent",
+                },
+            ]);
+
+            // Context with this RAL number should block new delegation
+            const context = createMockContext(ralNumber);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "Another task" }
+                ],
+            };
+
+            try {
+                await delegateTool.execute(input);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error: any) {
+                expect(error.message).toContain("Cannot create new delegation while waiting for existing delegation");
+                expect(error.message).toContain("other-agent");
+            }
+        });
+
+        it("should allow delegation when context has no ralNumber (backwards compatibility)", async () => {
+            // Create RAL with pending delegations
+            const ralNumber = registry.create("agent-pubkey-123", conversationId);
+            registry.setPendingDelegations("agent-pubkey-123", conversationId, ralNumber, [
+                {
+                    delegationConversationId: "pending-delegation-id",
+                    recipientPubkey: "some-other-agent",
+                    recipientSlug: "other-agent",
+                },
+            ]);
+
+            // Context WITHOUT ralNumber (undefined) should skip the check
+            const context = createMockContext(undefined);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "Task" }
+                ],
+            };
+
+            // Should succeed because ralNumber is undefined, so check is skipped
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
         });
     });
 });

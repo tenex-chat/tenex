@@ -30,7 +30,7 @@ describe("ConcurrentRALCoordinator", () => {
         isStreaming: false,
         currentTool: undefined,
         pendingDelegations: [{
-          eventId: "del-123",
+          delegationConversationId: "del-123",
           recipientPubkey: "pubkey",
           recipientSlug: "helper",
           prompt: "do something",
@@ -64,7 +64,7 @@ describe("ConcurrentRALCoordinator", () => {
           isStreaming: false,
           currentTool: undefined,
           pendingDelegations: [{
-            eventId: "del-456",
+            delegationConversationId: "del-456",
             recipientPubkey: "pubkey",
             recipientSlug: "worker",
             prompt: "task",
@@ -302,7 +302,7 @@ describe("ConcurrentRALCoordinator", () => {
         isStreaming: false,
         currentTool: undefined,
         pendingDelegations: [{
-          eventId: "del-123",
+          delegationConversationId: "del-123",
           recipientPubkey: "pubkey",
           recipientSlug: "helper",
           prompt: "task",
@@ -376,7 +376,7 @@ describe("ConcurrentRALCoordinator", () => {
         isStreaming: false,
         currentTool: undefined,
         pendingDelegations: [{
-          eventId: "del-123456789",
+          delegationConversationId: "del-123456789",
           recipientSlug: "researcher",
         }],
         hasPendingDelegations: true,

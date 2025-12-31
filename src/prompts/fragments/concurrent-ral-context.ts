@@ -17,7 +17,7 @@ interface RALContextSummary {
     isStreaming: boolean;
     hasPendingDelegations: boolean;
     currentTool?: string;
-    pendingDelegations: Array<{ recipientSlug?: string; eventId: string }>;
+    pendingDelegations: Array<{ recipientSlug?: string; delegationConversationId: string }>;
     createdAt: number;
 }
 
@@ -40,7 +40,7 @@ function buildRALDescriptions(rals: RALContextSummary[]): string {
         let delegationInfo = "";
         if (ral.pendingDelegations.length > 0) {
             const delegationList = ral.pendingDelegations
-                .map(d => `${d.recipientSlug || "agent"} (event_id: ${d.eventId.substring(0, 8)}...)`)
+                .map(d => `${d.recipientSlug || "agent"} (conversation_id: ${d.delegationConversationId.substring(0, 8)}...)`)
                 .join("\n    ");
             delegationInfo = `\n  Pending delegations:\n    ${delegationList}`;
         }

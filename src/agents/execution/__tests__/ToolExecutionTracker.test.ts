@@ -535,7 +535,7 @@ describe("ToolExecutionTracker", () => {
             const delegationResult = {
                 __stopExecution: true,
                 pendingDelegations: [
-                    { eventId: "delegation-event-123", recipientPubkey: "pubkey1", prompt: "Do X" },
+                    { delegationConversationId: "delegation-event-123", recipientPubkey: "pubkey1", prompt: "Do X" },
                 ],
                 delegationEventIds: { pubkey1: "delegation-event-123" },
                 message: "Delegated",
@@ -575,8 +575,8 @@ describe("ToolExecutionTracker", () => {
             const delegationResult = {
                 __stopExecution: true,
                 pendingDelegations: [
-                    { eventId: "delegation-1", recipientPubkey: "pubkey1", prompt: "Task 1" },
-                    { eventId: "delegation-2", recipientPubkey: "pubkey2", prompt: "Task 2" },
+                    { delegationConversationId: "delegation-1", recipientPubkey: "pubkey1", prompt: "Task 1" },
+                    { delegationConversationId: "delegation-2", recipientPubkey: "pubkey2", prompt: "Task 2" },
                 ],
                 delegationEventIds: { pubkey1: "delegation-1", pubkey2: "delegation-2" },
                 message: "Delegated",

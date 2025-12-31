@@ -56,7 +56,7 @@ describe("Bug Detection Verification", () => {
                     toolName: "delegate",
                     output: {
                         __stopExecution: true,
-                        pendingDelegations: [{ eventId: "e1" }],
+                        pendingDelegations: [{ delegationConversationId: "e1" }],
                         message: "Delegated",
                     },
                 }],
@@ -80,7 +80,7 @@ describe("Bug Detection Verification", () => {
         it("FIXED CODE: accessing tr.output preserves the data", () => {
             const expectedOutput = {
                 __stopExecution: true,
-                pendingDelegations: [{ eventId: "e1" }],
+                pendingDelegations: [{ delegationConversationId: "e1" }],
                 message: "Delegated",
             };
 

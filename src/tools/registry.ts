@@ -63,6 +63,9 @@ import { createStopPairingTool } from "./implementations/stop_pairing";
 // Todo tools
 import { createTodoAddTool, createTodoUpdateTool } from "./implementations/todo";
 
+// Web fetch tool
+import { createWebFetchTool } from "./implementations/web_fetch";
+
 /**
  * Metadata about tools that doesn't require instantiation.
  * Tools declare hasSideEffects: false if they are read-only operations.
@@ -89,6 +92,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     rag_subscription_get: { hasSideEffects: false },
     bug_list: { hasSideEffects: false },
     discover_capabilities: { hasSideEffects: false },
+    web_fetch: { hasSideEffects: false },
 };
 
 /**
@@ -181,6 +185,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Todo tools
     todo_add: createTodoAddTool,
     todo_update: createTodoUpdateTool,
+
+    // Web fetch tool
+    web_fetch: createWebFetchTool,
 };
 
 /**

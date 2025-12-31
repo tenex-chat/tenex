@@ -162,12 +162,12 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-event-1",
+          delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
           prompt: "Do task 1",
         },
         {
-          eventId: "del-event-2",
+          delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
           recipientSlug: "agent-2",
           prompt: "Do task 2",
@@ -185,12 +185,12 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-event-1",
+          delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
           prompt: "Task 1",
         },
         {
-          eventId: "del-event-2",
+          delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
           prompt: "Task 2",
         },
@@ -237,7 +237,7 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
       const delegations: PendingDelegation[] = [
         {
-          eventId: "del-123",
+          delegationConversationId: "del-123",
           recipientPubkey: "recipient",
           prompt: "Task",
         },
@@ -255,12 +255,12 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-event-1",
+          delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
           prompt: "Task 1",
         },
         {
-          eventId: "del-event-2",
+          delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
           prompt: "Task 2",
         },
@@ -269,7 +269,7 @@ describe("RALRegistry", () => {
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const completion: CompletedDelegation = {
-        eventId: "del-event-1",
+        delegationConversationId: "del-event-1",
         recipientPubkey: "recipient-1",
         response: "Task completed",
         responseEventId: "response-123",
@@ -282,12 +282,12 @@ describe("RALRegistry", () => {
       expect(updatedState?.completedDelegations).toHaveLength(1);
       expect(updatedState?.completedDelegations[0]).toEqual(completion);
       expect(updatedState?.pendingDelegations).toHaveLength(1);
-      expect(updatedState?.pendingDelegations[0].eventId).toBe("del-event-2");
+      expect(updatedState?.pendingDelegations[0].delegationConversationId).toBe("del-event-2");
     });
 
     it("should return undefined for non-existent delegation", () => {
       const completion: CompletedDelegation = {
-        eventId: "nonexistent",
+        delegationConversationId: "nonexistent",
         recipientPubkey: "recipient-1",
         response: "Done",
         completedAt: Date.now(),
@@ -302,7 +302,7 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-123",
+          delegationConversationId: "del-123",
           recipientPubkey: "recipient",
           prompt: "Task",
         },
@@ -316,7 +316,7 @@ describe("RALRegistry", () => {
       while (Date.now() - start < 2) {}
 
       const completion: CompletedDelegation = {
-        eventId: "del-123",
+        delegationConversationId: "del-123",
         recipientPubkey: "recipient",
         response: "Done",
         completedAt: Date.now(),
@@ -479,7 +479,7 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-pending-1",
+          delegationConversationId: "del-pending-1",
           recipientPubkey: "recipient-1",
           prompt: "Task 1",
         },
@@ -555,7 +555,7 @@ describe("RALRegistry", () => {
 
       const delegations1: PendingDelegation[] = [
         {
-          eventId: "del-conv1",
+          delegationConversationId: "del-conv1",
           recipientPubkey: "recipient-1",
           prompt: "Task for conv1",
         },
@@ -564,7 +564,7 @@ describe("RALRegistry", () => {
 
       const delegations2: PendingDelegation[] = [
         {
-          eventId: "del-conv2",
+          delegationConversationId: "del-conv2",
           recipientPubkey: "recipient-2",
           prompt: "Task for conv2",
         },
@@ -573,7 +573,7 @@ describe("RALRegistry", () => {
 
       // Complete delegation for conversation 1
       const completion: CompletedDelegation = {
-        eventId: "del-conv1",
+        delegationConversationId: "del-conv1",
         recipientPubkey: "recipient-1",
         response: "Done",
         completedAt: Date.now(),
@@ -633,7 +633,7 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       const delegations: PendingDelegation[] = [
-        { eventId: "del-1", recipientPubkey: "recipient", prompt: "Task" },
+        { delegationConversationId: "del-1", recipientPubkey: "recipient", prompt: "Task" },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
 
@@ -656,7 +656,7 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       const delegation: PendingDelegation = {
-        eventId: "del-123",
+        delegationConversationId: "del-123",
         recipientPubkey: "recipient",
         prompt: "Task",
       };
@@ -672,7 +672,7 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
-          eventId: "del-123",
+          delegationConversationId: "del-123",
           recipientPubkey: "recipient",
           prompt: "Task",
         },
@@ -680,7 +680,7 @@ describe("RALRegistry", () => {
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
       const completion: CompletedDelegation = {
-        eventId: "del-123",
+        delegationConversationId: "del-123",
         recipientPubkey: "recipient",
         response: "Done",
         completedAt: Date.now(),

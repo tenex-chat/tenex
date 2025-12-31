@@ -215,7 +215,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                 __stopExecution: true,
                 pendingDelegations: [
                     {
-                        eventId: "delegation-event-123",
+                        delegationConversationId: "delegation-event-123",
                         recipientPubkey: "recipient-pk-456",
                         recipientSlug: "researcher",
                         prompt: "Research the topic",
@@ -263,7 +263,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                 pendingDelegations: [
                     {
                         type: "ask",
-                        eventId: "ask-event-789",
+                        delegationConversationId: "ask-event-789",
                         recipientPubkey: "user-pk-123",
                         recipientSlug: "user",
                         prompt: "Which approach do you prefer?",
@@ -341,7 +341,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                         toolName: "delegate",
                         output: {
                             __stopExecution: true,
-                            pendingDelegations: [{ eventId: "e1", recipientPubkey: "pk1" }],
+                            pendingDelegations: [{ delegationConversationId: "e1", recipientPubkey: "pk1" }],
                             delegationEventIds: { pk1: "e1" },
                             message: "Delegated",
                         },
@@ -391,7 +391,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                     toolName: "delegate",
                     output: {
                         __stopExecution: true,
-                        pendingDelegations: [{ eventId: "e1", recipientPubkey: "p1" }],
+                        pendingDelegations: [{ delegationConversationId: "e1", recipientPubkey: "p1" }],
                         delegationEventIds: { p1: "e1" },
                         message: "Delegated",
                     },

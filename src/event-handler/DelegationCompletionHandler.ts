@@ -58,9 +58,9 @@ export async function handleDelegationCompletion(
         // Get the target agent for logging
         const projectCtx = getProjectContext();
 
-        // Record the completion (looks up RAL internally via delegation event ID)
+        // Record the completion (looks up RAL internally via delegation conversation ID)
         const state = ralRegistry.recordCompletion({
-            eventId: delegationEventId,
+            delegationConversationId: delegationEventId,
             recipientPubkey: event.pubkey,
             recipientSlug: projectCtx.getAgentByPubkey(event.pubkey)?.slug,
             response: event.content,
