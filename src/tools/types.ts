@@ -55,7 +55,8 @@ export type ToolName =
     | "todo_add"
     | "todo_update"
     | "web_fetch"
-    | "web_search";
+    | "web_search"
+    | "nostr_fetch";
 
 /**
  * AI SDK tool with optional human-readable formatter and side effect declaration.
