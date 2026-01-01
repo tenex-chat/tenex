@@ -37,9 +37,10 @@ import type {
 } from "ai";
 import chalk from "chalk";
 import { shouldReleasePausedRALs } from "./ConcurrentRALCoordinator";
+import { MessageSyncer } from "./MessageSyncer";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
-import type { ExecutionContext, StandaloneAgentContext } from "./types";
+import type { ExecutionContext, StandaloneAgentContext, StreamExecutionResult } from "./types";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -389,10 +390,10 @@ export class AgentExecutor {
         agentPublisher: AgentPublisher,
         ralNumber: number
     ): Promise<NDKEvent | undefined> {
-        let completionEvent: CompleteEvent | undefined | null;
+        let result: StreamExecutionResult;
 
         try {
-            completionEvent = await this.executeStreaming(context, toolTracker, ralNumber);
+            result = await this.executeStreaming(context, toolTracker, ralNumber);
         } catch (streamError) {
             logger.error("[AgentExecutor] Streaming failed", {
                 agent: context.agent.slug,
@@ -401,10 +402,12 @@ export class AgentExecutor {
             throw streamError;
         }
 
-        // null means stream error was handled - error event already published as finalization
-        if (completionEvent === null) {
+        // Error already handled - error event was published as finalization
+        if (result.kind === "error-handled") {
             return undefined;
         }
+
+        const completionEvent = result.event;
 
         // Determine if we should wait for more delegations
         // Use context.hasPendingDelegations (captured at completion time) for delegation completions
@@ -485,14 +488,14 @@ export class AgentExecutor {
     }
 
     /**
-     * Execute streaming and return the completion event.
-     * Returns null if a stream error was handled (error already published as finalization).
+     * Execute streaming and return the result.
+     * Uses discriminated union: 'complete' for success, 'error-handled' when error already published.
      */
     private async executeStreaming(
         context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
         toolTracker: ToolExecutionTracker,
         ralNumber: number
-    ): Promise<CompleteEvent | undefined | null> {
+    ): Promise<StreamExecutionResult> {
         const toolNames = context.agent.tools || [];
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
@@ -608,8 +611,7 @@ export class AgentExecutor {
 
         let contentBuffer = "";
         let reasoningBuffer = "";
-        let completionEvent: CompleteEvent | undefined;
-        let streamErrorHandled = false;
+        let result: StreamExecutionResult | undefined;
 
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
@@ -645,12 +647,16 @@ export class AgentExecutor {
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
-            completionEvent = event;
+            // Only set result if no error already occurred
+            if (!result) {
+                result = { kind: "complete", event };
+            }
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
-            streamErrorHandled = true;
+            // Set result FIRST to prevent complete handler from overwriting
+            result = { kind: "error-handled" };
 
             try {
                 const { message: errorMessage, errorType } = formatStreamError(event.error);
@@ -764,6 +770,15 @@ export class AgentExecutor {
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
                 // Update accumulated messages tracker
                 latestAccumulatedMessages = step.messages;
+
+                // Sync any tool calls/results from AI SDK to ConversationStore
+                // This ensures we never lose data (e.g., tool errors that didn't emit events)
+                const syncer = new MessageSyncer(
+                    conversationStore,
+                    context.agent.pubkey,
+                    ralNumber
+                );
+                syncer.syncFromSDK(step.messages);
 
                 // Check if we should release paused RALs based on completed steps
                 // Only release after a step with actual tool calls (agent made a decision)
@@ -1015,7 +1030,8 @@ export class AgentExecutor {
             }
 
             // Only publish error if not already handled by stream-error event
-            if (!streamErrorHandled) {
+            if (result?.kind !== "error-handled") {
+                result = { kind: "error-handled" };
                 try {
                     const { message: errorMessage, errorType } = formatStreamError(streamError);
                     await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
@@ -1060,7 +1076,7 @@ export class AgentExecutor {
             await flushReasoningBuffer();
         }
 
-        if (!sessionId && llmService.provider === "claudeCode" && completionEvent) {
+        if (!sessionId && llmService.provider === "claudeCode" && result?.kind === "complete") {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
@@ -1080,11 +1096,9 @@ export class AgentExecutor {
             await conversationStore.save();
         }
 
-        // Return null if stream error was handled (error event already published)
-        if (streamErrorHandled) {
-            return null;
+        if (!result) {
+            throw new Error("LLM stream completed without emitting complete or stream-error event");
         }
-
-        return completionEvent;
+        return result;
     }
 }
